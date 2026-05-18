@@ -7,14 +7,13 @@
 ## 架构
 
 ```
-LLM (Claude Code / OpenClaw / 自写客户端)
+LLM (Claude Code / 自写客户端)
     │
     │ MCP / HTTP / WS
     ▼
 ┌─────────────────────────┐
 │  @bytenew/vortex-mcp    │  MCP server（stdio）
 │  @bytenew/vortex-cli    │  命令行
-│  OpenClaw vortex plugin │  远程调用入口
 └────────────┬────────────┘
              │  ws / http
              ▼
@@ -37,14 +36,11 @@ LLM (Claude Code / OpenClaw / 自写客户端)
 |----|------|--------|
 | [`@bytenew/vortex-shared`](packages/shared) | 共享类型 / action 名 / 错误码 | [README](packages/shared/README.md) |
 | [`@bytenew/vortex-extension`](packages/extension) | Chrome 扩展（MV3）— 真正执行浏览器操作 | [README](packages/extension/README.md) |
-| [`@bytenew/vortex-server`](packages/server) | 本地桥接服务（NM ↔ HTTP/WS ↔ relay） | [README](packages/server/README.md) |
+| [`@bytenew/vortex-server`](packages/server) | 本地桥接服务（NM ↔ HTTP/WS） | [README](packages/server/README.md) |
 | [`@bytenew/vortex-cli`](packages/cli) | 命令行客户端 — 终端直调 action | [README](packages/cli/README.md) |
 | [`@bytenew/vortex-mcp`](packages/mcp) | MCP server — 接 Claude Code 等 LLM 工具 | [README](packages/mcp/README.md) |
 
 完整设计：[`docs/DESIGN.md`](docs/DESIGN.md)（架构图、协议、关键设计决策、安全模型、路线图）。
-
-外部（独立仓库）：
-- [`vortex-browser-plugin`](https://github.com/bytenew/vortex-browser-plugin) — OpenClaw 插件，让远程 OpenClaw 实例控制本地浏览器
 
 ## 快速上手（接 Claude Code）
 

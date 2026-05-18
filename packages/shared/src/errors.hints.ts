@@ -107,7 +107,7 @@ export const DEFAULT_ERROR_META: Record<VtxErrorCode, VtxErrorMeta> = {
     recoverable: true,
   },
   INTERNAL_ERROR: {
-    hint: "Unexpected error in the vortex runtime (server / relay / mcp). Inspect context.extras for the underlying message and retry — transient errors often recover.",
+    hint: "Unexpected error in the vortex runtime (server / mcp). Inspect context.extras for the underlying message and retry — transient errors often recover.",
     recoverable: true,
   },
 
