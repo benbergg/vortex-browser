@@ -112,6 +112,7 @@ pnpm -F @bytenew/vortex-bench bench baseline    # 把当前结果写成新 basel
 | `vortex-debug-read-console` | 填 public `vortex_debug_read(console)` 0-coverage 缺口 + 验 v0.8.x lazy-subscribe fix | pre-warm → click "Emit logs" 触发 `console.log/warn/error` 3 条具名 marker → `vortex_debug_read(console)` 响应必同时含 info / warn / error 三个 marker，按级别独立断言（任一级别丢都精准定位）|
 | `vortex-press-combo` | 填 public `vortex_press` combo 0-coverage + 验 combo 解析 fix | 同 commit 内 `keyboard.PRESS` 加 `parseKeyExpression`；case: focus input → press `Enter` / `Ctrl+s` / `Shift+ArrowDown`，断言页面 keydown 收到的 `event.key` + 修饰键标志位与 vortex_press 输入完全一致 |
 | `vortex-evaluate` | 填 public `vortex_evaluate` 0-coverage（sync + async 双路径）| 页面注入 `window.__vortexBenchValue` 字符串和 `window.__vortexBenchSlowFetch()` 返回 200ms Promise；case: sync 读 global / sync 算术 / async await Promise，三段独立断言 `js.evaluate` 和 `js.evaluateAsync` 两条 handler 路径 |
+| `vortex-screenshot` | 填 public `vortex_screenshot` 0-coverage（page + element 双模）| `vortex_screenshot({})` 全页 → MCP image content 包装；`vortex_screenshot({target:"#capture-target"})` 元素裁剪走 capture.element，验证 mime=image/png 且 bytes < 全页（防 element crop 退化为全屏回归）。`customMetric: fullBytes / elementBytes` 暴露 trend |
 
 > 想加新真站灵感 case：把 fixture HTML 落在 `playground/public/<name>.html`，case 文件用 `playgroundPath: "/<name>.html"`（注意不走 SPA hash router，是 vite static serve），开头加 `// Fixture-based: ...` 注释。
 

@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>vortex_screenshot fixture</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+      padding: 24px;
+      max-width: 640px;
+      background: #fafafa;
+    }
+    h1 { margin-top: 0; }
+    code { background: #f4f4f4; padding: 2px 6px; border-radius: 4px; }
+    #capture-target {
+      width: 200px;
+      height: 100px;
+      background: #d44;
+      color: white;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 600;
+      font-size: 16px;
+      border-radius: 6px;
+      margin: 16px 0;
+    }
+    .padding-block {
+      background: #fff;
+      padding: 16px;
+      margin: 12px 0;
+      border-radius: 4px;
+      border: 1px solid #e0e0e0;
+    }
+  </style>
+</head>
+<body>
+  <h1>vortex_screenshot fixture</h1>
+  <p>
+    The red box below has <code>id="capture-target"</code>. The bench
+    case takes both a full-page screenshot and an element-cropped
+    screenshot; the element one should be visibly smaller in bytes
+    (a small red rectangle vs the whole 640-wide page).
+  </p>
+
+  <div id="capture-target">Capture target</div>
+
+  <div class="padding-block">Padding block A — adds bytes to the full-page screenshot so the byte-size sanity check is non-trivial.</div>
+  <div class="padding-block">Padding block B — same.</div>
+  <div class="padding-block">Padding block C — same.</div>
+</body>
+</html>
