@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>vortex_debug_read(network) fixture</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; padding: 24px; max-width: 640px; }
+    h1 { margin-top: 0; }
+    code { background: #f4f4f4; padding: 2px 6px; border-radius: 4px; }
+    button {
+      padding: 8px 16px;
+      font-size: 14px;
+      cursor: pointer;
+      border: 1px solid #4a90e2;
+      background: #4a90e2;
+      color: white;
+      border-radius: 4px;
+    }
+    .external-display {
+      margin-top: 20px;
+      padding: 12px 16px;
+      background: #f0f6ff;
+      border-left: 4px solid #4a90e2;
+      border-radius: 4px;
+      font-family: ui-monospace, "SF Mono", monospace;
+      font-size: 14px;
+    }
+  </style>
+</head>
+<body>
+  <h1>vortex_debug_read(network) roundtrip</h1>
+  <p>
+    Clicking <code>Fire requests</code> fires two
+    <code>fetch()</code> calls to unique-named relative URLs. Both 404
+    on the playground server — that's intentional: the extension's
+    Network domain logs requests by URL + method regardless of status,
+    and 404s are the cheapest stable way to produce reproducible
+    entries without depending on a real API server. After both
+    promises resolve, the result region updates so the bench case knows
+    the fetches actually completed.
+  </p>
+
+  <button id="fire-btn" type="button">Fire requests</button>
+
+  <div data-testid="result" class="external-display"></div>
+
+  <script>
+    const result = document.querySelector('[data-testid="result"]');
+
+    document.getElementById("fire-btn").addEventListener("click", async () => {
+      // Two distinct markers so a regression that captures only the first
+      // request (or merges them) fails the second assertion. The names
+      // are namespaced to "vortex-bench" so they cannot collide with
+      // anything else the playground might fetch.
+      const [ra, rb] = await Promise.all([
+        fetch("/vortex-bench-net-marker-alpha").catch(() => null),
+        fetch("/vortex-bench-net-marker-beta").catch(() => null),
+      ]);
+      result.textContent = `fired 2 requests (status: ${ra?.status ?? "err"}, ${rb?.status ?? "err"})`;
+    });
+  </script>
+</body>
+</html>
