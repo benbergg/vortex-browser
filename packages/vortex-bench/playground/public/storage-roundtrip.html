@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>vortex_storage roundtrip fixture</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; padding: 24px; max-width: 640px; }
+    h1 { margin-top: 0; }
+    code { background: #f4f4f4; padding: 2px 6px; border-radius: 4px; }
+    button {
+      padding: 8px 16px;
+      font-size: 14px;
+      cursor: pointer;
+      border: 1px solid #4a90e2;
+      background: #4a90e2;
+      color: white;
+      border-radius: 4px;
+    }
+    .external-display {
+      margin-top: 20px;
+      padding: 12px 16px;
+      background: #f0f6ff;
+      border-left: 4px solid #4a90e2;
+      border-radius: 4px;
+      font-family: ui-monospace, "SF Mono", monospace;
+      font-size: 14px;
+    }
+  </style>
+</head>
+<body>
+  <h1>vortex_storage roundtrip</h1>
+  <p>
+    On page load and on every <code>Refresh display</code> click, the script
+    below reads <code>localStorage["vortex-bench-storage-key"]</code> and
+    mirrors the result into <code>[data-testid="result"]</code>. The bench
+    case writes through <code>vortex_storage(op=set)</code>, triggers a
+    refresh, then verifies both the page-side mirror and a direct
+    <code>vortex_storage(op=get)</code> readback.
+  </p>
+
+  <button id="refresh-btn" type="button">Refresh display</button>
+
+  <div data-testid="result" class="external-display"></div>
+
+  <script>
+    const KEY = "vortex-bench-storage-key";
+    const result = document.querySelector('[data-testid="result"]');
+
+    function refresh() {
+      const val = localStorage.getItem(KEY);
+      result.textContent = val === null ? "(no value)" : `value="${val}"`;
+    }
+
+    document.getElementById("refresh-btn").addEventListener("click", refresh);
+
+    // Initial read so the result region shows the current state immediately
+    // (the case explicitly triggers a refresh after writing through the
+    // tool, so it doesn't rely on this — but it's nicer in the browser).
+    refresh();
+  </script>
+</body>
+</html>
