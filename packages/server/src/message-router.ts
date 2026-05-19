@@ -28,7 +28,20 @@ export class MessageRouter {
     if (connected) this.flushBuffer();
   }
 
-  /** WS client request -> forward to extension via NM */
+  /**
+   * WS client request → forward to extension via NM.
+   *
+   * Async / fire-and-forget: the caller (vortex-mcp) holds a long-lived
+   * session and watches `sendToClient` pushes for the matching `id`.
+   *
+   * NM-disconnected behavior: the NM request is queued in `requestBuffer`
+   * and flushed when the extension service worker reconnects (typical
+   * cause: SW slept and was relaunched on event). Pending entry is still
+   * registered so the 30s timeout enforces an upper bound — if SW takes
+   * too long to come back, the caller gets a TIMEOUT response via the
+   * normal `sendToClient` path. This is intentionally different from the
+   * HTTP path; see `routeToExtensionSync` below.
+   */
   routeToExtension(vtxReq: VtxRequest): void {
     const requestId = `r-${++this.requestCounter}`;
     const nmReq: NmMessageFromServer = {
@@ -52,7 +65,19 @@ export class MessageRouter {
     }
   }
 
-  /** HTTP sync request -> forward to extension, return Promise */
+  /**
+   * HTTP sync request → forward to extension, return Promise.
+   *
+   * Synchronous from the caller's perspective: vortex-cli (and external
+   * scripts) fire one-shot requests and block on the response.
+   *
+   * NM-disconnected behavior: fail fast with `EXTENSION_NOT_CONNECTED`
+   * instead of queuing. Rationale: a CLI process is not designed to
+   * outlive a 30s wait for the extension SW to come back — it would
+   * just observe a TIMEOUT after the wait, identical outcome but
+   * worse latency. The asymmetry with `routeToExtension` (which queues
+   * for long-lived WS clients) is intentional.
+   */
   routeToExtensionSync(vtxReq: VtxRequest): Promise<VtxResponse> {
     if (!this.nmConnected) {
       return Promise.resolve({
