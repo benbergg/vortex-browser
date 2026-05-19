@@ -38,6 +38,46 @@ async function getActiveTabId(tabId?: number): Promise<number> {
   return tab.id;
 }
 
+/**
+ * Parse a key expression like "Enter" / "Ctrl+S" / "Shift+Ctrl+ArrowDown".
+ *
+ * - parts.length === 1: single key, no modifiers
+ * - parts.length > 1: every segment except the last must be a known
+ *   modifier name (Alt / Ctrl / Control / Meta / Shift); the last
+ *   segment is the main key
+ *
+ * Exported for unit tests; production callers go through `PRESS` /
+ * `SHORTCUT` handlers below.
+ */
+export function parseKeyExpression(
+  expr: string,
+): { key: string; modifiers: number; modifierKeys: string[] } {
+  const parts = expr
+    .split("+")
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+  if (parts.length === 0) {
+    throw vtxError(VtxErrorCode.INVALID_PARAMS, `key expression is empty: "${expr}"`);
+  }
+  if (parts.length === 1) {
+    return { key: parts[0], modifiers: 0, modifierKeys: [] };
+  }
+  const modifierKeys: string[] = [];
+  let modifiers = 0;
+  for (let i = 0; i < parts.length - 1; i++) {
+    const m = parts[i];
+    if (!(m in MODIFIERS)) {
+      throw vtxError(
+        VtxErrorCode.INVALID_PARAMS,
+        `Unknown modifier "${m}" in key expression "${expr}". Known: ${Object.keys(MODIFIERS).join(", ")}`,
+      );
+    }
+    modifierKeys.push(m);
+    modifiers |= MODIFIERS[m];
+  }
+  return { key: parts[parts.length - 1], modifiers, modifierKeys };
+}
+
 async function dispatchKey(
   debuggerMgr: DebuggerManager,
   tabId: number,
@@ -72,12 +112,49 @@ export function registerKeyboardHandlers(
   router.registerAll({
     [KeyboardActions.PRESS]: async (args, tabId) => {
       const tid = await getActiveTabId((args.tabId as number | undefined) ?? tabId);
-      const key = args.key as string;
-      if (!key) throw vtxError(VtxErrorCode.INVALID_PARAMS, "key is required");
+      const expr = args.key as string;
+      if (!expr) throw vtxError(VtxErrorCode.INVALID_PARAMS, "key is required");
+
+      const { key, modifiers, modifierKeys } = parseKeyExpression(expr);
 
       await debuggerMgr.attach(tid);
-      await dispatchKey(debuggerMgr, tid, key, 0);
-      return { success: true, key };
+
+      // Plain single-key path stays byte-identical to v0.8 behavior.
+      if (modifierKeys.length === 0) {
+        await dispatchKey(debuggerMgr, tid, key, 0);
+        return { success: true, key: expr };
+      }
+
+      // Combo path: hold modifiers across main-key dispatch, then
+      // release in reverse — same shape SHORTCUT uses, just collapsed
+      // into the PRESS path so the public surface honors its own
+      // description ("Press key or shortcut, e.g. 'Enter', 'Ctrl+S'").
+      let pressed = 0;
+      for (const m of modifierKeys) {
+        pressed |= MODIFIERS[m];
+        const mcode = KEY_CODES[m] ?? 0;
+        await debuggerMgr.sendCommand(tid, "Input.dispatchKeyEvent", {
+          type: "keyDown",
+          key: m,
+          code: m,
+          windowsVirtualKeyCode: mcode,
+          modifiers: pressed,
+        });
+      }
+      await dispatchKey(debuggerMgr, tid, key, modifiers);
+      for (let i = modifierKeys.length - 1; i >= 0; i--) {
+        const m = modifierKeys[i];
+        pressed &= ~MODIFIERS[m];
+        const mcode = KEY_CODES[m] ?? 0;
+        await debuggerMgr.sendCommand(tid, "Input.dispatchKeyEvent", {
+          type: "keyUp",
+          key: m,
+          code: m,
+          windowsVirtualKeyCode: mcode,
+          modifiers: pressed,
+        });
+      }
+      return { success: true, key: expr };
     },
 
     [KeyboardActions.SHORTCUT]: async (args, tabId) => {

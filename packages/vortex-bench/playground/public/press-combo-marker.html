@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>vortex_press combo fixture</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; padding: 24px; max-width: 640px; }
+    code { background: #f4f4f4; padding: 2px 6px; border-radius: 4px; }
+    input#key-target {
+      width: 100%;
+      padding: 8px 12px;
+      font-size: 14px;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+    }
+    .external-display {
+      margin-top: 20px;
+      padding: 12px 16px;
+      background: #f0f6ff;
+      border-left: 4px solid #4a90e2;
+      border-radius: 4px;
+      font-family: ui-monospace, "SF Mono", monospace;
+      font-size: 14px;
+    }
+  </style>
+</head>
+<body>
+  <h1>vortex_press combo capture</h1>
+  <p>
+    The text input below has focus by default. Each <code>keydown</code>
+    on a non-modifier key is mirrored to <code>[data-testid="result"]</code>
+    in the format <code>key=&lt;e.key&gt; mods=&lt;Ctrl|Shift|…|none&gt;</code>.
+    The bench case dispatches <code>vortex_press</code> with single keys
+    and combo strings; if the modifier flag never reaches the page-side
+    keydown event, the corresponding step fails immediately.
+  </p>
+
+  <input id="key-target" type="text" autofocus placeholder="(focused; press a key)">
+
+  <div data-testid="result" class="external-display"></div>
+
+  <script>
+    const input = document.getElementById("key-target");
+    const result = document.querySelector('[data-testid="result"]');
+
+    // Focus on load so the very first press lands here even if the
+    // browser took focus elsewhere during navigation.
+    input.focus();
+
+    input.addEventListener("keydown", (e) => {
+      // Suppress default browser shortcuts (Ctrl+S save, etc.) so the
+      // playground doesn't trigger system dialogs during the bench run.
+      if (e.ctrlKey || e.metaKey) e.preventDefault();
+
+      // Skip the modifier-only keydown events (Control / Shift / …);
+      // we only record the main key + its accumulated modifier flags,
+      // matching the assertion shape in the case.
+      if (
+        e.key === "Control" ||
+        e.key === "Shift" ||
+        e.key === "Alt" ||
+        e.key === "Meta"
+      ) return;
+
+      const mods = [];
+      if (e.ctrlKey) mods.push("Ctrl");
+      if (e.shiftKey) mods.push("Shift");
+      if (e.altKey) mods.push("Alt");
+      if (e.metaKey) mods.push("Meta");
+      result.textContent = `key=${e.key} mods=${mods.join("+") || "(none)"}`;
+    });
+  </script>
+</body>
+</html>
