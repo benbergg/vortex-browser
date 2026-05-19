@@ -20,6 +20,19 @@ export interface CaseMetrics {
   /** v0.7.1 新增：按工具名拆分的 outputBytes，用于看哪些 tool 是 token hog */
   outputBytesByTool?: Record<string, number>;
   failureReason?: string;
+  /**
+   * v0.8.x 新增：失败分类。让 ship-preflight / CI 能区分"环境问题"和
+   * "真 regression"——v0.8 之前所有失败用同一 string 字段，env 失败
+   * （例如 chrome-extension PERMISSION_DENIED）跟 assertion 失败混在
+   * 一起，掩盖真 regression。
+   * - assertion_failure: case 自己的 ctx.assert / assertResultContains 抛错
+   * - env_failure: 扩展未注入/未授权、playground 不在线、native host 未就绪
+   * - tool_error: 工具返回 `Error [CODE]:` 形式（INVALID_PARAMS / STALE_SNAPSHOT 等）
+   * - timeout: 上层 Promise 超时（≥ 30s 无响应）
+   * - unknown: 兜底（未来 caller 看到 unknown 即提 PR 加分类规则）
+   * passed=true 时此字段缺省。
+   */
+  failureClass?: "assertion_failure" | "env_failure" | "tool_error" | "timeout" | "unknown";
   /** v0.6 新增：case 自定义数值指标（如 P50/P90 延迟、token baseline 等） */
   customMetrics?: Record<string, number>;
 }

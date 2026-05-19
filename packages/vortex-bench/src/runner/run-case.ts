@@ -17,11 +17,40 @@ export interface RunCaseOptions {
   argOverrides?: Record<string, Record<string, unknown>>;
 }
 
-class AssertionError extends Error {
+/** Exported for unit tests; production code goes through `ctx.assert`. */
+export class AssertionError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "AssertionError";
   }
+}
+
+/**
+ * Classify a runner-level failure so reporters / CI can separate env breakage
+ * from real regression. Patterns are matched in the order listed; the first
+ * hit wins. New patterns should preserve the priority (assertion before
+ * tool_error, etc.).
+ *
+ * Exported for unit tests; production callers go through `runCase`.
+ */
+export function classifyFailure(err: unknown): NonNullable<CaseMetrics["failureClass"]> {
+  if (err instanceof AssertionError) return "assertion_failure";
+  const msg = err instanceof Error ? err.message : String(err);
+  // Env: extension not installed in this URL, native host down, playground unreachable
+  if (
+    msg.includes("PERMISSION_DENIED") ||
+    msg.includes("manifest must request permission") ||
+    msg.includes("Cannot access contents of url") ||
+    msg.includes("EXTENSION_NOT_CONNECTED") ||
+    msg.includes("vortex-server unreachable") ||
+    msg.includes("Failed to connect to vortex-server") ||
+    msg.includes("ECONNREFUSED")
+  ) return "env_failure";
+  // Timeout (runner-level or transport-level)
+  if (msg.includes("timed out") || msg.includes("TIMEOUT") || msg.includes("Timeout:")) return "timeout";
+  // Tool error: `Error [CODE]: ...` shape from vortex-mcp formatError
+  if (/^Error \[[A-Z_]+\]:/m.test(msg)) return "tool_error";
+  return "unknown";
 }
 
 export async function runCase(def: CaseDefinition, opts: RunCaseOptions): Promise<CaseMetrics> {
@@ -99,10 +128,11 @@ export async function runCase(def: CaseDefinition, opts: RunCaseOptions): Promis
 
     await def.run(ctx);
 
-    return buildMetrics(def, true, undefined, callCount, fallback, missed, outputBytes, outputBytesByTool, Date.now() - started, customMetrics);
+    return buildMetrics(def, true, undefined, undefined, callCount, fallback, missed, outputBytes, outputBytesByTool, Date.now() - started, customMetrics);
   } catch (err) {
     const reason = err instanceof Error ? err.message : String(err);
-    return buildMetrics(def, false, reason, callCount, fallback, missed, outputBytes, outputBytesByTool, Date.now() - started, customMetrics);
+    const failureClass = classifyFailure(err);
+    return buildMetrics(def, false, reason, failureClass, callCount, fallback, missed, outputBytes, outputBytesByTool, Date.now() - started, customMetrics);
   } finally {
     await closeMcpConnection(mcp);
     void trace; void mcp as unknown as McpConnection; // 保留引用抑制 unused 警告
@@ -113,6 +143,7 @@ function buildMetrics(
   def: CaseDefinition,
   passed: boolean,
   reason: string | undefined,
+  failureClass: CaseMetrics["failureClass"],
   callCount: number,
   fallback: number,
   missed: number,
@@ -132,6 +163,7 @@ function buildMetrics(
   };
   if (Object.keys(outputBytesByTool).length > 0) m.outputBytesByTool = { ...outputBytesByTool };
   if (reason !== undefined) m.failureReason = reason;
+  if (failureClass !== undefined) m.failureClass = failureClass;
   if (Object.keys(customMetrics).length > 0) m.customMetrics = { ...customMetrics };
   return m;
 }
