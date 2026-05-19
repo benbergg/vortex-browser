@@ -104,6 +104,7 @@ pnpm -F @bytenew/vortex-bench bench baseline    # 把当前结果写成新 basel
 | `cross-observe-ref-stale` | hashed ref 跨 observe | 第二次 observe 后用旧 ref 抛 `STALE_SNAPSHOT`（v0.8 sub-A 防回归）|
 | `shadow-dom-counter` | open shadow root + custom element | observe 透过 `attachShadow({mode:'open'})` 抓到内层 button + act/click 通；invariant I22 mock-CDP 路径的真 Chrome 镜像 |
 | `async-loading-spinner` | spinner → content 异步转场（~800ms `setTimeout`）| `vortex_wait_for(mode=idle, value=dom)` 必须阻塞到内容渲染；retry-disabled 的 `readResult` 立刻读到完成态才算 pass，验证 wait_for 不被 spinner 阶段错误地放行 |
+| `spa-route-residue` | Vue hash router 跨路由 unmount | `/el-radio-group` 设状态 → 跨路由跳 `/el-dropdown` → 跳回 `/el-radio-group`，断言 Vue router 正常 unmount，状态归零；防 `<KeepAlive>` / vortex_navigate no-op 类回归 |
 
 > 想加新真站灵感 case：把 fixture HTML 落在 `playground/public/<name>.html`，case 文件用 `playgroundPath: "/<name>.html"`（注意不走 SPA hash router，是 vite static serve），开头加 `// Fixture-based: ...` 注释。
 
