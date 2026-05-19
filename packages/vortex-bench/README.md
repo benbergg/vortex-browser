@@ -111,6 +111,7 @@ pnpm -F @bytenew/vortex-bench bench baseline    # 把当前结果写成新 basel
 | `dynamic-role-mutation` | observe 跨 mutation 的 state 语义一致性 | button `aria-pressed="false"` → 第一次 observe 行不带 `[active]` → click → `aria-pressed="true"` → re-observe 同名 button 行必含 `[active]`。验证 `getUiState` (observe.ts:437-475) 真读 live DOM，不被 snapshot 缓存 / stale tree 误导 |
 | `vortex-debug-read-console` | 填 public `vortex_debug_read(console)` 0-coverage 缺口 + 验 v0.8.x lazy-subscribe fix | pre-warm → click "Emit logs" 触发 `console.log/warn/error` 3 条具名 marker → `vortex_debug_read(console)` 响应必同时含 info / warn / error 三个 marker，按级别独立断言（任一级别丢都精准定位）|
 | `vortex-press-combo` | 填 public `vortex_press` combo 0-coverage + 验 combo 解析 fix | 同 commit 内 `keyboard.PRESS` 加 `parseKeyExpression`；case: focus input → press `Enter` / `Ctrl+s` / `Shift+ArrowDown`，断言页面 keydown 收到的 `event.key` + 修饰键标志位与 vortex_press 输入完全一致 |
+| `vortex-evaluate` | 填 public `vortex_evaluate` 0-coverage（sync + async 双路径）| 页面注入 `window.__vortexBenchValue` 字符串和 `window.__vortexBenchSlowFetch()` 返回 200ms Promise；case: sync 读 global / sync 算术 / async await Promise，三段独立断言 `js.evaluate` 和 `js.evaluateAsync` 两条 handler 路径 |
 
 > 想加新真站灵感 case：把 fixture HTML 落在 `playground/public/<name>.html`，case 文件用 `playgroundPath: "/<name>.html"`（注意不走 SPA hash router，是 vite static serve），开头加 `// Fixture-based: ...` 注释。
 

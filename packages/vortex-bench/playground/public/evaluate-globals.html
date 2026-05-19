@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>vortex_evaluate fixture</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; padding: 24px; max-width: 640px; }
+    code { background: #f4f4f4; padding: 2px 6px; border-radius: 4px; }
+  </style>
+</head>
+<body>
+  <h1>vortex_evaluate fixture</h1>
+  <p>
+    This page exposes two page-side hooks the bench case reads through
+    <code>vortex_evaluate</code>:
+  </p>
+  <ul>
+    <li><code>window.__vortexBenchValue</code> — a string global, for the sync path.</li>
+    <li><code>window.__vortexBenchSlowFetch()</code> — returns a <code>Promise</code> that resolves after ~200 ms, for the async path.</li>
+  </ul>
+
+  <script>
+    window.__vortexBenchValue = "magic-value";
+    window.__vortexBenchSlowFetch = () =>
+      new Promise((resolve) => {
+        setTimeout(() => resolve("slow-result"), 200);
+      });
+  </script>
+</body>
+</html>
