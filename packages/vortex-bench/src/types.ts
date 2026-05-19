@@ -33,6 +33,17 @@ export interface CaseMetrics {
    * passed=true 时此字段缺省。
    */
   failureClass?: "assertion_failure" | "env_failure" | "tool_error" | "timeout" | "unknown";
+  /**
+   * v0.8.x 新增：N-run aggregation metadata.
+   * - `repeats`: how many times this case was actually run (only set when >1).
+   * - `passRate`: passed_runs / repeats ∈ [0, 1]. `passed=true` iff `passRate >= 0.5`
+   *   (majority-pass policy — tolerates single-flake but surfaces borderline cases
+   *   via `passRate=0.67`). Other numeric fields hold the MEDIAN across the N runs.
+   * Both fields absent when repeats=1 so single-shot runs keep byte-identical
+   * report shape with v0.8 baseline.
+   */
+  repeats?: number;
+  passRate?: number;
   /** v0.6 新增：case 自定义数值指标（如 P50/P90 延迟、token baseline 等） */
   customMetrics?: Record<string, number>;
 }

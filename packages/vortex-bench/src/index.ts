@@ -6,6 +6,7 @@ import { readFile, writeFile, readdir, mkdir } from "node:fs/promises";
 import { resolve, dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { runCase } from "./runner/run-case.js";
+import { aggregate } from "./runner/aggregate.js";
 import { diffReports, renderDiffTable, hasCritical } from "./runner/diff.js";
 import {
   summarizeBoxesBudget,
@@ -19,6 +20,8 @@ const USAGE = `vortex-bench <command>
 Commands:
   run <caseName>         跑单个 case（e.g. el-dropdown）
   run --all              跑 cases/ 下全部
+  run --repeats N        每个 case 跑 N 次，median 聚合 + majority-pass
+                         （recommended for baseline refresh: N=3）
   diff                   跟 reports/baseline.json 对比
   baseline               把最近一次 latest.json 存成 baseline.json
   compare-boxes [--all] [cases...]
@@ -64,11 +67,39 @@ async function listCaseNames(): Promise<string[]> {
     .sort();
 }
 
+/**
+ * Parse `--repeats=N` or `--repeats N` from argv.
+ * Returns null on invalid input (caller surfaces the user-facing error),
+ * defaults to 1 when the flag is absent.
+ */
+function parseRepeats(args: string[]): number | null {
+  let raw: string | undefined;
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (a === "--repeats") {
+      raw = args[i + 1];
+      break;
+    }
+    if (a.startsWith("--repeats=")) {
+      raw = a.slice("--repeats=".length);
+      break;
+    }
+  }
+  if (raw === undefined) return 1;
+  const n = Number.parseInt(raw, 10);
+  if (!Number.isInteger(n) || n < 1) return null;
+  return n;
+}
+
 function formatRow(m: CaseMetrics): string {
   const status = m.passed ? "✓" : "✗";
   const bytesKB = ((m.outputBytes ?? 0) / 1024).toFixed(1);
   const cls = m.failureClass ? `[${m.failureClass}] ` : "";
-  return `${status} ${m.case.padEnd(32)} calls=${String(m.callCount).padStart(3)} fallback=${m.fallbackToEvaluate} missed=${m.observeMissedPopperItems} bytes=${bytesKB.padStart(6)}KB ${m.durationMs}ms${m.failureReason ? `  ← ${cls}${m.failureReason}` : ""}`;
+  const repeats =
+    m.repeats !== undefined && m.repeats > 1
+      ? ` n=${m.repeats} pass=${(m.passRate ?? 0).toFixed(2)}`
+      : "";
+  return `${status} ${m.case.padEnd(32)} calls=${String(m.callCount).padStart(3)} fallback=${m.fallbackToEvaluate} missed=${m.observeMissedPopperItems} bytes=${bytesKB.padStart(6)}KB ${m.durationMs}ms${repeats}${m.failureReason ? `  ← ${cls}${m.failureReason}` : ""}`;
 }
 
 async function writeLatest(report: BenchReport): Promise<string> {
@@ -80,9 +111,14 @@ async function writeLatest(report: BenchReport): Promise<string> {
 
 async function cmdRun(args: string[]): Promise<number> {
   const runAll = args.includes("--all");
+  const repeats = parseRepeats(args);
+  if (repeats === null) {
+    process.stderr.write("[vortex-bench] --repeats expects a positive integer (e.g. --repeats 3)\n");
+    return 1;
+  }
   const caseNames = runAll
     ? await listCaseNames()
-    : args.filter((a) => !a.startsWith("-"));
+    : args.filter((a) => !a.startsWith("-") && !/^\d+$/.test(a)); // 排除 --repeats 的 N 数值
 
   if (caseNames.length === 0) {
     process.stderr.write("[vortex-bench] run 需要 <caseName> 或 --all\n");
@@ -91,13 +127,18 @@ async function cmdRun(args: string[]): Promise<number> {
 
   const mcpBin = resolveMcpBin();
   const url = playgroundUrl();
+  const repeatsMsg = repeats > 1 ? ` (×${repeats} runs, median + majority-pass)` : "";
   process.stdout.write(`[vortex-bench] playground=${url}  mcp=${mcpBin}\n`);
-  process.stdout.write(`[vortex-bench] 跑 ${caseNames.length} 个 case\n\n`);
+  process.stdout.write(`[vortex-bench] 跑 ${caseNames.length} 个 case${repeatsMsg}\n\n`);
 
   const results: CaseMetrics[] = [];
   for (const name of caseNames) {
     const def = await loadCase(name);
-    const m = await runCase(def, { mcpBin, playgroundUrl: url });
+    const runs: CaseMetrics[] = [];
+    for (let i = 0; i < repeats; i++) {
+      runs.push(await runCase(def, { mcpBin, playgroundUrl: url }));
+    }
+    const m = aggregate(runs);
     results.push(m);
     process.stdout.write(formatRow(m) + "\n");
   }

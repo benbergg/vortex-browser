@@ -22,14 +22,20 @@ pnpm -F @bytenew/vortex-bench playground
 #    See packages/server/README.md for the one-time setup.
 
 # 3) From the repo root, run the full bench and promote it
-pnpm -F @bytenew/vortex-bench bench:baseline
+pnpm -F @bytenew/vortex-bench bench:baseline                        # single-shot
+pnpm -F @bytenew/vortex-bench bench run --all --repeats 3 && \
+  cp packages/vortex-bench/reports/latest.json \
+     packages/vortex-bench/reports/baseline.json                    # recommended
 ```
 
-The `bench:baseline` script wraps `vortex-bench run --all` and then copies `reports/latest.json` over `reports/baseline.json`. The previous baseline should first be moved into `archive/` with a dated filename so the audit trail is preserved:
+**`--repeats N` is recommended for baseline refresh** (default `N=3`). The runner executes each case N times, then collapses the results: numeric metrics use the median, `passed` uses majority-pass (`passRate ≥ 0.5`). Single-flake runs no longer poison the baseline, and the reporter prints `n=3 pass=0.67` for borderline cases so you can see exactly which cases are on the edge.
+
+`bench:baseline` still wraps the single-shot path (back-compat); pass `--repeats N` explicitly when you want aggregation. The previous baseline should first be moved into `archive/` with a dated filename so the audit trail is preserved:
 
 ```bash
 mv reports/baseline.json reports/archive/baseline-vX.Y-Ncases-$(date +%F).json
-pnpm -F @bytenew/vortex-bench bench:baseline
+pnpm -F @bytenew/vortex-bench bench run --all --repeats 3
+cp reports/latest.json reports/baseline.json
 ```
 
 ## When a run looks like an env failure
