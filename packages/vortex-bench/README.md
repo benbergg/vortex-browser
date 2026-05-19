@@ -102,6 +102,7 @@ pnpm -F @bytenew/vortex-bench bench baseline    # 把当前结果写成新 basel
 | `aria-cursor-nested-no-dup` | ARIA + cursor:pointer 嵌套去重 | 防 dual-instance：`<li role=menuitem>` 内层 `<div cursor:pointer>` 不重复输出 |
 | `icon-name-priority` | icon 命名优先级 | svg `<title>` > alt > aria-label > className（denylist for `el-`/`ant-`/`iconfont`）|
 | `cross-observe-ref-stale` | hashed ref 跨 observe | 第二次 observe 后用旧 ref 抛 `STALE_SNAPSHOT`（v0.8 sub-A 防回归）|
+| `shadow-dom-counter` | open shadow root + custom element | observe 透过 `attachShadow({mode:'open'})` 抓到内层 button + act/click 通；invariant I22 mock-CDP 路径的真 Chrome 镜像 |
 
 > 想加新真站灵感 case：把 fixture HTML 落在 `playground/public/<name>.html`，case 文件用 `playgroundPath: "/<name>.html"`（注意不走 SPA hash router，是 vite static serve），开头加 `// Fixture-based: ...` 注释。
 

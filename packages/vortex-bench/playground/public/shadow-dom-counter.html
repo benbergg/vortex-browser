@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Shadow DOM counter fixture</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; padding: 24px; max-width: 720px; }
+    h1 { margin-top: 0; }
+    code { background: #f4f4f4; padding: 2px 6px; border-radius: 4px; }
+    .external-display {
+      margin-top: 20px;
+      padding: 12px 16px;
+      background: #f0f6ff;
+      border-left: 4px solid #4a90e2;
+      border-radius: 4px;
+      font-size: 15px;
+    }
+    counter-widget {
+      display: block;
+      margin: 16px 0;
+      padding: 16px;
+      background: #fff8e1;
+      border: 1px solid #d8c478;
+      border-radius: 6px;
+    }
+  </style>
+</head>
+<body>
+  <h1>Shadow DOM counter</h1>
+  <p>
+    The button below lives inside a custom element
+    <code>&lt;counter-widget&gt;</code> with
+    <code>attachShadow({ mode: 'open' })</code>. A working
+    <code>vortex_observe</code> must still see and ref it via the CDP
+    flatten path (mirrors invariant I22 against a real browser).
+  </p>
+
+  <counter-widget></counter-widget>
+
+  <div data-testid="result" class="external-display">外部读数：<span id="external-count">0</span></div>
+
+  <script>
+    class CounterWidget extends HTMLElement {
+      constructor() {
+        super();
+        const root = this.attachShadow({ mode: 'open' });
+        root.innerHTML = `
+          <style>
+            :host { display: block; }
+            .row { display: flex; gap: 12px; align-items: center; }
+            button {
+              padding: 6px 14px;
+              font-size: 14px;
+              cursor: pointer;
+              border: 1px solid #888;
+              background: white;
+              border-radius: 4px;
+            }
+            button:hover { background: #f8f8f8; }
+            .count {
+              font-family: ui-monospace, "SF Mono", monospace;
+              padding: 4px 10px;
+              background: #fffbcc;
+              border-radius: 4px;
+              min-width: 32px;
+              display: inline-block;
+              text-align: center;
+            }
+            .label { font-weight: 600; }
+          </style>
+          <div class="row">
+            <span class="label">Shadow count:</span>
+            <span class="count" id="count">0</span>
+            <button type="button" id="inc">Increment</button>
+          </div>
+        `;
+        this._count = 0;
+        root.getElementById('inc').addEventListener('click', () => {
+          this._count++;
+          root.getElementById('count').textContent = String(this._count);
+          // Mirror into the light-DOM [data-testid="result"] so bench's
+          // assertResultContains can read the new value via the same
+          // selector all other cases use — keeps the case focused on
+          // "observe + click through an open shadow root" and not on
+          // shadow-aware text extraction.
+          const ext = document.getElementById('external-count');
+          if (ext) ext.textContent = String(this._count);
+        });
+      }
+    }
+    customElements.define('counter-widget', CounterWidget);
+  </script>
+</body>
+</html>
