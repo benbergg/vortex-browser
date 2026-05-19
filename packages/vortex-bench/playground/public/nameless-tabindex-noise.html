@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Issue #18 fixture — nameless tabindex noise</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; padding: 24px; max-width: 640px; }
+    .shell {
+      height: 32px;
+      margin: 6px 0;
+      border: 1px dashed #ccc;
+      background: repeating-linear-gradient(45deg, #fafafa, #fafafa 6px, #f0f0f0 6px, #f0f0f0 12px);
+    }
+    /* Visible labels live OUTSIDE the tabindex divs so the divs themselves
+       have empty textContent — that's what triggers issue #18 (accessibility
+       tree computes an empty `name` for the SPA-shell containers). */
+    .shell-label { font-size: 12px; color: #888; margin-top: 12px; }
+    button { padding: 8px 16px; font-size: 14px; cursor: pointer; }
+    .external-display { margin-top: 20px; padding: 12px 16px; background: #f0f6ff; border-left: 4px solid #4a90e2; border-radius: 4px; }
+  </style>
+</head>
+<body>
+  <h1>Nameless <code>tabindex</code> shells</h1>
+  <p>
+    The three boxes below are <code>&lt;div tabindex="0"&gt;</code> with no
+    label and no ARIA role — the SPA shell / router-view container pattern
+    that issue #18 caught on <code>testc.bytenew.com</code>. A working
+    <code>vortex_observe(frames=main, filter=interactive)</code> should
+    drop them before they reach the snapshot.
+  </p>
+
+  <!-- 3 truly nameless instances (empty textContent + no aria-label + no role)
+       so observe's accessibility tree computes name="" for each. The noise
+       signal is unambiguous and stable. -->
+  <div class="shell-label">SPA shell A:</div>
+  <div tabindex="0" class="shell"></div>
+  <div class="shell-label">SPA shell B:</div>
+  <div tabindex="0" class="shell"></div>
+  <div class="shell-label">SPA shell C:</div>
+  <div tabindex="0" class="shell"></div>
+
+  <!-- Positive control: a real interactive element observe MUST surface. -->
+  <button id="real-btn" type="button">Click me</button>
+
+  <div data-testid="result" class="external-display"></div>
+
+  <script>
+    document.getElementById('real-btn').addEventListener('click', () => {
+      document.querySelector('[data-testid="result"]').textContent = 'real button clicked';
+    });
+  </script>
+</body>
+</html>
