@@ -1,6 +1,6 @@
 {
   "name": "@bytenew/vortex-migrate",
-  "version": "0.7.4",
+  "version": "0.8.0",
   "description": "Codemod CLI: rewrite v0.5 vortex_* tool calls to v0.6 11-tool surface.",
   "type": "module",
   "main": "dist/src/index.js",

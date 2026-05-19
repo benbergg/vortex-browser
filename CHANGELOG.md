@@ -8,6 +8,14 @@
 
 _新工作进入此段；ship 时改为版本号 + 日期。_
 
+---
+
+## [0.8.0] - 2026-05-19
+
+### 💥 Breaking changes
+
+- **`vortex-server`: OpenClaw relay-client removed** (`packages/server/`). The outbound WebSocket relay that let a remote OpenClaw instance drive the local browser is decommissioned — the relay endpoint is dead and the OpenClaw vortex plugin is being uninstalled server-side. **Removed surface**: `packages/server/src/relay-client.ts` (file deleted), CLI flags `--relay` / `--token` / `--session-name` / `--no-local`, `~/.vortex/relay.env` config loading, and the `RelayClient` / `RelayConfig` / `RelayState` symbols. **Impact**: callers using `vortex-server --relay …` to bridge to a remote OpenClaw will see an unknown-flag error; switch to running the local NM ↔ HTTP/WS bridge that vortex-mcp and vortex-cli already use. The local bridge path is untouched. **Why**: dead code in the wild — no active relay endpoint to talk to, and keeping the dual-mode wiring forced every `vortex-server` change to reason about a code path that nobody exercised.
+
 ### ✨ Added
 
 - **Snapshot ref hash binding** (`packages/mcp/src/lib/ref-parser.ts`, `packages/mcp/src/lib/observe-render.ts`, `packages/mcp/src/server.ts`). `vortex_observe` now emits refs as `@<hash>:eN` (or `@<hash>:fNeM` with frame prefix), where `<hash>` is a 4-char lowercase hex prefix of `sha256(snapshotId)`. Callers that reuse a ref from a prior observe in a later `vortex_act` / `vortex_extract` / `vortex_wait_for` call get a structured `STALE_SNAPSHOT` error with the existing recovery hint ("Page has changed since the snapshot. Call vortex_observe to capture a fresh snapshot, then retry with the new ref") instead of silently rebinding to a different element.
@@ -25,6 +33,8 @@ _新工作进入此段；ship 时改为版本号 + 日期。_
   **Closes v0.7.x backlog (5 items)**: `el-slider-drag` (needed `vortex_mouse_drag`) · `el-upload` (needed `vortex_file_upload`) · `el-date-picker-daterange` + `el-date-picker-datetimerange` (needed `vortex_fill` with `kind` enum exposed at L4) · `latency-p50` (needed `vortex_evaluate`). All five bench cases statically verified to call v0.8 public tools only; e2e validation deferred to v0.8 ship preflight. 11 bench cases migrated from `vortex_act({action:"fill", ...})` to direct `vortex_fill` calls.
 
 - **Bare-ref deprecation telemetry** (`packages/mcp/src/lib/ref-parser.ts`, `packages/mcp/src/server.ts`). `resolveTargetParam` now counts every bare `@eN` / `@fNeM` it resolves and fires a single stderr warn on the first occurrence of a session (`[vortex-mcp] bare ref "<target>" used; this format is deprecated and will be rejected in v0.9.`). `vortex_ping` exposes the counter as `bareRefUsage: { hits, firstSeenAt }`, letting callers query mid- or end-of-session usage. **Why**: the v0.9 removal of bare refs is currently a planning-doc claim with no data behind it. The counter + warn turn the dual-format window into measurable signal so the v0.9 cut-over decision is evidence-driven rather than a guess.
+
+- **`scripts/ship-preflight.mjs`** (`pnpm ship:preflight`). New release checklist automation with 4 gates: (1) `[Unreleased]` must be empty, (2) file paths named in the latest section must appear in `git diff vPREV..HEAD --name-only`, (3) numeric claims in CHANGELOG cross-check commit messages (WARN-only), (4) new silent-fallback expressions (`??` / `||`) in the range must have a `*.test.ts` touched in the same range. Wraps the five hard ship gates accumulated across v0.7.0–v0.7.4 ship failures (`Knowledge-Library/07-Tech/20260512-vortex-ship-checklist.md`).
 
 ### 🔄 Backward compatibility
 
@@ -44,6 +54,8 @@ _新工作进入此段；ship 时改为版本号 + 日期。_
 - `packages/mcp/tests/observe-render.test.ts`: 6 new cases covering `refOf` and `renderObserveCompact` hash propagation.
 - `packages/mcp/tests/server-snapshot-hash.test.ts` (new file): 5 cases for `computeSnapshotHash` (sha256[0:4] lowercase hex, deterministic, null-safe).
 - `packages/vortex-bench/cases/cross-observe-ref-stale.case.ts` (new file): end-to-end assertion that ref reuse across observes throws `STALE_SNAPSHOT`. 20 existing bench cases had their ref-extraction regex broadened to admit hashed refs.
+- `packages/extension/tests/dom-commit.test.ts`: rebuilt 4 long-skipped mock cases against the page-side bundle invoke path (`kind="checkbox-group"` route via `loadPageSideModule` + `nativePageQuery`). New arg-order assertion `[selector, closestSelector, value, timeoutMs, driverId]` and mock of `loadPageSideModule` so only the page-query invocation is observed. Restores COMMIT_FAILED / UNSUPPORTED_TARGET / ELEMENT_NOT_FOUND mapping coverage off since v0.6.0. **Closes #13**. The same file also de-staled two driver-registry assertions left over from when `cascader` / `select` were unregistered (now use truly unregistered kinds `radio-group` / `slider`). Extension suite is back to 229 / 229 / 0 skipped (was 215 / 221 / 6 fail through the v0.7.x line).
+- `packages/mcp/tests/ref-parser.test.ts`: +7 cases locking the bare-ref telemetry contract (increment, accumulation, hashed no-op, selector no-op, firstSeenAt stability, warn-once, counter-before-throw).
 
 ---
 

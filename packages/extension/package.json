@@ -1,6 +1,6 @@
 {
   "name": "@bytenew/vortex-extension",
-  "version": "0.7.4",
+  "version": "0.8.0",
   "type": "module",
   "scripts": {
     "build": "vite build && node scripts/build-page-side.mjs",
