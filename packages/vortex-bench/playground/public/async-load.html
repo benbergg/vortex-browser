@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Async loading fixture</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+      padding: 24px;
+      max-width: 640px;
+    }
+    h1 { margin-top: 0; }
+    code { background: #f4f4f4; padding: 2px 6px; border-radius: 4px; }
+    button#load-btn {
+      padding: 8px 18px;
+      font-size: 14px;
+      cursor: pointer;
+      border: 1px solid #4a90e2;
+      background: #4a90e2;
+      color: white;
+      border-radius: 4px;
+    }
+    button#load-btn[hidden] { display: none; }
+    #spinner {
+      display: none;
+      margin: 16px 0;
+      font-style: italic;
+      color: #888;
+    }
+    #spinner.active { display: inline-block; }
+    #spinner::before {
+      content: "⏳";
+      margin-right: 6px;
+    }
+    #items {
+      display: none;
+      margin: 16px 0;
+      padding-left: 20px;
+    }
+    #items.active { display: block; }
+    #items li { margin: 4px 0; }
+    .external-display {
+      margin-top: 20px;
+      padding: 12px 16px;
+      background: #f0f6ff;
+      border-left: 4px solid #4a90e2;
+      border-radius: 4px;
+      font-size: 15px;
+    }
+  </style>
+</head>
+<body>
+  <h1>Async loading state machine</h1>
+  <p>
+    Clicking <code>Load data</code> hides the button, shows a spinner for
+    ~800 ms (simulated network latency via <code>setTimeout</code>), then
+    renders the result list and mirrors a completion string into
+    <code>[data-testid="result"]</code>. The case proves
+    <code>vortex_wait_for(mode=idle, value=dom)</code> blocks until the
+    spinner→content transition has actually settled.
+  </p>
+
+  <button id="load-btn" type="button">Load data</button>
+  <div id="spinner">Loading…</div>
+  <ul id="items"></ul>
+
+  <div data-testid="result" class="external-display"></div>
+
+  <script>
+    const btn = document.getElementById('load-btn');
+    const spinner = document.getElementById('spinner');
+    const items = document.getElementById('items');
+    const result = document.querySelector('[data-testid="result"]');
+
+    btn.addEventListener('click', () => {
+      // Phase 1 (sync, before vortex_act returns): swap button → spinner.
+      btn.hidden = true;
+      spinner.classList.add('active');
+
+      // Phase 2 (async, ~800 ms later): swap spinner → list + result text.
+      // The gap is the part `dom.waitSettled` must NOT return early on —
+      // a regression there would let the case extract while the result
+      // region is still empty.
+      setTimeout(() => {
+        spinner.classList.remove('active');
+        const data = ['Item A', 'Item B', 'Item C'];
+        items.innerHTML = data.map((d) => `<li>${d}</li>`).join('');
+        items.classList.add('active');
+        result.textContent = `异步加载完成 ${data.length} items`;
+      }, 800);
+    });
+  </script>
+</body>
+</html>
