@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Dynamic role mutation fixture — aria-pressed toggle</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; padding: 24px; max-width: 640px; }
+    code { background: #f4f4f4; padding: 2px 6px; border-radius: 4px; }
+    button {
+      padding: 8px 16px;
+      font-size: 14px;
+      cursor: pointer;
+      border: 1px solid #4a90e2;
+      background: white;
+      color: #4a90e2;
+      border-radius: 4px;
+    }
+    button[aria-pressed="true"] {
+      background: #4a90e2;
+      color: white;
+    }
+    .external-display {
+      margin-top: 20px;
+      padding: 12px 16px;
+      background: #f0f6ff;
+      border-left: 4px solid #4a90e2;
+      border-radius: 4px;
+      font-family: ui-monospace, "SF Mono", monospace;
+      font-size: 14px;
+    }
+  </style>
+</head>
+<body>
+  <h1>aria-pressed toggle</h1>
+  <p>
+    The button below uses <code>aria-pressed</code> to advertise a
+    pressed / unpressed state. <code>vortex_observe</code> should mirror
+    this as <code>state.active</code> (rendered as a trailing
+    <code>[active]</code> flag in the compact line) and the flag should
+    flip correctly across re-observes after a click.
+  </p>
+
+  <button
+    id="toggle-btn"
+    type="button"
+    aria-pressed="false"
+    aria-label="Toggle button"
+  >
+    Toggle me <span id="state-label">(off)</span>
+  </button>
+
+  <div data-testid="result" class="external-display"></div>
+
+  <script>
+    const btn = document.getElementById("toggle-btn");
+    const stateLabel = document.getElementById("state-label");
+    const result = document.querySelector('[data-testid="result"]');
+
+    btn.addEventListener("click", () => {
+      const next = btn.getAttribute("aria-pressed") !== "true";
+      btn.setAttribute("aria-pressed", String(next));
+      stateLabel.textContent = next ? "(on)" : "(off)";
+      result.textContent = `pressed=${next}`;
+    });
+  </script>
+</body>
+</html>
