@@ -6,7 +6,6 @@ import { dirname, resolve } from "node:path";
 import express from "express";
 import { NativeMessagingReader, writeNmMessage } from "./native-messaging.js";
 import { SessionManager } from "./session.js";
-import { StateCache } from "./state-cache.js";
 import { MessageRouter } from "./message-router.js";
 import { createWsServer } from "./ws-server.js";
 import { createHttpRoutes } from "./http-routes.js";
@@ -115,7 +114,6 @@ export function startServer(opts: StartServerOptions | number = {}): void {
   installExtensionDistWatcher();
 
   const sessions = new SessionManager();
-  const _stateCache = new StateCache();
   const router = new MessageRouter(process.stdout, sessions);
 
   // 防止 stdout EPIPE 崩溃

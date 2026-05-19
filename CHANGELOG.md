@@ -8,6 +8,10 @@
 
 _新工作进入此段；ship 时改为版本号 + 日期。_
 
+### 🗑 Removed
+
+- **`packages/server/src/state-cache.ts`** dead code. The `StateCache` class (console / network log ring buffer, 20 LoC) was instantiated as `_stateCache` in `index.ts` but never wired to any consumer — neither `MessageRouter`, the HTTP routes, nor the WS server held a reference. Logs are actually buffered by the extension's own `console.getLogs` / `network.getLogs` handlers, so the server-side cache was vestigial. Removing the class, its import, the instantiation line, and the `state-cache.ts` entry in `packages/server/README.md` architecture map.
+
 ---
 
 ## [0.8.0] - 2026-05-19

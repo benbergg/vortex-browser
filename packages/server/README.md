@@ -65,8 +65,7 @@ src/
 ├── http-routes.ts      # 本地 HTTP（给 CLI 与外部脚本）
 ├── native-messaging.ts # Chrome NM stdio 协议
 ├── message-router.ts   # VtxRequest ↔ NmRequest 互转 + pending 管理
-├── session.ts
-└── state-cache.ts      # 部分 action 结果的本地缓存
+└── session.ts
 bin/
 └── vortex-server.ts    # commander CLI
 native-host.sh          # Chrome NM 入口脚本（自动加载 nvm）
