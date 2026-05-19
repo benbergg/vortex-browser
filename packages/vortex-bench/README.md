@@ -109,6 +109,7 @@ pnpm -F @bytenew/vortex-bench bench baseline    # 把当前结果写成新 basel
 | `vortex-storage-roundtrip` | 填 public `vortex_storage` 0-coverage 缺口 | `vortex_storage(set, key, value)` → click "Refresh display" → 页面 read localStorage mirror 到 result → 双重 verify：`assertResultContains(value)` + `vortex_storage(get)` 响应含 value。证明 set / get 走同一 storage 分区 |
 | `vortex-debug-read-network` | 填 public `vortex_debug_read(network)` 0-coverage 缺口 | 先 pre-warm CDP Network 订阅 → click "Fire requests" 触发 2 个具名 fetch → assertResultContains "fired 2 requests" → `vortex_debug_read(network)` 响应必同时含 `vortex-bench-net-marker-alpha` 和 `vortex-bench-net-marker-beta`。防 dedup / merge / drop 类回归 |
 | `dynamic-role-mutation` | observe 跨 mutation 的 state 语义一致性 | button `aria-pressed="false"` → 第一次 observe 行不带 `[active]` → click → `aria-pressed="true"` → re-observe 同名 button 行必含 `[active]`。验证 `getUiState` (observe.ts:437-475) 真读 live DOM，不被 snapshot 缓存 / stale tree 误导 |
+| `vortex-debug-read-console` | 填 public `vortex_debug_read(console)` 0-coverage 缺口 + 验 v0.8.x lazy-subscribe fix | pre-warm → click "Emit logs" 触发 `console.log/warn/error` 3 条具名 marker → `vortex_debug_read(console)` 响应必同时含 info / warn / error 三个 marker，按级别独立断言（任一级别丢都精准定位）|
 
 > 想加新真站灵感 case：把 fixture HTML 落在 `playground/public/<name>.html`，case 文件用 `playgroundPath: "/<name>.html"`（注意不走 SPA hash router，是 vite static serve），开头加 `// Fixture-based: ...` 注释。
 

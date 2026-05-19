@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>vortex_debug_read(console) fixture</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; padding: 24px; max-width: 640px; }
+    h1 { margin-top: 0; }
+    code { background: #f4f4f4; padding: 2px 6px; border-radius: 4px; }
+    button {
+      padding: 8px 16px;
+      font-size: 14px;
+      cursor: pointer;
+      border: 1px solid #4a90e2;
+      background: #4a90e2;
+      color: white;
+      border-radius: 4px;
+    }
+    .external-display {
+      margin-top: 20px;
+      padding: 12px 16px;
+      background: #f0f6ff;
+      border-left: 4px solid #4a90e2;
+      border-radius: 4px;
+      font-family: ui-monospace, "SF Mono", monospace;
+      font-size: 14px;
+    }
+  </style>
+</head>
+<body>
+  <h1>vortex_debug_read(console) roundtrip</h1>
+  <p>
+    Clicking <code>Emit logs</code> fires three distinct
+    <code>console.*</code> calls — one each at log / warn / error level —
+    using namespaced marker strings. The bench case pre-warms the CDP
+    Runtime subscription, triggers the emits, then reads back through
+    <code>vortex_debug_read(source=console)</code> and asserts all three
+    markers appear.
+  </p>
+
+  <button id="emit-btn" type="button">Emit logs</button>
+
+  <div data-testid="result" class="external-display"></div>
+
+  <script>
+    const result = document.querySelector('[data-testid="result"]');
+
+    document.getElementById("emit-btn").addEventListener("click", () => {
+      // Three distinct markers at three levels so a regression that
+      // (a) drops one level / (b) merges adjacent calls / (c) silently
+      // dedupes the marker text would still fail at least one of the
+      // three substring assertions in the case.
+      console.log("vortex-bench-console-marker-info");
+      console.warn("vortex-bench-console-marker-warn");
+      console.error("vortex-bench-console-marker-error");
+      result.textContent = "emitted 3 logs";
+    });
+  </script>
+</body>
+</html>

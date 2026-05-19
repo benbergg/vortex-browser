@@ -131,13 +131,24 @@ export function registerConsoleHandlers(
     subscribedTabs.delete(tabId);
   });
 
+  // Idempotent CDP Runtime subscription. Pulled out of the SUBSCRIBE
+  // handler body so GET_LOGS / GET_ERRORS can lazy-subscribe — the
+  // public `vortex_debug_read(source=console)` tool dispatches to
+  // GET_LOGS without ever passing through SUBSCRIBE, so without this
+  // lazy-attach the cache stayed empty and the tool always returned
+  // []. Mirrors network.ts ensureSubscribed.
+  async function ensureSubscribed(tid: number): Promise<void> {
+    if (subscribedTabs.has(tid)) return;
+    await debuggerMgr.enableDomain(tid, "Runtime");
+    subscribedTabs.add(tid);
+  }
+
   router.registerAll({
     [ConsoleActions.SUBSCRIBE]: async (args, tabId) => {
       const tid = await getActiveTabId(
         (args.tabId as number | undefined) ?? tabId,
       );
-      await debuggerMgr.enableDomain(tid, "Runtime");
-      subscribedTabs.add(tid);
+      await ensureSubscribed(tid);
       return { subscribed: true, tabId: tid };
     },
 
@@ -145,6 +156,7 @@ export function registerConsoleHandlers(
       const tid = await getActiveTabId(
         (args.tabId as number | undefined) ?? tabId,
       );
+      await ensureSubscribed(tid);
       const level = args.level as string | undefined;
       let logs = consoleLogs.get(tid) ?? [];
       if (level) {
@@ -157,6 +169,7 @@ export function registerConsoleHandlers(
       const tid = await getActiveTabId(
         (args.tabId as number | undefined) ?? tabId,
       );
+      await ensureSubscribed(tid);
       const logs = consoleLogs.get(tid) ?? [];
       return logs.filter((l) => l.level === "error");
     },
