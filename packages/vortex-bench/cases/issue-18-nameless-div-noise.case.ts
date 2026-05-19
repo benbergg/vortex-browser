@@ -1,23 +1,32 @@
 // REGRESSION LOCK for https://github.com/benbergg/vortex/issues/18
 //
-// Status: KNOWN-FAIL until issue #18 is fixed. The fixture exercises the
-// exact selector pattern flagged in the bug report: a `<div tabindex="0">`
-// with no label, no ARIA role, and no text content. The current
-// INTERACTIVE_SELECTORS list in packages/extension/src/handlers/observe.ts
-// matches such elements via the trailing `[tabindex]:not([tabindex='-1'])`
-// rule but has no post-filter to drop nameless containers, so they ride
-// through into the snapshot as `[div]` lines without a quoted name.
+// Status: CURRENTLY PASSING — the fix is already live. Issue #18 was
+// reported during the 2026-05-02 testc.bytenew.com dogfood session and
+// shipped as BUG-3 of the v0.7 dogfood batch (merged to main as
+// `ca43a53` PR #19 the same day; the per-step feature-branch commit is
+// `7af7d43`). The issue ticket was filed 10 days later from the lagging
+// dogfood notes and was never closed against the fix.
+//
+// The post-filter that handles this lives at
+// `packages/extension/src/handlers/observe.ts` line 649-671 (see the
+// comment marked "BUG-3" there): in filter='interactive' mode, an
+// element matched only structurally (e.g. via the trailing
+// `[tabindex]:not([tabindex='-1'])` selector) is dropped unless it
+// has a form-like tag, an explicit role, an aria-label, or a non-empty
+// accessible name.
 //
 // What this case asserts:
-//   1. Positive control: "Click me" stays in the snapshot (so a regression
-//      that drops ALL elements doesn't accidentally pass this).
-//   2. `namelessDivCount == 0` — i.e. observe(frames=main) emitted no
-//      `[div]` lines lacking a quoted name. Today: 3 (the fixture
-//      contains 3 empty tabindex shells). When the bug is fixed, this
-//      flips to 0 and the case starts passing.
+//   1. Positive control: "Click me" stays in the snapshot (so a future
+//      regression that drops ALL elements doesn't accidentally pass).
+//   2. `namelessDivCount == 0` — observe(frames=main) emits zero `[div]`
+//      lines lacking a quoted name. The fixture intentionally plants
+//      3 nameless `<div tabindex="0">` shells exactly matching the
+//      bug pattern; the test fails immediately with the offending lines
+//      attached to the failure message if the filter ever regresses.
 //
-// The exact noise count is also recorded as a customMetric so trend
-// reports surface partial fixes (e.g. 3 → 1 → 0).
+// The exact noise count is also recorded as `customMetric.namelessDivCount`
+// so trend reports show a partial regression (e.g. 0 → 2 → 3) before the
+// strict assertion flips red.
 
 import type { CaseDefinition } from "../src/types.js";
 import { extractText } from "./_helpers.js";
