@@ -1,0 +1,947 @@
+{
+  "generatedAt": "2026-05-20T02:52:36.589Z",
+  "playgroundUrl": "http://localhost:5173",
+  "cases": [
+    {
+      "case": "aria-cursor-nested-no-dup",
+      "passed": true,
+      "callCount": 4,
+      "fallbackToEvaluate": 0,
+      "observeMissedPopperItems": 0,
+      "outputBytes": 728,
+      "durationMs": 907,
+      "repeats": 3,
+      "passRate": 1,
+      "outputBytesByTool": {
+        "vortex_navigate": 211,
+        "vortex_wait_for": 62,
+        "vortex_observe": 455
+      },
+      "customMetrics": {
+        "totalRefBytes": 415,
+        "ariaItems": 8
+      }
+    },
+    {
+      "case": "async-loading-spinner",
+      "passed": true,
+      "callCount": 9,
+      "fallbackToEvaluate": 0,
+      "observeMissedPopperItems": 0,
+      "outputBytes": 619,
+      "durationMs": 1501,
+      "repeats": 3,
+      "passRate": 1,
+      "outputBytesByTool": {
+        "vortex_navigate": 188,
+        "vortex_wait_for": 124,
+        "vortex_observe": 167,
+        "vortex_extract": 32,
+        "vortex_act": 108
+      }
+    },
+    {
+      "case": "cross-observe-ref-stale",
+      "passed": true,
+      "callCount": 6,
+      "fallbackToEvaluate": 0,
+      "observeMissedPopperItems": 0,
+      "outputBytes": 1373,
+      "durationMs": 783,
+      "repeats": 3,
+      "passRate": 1,
+      "outputBytesByTool": {
+        "vortex_navigate": 211,
+        "vortex_wait_for": 62,
+        "vortex_observe": 910,
+        "vortex_act": 190
+      },
+      "customMetrics": {
+        "observe1HashedRef": 1,
+        "staleSnapshotDetected": 1
+      }
+    },
+    {
+      "case": "dynamic-role-mutation",
+      "passed": true,
+      "callCount": 7,
+      "fallbackToEvaluate": 0,
+      "observeMissedPopperItems": 0,
+      "outputBytes": 853,
+      "durationMs": 625,
+      "repeats": 3,
+      "passRate": 1,
+      "outputBytesByTool": {
+        "vortex_navigate": 229,
+        "vortex_wait_for": 62,
+        "vortex_observe": 433,
+        "vortex_act": 115,
+        "vortex_extract": 14
+      }
+    },
+    {
+      "case": "el-autocomplete",
+      "passed": true,
+      "callCount": 9,
+      "fallbackToEvaluate": 0,
+      "observeMissedPopperItems": 0,
+      "outputBytes": 1574,
+      "durationMs": 2035,
+      "repeats": 3,
+      "passRate": 1,
+      "outputBytesByTool": {
+        "vortex_navigate": 192,
+        "vortex_wait_for": 124,
+        "vortex_act": 247,
+        "vortex_observe": 997,
+        "vortex_extract": 14
+      }
+    },
+    {
+      "case": "el-cascader",
+      "passed": true,
+      "callCount": 5,
+      "fallbackToEvaluate": 0,
+      "observeMissedPopperItems": 0,
+      "outputBytes": 449,
+      "durationMs": 1547,
+      "repeats": 3,
+      "passRate": 1,
+      "outputBytesByTool": {
+        "vortex_navigate": 188,
+        "vortex_wait_for": 62,
+        "vortex_fill": 160,
+        "vortex_extract": 39
+      }
+    },
+    {
+      "case": "el-color-picker",
+      "passed": true,
+      "callCount": 13,
+      "fallbackToEvaluate": 1,
+      "observeMissedPopperItems": 0,
+      "outputBytes": 776,
+      "durationMs": 12246,
+      "repeats": 3,
+      "passRate": 1,
+      "outputBytesByTool": {
+        "vortex_navigate": 192,
+        "vortex_wait_for": 248,
+        "vortex_act": 230,
+        "vortex_press": 79,
+        "vortex_evaluate": 11,
+        "vortex_extract": 16
+      }
+    },
+    {
+      "case": "el-date-picker-daterange",
+      "passed": true,
+      "callCount": 6,
+      "fallbackToEvaluate": 0,
+      "observeMissedPopperItems": 0,
+      "outputBytes": 481,
+      "durationMs": 5513,
+      "repeats": 3,
+      "passRate": 1,
+      "outputBytesByTool": {
+        "vortex_navigate": 201,
+        "vortex_wait_for": 62,
+        "vortex_fill": 150,
+        "vortex_extract": 68
+      }
+    },
+    {
+      "case": "el-date-picker-datetimerange",
+      "passed": true,
+      "callCount": 6,
+      "fallbackToEvaluate": 0,
+      "observeMissedPopperItems": 0,
+      "outputBytes": 543,
+      "durationMs": 8502,
+      "repeats": 3,
+      "passRate": 1,
+      "outputBytesByTool": {
+        "vortex_navigate": 205,
+        "vortex_wait_for": 62,
+        "vortex_fill": 172,
+        "vortex_extract": 104
+      }
+    },
+    {
+      "case": "el-dialog-nested",
+      "passed": true,
+      "callCount": 9,
+      "fallbackToEvaluate": 0,
+      "observeMissedPopperItems": 0,
+      "outputBytes": 1546,
+      "durationMs": 1601,
+      "repeats": 3,
+      "passRate": 1,
+      "outputBytesByTool": {
+        "vortex_navigate": 193,
+        "vortex_wait_for": 124,
+        "vortex_observe": 980,
+        "vortex_act": 92,
+        "vortex_fill": 105,
+        "vortex_extract": 52
+      }
+    },
+    {
+      "case": "el-drawer",
+      "passed": true,
+      "callCount": 9,
+      "fallbackToEvaluate": 0,
+      "observeMissedPopperItems": 0,
+      "outputBytes": 611,
+      "durationMs": 1639,
+      "repeats": 3,
+      "passRate": 1,
+      "outputBytesByTool": {
+        "vortex_navigate": 186,
+        "vortex_wait_for": 124,
+        "vortex_act": 227,
+        "vortex_extract": 74
+      }
+    },
+    {
+      "case": "el-dropdown",
+      "passed": true,
+      "callCount": 9,
+      "fallbackToEvaluate": 0,
+      "observeMissedPopperItems": 0,
+      "outputBytes": 2600,
+      "durationMs": 1568,
+      "repeats": 3,
+      "passRate": 1,
+      "outputBytesByTool": {
+        "vortex_navigate": 188,
+        "vortex_wait_for": 124,
+        "vortex_observe": 2073,
+        "vortex_act": 196,
+        "vortex_extract": 19
+      }
+    },
+    {
+      "case": "el-form-composite",
+      "passed": true,
+      "callCount": 13,
+      "fallbackToEvaluate": 0,
+      "observeMissedPopperItems": 0,
+      "outputBytes": 1213,
+      "durationMs": 1299,
+      "repeats": 3,
+      "passRate": 1,
+      "outputBytesByTool": {
+        "vortex_navigate": 194,
+        "vortex_wait_for": 62,
+        "vortex_act": 193,
+        "vortex_fill": 259,
+        "vortex_extract": 505
+      }
+    },
+    {
+      "case": "el-input-number",
+      "passed": true,
+      "callCount": 8,
+      "fallbackToEvaluate": 0,
+      "observeMissedPopperItems": 0,
+      "outputBytes": 498,
+      "durationMs": 1249,
+      "repeats": 3,
+      "passRate": 1,
+      "outputBytesByTool": {
+        "vortex_navigate": 192,
+        "vortex_wait_for": 124,
+        "vortex_act": 137,
+        "vortex_press": 37,
+        "vortex_extract": 8
+      }
+    },
+    {
+      "case": "el-message-box",
+      "passed": true,
+      "callCount": 8,
+      "fallbackToEvaluate": 0,
+      "observeMissedPopperItems": 0,
+      "outputBytes": 1602,
+      "durationMs": 1439,
+      "repeats": 3,
+      "passRate": 1,
+      "outputBytesByTool": {
+        "vortex_navigate": 191,
+        "vortex_wait_for": 124,
+        "vortex_act": 172,
+        "vortex_observe": 1092,
+        "vortex_extract": 23
+      }
+    },
+    {
+      "case": "el-pagination",
+      "passed": true,
+      "callCount": 6,
+      "fallbackToEvaluate": 0,
+      "observeMissedPopperItems": 0,
+      "outputBytes": 1654,
+      "durationMs": 917,
+      "repeats": 3,
+      "passRate": 1,
+      "outputBytesByTool": {
+        "vortex_navigate": 190,
+        "vortex_wait_for": 62,
+        "vortex_observe": 1312,
+        "vortex_act": 74,
+        "vortex_extract": 16
+      }
+    },
+    {
+      "case": "el-radio-group",
+      "passed": true,
+      "callCount": 6,
+      "fallbackToEvaluate": 0,
+      "observeMissedPopperItems": 0,
+      "outputBytes": 1395,
+      "durationMs": 882,
+      "repeats": 3,
+      "passRate": 1,
+      "outputBytesByTool": {
+        "vortex_navigate": 191,
+        "vortex_wait_for": 62,
+        "vortex_observe": 1046,
+        "vortex_act": 84,
+        "vortex_extract": 12
+      }
+    },
+    {
+      "case": "el-select-multiple",
+      "passed": true,
+      "callCount": 6,
+      "fallbackToEvaluate": 0,
+      "observeMissedPopperItems": 0,
+      "outputBytes": 422,
+      "durationMs": 1056,
+      "repeats": 3,
+      "passRate": 1,
+      "outputBytesByTool": {
+        "vortex_navigate": 195,
+        "vortex_wait_for": 62,
+        "vortex_fill": 127,
+        "vortex_extract": 38
+      }
+    },
+    {
+      "case": "el-select-single",
+      "passed": true,
+      "callCount": 5,
+      "fallbackToEvaluate": 0,
+      "observeMissedPopperItems": 0,
+      "outputBytes": 382,
+      "durationMs": 969,
+      "repeats": 3,
+      "passRate": 1,
+      "outputBytesByTool": {
+        "vortex_navigate": 193,
+        "vortex_wait_for": 62,
+        "vortex_fill": 112,
+        "vortex_extract": 15
+      }
+    },
+    {
+      "case": "el-select-v2",
+      "passed": true,
+      "callCount": 5,
+      "fallbackToEvaluate": 0,
+      "observeMissedPopperItems": 0,
+      "outputBytes": 376,
+      "durationMs": 946,
+      "repeats": 3,
+      "passRate": 1,
+      "outputBytesByTool": {
+        "vortex_navigate": 189,
+        "vortex_wait_for": 62,
+        "vortex_fill": 112,
+        "vortex_extract": 13
+      }
+    },
+    {
+      "case": "el-select-v2-virtual",
+      "passed": false,
+      "callCount": 16,
+      "fallbackToEvaluate": 1,
+      "observeMissedPopperItems": 1,
+      "outputBytes": 3253,
+      "durationMs": 10865,
+      "repeats": 3,
+      "passRate": 0,
+      "outputBytesByTool": {
+        "vortex_navigate": 189,
+        "vortex_wait_for": 186,
+        "vortex_act": 157,
+        "vortex_observe": 2614,
+        "vortex_evaluate": 11,
+        "vortex_extract": 96
+      },
+      "failureReason": "result 区应包含 \"value=opt-500\"，实际: \"value=(未选)\"",
+      "failureClass": "assertion_failure"
+    },
+    {
+      "case": "el-slider",
+      "passed": true,
+      "callCount": 7,
+      "fallbackToEvaluate": 0,
+      "observeMissedPopperItems": 0,
+      "outputBytes": 376,
+      "durationMs": 1203,
+      "repeats": 3,
+      "passRate": 1,
+      "outputBytesByTool": {
+        "vortex_navigate": 186,
+        "vortex_wait_for": 124,
+        "vortex_fill": 21,
+        "vortex_press": 37,
+        "vortex_extract": 8
+      }
+    },
+    {
+      "case": "el-slider-drag",
+      "passed": true,
+      "callCount": 7,
+      "fallbackToEvaluate": 0,
+      "observeMissedPopperItems": 0,
+      "outputBytes": 585,
+      "durationMs": 12592,
+      "repeats": 3,
+      "passRate": 1,
+      "outputBytesByTool": {
+        "vortex_navigate": 186,
+        "vortex_wait_for": 124,
+        "vortex_evaluate": 106,
+        "vortex_mouse_drag": 169
+      }
+    },
+    {
+      "case": "el-table",
+      "passed": true,
+      "callCount": 8,
+      "fallbackToEvaluate": 0,
+      "observeMissedPopperItems": 0,
+      "outputBytes": 515,
+      "durationMs": 1778,
+      "repeats": 3,
+      "passRate": 1,
+      "outputBytesByTool": {
+        "vortex_navigate": 185,
+        "vortex_wait_for": 124,
+        "vortex_act": 160,
+        "vortex_extract": 46
+      }
+    },
+    {
+      "case": "el-tabs",
+      "passed": true,
+      "callCount": 9,
+      "fallbackToEvaluate": 0,
+      "observeMissedPopperItems": 0,
+      "outputBytes": 1517,
+      "durationMs": 1276,
+      "repeats": 3,
+      "passRate": 1,
+      "outputBytesByTool": {
+        "vortex_navigate": 184,
+        "vortex_wait_for": 124,
+        "vortex_observe": 1015,
+        "vortex_act": 136,
+        "vortex_extract": 58
+      }
+    },
+    {
+      "case": "el-time-picker",
+      "passed": true,
+      "callCount": 5,
+      "fallbackToEvaluate": 0,
+      "observeMissedPopperItems": 0,
+      "outputBytes": 289,
+      "durationMs": 927,
+      "repeats": 3,
+      "passRate": 1,
+      "outputBytesByTool": {
+        "vortex_navigate": 191,
+        "vortex_wait_for": 62,
+        "vortex_act": 21,
+        "vortex_extract": 15
+      }
+    },
+    {
+      "case": "el-transfer",
+      "passed": true,
+      "callCount": 9,
+      "fallbackToEvaluate": 0,
+      "observeMissedPopperItems": 0,
+      "outputBytes": 1808,
+      "durationMs": 1416,
+      "repeats": 3,
+      "passRate": 1,
+      "outputBytesByTool": {
+        "vortex_navigate": 188,
+        "vortex_wait_for": 124,
+        "vortex_observe": 1239,
+        "vortex_act": 241,
+        "vortex_extract": 16
+      }
+    },
+    {
+      "case": "el-tree",
+      "passed": true,
+      "callCount": 13,
+      "fallbackToEvaluate": 0,
+      "observeMissedPopperItems": 0,
+      "outputBytes": 3956,
+      "durationMs": 2556,
+      "repeats": 3,
+      "passRate": 1,
+      "outputBytesByTool": {
+        "vortex_navigate": 184,
+        "vortex_wait_for": 248,
+        "vortex_observe": 3261,
+        "vortex_act": 240,
+        "vortex_extract": 23
+      }
+    },
+    {
+      "case": "el-tree-select",
+      "passed": true,
+      "callCount": 15,
+      "fallbackToEvaluate": 0,
+      "observeMissedPopperItems": 0,
+      "outputBytes": 4555,
+      "durationMs": 3327,
+      "repeats": 3,
+      "passRate": 1,
+      "outputBytesByTool": {
+        "vortex_navigate": 191,
+        "vortex_wait_for": 310,
+        "vortex_act": 323,
+        "vortex_observe": 3717,
+        "vortex_extract": 14
+      }
+    },
+    {
+      "case": "el-upload",
+      "passed": true,
+      "callCount": 6,
+      "fallbackToEvaluate": 0,
+      "observeMissedPopperItems": 0,
+      "outputBytes": 405,
+      "durationMs": 1142,
+      "repeats": 3,
+      "passRate": 1,
+      "outputBytesByTool": {
+        "vortex_navigate": 186,
+        "vortex_wait_for": 124,
+        "vortex_file_upload": 69,
+        "vortex_extract": 26
+      }
+    },
+    {
+      "case": "icon-name-priority",
+      "passed": true,
+      "callCount": 4,
+      "fallbackToEvaluate": 0,
+      "observeMissedPopperItems": 0,
+      "outputBytes": 529,
+      "durationMs": 893,
+      "repeats": 3,
+      "passRate": 1,
+      "outputBytesByTool": {
+        "vortex_navigate": 206,
+        "vortex_wait_for": 62,
+        "vortex_observe": 261
+      },
+      "customMetrics": {
+        "totalRefBytes": 253,
+        "p6IconPrioritySnapBytes": 253
+      }
+    },
+    {
+      "case": "iframe-nested-empty-deep",
+      "passed": true,
+      "callCount": 4,
+      "fallbackToEvaluate": 0,
+      "observeMissedPopperItems": 0,
+      "outputBytes": 619,
+      "durationMs": 1597,
+      "repeats": 3,
+      "passRate": 1,
+      "outputBytesByTool": {
+        "vortex_navigate": 203,
+        "vortex_wait_for": 62,
+        "vortex_observe": 354
+      },
+      "customMetrics": {
+        "observeLen": 354,
+        "emptyHintCount": 2
+      }
+    },
+    {
+      "case": "iframe-nested-with-content",
+      "passed": true,
+      "callCount": 4,
+      "fallbackToEvaluate": 0,
+      "observeMissedPopperItems": 0,
+      "outputBytes": 599,
+      "durationMs": 1655,
+      "repeats": 3,
+      "passRate": 1,
+      "outputBytesByTool": {
+        "vortex_navigate": 191,
+        "vortex_wait_for": 62,
+        "vortex_observe": 346
+      },
+      "customMetrics": {
+        "observeAllLen": 320,
+        "subFrameRefCount": 3
+      }
+    },
+    {
+      "case": "issue-18-nameless-div-noise",
+      "passed": true,
+      "callCount": 4,
+      "fallbackToEvaluate": 0,
+      "observeMissedPopperItems": 0,
+      "outputBytes": 490,
+      "durationMs": 585,
+      "repeats": 3,
+      "passRate": 1,
+      "outputBytesByTool": {
+        "vortex_navigate": 225,
+        "vortex_wait_for": 62,
+        "vortex_observe": 203
+      },
+      "customMetrics": {
+        "namelessDivCount": 0
+      }
+    },
+    {
+      "case": "jd-review-rm-01-open",
+      "passed": true,
+      "callCount": 7,
+      "fallbackToEvaluate": 0,
+      "observeMissedPopperItems": 0,
+      "outputBytes": 1078,
+      "durationMs": 952,
+      "repeats": 3,
+      "passRate": 1,
+      "outputBytesByTool": {
+        "vortex_navigate": 195,
+        "vortex_wait_for": 62,
+        "vortex_observe": 692,
+        "vortex_act": 115,
+        "vortex_extract": 14
+      },
+      "customMetrics": {
+        "snap1Bytes": 158,
+        "snap2Bytes": 436,
+        "fullTagNamesObserved": 4
+      }
+    },
+    {
+      "case": "jd-review-rm-02-switch-tab",
+      "passed": true,
+      "callCount": 8,
+      "fallbackToEvaluate": 0,
+      "observeMissedPopperItems": 0,
+      "outputBytes": 2035,
+      "durationMs": 1382,
+      "repeats": 3,
+      "passRate": 1,
+      "outputBytesByTool": {
+        "vortex_navigate": 195,
+        "vortex_wait_for": 62,
+        "vortex_observe": 692,
+        "vortex_act": 221,
+        "vortex_extract": 865
+      },
+      "customMetrics": {
+        "observeFoundBadTagAsLeaf": 1,
+        "listExtractBytes": 385
+      }
+    },
+    {
+      "case": "jd-review-rm-03-scroll-load",
+      "passed": true,
+      "callCount": 8,
+      "fallbackToEvaluate": 0,
+      "observeMissedPopperItems": 0,
+      "outputBytes": 3233,
+      "durationMs": 1604,
+      "repeats": 3,
+      "passRate": 1,
+      "outputBytesByTool": {
+        "vortex_navigate": 195,
+        "vortex_wait_for": 62,
+        "vortex_observe": 175,
+        "vortex_act": 136,
+        "vortex_extract": 2665
+      },
+      "customMetrics": {
+        "itemsBefore": 8,
+        "itemsAfter": 12
+      }
+    },
+    {
+      "case": "jd-review-rm-04-close",
+      "passed": true,
+      "callCount": 12,
+      "fallbackToEvaluate": 0,
+      "observeMissedPopperItems": 0,
+      "outputBytes": 2311,
+      "durationMs": 2271,
+      "repeats": 3,
+      "passRate": 1,
+      "outputBytesByTool": {
+        "vortex_navigate": 195,
+        "vortex_wait_for": 62,
+        "vortex_observe": 1563,
+        "vortex_act": 451,
+        "vortex_press": 40
+      },
+      "customMetrics": {
+        "afterCloseObsBytes": 159,
+        "closeIconClickWorked": 1,
+        "escapeKeyWorked": 1
+      }
+    },
+    {
+      "case": "jd-review-rm-05-photo-tag",
+      "passed": true,
+      "callCount": 8,
+      "fallbackToEvaluate": 0,
+      "observeMissedPopperItems": 0,
+      "outputBytes": 1905,
+      "durationMs": 1417,
+      "repeats": 3,
+      "passRate": 1,
+      "outputBytesByTool": {
+        "vortex_navigate": 195,
+        "vortex_wait_for": 62,
+        "vortex_observe": 694,
+        "vortex_act": 226,
+        "vortex_extract": 728
+      },
+      "customMetrics": {
+        "keywordTagFullText": 1,
+        "photoListBytes": 392,
+        "photoUsers": 8
+      }
+    },
+    {
+      "case": "jd-review-rm-06-sort-toggle",
+      "passed": true,
+      "callCount": 8,
+      "fallbackToEvaluate": 0,
+      "observeMissedPopperItems": 0,
+      "outputBytes": 1701,
+      "durationMs": 1348,
+      "repeats": 3,
+      "passRate": 1,
+      "outputBytesByTool": {
+        "vortex_navigate": 195,
+        "vortex_wait_for": 62,
+        "vortex_observe": 1213,
+        "vortex_act": 231
+      },
+      "customMetrics": {
+        "sortToggleVerified": 1
+      }
+    },
+    {
+      "case": "latency-p50",
+      "passed": true,
+      "callCount": 208,
+      "fallbackToEvaluate": 0,
+      "observeMissedPopperItems": 0,
+      "outputBytes": 23261,
+      "durationMs": 250441,
+      "repeats": 3,
+      "passRate": 0.6666666666666666,
+      "outputBytesByTool": {
+        "vortex_navigate": 374,
+        "vortex_wait_for": 124,
+        "vortex_observe": 973,
+        "vortex_act": 11500,
+        "vortex_evaluate": 98,
+        "vortex_mouse_drag": 10192
+      },
+      "customMetrics": {
+        "nativeP50_ms": 15,
+        "nativeP90_ms": 28,
+        "cdpP50_ms": 37,
+        "cdpP90_ms": 6000,
+        "sampleCount": 100,
+        "totalTokenBaseline": 0
+      }
+    },
+    {
+      "case": "observe-srcdoc-same-origin",
+      "passed": true,
+      "callCount": 4,
+      "fallbackToEvaluate": 0,
+      "observeMissedPopperItems": 0,
+      "outputBytes": 525,
+      "durationMs": 593,
+      "repeats": 3,
+      "passRate": 1,
+      "outputBytesByTool": {
+        "vortex_navigate": 216,
+        "vortex_wait_for": 62,
+        "vortex_observe": 247
+      }
+    },
+    {
+      "case": "shadow-dom-counter",
+      "passed": true,
+      "callCount": 6,
+      "fallbackToEvaluate": 0,
+      "observeMissedPopperItems": 0,
+      "outputBytes": 522,
+      "durationMs": 594,
+      "repeats": 3,
+      "passRate": 1,
+      "outputBytesByTool": {
+        "vortex_navigate": 201,
+        "vortex_wait_for": 62,
+        "vortex_observe": 181,
+        "vortex_evaluate": 60,
+        "vortex_extract": 18
+      }
+    },
+    {
+      "case": "spa-route-residue",
+      "passed": true,
+      "callCount": 12,
+      "fallbackToEvaluate": 0,
+      "observeMissedPopperItems": 0,
+      "outputBytes": 2961,
+      "durationMs": 31512,
+      "repeats": 3,
+      "passRate": 1,
+      "outputBytesByTool": {
+        "vortex_navigate": 640,
+        "vortex_wait_for": 186,
+        "vortex_observe": 2020,
+        "vortex_act": 84,
+        "vortex_extract": 31
+      }
+    },
+    {
+      "case": "vortex-debug-read-console",
+      "passed": true,
+      "callCount": 8,
+      "fallbackToEvaluate": 0,
+      "observeMissedPopperItems": 0,
+      "outputBytes": 2135,
+      "durationMs": 617,
+      "repeats": 3,
+      "passRate": 1,
+      "outputBytesByTool": {
+        "vortex_navigate": 210,
+        "vortex_wait_for": 62,
+        "vortex_debug_read": 1549,
+        "vortex_observe": 190,
+        "vortex_act": 108,
+        "vortex_extract": 16
+      }
+    },
+    {
+      "case": "vortex-debug-read-network",
+      "passed": true,
+      "callCount": 9,
+      "fallbackToEvaluate": 0,
+      "observeMissedPopperItems": 0,
+      "outputBytes": 6426,
+      "durationMs": 1095,
+      "repeats": 3,
+      "passRate": 1,
+      "outputBytesByTool": {
+        "vortex_navigate": 211,
+        "vortex_wait_for": 62,
+        "vortex_debug_read": 5807,
+        "vortex_observe": 195,
+        "vortex_act": 112,
+        "vortex_extract": 39
+      }
+    },
+    {
+      "case": "vortex-evaluate",
+      "passed": true,
+      "callCount": 6,
+      "fallbackToEvaluate": 0,
+      "observeMissedPopperItems": 0,
+      "outputBytes": 292,
+      "durationMs": 749,
+      "repeats": 3,
+      "passRate": 1,
+      "outputBytesByTool": {
+        "vortex_navigate": 196,
+        "vortex_wait_for": 62,
+        "vortex_evaluate": 34
+      }
+    },
+    {
+      "case": "vortex-press-combo",
+      "passed": true,
+      "callCount": 10,
+      "fallbackToEvaluate": 0,
+      "observeMissedPopperItems": 0,
+      "outputBytes": 557,
+      "durationMs": 630,
+      "repeats": 3,
+      "passRate": 1,
+      "outputBytesByTool": {
+        "vortex_navigate": 201,
+        "vortex_wait_for": 62,
+        "vortex_act": 100,
+        "vortex_press": 128,
+        "vortex_extract": 66
+      }
+    },
+    {
+      "case": "vortex-screenshot",
+      "passed": true,
+      "callCount": 5,
+      "fallbackToEvaluate": 0,
+      "observeMissedPopperItems": 0,
+      "outputBytes": 261,
+      "durationMs": 684,
+      "repeats": 3,
+      "passRate": 1,
+      "outputBytesByTool": {
+        "vortex_navigate": 199,
+        "vortex_wait_for": 62,
+        "vortex_screenshot": 0
+      },
+      "customMetrics": {
+        "fullBytes": 72216,
+        "elementBytes": 3824
+      }
+    },
+    {
+      "case": "vortex-storage-roundtrip",
+      "passed": true,
+      "callCount": 8,
+      "fallbackToEvaluate": 0,
+      "observeMissedPopperItems": 0,
+      "outputBytes": 658,
+      "durationMs": 557,
+      "repeats": 3,
+      "passRate": 1,
+      "outputBytesByTool": {
+        "vortex_navigate": 206,
+        "vortex_wait_for": 62,
+        "vortex_storage": 46,
+        "vortex_observe": 192,
+        "vortex_act": 117,
+        "vortex_extract": 35
+      }
+    }
+  ]
+}
