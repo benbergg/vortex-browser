@@ -14,7 +14,12 @@ const def: CaseDefinition = {
       target: "[data-testid=\"target-slider\"] .el-input-number input",
       value: "50"
     });
-    
+
+    // el-input-number only emits to v-model on blur/change/Enter — the
+    // raw `input` event vortex_fill dispatches isn't enough by itself.
+    // Mirror what el-input-number.case.ts does (Tab triggers blur).
+    await ctx.call("vortex_press", { key: "Tab" });
+
     await ctx.call("vortex_wait_for", {
       mode: "idle",
       value: "dom",

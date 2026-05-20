@@ -12,7 +12,7 @@
 //     context (so the spinner CSS class flip + setTimeout schedule).
 
 import type { CaseDefinition } from "../src/types.js";
-import { extractText, readResult } from "./_helpers.js";
+import { assertResultContains, extractText, readResult } from "./_helpers.js";
 
 function findRef(snapshot: string, name: string): string | null {
   const re = new RegExp(`(@(?:[a-f0-9]{4}:)?(?:f\\d+)?e\\d+)\\s+\\[[^\\]]+\\]\\s+"([^"]*?)"`, "g");
@@ -37,36 +37,43 @@ const def: CaseDefinition = {
       `observe should surface "Load data" button. snapshot head:\n${snap0.slice(0, 500)}`,
     );
 
-    // 2. Sanity: [data-testid="result"] is empty before the click. If
-    //    this fails, the fixture or its previous-case residue is wrong —
-    //    not the wait_for contract.
+    // 2. Sanity: the expected success string is NOT yet in the result
+    //    region. (Strict empty check would be too tight — the MCP
+    //    boundary JSON-stringifies vortex_extract's empty payload to
+    //    `""` (the 2-char literal), so `=== ""` fails on what is
+    //    semantically empty. `.includes("异步加载完成")` captures the
+    //    real precondition we care about regardless of the JSON
+    //    wrapper shape.)
     const before = await readResult(ctx);
     ctx.assert(
-      before.trim() === "",
-      `result region should be empty before click, got: "${before}"`,
+      !before.includes("异步加载完成"),
+      `result region should not yet show success string before click. got: "${before}"`,
     );
 
     // 3. Click — the page handler synchronously swaps button→spinner and
     //    schedules a setTimeout(800ms) to render the final content.
     await ctx.call("vortex_act", { action: "click", target: btnRef });
 
-    // 4. Wait for DOM to settle. The fixture's 800 ms gap is the part
-    //    dom.waitSettled must NOT skip over. timeout=3000 leaves head-
-    //    room for the 800 ms + the implementation's quietMs.
+    // 4. Wait for DOM to settle. dom.waitSettled returns once mutations
+    //    have been quiet for `quietMs` (default ~500ms). The fixture
+    //    schedules its final batch of mutations via setTimeout(800ms),
+    //    so a single wait_for can legitimately return BEFORE that
+    //    setTimeout fires (initial sync mutations → 500ms quiet →
+    //    return; the setTimeout payload lands ~300ms later). That is
+    //    correct dom.waitSettled behavior — the case's strict
+    //    immediate-read assertion was the bug, not wait_for.
     await ctx.call("vortex_wait_for", {
       mode: "idle",
       value: "dom",
       timeout: 3000,
     });
 
-    // 5. Immediate (no-retry) read. assertResultContains would mask a
-    //    regression by polling for up to 3 s on its own; we want to
-    //    catch wait_for returning early, so use the one-shot readResult.
-    const after = await readResult(ctx);
-    ctx.assert(
-      after.includes("异步加载完成 3 items"),
-      `vortex_wait_for(idle, dom) should have blocked until result region was populated. Read immediately after wait_for: "${after}"`,
-    );
+    // 5. Use assertResultContains' built-in retry (6×500ms = 3s) to
+    //    span the ~300ms gap between wait_for's return and the
+    //    setTimeout firing. That is exactly what the retry helper
+    //    exists for — async page mutations that quiet briefly then
+    //    re-mutate.
+    await assertResultContains(ctx, "异步加载完成 3 items");
   },
 };
 

@@ -1,5 +1,15 @@
 // el-select-v2 虚拟滚动跨屏：从 1000 条选项里挑 Option 500（远超初始 viewport）。
 // 策略：用 filterable 在 input 里 type "500" 过滤，让 virtual list 只剩匹配项。
+//
+// Status: KNOWN-FAIL until the `element-plus-select` commit driver gets
+// filter-mode support. Live diagnosis 2026-05-20 confirmed Element Plus's
+// el-select-v2 places its placeholder div directly on top of the inner
+// `<input>` (same stacking context), so dom.type's actionability check
+// fails with `OBSCURED — blocker: div.el-select__placeholder` after the
+// 5s retry budget. The basic `el-select-v2` case (first-batch select via
+// kind="select") passes via CDP path; this case needs the same driver
+// extended to accept a filter string before label match. Tracked as a
+// driver feature gap, not a bench bug.
 import type { CaseDefinition } from "../src/types.js";
 import { assertResultContains, extractText } from "./_helpers.js";
 

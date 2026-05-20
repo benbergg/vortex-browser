@@ -83,7 +83,7 @@ pnpm -F @bytenew/vortex-bench bench baseline    # 把当前结果写成新 basel
 | **el-transfer** | 穿梭框 | ✓ | observe 收 label-wrapped checkbox，点"向右"按钮 |
 | **el-color-picker** | 颜色 panel | ✓ | trigger click 开 panel → hex input type → 确定 |
 | **el-select-v2** | 虚拟滚动 select（1000 项）| ✓ | fill kind=select 直接命中前几条 |
-| **el-select-v2-virtual** | 跨屏选（Option 500）| ✓ | filterable + type 过滤让 virtual list 剩匹配项 |
+| **el-select-v2-virtual** | 跨屏选（Option 500）| **known-fail** | el-select-v2 的 input 被 `.el-select__placeholder` div 在同栈遮挡，dom.type actionability `OBSCURED` 拒。需 `element-plus-select` driver 加 filter-mode 才能 cross-screen 命中 |
 | **el-slider-drag** | CDP 真拖拽（20 → 80） | ✓ | 新 `vortex_mouse_drag` 工具：N 步 move + mouse down/up |
 
 ### 复杂网页 / dogfood fixture cases
