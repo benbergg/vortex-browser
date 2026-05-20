@@ -663,6 +663,21 @@ async function scanOneFrame(
           const rect = htmlEl.getBoundingClientRect();
           if (rect.width === 0 || rect.height === 0) continue;
 
+          // Skip elements hidden via CSS `visibility` (inherited from
+          // any ancestor). These keep layout space and a nonzero rect
+          // but are not user-interactable: clicks fall through and the
+          // accessible-name pipeline can only reach className garbage
+          // since innerText respects visibility. Discovered against
+          // notion.com/help (2026-05-20) where a hover-only mega menu
+          // leaked 16 `navItem_navItem_` (CSS-module class) candidates.
+          const computedStyle = getComputedStyle(htmlEl);
+          if (
+            computedStyle.visibility === "hidden" ||
+            computedStyle.visibility === "collapse"
+          ) {
+            continue;
+          }
+
           const inViewport =
             rect.top < window.innerHeight &&
             rect.bottom > 0 &&

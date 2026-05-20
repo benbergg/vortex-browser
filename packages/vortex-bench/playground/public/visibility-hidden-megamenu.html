@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>visibility:hidden mega-menu fixture</title>
+  <style>
+    body { font-family: sans-serif; padding: 20px; }
+    nav { display: flex; gap: 12px; }
+    .top-trigger { padding: 8px 12px; }
+
+    /* Collapsed mega-menu: only visibility:hidden — no off-canvas
+       translation. This matches Notion's actual production mega-menu
+       (verified 2026-05-20 against notion.com/help): the wrapper sits
+       in-viewport with `visibility: hidden`, child anchors inherit it,
+       and the wrapper's display is `contents` so children still claim
+       layout space. The bug under test: observe surfaces these as
+       actionable links with `navItem_navItem_` (CSS-module class)
+       names because innerText is empty (visibility:hidden) and
+       fallback hits className tokenization. */
+    .mega-collapsed { visibility: hidden; display: flex; gap: 12px; }
+
+    /* Mega-menu link styling — the visible-text span uses
+       visibility:hidden directly (inheriting from .mega-collapsed),
+       and an aria-hidden decorative icon span sits next to it. This
+       matches Notion's CSS-module pattern that surfaced
+       `navItem_navItem_` garbage in observe output. */
+    .mega-link {
+      display: inline-block; padding: 6px 12px;
+    }
+    .mega-link .icon {
+      display: inline-block; width: 16px; height: 16px; background: #888;
+    }
+    .mega-link .label {
+      /* This is the part that breaks observe in Notion's wild form:
+         the text span itself carries visibility:hidden, so innerText
+         is empty, fallthrough hits className, returns CSS-module
+         garbage. Even when the wrapper is later made visible (hover),
+         the regression we want to lock is: while currently hidden,
+         observe must not surface this link as actionable. */
+      visibility: hidden;
+    }
+  </style>
+</head>
+<body>
+  <h1>visibility:hidden mega-menu</h1>
+  <p>Reproduces Notion's hover-only mega menu pattern that was leaking
+     CSS-module class names (e.g. <code>navItem_navItem_</code>) as
+     accessible names because the text-bearing inner span is
+     <code>visibility:hidden</code> while the link itself still has
+     layout. observe should drop these candidates entirely; only the
+     visible top-level navigation should surface.</p>
+
+  <nav>
+    <a href="#home" class="top-trigger" data-testid="top-home">Home</a>
+    <a href="#pricing" class="top-trigger" data-testid="top-pricing">Pricing</a>
+
+    <!-- Collapsed mega-menu — 5 anchors that should NOT appear in
+         observe output. Each has the Notion-style decorative
+         icon span + visibility:hidden text span. -->
+    <div class="mega-collapsed">
+      <a class="mega-link nav-item-class-leak" href="/product/calendar" data-testid="hidden-calendar">
+        <span aria-hidden="true" class="icon"></span>
+        <span class="label">Calendar (hidden)</span>
+      </a>
+      <a class="mega-link nav-item-class-leak" href="/product/mail" data-testid="hidden-mail">
+        <span aria-hidden="true" class="icon"></span>
+        <span class="label">Mail (hidden)</span>
+      </a>
+      <a class="mega-link nav-item-class-leak" href="/product/ai" data-testid="hidden-ai">
+        <span aria-hidden="true" class="icon"></span>
+        <span class="label">AI (hidden)</span>
+      </a>
+      <a class="mega-link nav-item-class-leak" href="/product/docs" data-testid="hidden-docs">
+        <span aria-hidden="true" class="icon"></span>
+        <span class="label">Docs (hidden)</span>
+      </a>
+      <a class="mega-link nav-item-class-leak" href="/product/sites" data-testid="hidden-sites">
+        <span aria-hidden="true" class="icon"></span>
+        <span class="label">Sites (hidden)</span>
+      </a>
+    </div>
+  </nav>
+
+  <main>
+    <a href="#docs" data-testid="visible-docs-link">Visible documentation link</a>
+  </main>
+</body>
+</html>
