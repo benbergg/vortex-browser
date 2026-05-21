@@ -147,15 +147,11 @@ export function dispatchNewTool(
     // guards against re-introducing it (see invariants/I16.dispatch-routing).
     case "vortex_extract": {
       // server.ts 已把 target=@ref 翻成 params.index/snapshotId（删了 params.target），
-      // 把 target=selector 翻成 params.selector。content.getText handler 当前只读 selector，
-      // 所以 ref 形式会静默回退到全页 innerText —— v0.6.x a11y subtree 上线前先 throw 提示。
+      // 把 target=selector 翻成 params.selector。v0.8.1 起 content.getText
+      // handler 通过 resolveTargetOptional 反查 snapshot store 拿 selector，
+      // 不再依赖 a11y subtree —— @ref 与 CSS selector 走同一条 page-side 路径
+      // （P0-6, 2026-05-21 用户报告）。
       const { target: _target, depth, include, ...rest } = params;
-      if (params.index != null) {
-        throw vtxError(
-          VtxErrorCode.INVALID_PARAMS,
-          "extract: @ref form not yet wired to a11y subtree (v0.6.x). Use a CSS selector for now, or omit target for whole-page text.",
-        );
-      }
       const next: Record<string, unknown> = { ...rest };
       if (depth !== undefined) next.maxDepth = depth;
       if (Array.isArray(include)) next.include = include;

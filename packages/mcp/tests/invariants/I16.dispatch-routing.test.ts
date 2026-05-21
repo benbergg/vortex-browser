@@ -81,11 +81,17 @@ describe("I16: dispatch routing for 11 public tools", () => {
       expect(r?.params.index).toBeUndefined();
     });
 
-    it("@ref 形式（server.ts 翻译后 params.index）throws INVALID_PARAMS（a11y subtree 待 v0.6.x）", () => {
-      // server.ts 把 @e3 翻译成 { index, snapshotId }，删 params.target
-      expect(() =>
-        dispatchNewTool("vortex_extract", { index: 3, snapshotId: "abc", depth: 2 }),
-      ).toThrowError(/INVALID_PARAMS|@ref form not yet/);
+    it("@ref 形式（server.ts 翻译后 params.index）透传 → content.getText（v0.8.1 起支持，handler 反查 snapshot store）", () => {
+      // server.ts 把 @e3 翻译成 { index, snapshotId }，删 params.target。
+      // v0.8.1 前 dispatch 显式 throw "a11y subtree pending"；现在 snapshot
+      // store 已存 selector，extension handler 通过 resolveTargetOptional
+      // 反查并走与 selector 一致的 querySelector 路径（P0-6, 2026-05-21）。
+      const r = dispatchNewTool("vortex_extract", { index: 3, snapshotId: "abc", depth: 2 });
+      expect(r?.action).toBe("content.getText");
+      expect(r?.params.index).toBe(3);
+      expect(r?.params.snapshotId).toBe("abc");
+      expect(r?.params.maxDepth).toBe(2);
+      expect(r?.params.target).toBeUndefined();
     });
   });
 

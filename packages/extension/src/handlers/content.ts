@@ -1,24 +1,32 @@
 import { ContentActions, VtxErrorCode, vtxError } from "@bytenew/vortex-shared";
 import type { ActionRouter } from "../lib/router.js";
 import { getActiveTabId, buildExecuteTarget, ensureFrameAttached } from "../lib/tab-utils.js";
+import { resolveTargetOptional } from "../lib/resolve-target.js";
 import { truncateWithTextTrailer, truncateWithHtmlTrailer } from "../lib/truncate.js";
 
 export function registerContentHandlers(router: ActionRouter): void {
   router.registerAll({
     [ContentActions.GET_TEXT]: async (args, tabId) => {
-      const selector = args.selector as string | undefined;
-      const tid = await getActiveTabId(args.tabId as number | undefined ?? tabId);
-      const frameId = args.frameId as number | undefined;
+      // v0.8.1: @ref 形式（{index, snapshotId}）也走 page-side path，通过
+      // snapshot store 反查 selector。dispatch 层不再 throw "a11y subtree
+      // pending"（P0-6, 2026-05-21）。
+      const __t = resolveTargetOptional(args);
+      const selector = __t?.selector ?? (args.selector as string | undefined);
+      const includeRaw = Array.isArray(args.include) ? (args.include as string[]) : null;
+      const wantValue = includeRaw != null && includeRaw.includes("value");
+      const wantAttrs = includeRaw != null && includeRaw.includes("attrs");
+      const wantsStructured = wantValue || wantAttrs;
+      const maxDepth = typeof args.maxDepth === "number" && args.maxDepth >= 0 ? args.maxDepth : 20;
+      const tid = await getActiveTabId(__t?.boundTabId ?? (args.tabId as number | undefined) ?? tabId);
+      const frameId = __t?.boundFrameId ?? (args.frameId as number | undefined);
       if (frameId != null) await ensureFrameAttached(tid, frameId);
       const results = await chrome.scripting.executeScript({
         target: buildExecuteTarget(tid, frameId),
-        func: (sel: string | undefined) => {
+        func: (sel: string | undefined, opts: { wantValue: boolean; wantAttrs: boolean; maxDepth: number }) => {
           try {
             // Hidden 检查：display:none / visibility:hidden / [hidden] 自身或祖先
             // —— Chrome 的 el.innerText 在 display:none 元素上仍返回 textContent，
             // 违反 schema 描述 "Extract visible text"。这里显式过滤。
-            // （innerText 对 visible 父元素的 hidden 后代已正确过滤，故仅需检查目标
-            // 自身链上的 hidden 状态）
             const isHiddenChain = (el: Element | null): boolean => {
               for (let cur: Element | null = el; cur; cur = cur.parentElement) {
                 if (cur.nodeType !== 1) continue;
@@ -28,29 +36,157 @@ export function registerContentHandlers(router: ActionRouter): void {
               }
               return false;
             };
-            if (sel) {
-              const el = document.querySelector(sel) as HTMLElement | null;
-              if (!el) return { error: `Element not found: ${sel}` };
-              if (isHiddenChain(el)) return { result: "" };
-              return { result: el.innerText };
+
+            // 构造从 root 到 el 的稳定 path（用 nth-of-type / id 优先）
+            const buildPath = (el: Element, root: Element): string => {
+              const parts: string[] = [];
+              let cur: Element | null = el;
+              while (cur && cur !== root && cur.nodeType === 1) {
+                const tag = cur.tagName.toLowerCase();
+                if (cur.id) {
+                  parts.unshift(`${tag}#${cur.id}`);
+                  break;
+                }
+                const parent = cur.parentElement;
+                if (parent) {
+                  const siblings = Array.from(parent.children).filter(c => c.tagName === cur!.tagName);
+                  const idx = siblings.indexOf(cur);
+                  parts.unshift(siblings.length > 1 ? `${tag}:nth-of-type(${idx + 1})` : tag);
+                } else {
+                  parts.unshift(tag);
+                }
+                cur = parent;
+              }
+              return parts.join(" > ");
+            };
+
+            interface ControlInfo {
+              path: string;
+              tag: string;
+              type?: string;
+              name?: string;
+              id?: string;
+              value?: string | string[];
+              checked?: boolean;
+              selected?: boolean;
+              attrs?: Record<string, string>;
             }
-            return { result: document.body.innerText };
+
+            const SELECTABLE_ATTRS = ["id", "name", "type", "role", "aria-label", "aria-labelledby", "placeholder", "title", "data-testid"];
+
+            const pickAttrs = (el: Element): Record<string, string> => {
+              const out: Record<string, string> = {};
+              for (const a of SELECTABLE_ATTRS) {
+                const v = el.getAttribute(a);
+                if (v != null) out[a] = v;
+              }
+              // data-* 全集（前 8 个，防爆炸）
+              let dataCount = 0;
+              for (const attr of Array.from(el.attributes)) {
+                if (attr.name.startsWith("data-") && !(attr.name in out)) {
+                  out[attr.name] = attr.value;
+                  if (++dataCount >= 8) break;
+                }
+              }
+              return out;
+            };
+
+            const extractControl = (el: Element, root: Element): ControlInfo | null => {
+              const tag = el.tagName.toLowerCase();
+              if (tag !== "input" && tag !== "textarea" && tag !== "select" && !(el as HTMLElement).isContentEditable) {
+                return null;
+              }
+              if (isHiddenChain(el) && !(tag === "input" && (el as HTMLInputElement).type === "hidden")) {
+                return null;
+              }
+              const ci: ControlInfo = { path: buildPath(el, root), tag };
+              const idA = el.getAttribute("id");
+              const nameA = el.getAttribute("name");
+              if (idA) ci.id = idA;
+              if (nameA) ci.name = nameA;
+              if (tag === "input") {
+                const inp = el as HTMLInputElement;
+                ci.type = inp.type || "text";
+                if (inp.type === "checkbox" || inp.type === "radio") {
+                  ci.checked = inp.checked;
+                  if (inp.value && inp.value !== "on") ci.value = inp.value;
+                } else {
+                  ci.value = inp.value;
+                }
+              } else if (tag === "textarea") {
+                ci.value = (el as HTMLTextAreaElement).value;
+              } else if (tag === "select") {
+                const sel = el as HTMLSelectElement;
+                if (sel.multiple) {
+                  ci.value = Array.from(sel.selectedOptions).map(o => o.value);
+                } else {
+                  ci.value = sel.value;
+                  const opt = sel.options[sel.selectedIndex];
+                  if (opt) ci.selected = true;
+                }
+              } else {
+                // contenteditable
+                ci.type = "contenteditable";
+                ci.value = (el as HTMLElement).textContent ?? "";
+              }
+              if (opts.wantAttrs) ci.attrs = pickAttrs(el);
+              return ci;
+            };
+
+            const walkControls = (root: Element, maxDepth: number): ControlInfo[] => {
+              const out: ControlInfo[] = [];
+              const stack: Array<{ el: Element; d: number }> = [{ el: root, d: 0 }];
+              let visited = 0;
+              while (stack.length && visited < 2000) {
+                const { el, d } = stack.pop()!;
+                visited++;
+                const ci = extractControl(el, root);
+                if (ci) out.push(ci);
+                if (d < maxDepth) {
+                  for (const child of Array.from(el.children)) {
+                    stack.push({ el: child, d: d + 1 });
+                  }
+                }
+              }
+              return out;
+            };
+
+            const root: Element | null = sel
+              ? (document.querySelector(sel) as Element | null)
+              : document.body;
+            if (sel && !root) return { error: `Element not found: ${sel}` };
+            if (!root) return { result: "" };
+            const hidden = isHiddenChain(root);
+            const text = hidden ? "" : (root as HTMLElement).innerText ?? "";
+
+            if (!opts.wantValue && !opts.wantAttrs) {
+              return { result: text };
+            }
+            const controls = walkControls(root, opts.maxDepth);
+            return { result: { text, controls } };
           } catch (err) {
             return { error: err instanceof Error ? err.message : String(err) };
           }
         },
-        args: [selector ?? null],
+        args: [selector ?? undefined, { wantValue, wantAttrs, maxDepth }],
         world: "MAIN",
       });
       const res = results[0]?.result as { result?: unknown; error?: string };
       if (res?.error) throw vtxError(res.error.startsWith("Element not found:") ? VtxErrorCode.ELEMENT_NOT_FOUND : VtxErrorCode.JS_EXECUTION_ERROR, res.error, selector ? { selector } : undefined);
       const raw = res?.result;
-      if (typeof raw !== "string") return raw;
       const maxBytes = typeof args.maxBytes === "number" ? args.maxBytes : 131072;
       if (!Number.isInteger(maxBytes) || maxBytes < 4096 || maxBytes > 5242880) {
         throw vtxError(VtxErrorCode.INVALID_PARAMS, `maxBytes must be an integer in [4096, 5242880]; got ${maxBytes}`);
       }
-      return truncateWithTextTrailer(raw, maxBytes);
+      if (typeof raw === "string") {
+        return truncateWithTextTrailer(raw, maxBytes);
+      }
+      if (raw && typeof raw === "object" && "text" in (raw as Record<string, unknown>)) {
+        const obj = raw as { text: string; controls?: unknown };
+        const truncated = truncateWithTextTrailer(obj.text, Math.max(4096, Math.floor(maxBytes / 2)));
+        return { text: truncated, controls: obj.controls };
+      }
+      return raw;
     },
 
     [ContentActions.GET_HTML]: async (args, tabId) => {
