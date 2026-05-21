@@ -314,25 +314,34 @@ async function scanOneFrame(
           return "";
         }
 
+        // Name extraction uses textContent (not innerText) to bypass CSS
+        // `text-overflow: ellipsis` truncation — innerText returns the
+        // rendered visible text, which on `white-space:nowrap; overflow:hidden`
+        // cells drops everything past the visible width. textContent is the
+        // unrendered DOM text and is unaffected. We still cap to 80 chars to
+        // keep the observe token budget intact.
+        const normName = (s: string | null | undefined): string =>
+          (s ?? "").replace(/\s+/g, " ").trim().slice(0, 80);
+
         function getAccessibleName(el: HTMLElement): string {
           const aria = el.getAttribute("aria-label");
           if (aria) return aria;
           const labelledBy = el.getAttribute("aria-labelledby");
           if (labelledBy) {
             const label = document.getElementById(labelledBy);
-            if (label) return (label.innerText || "").trim().slice(0, 80);
+            if (label) return normName(label.textContent);
           }
           if (el.tagName === "INPUT" || el.tagName === "TEXTAREA") {
             const id = el.id;
             if (id) {
               const lbl = document.querySelector(`label[for="${id}"]`);
-              if (lbl) return (lbl as HTMLElement).innerText?.trim().slice(0, 80) ?? "";
+              if (lbl) return normName(lbl.textContent);
             }
             // radio / checkbox 通常包在 <label> 里（Element Plus el-radio / el-checkbox 风格）
             const t = (el as HTMLInputElement).type;
             if (t === "radio" || t === "checkbox") {
               const wrapLabel = el.closest("label");
-              if (wrapLabel) return (wrapLabel.innerText || "").trim().slice(0, 80);
+              if (wrapLabel) return normName(wrapLabel.textContent);
             }
             return (
               el.getAttribute("placeholder") || el.getAttribute("title") || ""
@@ -346,9 +355,9 @@ async function scanOneFrame(
           const role = el.getAttribute("role");
           if (role === "treeitem") {
             const content = el.querySelector(":scope > .el-tree-node__content") as HTMLElement | null;
-            if (content) return (content.innerText || "").trim().slice(0, 80);
+            if (content) return normName(content.textContent);
           }
-          const text = (el.innerText || "").trim().slice(0, 80);
+          const text = normName(el.textContent);
           if (text) return text;
           // 仅 svg/img 子且无文本时，从 className 兜底（如 `_closeIcon_1ygkr_39` → `closeIcon`）
           return iconNameFromClass(el);
