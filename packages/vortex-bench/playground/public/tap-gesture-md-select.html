@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>tap-gesture fixture (md-select / Hammer.js / tapClick style)</title>
+<style>
+  body { font-family: system-ui, sans-serif; padding: 24px; }
+  #target {
+    padding: 12px 20px;
+    font-size: 16px;
+    background: #2c3e50;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+  }
+  #target:hover { background: #34495e; }
+  [data-testid="result"] {
+    margin-top: 16px;
+    padding: 8px 12px;
+    background: #ecf0f1;
+    min-height: 32px;
+    font-family: monospace;
+  }
+  .note {
+    margin-top: 32px;
+    padding: 12px;
+    background: #fffbea;
+    border-left: 4px solid #f39c12;
+    font-size: 14px;
+  }
+</style>
+</head>
+<body>
+
+<h1>Tap-gesture target (BUG 8 regression fixture)</h1>
+
+<button id="target" data-testid="target">Tap me</button>
+
+<div data-testid="result"></div>
+
+<div class="note">
+  <strong>What this fixture exercises:</strong> the button below only
+  responds to a real tap gesture, which is <code>mousedown</code> +
+  <code>mouseup</code> within a short window. A bare <code>click</code>
+  event (such as what <code>HTMLElement.click()</code> dispatches) is
+  intentionally swallowed via <code>event.stopPropagation()</code> +
+  <code>event.preventDefault()</code> — this mirrors the gesture
+  recognisers used by AngularJS Material <code>$mdGesture</code>,
+  Hammer.js, and pre-v3 Element / Ant Select widgets, all of which
+  block lone clicks to avoid duplicate triggers on touch + mouse
+  devices.
+  <br><br>
+  Before v0.8.2, <code>vortex_act action="click"</code> dispatched only
+  <code>el.click()</code>, so this fixture would never report
+  <code>value=tapped</code>. The fix dispatches the full
+  pointerdown → mousedown → pointerup → mouseup → click sequence.
+</div>
+
+<script>
+  (function () {
+    const target = document.getElementById('target');
+    const result = document.querySelector('[data-testid="result"]');
+    let mouseDownAt = 0;
+
+    target.addEventListener('mousedown', function () {
+      mouseDownAt = Date.now();
+    });
+
+    target.addEventListener('mouseup', function () {
+      // Tap = mousedown followed by mouseup within 1s window
+      if (mouseDownAt > 0 && Date.now() - mouseDownAt < 1000) {
+        result.textContent = 'value=tapped';
+      }
+      mouseDownAt = 0;
+    });
+
+    // Intentionally swallow lone click events (the v0.8.1- vortex behaviour)
+    target.addEventListener('click', function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }, true);
+  })();
+</script>
+
+</body>
+</html>
