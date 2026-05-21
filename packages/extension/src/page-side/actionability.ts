@@ -101,6 +101,51 @@ export type ActionabilityResult =
     const hit = document.elementFromPoint(cx, cy);
     if (!hit) return { ok: false, blocker: "elementFromPoint=null" };
     if (hit === el || el.contains(hit) || hit.contains(el)) return { ok: true };
+    // Backdrop compatibility: when an overlay (md-select dropdown / md-dialog /
+    // CDK overlay / bootstrap modal) is open, its expected backdrop visually
+    // covers the page area. elementFromPoint correctly returns the backdrop
+    // because backdrops sit below the overlay pane in stacking context. But
+    // the user-actioned target lives inside a higher-z overlay container and
+    // is fully clickable. Without this carve-out, vortex couldn't fill the
+    // search input or click md-option inside an md-select dropdown — the
+    // root cause of the 2026-05-21 dogfood "Topic select 选不上" blocker.
+    //
+    // Heuristic: hit looks like a backdrop AND target sits inside a known
+    // overlay container ancestry → not obscured.
+    const hitTag = hit.tagName.toLowerCase();
+    const hitClsLower =
+      typeof hit.className === "string" ? hit.className.toLowerCase() : "";
+    const isBackdrop =
+      hitTag === "md-backdrop" ||
+      hitClsLower.includes("cdk-overlay-backdrop") ||
+      hitClsLower.includes("modal-backdrop") ||
+      hitClsLower.includes("ant-modal-mask") ||
+      hitClsLower.includes("backdrop");
+    if (isBackdrop) {
+      let cur: Element | null = el;
+      while (cur && cur !== document.documentElement) {
+        const t = cur.tagName.toLowerCase();
+        const c =
+          typeof cur.className === "string" ? cur.className.toLowerCase() : "";
+        if (
+          t === "md-select-menu" ||
+          t === "md-dialog" ||
+          t === "md-menu-content" ||
+          c.includes("md-open-menu-container") ||
+          c.includes("md-select-menu-container") ||
+          c.includes("cdk-overlay-pane") ||
+          c.includes("cdk-overlay-container") ||
+          c.includes("ngdialog-content") ||
+          c.includes("modal-content") ||
+          c.includes("ant-modal-content") ||
+          c.includes("el-dialog") ||
+          c.includes("el-select-dropdown")
+        ) {
+          return { ok: true };
+        }
+        cur = cur.parentElement;
+      }
+    }
     const cls =
       typeof hit.className === "string" && hit.className
         ? "." + hit.className.split(" ").filter(Boolean).slice(0, 2).join(".")
