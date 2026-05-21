@@ -22,7 +22,7 @@ export function registerContentHandlers(router: ActionRouter): void {
       if (frameId != null) await ensureFrameAttached(tid, frameId);
       const results = await chrome.scripting.executeScript({
         target: buildExecuteTarget(tid, frameId),
-        func: (sel: string | undefined, opts: { wantValue: boolean; wantAttrs: boolean; maxDepth: number }) => {
+        func: (sel: string | null, opts: { wantValue: boolean; wantAttrs: boolean; maxDepth: number }) => {
           try {
             // Hidden 检查：display:none / visibility:hidden / [hidden] 自身或祖先
             // —— Chrome 的 el.innerText 在 display:none 元素上仍返回 textContent，
@@ -168,7 +168,7 @@ export function registerContentHandlers(router: ActionRouter): void {
             return { error: err instanceof Error ? err.message : String(err) };
           }
         },
-        args: [selector ?? undefined, { wantValue, wantAttrs, maxDepth }],
+        args: [selector ?? null, { wantValue, wantAttrs, maxDepth }],
         world: "MAIN",
       });
       const res = results[0]?.result as { result?: unknown; error?: string };
