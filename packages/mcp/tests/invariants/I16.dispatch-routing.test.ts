@@ -127,6 +127,16 @@ describe("I16: dispatch routing for 11 public tools", () => {
       expect(r?.action).toBe("page.info");
     });
 
+    it("mode=info defaults includeAllTabs=true so agents see sibling tabs", () => {
+      const r = dispatchNewTool("vortex_wait_for", { mode: "info" });
+      expect(r?.params.includeAllTabs).toBe(true);
+    });
+
+    it("mode=info respects explicit includeAllTabs=false opt-out", () => {
+      const r = dispatchNewTool("vortex_wait_for", { mode: "info", includeAllTabs: false });
+      expect(r?.params.includeAllTabs).toBe(false);
+    });
+
     it("timeout 透传", () => {
       const r = dispatchNewTool("vortex_wait_for", { mode: "info", timeout: 12000 });
       expect(r?.params.timeout).toBe(12000);

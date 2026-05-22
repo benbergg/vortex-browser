@@ -134,7 +134,11 @@ export function registerPageHandlers(router: ActionRouter, debuggerMgr: Debugger
     [PageActions.INFO]: async (args, tabId) => {
       const tid = await getActiveTabId(tabId);
       const tab = await chrome.tabs.get(tid);
-      return { url: tab.url, title: tab.title, status: tab.status, tabId: tab.id, windowId: tab.windowId };
+      const base = { url: tab.url, title: tab.title, status: tab.status, tabId: tab.id, windowId: tab.windowId };
+      if (!args?.includeAllTabs) return base;
+      const all = await chrome.tabs.query({});
+      const tabs = all.map((t) => ({ tabId: t.id, windowId: t.windowId, url: t.url, title: t.title, active: t.active }));
+      return { ...base, tabs };
     },
 
     [PageActions.WAIT_FOR_NETWORK_IDLE]: async (args, tabId) => {

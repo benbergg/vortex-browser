@@ -182,8 +182,11 @@ export function dispatchNewTool(
             : "page.waitForXhrIdle";
           return { action, params: next };
         }
-        case "info":
+        case "info": {
+          // Default to all-tabs summary so the agent sees siblings without an extra call.
+          if (next.includeAllTabs === undefined) next.includeAllTabs = true;
           return { action: "page.info", params: next };
+        }
         default:
           throw vtxError(
             VtxErrorCode.INVALID_PARAMS,

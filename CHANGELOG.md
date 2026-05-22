@@ -8,6 +8,10 @@
 
 _新工作进入此段；ship 时改为版本号 + 日期。_
 
+### ✨ Added
+
+- **`wait_for(mode=info)` now surfaces sibling tabs** (`packages/extension/src/handlers/page.ts`, `packages/mcp/src/tools/dispatch.ts`). `PageActions.INFO` accepts an optional `includeAllTabs` flag; when set, the response carries a `tabs: [{tabId, windowId, url, title, active}]` array alongside the active-tab fields. The L4 dispatcher defaults `includeAllTabs=true` for `vortex_wait_for(mode=info)` so an agent's first call after attaching can see every open tab without an extra round-trip. Direct `page.info` callers (CLI, internal dispatch) are unchanged unless they opt in. **Why**: `vortex_tab_list` was demoted from the public surface in v0.6 (token-budget driven), but agents still need a way to discover sibling tabs after a session attaches — previously they had to guess or rely on `tabs_context` from the parallel `claude-in-chrome` MCP. Folding the listing into the existing `wait_for` info path keeps the public surface at 15 tools while closing the discovery gap. Discovered while driving a real Yuque-spec + prototype walkthrough where the user had a second tab pre-opened that the agent could not see.
+
 ### 🗑 Removed
 
 - **`packages/server/src/state-cache.ts`** dead code. The `StateCache` class (console / network log ring buffer, 20 LoC) was instantiated as `_stateCache` in `index.ts` but never wired to any consumer — neither `MessageRouter`, the HTTP routes, nor the WS server held a reference. Logs are actually buffered by the extension's own `console.getLogs` / `network.getLogs` handlers, so the server-side cache was vestigial. Removing the class, its import, the instantiation line, and the `state-cache.ts` entry in `packages/server/README.md` architecture map.
