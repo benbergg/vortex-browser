@@ -17,6 +17,7 @@ import type { BenchReport, CaseDefinition, CaseMetrics } from "./types.js";
 import { scanFixture } from "./runner/scan.js";
 import { renderScanMarkdown, rankFindings } from "./scan-report.js";
 import type { FixtureScanResult, ScanReport, SynthManifest } from "./scan-types.js";
+import { captureSnapshot } from "./runner/snapshot.js";
 
 const USAGE = `vortex-bench <command>
 
@@ -33,6 +34,8 @@ Commands:
                          median / p95 / max + reports/boxes-budget-*.json
   scan --all             扫全部合成 fixture,产 reports/scan/<ts>.{md,json}
   scan --pattern <name>  扫单个 pattern
+  snapshot <name>        冻结当前活动 tab 为 synth/<name>.html + 提议 manifest
+  snapshot <name> --url <u>  先 navigate 再冻结
   --help                 显示帮助
 
 Env:
@@ -258,6 +261,11 @@ async function loadManifest(name: string): Promise<SynthManifest> {
   return m;
 }
 
+/** #2:提议稿未确认 → scan 跳过(返回 true 表示应跳过) */
+function isProposed(m: SynthManifest): boolean {
+  return m._proposed === true;
+}
+
 async function cmdScan(args: string[]): Promise<number> {
   const runAll = args.includes("--all");
   let names: string[];
@@ -283,6 +291,10 @@ async function cmdScan(args: string[]): Promise<number> {
     let fx: FixtureScanResult;
     try {
       const manifest = await loadManifest(name);
+      if (isProposed(manifest)) {
+        process.stdout.write(`⊘ ${name.padEnd(28)} 跳过未审提议稿(_proposed:true)\n`);
+        continue;
+      }
       fx = await scanFixture(manifest, { mcpBin, playgroundUrl: url });
     } catch (e) {
       // manifest 缺失/非法等:记为该 fixture 的 error,不中断整轮扫描
@@ -315,6 +327,40 @@ async function cmdScan(args: string[]): Promise<number> {
   return totalP0 === 0 ? 0 : 2;
 }
 
+async function cmdSnapshot(args: string[]): Promise<number> {
+  // bench snapshot <name> [--url <url>] [--frames <main|all-same-origin|all-permitted>]
+  const urlIdx = args.indexOf("--url");
+  const url = urlIdx >= 0 ? args[urlIdx + 1] : undefined;
+  const framesIdx = args.indexOf("--frames");
+  const frames = framesIdx >= 0 ? args[framesIdx + 1] : undefined;
+  // name = 第一个既非 flag 也非 flag 值的位置参数(防 --url <url> 在前时误选 url 为 name)
+  const consumed = new Set<number>();
+  if (urlIdx >= 0) { consumed.add(urlIdx); consumed.add(urlIdx + 1); }
+  if (framesIdx >= 0) { consumed.add(framesIdx); consumed.add(framesIdx + 1); }
+  const name = args.find((a, i) => !consumed.has(i) && !a.startsWith("-"));
+  if (!name) {
+    process.stderr.write("[vortex-bench] snapshot 需要 <name>(产出 synth/<name>.html + .manifest.json)\n");
+    return 1;
+  }
+
+  const mcpBin = resolveMcpBin();
+  process.stdout.write(`[vortex-bench] snapshot ${name}  mcp=${mcpBin}${url ? `  url=${url}` : "  (当前活动 tab)"}\n`);
+
+  const res = await captureSnapshot({
+    mcpBin, name, synthDir: SYNTH_DIR, url,
+    frames: frames as "main" | "all-same-origin" | "all-permitted" | undefined,
+  });
+
+  process.stdout.write(
+    `✓ 冻结 ${res.observeRowCount} observe 行 / ${res.candidateCount} 候选\n` +
+    `  来源: ${res.source}\n` +
+    `  _review: observe-missed=${res.review.observeMissed} observe-extra=${res.review.observeExtra} agree=${res.review.agree}\n` +
+    `  [html] ${res.htmlPath}\n  [manifest 提议稿] ${res.manifestPath}\n` +
+    `  ⚠ 提议稿带 _proposed:true,scan 会跳过 —— 人工审定 interactive/name 后去掉 _proposed 再 scan\n`,
+  );
+  return 0;
+}
+
 async function main(): Promise<number> {
   const [, , cmd, ...rest] = process.argv;
   if (!cmd || cmd === "--help" || cmd === "-h") {
@@ -332,6 +378,8 @@ async function main(): Promise<number> {
       return cmdCompareBoxes(rest);
     case "scan":
       return cmdScan(rest);
+    case "snapshot":
+      return cmdSnapshot(rest);
     default:
       process.stderr.write(`[vortex-bench] 未知命令: ${cmd}\n\n${USAGE}`);
       return 1;

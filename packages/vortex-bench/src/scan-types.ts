@@ -14,6 +14,8 @@ export interface ManifestEntry {
   pattern: string;
   /** join 方式:geometry(默认,按 bbox)或 name(跨 frame fixture 用) */
   joinBy?: "geometry" | "name";
+  /** #2 提议稿的 delta 提示(scan 忽略此字段) */
+  _review?: "observe-missed" | "observe-extra" | "agree";
   note?: string;
 }
 
@@ -24,6 +26,10 @@ export interface SynthManifest {
   path: string;
   /** observe frames 参数,默认 "main" */
   frames?: "main" | "all-same-origin" | "all-permitted";
+  /** #2:捕获来源 URL(真站派生 fixture 记溯源) */
+  source?: string;
+  /** #2:提议稿未确认标记;scan 跳过 _proposed:true 的 manifest */
+  _proposed?: boolean;
   entries: ManifestEntry[];
 }
 

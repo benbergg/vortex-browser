@@ -26,11 +26,19 @@ function extractText(res: unknown): string {
     .join("\n");
 }
 
+// 穿 open shadow 收集所有 data-vtx-oracle 元素 —— 与 observe 的 querySelectorAllDeep
+// 一致。光 document.querySelectorAll 不穿 shadow,会让 shadow 内部的 oracle 元素拿不到
+// 几何而错配(#2 快照把 oracle 标在真实交互元素上,可能落在 shadow 内)。
 const ORACLE_PROBE_CODE =
-  "Array.from(document.querySelectorAll('[data-vtx-oracle]')).map(function(el){" +
+  "(function(){var out=[];" +
+  "function visit(el){" +
+  "if(el.getAttribute&&el.getAttribute('data-vtx-oracle')!==null){" +
   "var r=el.getBoundingClientRect();" +
-  "return {id:el.getAttribute('data-vtx-oracle')," +
-  "rect:[Math.round(r.x),Math.round(r.y),Math.round(r.width),Math.round(r.height)]};})";
+  "out.push({id:el.getAttribute('data-vtx-oracle')," +
+  "rect:[Math.round(r.x),Math.round(r.y),Math.round(r.width),Math.round(r.height)]});}" +
+  "if(el.shadowRoot){var sc=el.shadowRoot.querySelectorAll('*');for(var i=0;i<sc.length;i++)visit(sc[i]);}}" +
+  "var all=document.querySelectorAll('*');for(var j=0;j<all.length;j++)visit(all[j]);" +
+  "return out;})()";
 
 export async function scanFixture(manifest: SynthManifest, opts: ScanOptions): Promise<FixtureScanResult> {
   const frames = manifest.frames ?? "main";
