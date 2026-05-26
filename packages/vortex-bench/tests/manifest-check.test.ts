@@ -62,4 +62,13 @@ describe("checkManifest", () => {
     const m = manifest([{ id: "x", interactive: true, expectedName: "子框按钮", expectedRole: null, pattern: "iframe-srcdoc-inherit", joinBy: "name" }]);
     expect(checkManifest(p, oracles, m)).toHaveLength(0); // name 命中 → 无 recall-miss
   });
+
+  it("name-join 认领的行(有 bbox 但几何 join 不上)不被误报为 _unannotated 噪声", () => {
+    // 自校准实测:srcdoc 子按钮在 iframe 内有 bbox,主 frame 探针拿不到它的 oracle rect,
+    // 故落入 geometry unmatchedRows;但它已被 joinBy:name 的 entry 认领,不该算噪声。
+    const p = parsed([{ ref: "@f49e1", role: "button", name: "子框按钮", flags: [], bbox: [5, 5, 60, 20], frameId: 49 }]);
+    const oracles: OracleRect[] = [];
+    const m = manifest([{ id: "child", interactive: true, expectedName: "子框按钮", expectedRole: null, pattern: "iframe-srcdoc-inherit", joinBy: "name" }]);
+    expect(checkManifest(p, oracles, m)).toHaveLength(0); // 既不 recall-miss 也不 precision-miss
+  });
 });

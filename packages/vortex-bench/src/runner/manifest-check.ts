@@ -51,8 +51,18 @@ export function checkManifest(
     }
   }
 
+  // joinBy:name 的 entry 靠 name 认领 observe 行(跨 frame 无 geometry oracle),
+  // 这些行必然落在 geometry 的 unmatchedRows 里。下面噪声扫描要排除它们,
+  // 否则被正确识别的跨 frame 元素会被误报成 _unannotated 噪声(自校准实测假阳)。
+  const nameClaimed = new Set(
+    manifest.entries
+      .filter((e) => e.joinBy === "name" && e.expectedName !== null)
+      .map((e) => e.expectedName as string),
+  );
+
   // 命中不到任何 oracle 的 observe 行:记为 P2 噪声(fixture 应标全;未标元素从轻)
   for (const row of unmatchedRows) {
+    if (row.name !== null && nameClaimed.has(row.name)) continue; // 已被 name-join 认领
     findings.push({ fixture: manifest.fixture, pattern: "_unannotated", severity: "P2",
       kind: "precision-miss", ref: row.ref,
       detail: `observe 行 ${row.ref} [${row.role}] "${row.name ?? ""}" 未匹配任何 oracle 标注` });
