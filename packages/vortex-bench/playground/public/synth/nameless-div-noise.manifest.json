@@ -1,0 +1,11 @@
+{
+  "fixture": "nameless-div-noise",
+  "path": "/synth/nameless-div-noise.html",
+  "frames": "main",
+  "entries": [
+    { "id": "noise-1", "interactive": false, "expectedName": null, "expectedRole": null, "pattern": "nameless-div-noise", "note": "空 tabindex div,应被过滤" },
+    { "id": "noise-2", "interactive": false, "expectedName": null, "expectedRole": null, "pattern": "nameless-div-noise" },
+    { "id": "noise-3", "interactive": false, "expectedName": null, "expectedRole": null, "pattern": "nameless-div-noise" },
+    { "id": "real", "interactive": true, "expectedName": "点我", "expectedRole": "button", "pattern": "nameless-div-noise", "note": "正对照" }
+  ]
+}

@@ -1,0 +1,10 @@
+<!doctype html>
+<html lang="zh"><head><meta charset="utf-8"><title>nameless noise</title></head><body>
+<h1>空 div 噪声(#18)</h1>
+<!-- 3 个无 name 的 tabindex div,observe 不该输出(precision) -->
+<div tabindex="0" data-vtx-oracle="noise-1"></div>
+<div tabindex="0" data-vtx-oracle="noise-2"></div>
+<div tabindex="0" data-vtx-oracle="noise-3"></div>
+<!-- 真按钮:observe 必须保留(防「全丢」假阴) -->
+<button data-vtx-oracle="real">点我</button>
+</body></html>

@@ -1,0 +1,9 @@
+{
+  "fixture": "aria-cursor-dedup",
+  "path": "/synth/aria-cursor-dedup.html",
+  "frames": "main",
+  "entries": [
+    { "id": "home", "interactive": true, "expectedName": "首页", "expectedRole": "menuitem", "pattern": "aria-cursor-dedup", "note": "外层 li 与内层 div 不应产生两行" },
+    { "id": "about", "interactive": true, "expectedName": "关于", "expectedRole": "menuitem", "pattern": "aria-cursor-dedup" }
+  ]
+}

@@ -1,0 +1,11 @@
+<!doctype html>
+<html lang="zh"><head><meta charset="utf-8"><title>cursor pointer</title>
+<style>.btn{cursor:pointer;display:inline-block;padding:8px 16px;border:1px solid #888;margin:8px}</style>
+</head><body>
+<h1>cursor:pointer div 识别</h1>
+<!-- 无 role 的可点 div,靠 cursor:pointer 启发式;observe 应识别 -->
+<div class="btn" data-vtx-oracle="save" onclick="void 0">保存</div>
+<div class="btn" data-vtx-oracle="open-menu" onclick="void 0">打开菜单</div>
+<!-- 真 button 对照组 -->
+<button data-vtx-oracle="real-btn">真按钮</button>
+</body></html>

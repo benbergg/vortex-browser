@@ -1,0 +1,10 @@
+{
+  "fixture": "cursor-pointer-div",
+  "path": "/synth/cursor-pointer-div.html",
+  "frames": "main",
+  "entries": [
+    { "id": "save", "interactive": true, "expectedName": "保存", "expectedRole": null, "pattern": "cursor-pointer-div", "note": "无 role 的 cursor:pointer div" },
+    { "id": "open-menu", "interactive": true, "expectedName": "打开菜单", "expectedRole": null, "pattern": "cursor-pointer-div" },
+    { "id": "real-btn", "interactive": true, "expectedName": "真按钮", "expectedRole": "button", "pattern": "cursor-pointer-div", "note": "正对照" }
+  ]
+}

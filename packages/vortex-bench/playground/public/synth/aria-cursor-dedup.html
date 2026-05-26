@@ -1,0 +1,10 @@
+<!doctype html>
+<html lang="zh"><head><meta charset="utf-8"><title>aria cursor dedup</title>
+<style>.item{cursor:pointer}</style></head><body>
+<h1>ARIA + cursor 嵌套去重</h1>
+<ul>
+  <!-- li[role=menuitem] 内层再套 cursor:pointer div:observe 应只输出 1 行,不 dual-instance -->
+  <li role="menuitem" data-vtx-oracle="home"><div class="item">首页</div></li>
+  <li role="menuitem" data-vtx-oracle="about"><div class="item">关于</div></li>
+</ul>
+</body></html>
