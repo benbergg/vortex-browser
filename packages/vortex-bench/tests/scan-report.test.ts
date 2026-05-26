@@ -38,4 +38,20 @@ describe("renderScanMarkdown", () => {
     const report: ScanReport = { generatedAt: "t", playgroundUrl: "u", fixtures: [], findings: [] };
     expect(renderScanMarkdown(report)).toContain("未发现候选");
   });
+
+  it("fixture.error 含 | 时转义,不破坏表格", () => {
+    const report: ScanReport = {
+      generatedAt: "t", playgroundUrl: "u",
+      fixtures: [{
+        fixture: "x", pattern: "p", path: "/x",
+        recall: { matched: 0, expected: 0 }, precision: { matchedNoise: 0, emitted: 0 },
+        invariants: { inv1: false, inv2: false, inv3: false, inv4: false },
+        findings: [], error: "boom a|b|c",
+      }],
+      findings: [],
+    };
+    const md = renderScanMarkdown(report);
+    expect(md).toContain("boom a\\|b\\|c");
+    expect(md).not.toContain("boom a|b|c");
+  });
 });

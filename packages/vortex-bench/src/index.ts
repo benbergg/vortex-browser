@@ -16,7 +16,7 @@ import {
 import type { BenchReport, CaseDefinition, CaseMetrics } from "./types.js";
 import { scanFixture } from "./runner/scan.js";
 import { renderScanMarkdown, rankFindings } from "./scan-report.js";
-import type { ScanReport, SynthManifest } from "./scan-types.js";
+import type { FixtureScanResult, ScanReport, SynthManifest } from "./scan-types.js";
 
 const USAGE = `vortex-bench <command>
 
@@ -280,8 +280,19 @@ async function cmdScan(args: string[]): Promise<number> {
 
   const report: ScanReport = { generatedAt: new Date().toISOString(), playgroundUrl: url, fixtures: [], findings: [] };
   for (const name of names) {
-    const manifest = await loadManifest(name);
-    const fx = await scanFixture(manifest, { mcpBin, playgroundUrl: url });
+    let fx: FixtureScanResult;
+    try {
+      const manifest = await loadManifest(name);
+      fx = await scanFixture(manifest, { mcpBin, playgroundUrl: url });
+    } catch (e) {
+      // manifest 缺失/非法等:记为该 fixture 的 error,不中断整轮扫描
+      fx = {
+        fixture: name, pattern: name, path: "",
+        recall: { matched: 0, expected: 0 }, precision: { matchedNoise: 0, emitted: 0 },
+        invariants: { inv1: false, inv2: false, inv3: false, inv4: false },
+        findings: [], error: `加载/扫描失败: ${e instanceof Error ? e.message : String(e)}`,
+      };
+    }
     report.fixtures.push(fx);
     report.findings.push(...fx.findings);
     const p0 = fx.findings.filter((f) => f.severity === "P0").length;

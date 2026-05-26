@@ -40,7 +40,7 @@ export async function scanFixture(manifest: SynthManifest, opts: ScanOptions): P
     path: manifest.path,
     recall: { matched: 0, expected: 0 },
     precision: { matchedNoise: 0, emitted: 0 },
-    invariants: { inv1: true, inv2: true, inv3: true, inv4: true },
+    invariants: { inv1: false, inv2: false, inv3: false, inv4: false },
     findings: [],
   };
 
@@ -64,20 +64,27 @@ export async function scanFixture(manifest: SynthManifest, opts: ScanOptions): P
 
     // 2) oracle rect 探针(仅主 frame;跨 frame entry 走 joinBy:name)
     let oracles: OracleRect[] = [];
+    let oracleProbeFailed = false;
     try {
       oracles = JSON.parse(extractText(await call("vortex_evaluate", { code: ORACLE_PROBE_CODE }))) as OracleRect[];
     } catch (e) {
+      oracleProbeFailed = true;
       result.error = `oracle 探针失败: ${e instanceof Error ? e.message : String(e)}`;
     }
 
-    // manifest 裁决
-    const manifestFindings = checkManifest(parsed1, oracles, manifest);
-    result.findings.push(...manifestFindings);
-    result.recall.expected = manifest.entries.filter((e) => e.interactive).length;
-    result.recall.matched =
-      result.recall.expected - manifestFindings.filter((f) => f.kind === "recall-miss").length;
-    result.precision.emitted = parsed1.rows.length;
-    result.precision.matchedNoise = manifestFindings.filter((f) => f.kind === "precision-miss").length;
+    // manifest 裁决 —— 仅在 oracle 探针成功时跑。否则空 oracles 会让所有
+    // interactive 条目都 join 不上 → 一堆假 P0 recall-miss,把环境/工具故障
+    // 伪装成 vortex 真 bug,破坏 P0=0 自校准承诺。探针失败时跳过 recall/
+    // precision;但下面 4 条不变量只依赖 observe 输出,仍照常跑。
+    if (!oracleProbeFailed) {
+      const manifestFindings = checkManifest(parsed1, oracles, manifest);
+      result.findings.push(...manifestFindings);
+      result.recall.expected = manifest.entries.filter((e) => e.interactive).length;
+      result.recall.matched =
+        result.recall.expected - manifestFindings.filter((f) => f.kind === "recall-miss").length;
+      result.precision.emitted = parsed1.rows.length;
+      result.precision.matchedNoise = manifestFindings.filter((f) => f.kind === "precision-miss").length;
+    }
 
     // INV-3 / INV-4(基于 observe #1)
     const dup = checkDuplicates(parsed1.rows, manifest.fixture, result.pattern);
@@ -87,16 +94,19 @@ export async function scanFixture(manifest: SynthManifest, opts: ScanOptions): P
     result.invariants.inv4 = bbox.length === 0;
 
     // 3) INV-2 — 探 observe #1 每个 ref(此时仍是 active snapshot)
+    let inv2Crashed = false;
     for (const row of parsed1.rows) {
       const probe = await runProbe(call, row.ref);
       const verdict = classifyProbe(probe);
       if (verdict === "crash") {
-        result.invariants.inv2 = false;
+        inv2Crashed = true;
         result.findings.push({ fixture: manifest.fixture, pattern: result.pattern, severity: "P0",
           kind: "inv2-unresolvable", ref: row.ref,
           detail: `ref ${row.ref} 探针 ${probe.timedOut ? "超时" : "崩溃"}: ${probe.text.slice(0, 120)}` });
       }
     }
+    // 跑完所有 ref 无 crash 才置 INV-2 通过(init false = 未验证)
+    result.invariants.inv2 = !inv2Crashed;
 
     // 4) observe #2 → INV-1 稳定性(此处才让 observe #1 的 ref 失效)
     const parsed2 = parseObserveSnapshot(extractText(await call("vortex_observe", { frames, includeBoxes: true })));

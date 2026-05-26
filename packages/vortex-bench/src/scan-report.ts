@@ -30,7 +30,7 @@ export function renderScanMarkdown(report: ScanReport): string {
       `${fx.precision.matchedNoise}/${fx.precision.emitted} | ${inv(fx.invariants.inv1)} | ` +
       `${inv(fx.invariants.inv2)} | ${inv(fx.invariants.inv3)} | ${inv(fx.invariants.inv4)} |`,
     );
-    if (fx.error) lines.push(`| ↳ ⚠ error | ${fx.error} | | | | | | |`);
+    if (fx.error) lines.push(`| ↳ ⚠ error | ${fx.error.replace(/\|/g, "\\|")} | | | | | | |`);
   }
   lines.push("");
 

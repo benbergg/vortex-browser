@@ -39,7 +39,7 @@ export function checkStability(a: ParsedObserve, b: ParsedObserve, fixture: stri
   for (const k of keys) {
     const na = ca.get(k) ?? 0;
     const nb = cb.get(k) ?? 0;
-    if (na !== nb) diffs.push(`${k.replace(" ", " ")}: ${na}→${nb}`);
+    if (na !== nb) diffs.push(`${k.replace(" ", "/")}: ${na}→${nb}`);
   }
   if (diffs.length === 0) return [];
   return [{ fixture, pattern, severity: "P1", kind: "inv1-instability",
@@ -82,7 +82,9 @@ export function checkBboxSanity(parsed: ParsedObserve, fixture: string, pattern:
     const bad: string[] = [];
     if (w <= 0 || h <= 0) bad.push(`退化尺寸 ${w}x${h}`);
     if (x < 0 || y < 0) bad.push(`负坐标 (${x},${y})`);
-    if (vp) {
+    // 视口越界类只对主 frame 判定:子 frame 元素坐标是 frame-local,
+    // 拿主 frame viewport 比会假阳。退化尺寸/负坐标对所有 frame 都查。
+    if (vp && r.frameId === 0) {
       if (w > vp.width * 2) bad.push(`宽 ${w} 超视口 2 倍(${vp.width})`);
       if (y > vp.scrollHeight + 50) bad.push(`y=${y} 超文档高 ${vp.scrollHeight}`);
     }
