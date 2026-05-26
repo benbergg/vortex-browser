@@ -14,6 +14,9 @@ import {
   renderBoxesBudgetTable,
 } from "./runner/boxes-budget.js";
 import type { BenchReport, CaseDefinition, CaseMetrics } from "./types.js";
+import { scanFixture } from "./runner/scan.js";
+import { renderScanMarkdown, rankFindings } from "./scan-report.js";
+import type { ScanReport, SynthManifest } from "./scan-types.js";
 
 const USAGE = `vortex-bench <command>
 
@@ -28,6 +31,8 @@ Commands:
                          issue #21 token budget sweep: 跑同一组 case 两遍
                          （baseline vs includeBoxes:true），输出 ratio /
                          median / p95 / max + reports/boxes-budget-*.json
+  scan --all             扫全部合成 fixture,产 reports/scan/<ts>.{md,json}
+  scan --pattern <name>  扫单个 pattern
   --help                 显示帮助
 
 Env:
@@ -40,6 +45,8 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const PKG_ROOT = resolve(HERE, "..");
 const CASES_DIR = resolve(PKG_ROOT, "cases");
 const REPORTS_DIR = resolve(PKG_ROOT, "reports");
+const SYNTH_DIR = resolve(PKG_ROOT, "playground", "public", "synth");
+const SCAN_REPORTS_DIR = resolve(REPORTS_DIR, "scan");
 
 function resolveMcpBin(): string {
   if (process.env.VORTEX_MCP_BIN) return resolve(process.env.VORTEX_MCP_BIN);
@@ -234,6 +241,69 @@ async function cmdBaseline(): Promise<number> {
   return 0;
 }
 
+async function listSynthManifests(): Promise<string[]> {
+  const entries = await readdir(SYNTH_DIR);
+  return entries
+    .filter((e) => e.endsWith(".manifest.json"))
+    .map((e) => e.replace(/\.manifest\.json$/, ""))
+    .sort();
+}
+
+async function loadManifest(name: string): Promise<SynthManifest> {
+  const path = resolve(SYNTH_DIR, `${name}.manifest.json`);
+  const m = JSON.parse(await readFile(path, "utf-8")) as SynthManifest;
+  if (!m.fixture || !m.path || !Array.isArray(m.entries)) {
+    throw new Error(`manifest ${name} 结构非法(需 fixture/path/entries)`);
+  }
+  return m;
+}
+
+async function cmdScan(args: string[]): Promise<number> {
+  const runAll = args.includes("--all");
+  let names: string[];
+  if (runAll) {
+    names = await listSynthManifests();
+  } else {
+    const patternIdx = args.indexOf("--pattern");
+    if (patternIdx >= 0 && args[patternIdx + 1]) names = [args[patternIdx + 1]];
+    else names = args.filter((a) => !a.startsWith("-"));
+  }
+  if (names.length === 0) {
+    process.stderr.write("[vortex-bench] scan 需要 --all 或 --pattern <name> 或 <name...>\n");
+    return 1;
+  }
+
+  const mcpBin = resolveMcpBin();
+  const url = playgroundUrl();
+  process.stdout.write(`[vortex-bench] scan  playground=${url}  mcp=${mcpBin}\n`);
+  process.stdout.write(`[vortex-bench] 扫 ${names.length} 个合成 fixture\n\n`);
+
+  const report: ScanReport = { generatedAt: new Date().toISOString(), playgroundUrl: url, fixtures: [], findings: [] };
+  for (const name of names) {
+    const manifest = await loadManifest(name);
+    const fx = await scanFixture(manifest, { mcpBin, playgroundUrl: url });
+    report.fixtures.push(fx);
+    report.findings.push(...fx.findings);
+    const p0 = fx.findings.filter((f) => f.severity === "P0").length;
+    process.stdout.write(
+      `${p0 === 0 ? "✓" : "✗"} ${name.padEnd(28)} recall=${fx.recall.matched}/${fx.recall.expected} ` +
+      `P0=${p0} findings=${fx.findings.length}${fx.error ? `  ⚠ ${fx.error}` : ""}\n`,
+    );
+  }
+  report.findings = rankFindings(report.findings);
+
+  await mkdir(SCAN_REPORTS_DIR, { recursive: true });
+  const stamp = report.generatedAt.replace(/[:.]/g, "-");
+  const jsonPath = join(SCAN_REPORTS_DIR, `${stamp}.json`);
+  const mdPath = join(SCAN_REPORTS_DIR, `${stamp}.md`);
+  await writeFile(jsonPath, JSON.stringify(report, null, 2));
+  await writeFile(mdPath, renderScanMarkdown(report));
+  process.stdout.write(`\n[report] ${mdPath}\n[report] ${jsonPath}\n`);
+
+  const totalP0 = report.findings.filter((f) => f.severity === "P0").length;
+  return totalP0 === 0 ? 0 : 2;
+}
+
 async function main(): Promise<number> {
   const [, , cmd, ...rest] = process.argv;
   if (!cmd || cmd === "--help" || cmd === "-h") {
@@ -249,6 +319,8 @@ async function main(): Promise<number> {
       return cmdBaseline();
     case "compare-boxes":
       return cmdCompareBoxes(rest);
+    case "scan":
+      return cmdScan(rest);
     default:
       process.stderr.write(`[vortex-bench] 未知命令: ${cmd}\n\n${USAGE}`);
       return 1;
