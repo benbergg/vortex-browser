@@ -11,3 +11,6 @@ reports/*.json
 !reports/archive/
 reports/*.md
 !reports/README.md
+
+# scan 运行产物(transient discovery 报告,按时间戳生成,不入库)
+reports/scan/
