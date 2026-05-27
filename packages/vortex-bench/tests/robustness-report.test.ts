@@ -50,4 +50,17 @@ describe("renderRobustnessMarkdown", () => {
     expect(md).toContain("⚠ error");
     expect(md).toContain("navigate 失败\\|超时");
   });
+
+  it("R1-only(无 R0)→ 既写契约全成立 banner 又列 R1 段", () => {
+    const finding = f({ severity: "R1", code: "OBSCURED", ref: "@cov", detail: '[link] "x" — covered' });
+    const report: RobustnessReport = {
+      generatedAt: "t", playgroundUrl: "u",
+      fixtures: [fx({ findings: [finding], okCount: 1, okRate: 0.5 })],
+      findings: [finding],
+    };
+    const md = renderRobustnessMarkdown(report);
+    expect(md).toContain("✅ observe→act 契约全成立");
+    expect(md).toContain("R1(actionability 降级)");
+    expect(md).toContain("@cov");
+  });
 });

@@ -53,11 +53,16 @@ export async function probeFixture(
     // 先 observe 一次拿 ref 总数 N
     const first = await navObserve();
     const total = first.rows.length;
+    let truncated: string | undefined;
 
     for (let i = 0; i < total; i++) {
       // 每 ref 重导航 + 重 observe → pristine DOM + fresh ref(隔离 mutating click)
       const parsed = await navObserve();
-      if (i >= parsed.rows.length) break; // 防御:重载后 ref 数缩水(理论不应,INV-1 已立)
+      if (i >= parsed.rows.length) {
+        // 重载后 ref 数缩水(理论不应,INV-1 已立):记原因,不静默截断
+        truncated = `ref 数缩水: 初始 N=${total},重载后仅剩 ${parsed.rows.length} 行,中止于 i=${i}`;
+        break;
+      }
       const row = parsed.rows[i];
       const act = await runActProbe(call, row.ref);
       const cls = classifyAct(act);
@@ -67,11 +72,13 @@ export async function probeFixture(
         name: row.name,
         kind: cls.kind,
         code: cls.code,
-        detail: act.text.slice(0, 120),
+        detail: act.timedOut ? "act 超时(>5s)" : act.text.slice(0, 120),
       });
     }
 
-    return aggregateFixture(manifest.fixture, manifest.path, outcomes);
+    const fx = aggregateFixture(manifest.fixture, manifest.path, outcomes);
+    if (truncated) fx.error = truncated;
+    return fx;
   } catch (err) {
     // 中途环境/工具错误:保留已收集 outcomes,挂 error
     const fx = aggregateFixture(manifest.fixture, manifest.path, outcomes);
