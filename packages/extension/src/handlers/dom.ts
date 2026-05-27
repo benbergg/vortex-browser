@@ -113,12 +113,14 @@ export function registerDomHandlers(
       }
 
       // 普通 element.click() 路径（含失败探测）
+      // 加载 dom-resolve 模块，使 inline func 能通过 shadow 穿透解析 selector
+      await loadPageSideModule(tid, frameId, "dom-resolve");
       const results = await chrome.scripting.executeScript({
         target: buildExecuteTarget(tid, frameId),
         func: (sel: string) => {
           try {
             // 探测阶段：逐项检查失败原因，细化错误码
-            const els = document.querySelectorAll(sel);
+            const els = (window as any).__vortexDomResolve.queryAllDeep(sel) as Element[];
             if (els.length === 0) {
               return { errorCode: "ELEMENT_NOT_FOUND", error: `Element not found: ${sel}` };
             }
@@ -272,6 +274,8 @@ export function registerDomHandlers(
       // — the only path that produces a native browser-source input
       // event capable of driving a real rich-text editor's
       // beforeinput → transaction pipeline.
+      // 加载 dom-resolve 模块，使 inline func 能通过 shadow 穿透解析 selector
+      await loadPageSideModule(tid, frameId, "dom-resolve");
       const probe = await nativePageQuery<{
         ok?: true;
         isContentEditable?: boolean;
@@ -282,7 +286,7 @@ export function registerDomHandlers(
         tid,
         frameId,
         (sel: string) => {
-          const els = document.querySelectorAll(sel);
+          const els = (window as any).__vortexDomResolve.queryAllDeep(sel) as Element[];
           if (els.length === 0) {
             return { errorCode: "ELEMENT_NOT_FOUND", error: `Element not found: ${sel}` };
           }
@@ -357,7 +361,7 @@ export function registerDomHandlers(
         frameId,
         async (sel: string, txt: string, delayMs: number) => {
           try {
-            const els = document.querySelectorAll(sel);
+            const els = (window as any).__vortexDomResolve.queryAllDeep(sel) as Element[];
             if (els.length === 0) {
               return { errorCode: "ELEMENT_NOT_FOUND", error: `Element not found: ${sel}` };
             }
@@ -418,6 +422,8 @@ export function registerDomHandlers(
         }
       }
 
+      // 加载 dom-resolve 模块，使 inline func 能通过 shadow 穿透解析 selector
+      await loadPageSideModule(tid, frameId, "dom-resolve");
       const res = await nativePageQuery<{
         result?: unknown;
         error?: string;
@@ -429,7 +435,7 @@ export function registerDomHandlers(
         (sel: string, val: string) => {
           try {
             // === element probes (in sync with CLICK) ===
-            const els = document.querySelectorAll(sel);
+            const els = (window as any).__vortexDomResolve.queryAllDeep(sel) as Element[];
             if (els.length === 0) {
               return { errorCode: "ELEMENT_NOT_FOUND", error: `Element not found: ${sel}` };
             }
@@ -497,6 +503,8 @@ export function registerDomHandlers(
       // L2 integration: actionability + auto-wait pre-check
       await waitActionable(tid, frameId, selector, { timeout: (args.timeout as number | undefined) ?? 5000 });
 
+      // 加载 dom-resolve 模块，使 inline func 能通过 shadow 穿透解析 selector
+      await loadPageSideModule(tid, frameId, "dom-resolve");
       const res = await nativePageQuery<{
         result?: unknown;
         error?: string;
@@ -508,7 +516,7 @@ export function registerDomHandlers(
         (sel: string, val: string) => {
           try {
             // === 探测（与 CLICK 同步）===
-            const els = document.querySelectorAll(sel);
+            const els = (window as any).__vortexDomResolve.queryAllDeep(sel) as Element[];
             if (els.length === 0) {
               return { errorCode: "ELEMENT_NOT_FOUND", error: `Element not found: ${sel}` };
             }
@@ -671,6 +679,8 @@ export function registerDomHandlers(
       const tid = await getActiveTabId(__t.boundTabId ?? (args.tabId as number | undefined) ?? tabId);
       const frameId = __t.boundFrameId ?? (args.frameId as number | undefined);
       if (frameId != null) await ensureFrameAttached(tid, frameId);
+      // 加载 dom-resolve 模块，使 inline func 能通过 shadow 穿透解析 selector
+      await loadPageSideModule(tid, frameId, "dom-resolve");
       const res = await nativePageQuery<{
         result?: unknown;
         error?: string;
@@ -682,7 +692,7 @@ export function registerDomHandlers(
         (sel: string) => {
           try {
             // === 探测（与 CLICK 同步；HOVER 不检查 disabled，disabled 元素仍可收 hover 事件）===
-            const els = document.querySelectorAll(sel);
+            const els = (window as any).__vortexDomResolve.queryAllDeep(sel) as Element[];
             if (els.length === 0) {
               return { errorCode: "ELEMENT_NOT_FOUND", error: `Element not found: ${sel}` };
             }
