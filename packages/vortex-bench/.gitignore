@@ -17,3 +17,6 @@ reports/scan/
 
 # robustness 运行产物(同 scan,transient discovery 报告,不入库)
 reports/robustness/
+
+# robustness-live 运行产物(同 scan/robustness,transient,不入库)
+reports/robustness-live/
