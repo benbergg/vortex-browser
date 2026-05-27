@@ -159,7 +159,9 @@ export function registerDomHandlers(
             const rect = el.getBoundingClientRect();
             const cx = rect.left + rect.width / 2;
             const cy = rect.top + rect.height / 2;
-            const topEl = document.elementFromPoint(cx, cy);
+            // 使用穿 shadow 的 deepElementFromPoint，避免对 shadow-internal 元素返回 shadow host
+            // 导致 host.contains(el) 不穿 shadow 而误判 ELEMENT_OCCLUDED。
+            const topEl = (window as any).__vortexDomResolve.deepElementFromPoint(cx, cy);
             if (topEl && topEl !== el && !el.contains(topEl) && !topEl.contains(el)) {
               const classStr =
                 typeof topEl.className === "string" && topEl.className

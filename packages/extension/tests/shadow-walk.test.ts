@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { JSDOM } from "jsdom";
-import { queryDeep, queryAllDeep } from "../src/page-side/shadow-walk.js";
+import { queryDeep, queryAllDeep, deepElementFromPoint } from "../src/page-side/shadow-walk.js";
 
 function setup(html: string): Document {
   const dom = new JSDOM(html);
@@ -86,6 +86,38 @@ describe("shadow-walk queryDeep", () => {
     target.setAttribute("data-depth", "5");
     currentParent.appendChild(target);
     expect(queryDeep('[data-depth="5"]', doc as unknown as Document)).toBe(target);
+  });
+
+  describe("deepElementFromPoint", () => {
+    it("light-DOM：elementFromPoint 返回无 shadowRoot 的普通元素，原样返回", () => {
+      const doc = setup('<button id="btn">x</button>');
+      const btn = doc.getElementById("btn")!;
+      // jsdom 不实现 elementFromPoint，需手动定义
+      Object.defineProperty(doc, "elementFromPoint", {
+        value: () => btn,
+        configurable: true,
+      });
+      expect(deepElementFromPoint(10, 10)).toBe(btn);
+    });
+
+    it("shadow：elementFromPoint 返回 host，下钻后返回 shadow 内的 button", () => {
+      const doc = setup('<div id="host"></div>');
+      const host = doc.getElementById("host")!;
+      const sr = host.attachShadow({ mode: "open" });
+      const btn = doc.createElement("button");
+      sr.appendChild(btn);
+      // mock document.elementFromPoint → host
+      Object.defineProperty(doc, "elementFromPoint", {
+        value: () => host,
+        configurable: true,
+      });
+      // mock shadowRoot.elementFromPoint → btn
+      Object.defineProperty(sr, "elementFromPoint", {
+        value: () => btn,
+        configurable: true,
+      });
+      expect(deepElementFromPoint(5, 5)).toBe(btn);
+    });
   });
 
   it("queryAllDeep 嵌套两层 shadow 各有 .x 加 light-DOM .x，共累积 3 个", () => {

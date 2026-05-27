@@ -49,3 +49,18 @@ function queryAllDeepImpl(
   }
   return acc;
 }
+
+// document.elementFromPoint 对 shadow-internal 元素返回其 shadow host（composed 树顶,
+// 重定向到 shadow 边界）。逐级下钻 open shadow root 的 elementFromPoint 得到真实命中元素,
+// 使遮挡检查对 shadow 内元素成立（否则 host.contains(el) 不穿 shadow → 误判遮挡）。
+export function deepElementFromPoint(cx: number, cy: number): Element | null {
+  let el = document.elementFromPoint(cx, cy);
+  let depth = 0;
+  while (el && (el as HTMLElement).shadowRoot && depth < 10) {
+    const inner = (el as HTMLElement).shadowRoot!.elementFromPoint(cx, cy);
+    if (!inner || inner === el) break;
+    el = inner;
+    depth++;
+  }
+  return el;
+}

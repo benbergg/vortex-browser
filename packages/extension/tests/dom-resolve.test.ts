@@ -10,13 +10,14 @@ describe("dom-resolve page-side module", () => {
     (globalThis as any).HTMLElement = dom.window.HTMLElement;
   });
 
-  it("挂载 __vortexDomResolve（version=1，含两个函数）", async () => {
+  it("挂载 __vortexDomResolve（version=1，含三个函数含 deepElementFromPoint）", async () => {
     vi.resetModules();
     await import("../src/page-side/dom-resolve.js");
     const ns = (window as any).__vortexDomResolve;
     expect(ns.version).toBe(1);
     expect(typeof ns.queryDeep).toBe("function");
     expect(typeof ns.queryAllDeep).toBe("function");
+    expect(typeof ns.deepElementFromPoint).toBe("function");
   });
 
   it("queryDeep 穿 open shadow 命中", async () => {
@@ -56,6 +57,30 @@ describe("dom-resolve page-side module", () => {
     expect(results.length).toBe(1);
     expect(results).toContain(lightEl);
     expect(results).not.toContain(shadowEl);
+  });
+
+  it("deepElementFromPoint：elementFromPoint 返回 host，下钻后命中 shadow 内 button", async () => {
+    vi.resetModules();
+    await import("../src/page-side/dom-resolve.js");
+
+    const host = document.getElementById("host")!;
+    const sr = host.attachShadow({ mode: "open" });
+    const btn = document.createElement("button");
+    sr.appendChild(btn);
+
+    // jsdom 不实现 elementFromPoint，手动 mock：document 返回 host
+    Object.defineProperty(document, "elementFromPoint", {
+      value: () => host,
+      configurable: true,
+    });
+    // shadowRoot 返回 btn
+    Object.defineProperty(sr, "elementFromPoint", {
+      value: () => btn,
+      configurable: true,
+    });
+
+    const result = (window as any).__vortexDomResolve.deepElementFromPoint(5, 5);
+    expect(result).toBe(btn);
   });
 
   it("queryAllDeep shadow 兜底：light-DOM 零命中时穿 shadow，多命中仍返回全部（length=2）", async () => {
