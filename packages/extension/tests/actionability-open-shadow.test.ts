@@ -17,6 +17,7 @@ vi.mock("../src/adapter/page-side-loader.js", () => ({
 afterEach(() => {
   vi.useRealTimers();
   vi.restoreAllMocks();
+  (globalThis as any).__shadowBtn = undefined;
 });
 
 describe("actionability open-shadow deep resolution (Tier 2)", () => {

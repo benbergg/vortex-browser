@@ -5,7 +5,7 @@
 // 6 checks: Attached / Visible / Stable / ReceivesEvents / Enabled / Editable.
 //
 // Implementation constraints:
-// - IIFE self-contained, no external imports (chrome.scripting files = plain script injection)
+// - IIFE bundle：vite 打包时 inline 本地 page-side import（如 shadow-walk），运行时无外部依赖。
 // - Defensive guard against double-load (page-side-loader is idempotent, but defend here too)
 // - All checks are sync except Stable (which uses RAF double-sample)
 
@@ -18,7 +18,8 @@ export type ActionabilityFailure =
   | "OBSCURED"
   | "DISABLED"
   | "NOT_EDITABLE"
-  // issue #27: 元素在 open shadow 内,querySelector 解析不到 → 永久不可解析,快速失败。
+  // Tier 2 起不再由 probe 发射：findInOpenShadow 已让 open-shadow 元素可解析。保留作安全网——
+  // 若未来出现不可解析的 shadow 路径，此非重试分支避免 TIMEOUT 空转。
   | "OPEN_SHADOW";
 
 export type ActionabilityResult =
