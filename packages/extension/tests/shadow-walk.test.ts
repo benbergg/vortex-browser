@@ -56,4 +56,52 @@ describe("shadow-walk queryDeep", () => {
     sr.appendChild(btn2);
     expect(queryAllDeep("button.x", doc as unknown as Document).length).toBe(2);
   });
+
+  it("深度上限：11 层嵌套时 depth=10 处停止，第 11 层返回 null", () => {
+    const doc = setup('<div id="root"></div>');
+    // 构建 11 层嵌套 open shadow 链，追踪当前可 appendChild 的节点
+    let currentParent: Element | ShadowRoot = doc.getElementById("root")!;
+    for (let i = 0; i < 11; i++) {
+      const host = doc.createElement("div");
+      currentParent.appendChild(host);
+      currentParent = host.attachShadow({ mode: "open" });
+    }
+    // 在第 11 层（depth=11 > MAX_SHADOW_DEPTH=10）放目标元素
+    const target = doc.createElement("button");
+    target.setAttribute("data-depth", "11");
+    currentParent.appendChild(target);
+    expect(queryDeep('[data-depth="11"]', doc as unknown as Document)).toBeNull();
+  });
+
+  it("深度上限：depth=5 的元素仍可被找到（上限不过早截止）", () => {
+    const doc = setup('<div id="root"></div>');
+    // 构建 5 层嵌套 open shadow 链
+    let currentParent: Element | ShadowRoot = doc.getElementById("root")!;
+    for (let i = 0; i < 5; i++) {
+      const host = doc.createElement("div");
+      currentParent.appendChild(host);
+      currentParent = host.attachShadow({ mode: "open" });
+    }
+    const target = doc.createElement("button");
+    target.setAttribute("data-depth", "5");
+    currentParent.appendChild(target);
+    expect(queryDeep('[data-depth="5"]', doc as unknown as Document)).toBe(target);
+  });
+
+  it("queryAllDeep 嵌套两层 shadow 各有 .x 加 light-DOM .x，共累积 3 个", () => {
+    const doc = setup('<button class="x"></button><div id="host1"></div>');
+    // 第一层 shadow
+    const sr1 = doc.getElementById("host1")!.attachShadow({ mode: "open" });
+    const btn1 = doc.createElement("button");
+    btn1.className = "x";
+    sr1.appendChild(btn1);
+    // 在第一层 shadow 内再套一个 host
+    const host2 = doc.createElement("div");
+    sr1.appendChild(host2);
+    const sr2 = host2.attachShadow({ mode: "open" });
+    const btn2 = doc.createElement("button");
+    btn2.className = "x";
+    sr2.appendChild(btn2);
+    expect(queryAllDeep("button.x", doc as unknown as Document).length).toBe(3);
+  });
 });
