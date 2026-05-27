@@ -18,23 +18,35 @@ afterEach(() => {
   vi.useRealTimers();
   vi.restoreAllMocks();
   (globalThis as any).__shadowBtn = undefined;
+  (globalThis as any).__shadowHost = undefined;
+  (globalThis as any).__outerHost = undefined;
 });
 
 describe("actionability open-shadow deep resolution (Tier 2)", () => {
   it("open-shadow-internal 元素经 findInOpenShadow 解析为可操作（rect+efp 给定）", async () => {
     vi.resetModules();
+    // 模拟真实浏览器行为：document.elementFromPoint 返回 shadow HOST（composed 树顶重定向），
+    // 而非 shadow 内部元素。deepElementFromPoint 需下钻 host.shadowRoot.elementFromPoint
+    // 才能拿到真实命中元素（button）。此模拟在修复前会触发 OBSCURED → TIMEOUT。
     const dom = setupActionabilityEnv({
       html: '<div id="host"></div>',
-      // efp 返回 shadow button，模拟「目标接收事件」（非遮挡）
-      elementFromPoint: () => (globalThis as any).__shadowBtn ?? null,
+      // document.elementFromPoint 返回 shadow host（真实浏览器 composed 树重定向行为）
+      elementFromPoint: () => (globalThis as any).__shadowHost ?? null,
     });
     const host = dom.window.document.getElementById("host")!;
     const sr = host.attachShadow({ mode: "open" });
     const btn = dom.window.document.createElement("button");
     btn.textContent = "影子按钮";
     sr.appendChild(btn);
-    (globalThis as any).__shadowBtn = btn;
-    // jsdom 无 layout：给 shadow button 一个非零 rect，使可见性检查通过。
+    (globalThis as any).__shadowHost = host;
+    // jsdom ShadowRoot 无 elementFromPoint；注入模拟：返回 shadow button（下钻一层后命中目标）
+    Object.defineProperty(sr, "elementFromPoint", {
+      value: () => btn,
+      configurable: true,
+    });
+    // jsdom 无 layout：给 host 和 shadow button 非零 rect，使可见性检查和坐标中点计算正常。
+    host.getBoundingClientRect = () =>
+      ({ x: 10, y: 10, width: 40, height: 20, top: 10, left: 10, right: 50, bottom: 30 } as DOMRect);
     btn.getBoundingClientRect = () =>
       ({ x: 10, y: 10, width: 40, height: 20, top: 10, left: 10, right: 50, bottom: 30 } as DOMRect);
 
@@ -49,17 +61,37 @@ describe("actionability open-shadow deep resolution (Tier 2)", () => {
 
   it("嵌套两层 open shadow 也能解析（递归 walk）", async () => {
     vi.resetModules();
+    // 模拟两层嵌套 shadow 的真实重定向：
+    //   document.elementFromPoint → outerHost（composed 顶层重定向）
+    //   outerHost.shadowRoot.elementFromPoint → innerHost（第二层 host）
+    //   innerHost.shadowRoot.elementFromPoint → btn（真实命中元素）
     const dom = setupActionabilityEnv({
       html: '<div id="host"></div>',
-      elementFromPoint: () => (globalThis as any).__shadowBtn ?? null,
+      // document.elementFromPoint 返回外层 shadow host（真实浏览器行为）
+      elementFromPoint: () => (globalThis as any).__outerHost ?? null,
     });
-    const sr1 = dom.window.document.getElementById("host")!.attachShadow({ mode: "open" });
+    const outerHost = dom.window.document.getElementById("host")!;
+    const sr1 = outerHost.attachShadow({ mode: "open" });
     const inner = dom.window.document.createElement("div");
     sr1.appendChild(inner);
     const sr2 = inner.attachShadow({ mode: "open" });
     const btn = dom.window.document.createElement("button");
     sr2.appendChild(btn);
-    (globalThis as any).__shadowBtn = btn;
+    (globalThis as any).__outerHost = outerHost;
+    // sr1.elementFromPoint 下钻返回 inner（中间 host）
+    Object.defineProperty(sr1, "elementFromPoint", {
+      value: () => inner,
+      configurable: true,
+    });
+    // sr2.elementFromPoint 下钻返回 btn（最终命中目标）
+    Object.defineProperty(sr2, "elementFromPoint", {
+      value: () => btn,
+      configurable: true,
+    });
+    outerHost.getBoundingClientRect = () =>
+      ({ x: 10, y: 10, width: 40, height: 20, top: 10, left: 10, right: 50, bottom: 30 } as DOMRect);
+    inner.getBoundingClientRect = () =>
+      ({ x: 10, y: 10, width: 40, height: 20, top: 10, left: 10, right: 50, bottom: 30 } as DOMRect);
     btn.getBoundingClientRect = () =>
       ({ x: 10, y: 10, width: 40, height: 20, top: 10, left: 10, right: 50, bottom: 30 } as DOMRect);
 
