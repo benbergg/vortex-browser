@@ -29,3 +29,8 @@ export function classifyAct(r: ActResult): ClassifiedAct {
   if (m) return { kind: "typed-error", code: m[1] };
   return { kind: "ok", code: null };
 }
+
+// 注:#3.x live extract 复用 classifyAct —— vortex_extract 经 content.getText,解析不到的
+// ref 干净抛 Error[ELEMENT_NOT_FOUND](content.ts:175),成功返 {text,controls}(无 Error)。
+// 故 classifyAct 的 Error 文本解析对 extract 同样正确(not-found→typed-error,success→ok),
+// 无需 null-result 检测。(早期 classifyExtract/hasElementData 基于误读的 dom.ts 死路径,已删。)

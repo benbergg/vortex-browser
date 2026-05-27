@@ -1,0 +1,7 @@
+{
+  "_note": "公开 JS-heavy 站点种子,bench robustness --seeds 批量探。用户可增删。",
+  "seeds": [
+    "https://web.dev/",
+    "https://material-web.dev/components/button/"
+  ]
+}

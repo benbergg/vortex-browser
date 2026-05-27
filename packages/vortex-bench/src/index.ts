@@ -19,6 +19,7 @@ import { renderScanMarkdown, rankFindings } from "./scan-report.js";
 import type { FixtureScanResult, ScanReport, SynthManifest } from "./scan-types.js";
 import { captureSnapshot } from "./runner/snapshot.js";
 import { probeFixture } from "./runner/robustness.js";
+import { probeLive, type LiveTarget } from "./runner/robustness-live.js";
 import { renderRobustnessMarkdown, rankRobustnessFindings } from "./robustness-report.js";
 import type { FixtureRobustness, RobustnessReport } from "./robustness-types.js";
 
@@ -41,6 +42,9 @@ Commands:
   snapshot <name> --url <u>  先 navigate 再冻结
   robustness --all       探全部 fixture 的 observe→act 契约,产 reports/robustness/<ts>.{md,json}
   robustness --pattern <name>  探单个 fixture
+  robustness --url <url>       live 只读探单个真站 observe→act 契约
+  robustness --current-tab     live 只读探当前已加载/已登录 tab
+  robustness --seeds [file]    live 批量探种子列表(默认 live-seeds.json)
   --help                 显示帮助
 
 Env:
@@ -56,6 +60,7 @@ const REPORTS_DIR = resolve(PKG_ROOT, "reports");
 const SYNTH_DIR = resolve(PKG_ROOT, "playground", "public", "synth");
 const SCAN_REPORTS_DIR = resolve(REPORTS_DIR, "scan");
 const ROBUSTNESS_REPORTS_DIR = resolve(REPORTS_DIR, "robustness");
+const ROBUSTNESS_LIVE_REPORTS_DIR = resolve(REPORTS_DIR, "robustness-live");
 
 function resolveMcpBin(): string {
   if (process.env.VORTEX_MCP_BIN) return resolve(process.env.VORTEX_MCP_BIN);
@@ -368,6 +373,19 @@ async function cmdSnapshot(args: string[]): Promise<number> {
 }
 
 async function cmdRobustness(args: string[]): Promise<number> {
+  // live 模式:--url / --current-tab / --seeds
+  const urlIdx = args.indexOf("--url");
+  if (urlIdx >= 0 && args[urlIdx + 1]) return cmdRobustnessLive([{ url: args[urlIdx + 1] }]);
+  if (args.includes("--current-tab")) return cmdRobustnessLive([{ currentTab: true }]);
+  const seedsIdx = args.indexOf("--seeds");
+  if (seedsIdx >= 0) {
+    const file = args[seedsIdx + 1] && !args[seedsIdx + 1].startsWith("-")
+      ? resolve(args[seedsIdx + 1])
+      : resolve(PKG_ROOT, "live-seeds.json");
+    const urls = await loadSeeds(file);
+    return cmdRobustnessLive(urls.map((url) => ({ url })));
+  }
+
   const runAll = args.includes("--all");
   let names: string[];
   if (runAll) {
@@ -420,6 +438,53 @@ async function cmdRobustness(args: string[]): Promise<number> {
   const stamp = report.generatedAt.replace(/[:.]/g, "-");
   const jsonPath = join(ROBUSTNESS_REPORTS_DIR, `${stamp}.json`);
   const mdPath = join(ROBUSTNESS_REPORTS_DIR, `${stamp}.md`);
+  await writeFile(jsonPath, JSON.stringify(report, null, 2));
+  await writeFile(mdPath, renderRobustnessMarkdown(report));
+  process.stdout.write(`\n[report] ${mdPath}\n[report] ${jsonPath}\n`);
+
+  const totalR0 = report.findings.filter((f) => f.severity === "R0").length;
+  return totalR0 === 0 ? 0 : 2;
+}
+
+async function loadSeeds(file: string): Promise<string[]> {
+  const raw = JSON.parse(await readFile(file, "utf-8")) as { seeds?: unknown };
+  if (!Array.isArray(raw.seeds)) throw new Error(`seeds 文件需含 seeds:string[](${file})`);
+  return raw.seeds.map((s) => String(s));
+}
+
+async function cmdRobustnessLive(targets: LiveTarget[]): Promise<number> {
+  const mcpBin = resolveMcpBin();
+  process.stdout.write(`[vortex-bench] robustness LIVE  mcp=${mcpBin}\n`);
+  process.stdout.write(`[vortex-bench] 只读探 ${targets.length} 个 live 目标的 observe→act 契约\n\n`);
+
+  const report: RobustnessReport = {
+    generatedAt: new Date().toISOString(), playgroundUrl: "(live)", fixtures: [], findings: [],
+  };
+  for (const t of targets) {
+    let fx: FixtureRobustness;
+    try {
+      fx = await probeLive(t, { mcpBin });
+    } catch (e) {
+      fx = {
+        fixture: t.url ?? "current-tab", path: "", totalRefs: 0, okCount: 0, okRate: 1, histogram: {},
+        findings: [], error: `探测失败: ${e instanceof Error ? e.message : String(e)}`,
+      };
+    }
+    report.fixtures.push(fx);
+    report.findings.push(...fx.findings);
+    const r0 = fx.findings.filter((f) => f.severity === "R0").length;
+    const r1 = fx.findings.filter((f) => f.severity === "R1").length;
+    process.stdout.write(
+      `${r0 === 0 ? "✓" : "✗"} ${fx.fixture.slice(0, 40).padEnd(40)} refs=${fx.totalRefs} okRate=${(fx.okRate * 100).toFixed(0)}% ` +
+      `R0=${r0} R1=${r1}${fx.error ? `  ⚠ ${fx.error}` : ""}\n`,
+    );
+  }
+  report.findings = rankRobustnessFindings(report.findings);
+
+  await mkdir(ROBUSTNESS_LIVE_REPORTS_DIR, { recursive: true });
+  const stamp = report.generatedAt.replace(/[:.]/g, "-");
+  const jsonPath = join(ROBUSTNESS_LIVE_REPORTS_DIR, `${stamp}.json`);
+  const mdPath = join(ROBUSTNESS_LIVE_REPORTS_DIR, `${stamp}.md`);
   await writeFile(jsonPath, JSON.stringify(report, null, 2));
   await writeFile(mdPath, renderRobustnessMarkdown(report));
   process.stdout.write(`\n[report] ${mdPath}\n[report] ${jsonPath}\n`);
