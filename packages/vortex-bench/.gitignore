@@ -14,3 +14,6 @@ reports/*.md
 
 # scan 运行产物(transient discovery 报告,按时间戳生成,不入库)
 reports/scan/
+
+# robustness 运行产物(同 scan,transient discovery 报告,不入库)
+reports/robustness/
