@@ -376,6 +376,7 @@ async function scanOneFrame(
         // 给元素打唯一 data-vortex-rid 并返回该 selector。供两类情况复用：
         // (1) light-DOM 路径选择器歧义；(2) shadow-internal 元素（路径在 shadow 边界断裂）。
         // setAttribute 失败（非 Element / sandbox shadow）时返回 null，由调用方回退。
+        // 注意：ridCounter 在 try 块之前自增，失败时 ridCounter 仍自增一格，无害——该 rid 不写入任何元素。
         function stampRid(el: Element): string | null {
           const rid = ridPrefix + ridCounter++;
           try {
