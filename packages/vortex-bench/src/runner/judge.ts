@@ -10,6 +10,8 @@ import { parseJudgeResponse } from "./judge-parse.js";
 import { intersectPasses } from "./judge-consistency.js";
 import { ablateRows, computeCalibration } from "./judge-calibrate.js";
 import { callJudge, type JudgeImage } from "./judge-llm.js";
+import type { ScreenshotProfile } from "./judge-screenshot-profile.js";
+import { profilePromptHint } from "./judge-screenshot-profile.js";
 import type { ParsedObserve } from "../scan-types.js";
 import type { ClaimedMiss, JudgePageResult } from "../judge-types.js";
 import type { Finding } from "../scan-types.js";
@@ -25,11 +27,15 @@ export interface JudgeTarget {
 }
 
 export interface JudgeOptions {
-  mcpBin: string;
+  mcpBin?: string;
   model: string;
   playgroundUrl: string;
   /** synth 模式消融抽行数 */
-  ablate: number;
+  ablate?: number;
+  /** 截图 profile(format/quality/dpr);省略时等同于 q70 默认 */
+  screenshotProfile?: ScreenshotProfile;
+  /** 可选 MCP 调用注入(测试用 mock)。传入时跳过真实 MCP 连接 */
+  mcpCall?: (tool: string, args: Record<string, unknown>) => Promise<unknown>;
 }
 
 /** 从 MCP tool 响应里提取纯文本(与 robustness-live.ts 对齐) */
@@ -101,8 +107,9 @@ async function judgeTwice(
   parsed: ParsedObserve,
   image: JudgeImage,
   model: string,
+  promptHint?: string,
 ): Promise<ClaimedMiss[]> {
-  const prompt = buildJudgePrompt(parsed);
+  const prompt = buildJudgePrompt(parsed, promptHint);
   const r1 = parseJudgeResponse(await callJudge({ model, prompt, image }));
   const r2 = parseJudgeResponse(await callJudge({ model, prompt, image }));
   return intersectPasses(r1, r2);
@@ -113,15 +120,25 @@ export async function judgePage(
   target: JudgeTarget,
   opts: JudgeOptions,
 ): Promise<JudgePageResult> {
-  const mcp: McpConnection = await createMcpConnection({
-    command: process.execPath,
-    args: [opts.mcpBin],
-    env: { ...(process.env as Record<string, string>) },
-  });
+  // mcpCall 注入(测试 mock)或真实 MCP 连接二选一
+  let mcp: McpConnection | null = null;
+  let call: CallFn;
 
-  // callTool 签名与 robustness-live.ts 保持一致
-  const call: CallFn = (name, args) =>
-    mcp.client.callTool({ name, arguments: args });
+  if (opts.mcpCall) {
+    // 测试 mock 注入:直接使用传入的函数,无需建立 MCP 连接
+    call = opts.mcpCall;
+  } else {
+    mcp = await createMcpConnection({
+      command: process.execPath,
+      args: [opts.mcpBin!],
+      env: { ...(process.env as Record<string, string>) },
+    });
+    call = (name, args) => mcp!.client.callTool({ name, arguments: args });
+  }
+
+  const profile = opts.screenshotProfile;
+  const promptHint = profile ? profilePromptHint(profile) : "";
+  const ablate = opts.ablate ?? 3;
 
   try {
     // 导航(可选)
@@ -138,10 +155,20 @@ export async function judgePage(
     const parsed = parseObserveSnapshot(
       extractText(await call("vortex_observe", { includeBoxes: true })),
     );
-    const image = await extractImage(await call("vortex_screenshot", { format: "jpeg", quality: 70 }));
+    // 根据 profile 决定截图参数;png 不带 quality,dpr=1 不传 deviceScaleFactor
+    const screenshotArgs: Record<string, unknown> = {
+      format: profile?.format ?? "jpeg",
+      ...(profile?.format === "png"
+        ? {}
+        : { quality: profile?.quality ?? 70 }),
+      ...(profile?.deviceScaleFactor != null && profile.deviceScaleFactor !== 1
+        ? { deviceScaleFactor: profile.deviceScaleFactor }
+        : {}),
+    };
+    const image = await extractImage(await call("vortex_screenshot", screenshotArgs));
 
     // FP run:原样列表 2 轮自一致取交集
-    const confirmed = await judgeTwice(parsed, image, opts.model);
+    const confirmed = await judgeTwice(parsed, image, opts.model, promptHint || undefined);
     const findings: Finding[] = confirmed.map((m) => ({
       severity: "P0",
       kind: "recall-miss",
@@ -155,6 +182,17 @@ export async function judgePage(
       totalObserveRows: parsed.rows.filter((r) => r.frameId === 0).length,
       confirmedMisses: confirmed,
       findings,
+      ...(profile
+        ? {
+            profile: {
+              name: profile.name,
+              format: profile.format,
+              quality: profile.quality,
+              deviceScaleFactor: profile.deviceScaleFactor,
+              perFrame: profile.perFrame,
+            },
+          }
+        : {}),
     };
 
     // synth 模式:消融 TP run(重渲染抽行后的列表喂第二次判官)
@@ -164,10 +202,10 @@ export async function judgePage(
       // 若 observe 含 precision-miss 噪声(非真正可交互但被误报的元素),
       // 会污染 TP 口径(ablated 含噪声行 → recovered 偏高 → 查全率偏宽松)。
       // live Step 2 标定时知情,排他校验留 backlog。
-      const { kept, ablated } = ablateRows(parsed.rows, opts.ablate);
+      const { kept, ablated } = ablateRows(parsed.rows, ablate);
       const ablatedParsed: ParsedObserve = { ...parsed, rows: kept };
       // TP run:把 kept 列表喂判官,判官报的 miss 里应含被抽掉的那些行
-      const tpMisses = await judgeTwice(ablatedParsed, image, opts.model);
+      const tpMisses = await judgeTwice(ablatedParsed, image, opts.model, promptHint || undefined);
       result.calibration = computeCalibration(confirmed, tpMisses, ablated);
       // synth 已知干净页:FP miss 仅用于校准,不当真 finding 上报
       result.findings = [];
@@ -180,9 +218,20 @@ export async function judgePage(
       totalObserveRows: 0,
       confirmedMisses: [],
       findings: [],
+      ...(profile
+        ? {
+            profile: {
+              name: profile.name,
+              format: profile.format,
+              quality: profile.quality,
+              deviceScaleFactor: profile.deviceScaleFactor,
+              perFrame: profile.perFrame,
+            },
+          }
+        : {}),
       error: err instanceof Error ? err.message : String(err),
     };
   } finally {
-    await closeMcpConnection(mcp);
+    if (mcp) await closeMcpConnection(mcp);
   }
 }

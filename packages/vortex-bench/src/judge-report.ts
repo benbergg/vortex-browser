@@ -10,6 +10,7 @@ export function renderJudgeMarkdown(report: JudgeReport): string {
   lines.push(`- 生成时间: ${report.generatedAt}`);
   lines.push(`- 模型: ${report.model}`);
   lines.push(`- 模式: ${report.mode}`);
+  lines.push(`- profile: ${report.profile?.name ?? "q70-default"}`);
   lines.push(`- page 数: ${report.pages.length}  recall-miss: ${report.findings.length}`);
   lines.push("");
 

@@ -25,6 +25,8 @@ import type { FixtureRobustness, RobustnessReport } from "./robustness-types.js"
 import { judgePage, type JudgeTarget } from "./runner/judge.js";
 import { renderJudgeMarkdown } from "./judge-report.js";
 import type { JudgeReport, JudgePageResult } from "./judge-types.js";
+import { resolveProfile } from "./runner/judge-screenshot-profile.js";
+import type { ScreenshotProfile } from "./runner/judge-screenshot-profile.js";
 
 const USAGE = `vortex-bench <command>
 
@@ -55,6 +57,9 @@ Commands:
   judge --current-tab    当前已加载/已登录 tab
   judge --model <id>     切模型(默认 doubao-1-5-vision-pro-32k-250115;火山方舟 model ID)
   judge --ablate <k>     synth 消融抽行数(默认 3)
+  judge --screenshot-profile <name>
+                         截图 profile(q70|q85|q85+dpr2|q85+dpr2+png|q85+dpr2+png+per-frame)
+                         默认 q70(jpeg quality=70, dpr=1)
   --help                 显示帮助
 
 Env:
@@ -510,6 +515,10 @@ async function cmdJudge(args: string[]): Promise<number> {
   const model = modelIdx >= 0 && args[modelIdx + 1] ? args[modelIdx + 1] : "doubao-1-5-vision-pro-32k-250115";
   const ablateIdx = args.indexOf("--ablate");
   const ablate = ablateIdx >= 0 && args[ablateIdx + 1] ? Number.parseInt(args[ablateIdx + 1], 10) : 3;
+  const profileIdx = args.indexOf("--screenshot-profile");
+  const screenshotProfile: ScreenshotProfile = resolveProfile(
+    profileIdx >= 0 && args[profileIdx + 1] ? args[profileIdx + 1] : undefined,
+  );
   const mcpBin = resolveMcpBin();
   const url = playgroundUrl();
 
@@ -543,6 +552,7 @@ async function cmdJudge(args: string[]): Promise<number> {
         const consumed = new Set<number>();
         if (modelIdx >= 0) { consumed.add(modelIdx); consumed.add(modelIdx + 1); }
         if (ablateIdx >= 0) { consumed.add(ablateIdx); consumed.add(ablateIdx + 1); }
+        if (profileIdx >= 0) { consumed.add(profileIdx); consumed.add(profileIdx + 1); }
         names = args.filter((a, i) => !consumed.has(i) && !a.startsWith("-"));
       }
     }
@@ -558,14 +568,21 @@ async function cmdJudge(args: string[]): Promise<number> {
     });
   }
 
-  process.stdout.write(`[vortex-bench] judge  mode=${mode}  model=${model}  mcp=${mcpBin}\n`);
+  process.stdout.write(`[vortex-bench] judge  mode=${mode}  model=${model}  profile=${screenshotProfile.name}  mcp=${mcpBin}\n`);
   process.stdout.write(`[vortex-bench] 判 ${targets.length} 个 page 的 observe recall-miss\n\n`);
 
-  const report: JudgeReport = { generatedAt: new Date().toISOString(), model, mode, pages: [], findings: [] };
+  const report: JudgeReport = {
+    generatedAt: new Date().toISOString(),
+    model,
+    mode,
+    profile: { name: screenshotProfile.name },
+    pages: [],
+    findings: [],
+  };
   for (const t of targets) {
     let p: JudgePageResult;
     try {
-      p = await judgePage(t, { mcpBin, model, playgroundUrl: url, ablate });
+      p = await judgePage(t, { mcpBin, model, playgroundUrl: url, ablate, screenshotProfile });
     } catch (e) {
       p = { page: t.page, totalObserveRows: 0, confirmedMisses: [], findings: [], error: e instanceof Error ? e.message : String(e) };
     }
@@ -581,8 +598,9 @@ async function cmdJudge(args: string[]): Promise<number> {
 
   await mkdir(JUDGE_REPORTS_DIR, { recursive: true });
   const stamp = report.generatedAt.replace(/[:.]/g, "-");
-  const jsonPath = join(JUDGE_REPORTS_DIR, `${stamp}.json`);
-  const mdPath = join(JUDGE_REPORTS_DIR, `${stamp}.md`);
+  const profileName = screenshotProfile.name;
+  const jsonPath = join(JUDGE_REPORTS_DIR, `profile-${profileName}-${stamp}.json`);
+  const mdPath = join(JUDGE_REPORTS_DIR, `profile-${profileName}-${stamp}.md`);
   await writeFile(jsonPath, JSON.stringify(report, null, 2));
   await writeFile(mdPath, renderJudgeMarkdown(report));
   process.stdout.write(`\n[report] ${mdPath}\n[report] ${jsonPath}\n`);

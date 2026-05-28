@@ -20,9 +20,9 @@ function formatRow(r: ObserveRow): string {
 }
 
 /** 完整判官 prompt:截图随消息另传,这里只出文本指令 + observe 列表 */
-export function buildJudgePrompt(parsed: ParsedObserve): string {
+export function buildJudgePrompt(parsed: ParsedObserve, hint?: string): string {
   const list = renderObserveList(parsed);
-  return [
+  const lines = [
     "You are auditing a browser-automation tool's element extractor.",
     "The attached screenshot is the current viewport. Below is the list of interactive",
     "elements the tool extracted (each: [role] \"name\" bbox=[x,y,w,h] in viewport px).",
@@ -38,7 +38,9 @@ export function buildJudgePrompt(parsed: ParsedObserve): string {
     "Respond with ONLY a JSON object, no prose:",
     '{ "misses": [ { "label": "<short>", "bbox": [x,y,w,h], "reason": "<why interactive>" } ] }',
     "",
+    ...(hint ? [`Note: ${hint}`, ""] : []),
     "Extracted interactive elements:",
     list || "(none)",
-  ].join("\n");
+  ];
+  return lines.join("\n");
 }
