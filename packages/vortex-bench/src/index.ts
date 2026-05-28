@@ -48,19 +48,19 @@ Commands:
   robustness --url <url>       live 只读探单个真站 observe→act 契约
   robustness --current-tab     live 只读探当前已加载/已登录 tab
   robustness --seeds [file]    live 批量探种子列表(默认 live-seeds.json)
-  judge --all            synth 全量 + 消融校准(产 FP/TP 表;需 BIGMODEL_API_KEY)
+  judge --all            synth 全量 + 消融校准(产 FP/TP 表;需 DOUBAO_API_KEY)
   judge --pattern <name> 单 synth fixture 校准
   judge --url <url>      live 真站单页判 recall-miss
   judge --seeds [file]   live 批量种子
   judge --current-tab    当前已加载/已登录 tab
-  judge --model <id>     切模型(默认 glm-4.6v;BigModel 平台模型 ID)
+  judge --model <id>     切模型(默认 doubao-1-5-vision-pro-32k-250115;火山方舟 model ID)
   judge --ablate <k>     synth 消融抽行数(默认 3)
   --help                 显示帮助
 
 Env:
   VORTEX_MCP_BIN         默认 ../mcp/dist/src/server.js
   PLAYGROUND_URL         默认 http://localhost:5173
-  BIGMODEL_API_KEY       judge 子命令必需(BigModel 平台 https://open.bigmodel.cn API key)
+  DOUBAO_API_KEY         judge 子命令必需(火山方舟 https://ark.cn-beijing.volces.com API key)
 `;
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -507,7 +507,7 @@ async function cmdRobustnessLive(targets: LiveTarget[]): Promise<number> {
 
 async function cmdJudge(args: string[]): Promise<number> {
   const modelIdx = args.indexOf("--model");
-  const model = modelIdx >= 0 && args[modelIdx + 1] ? args[modelIdx + 1] : "glm-4.6v";
+  const model = modelIdx >= 0 && args[modelIdx + 1] ? args[modelIdx + 1] : "doubao-1-5-vision-pro-32k-250115";
   const ablateIdx = args.indexOf("--ablate");
   const ablate = ablateIdx >= 0 && args[ablateIdx + 1] ? Number.parseInt(args[ablateIdx + 1], 10) : 3;
   const mcpBin = resolveMcpBin();
