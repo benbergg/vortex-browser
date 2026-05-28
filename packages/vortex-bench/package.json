@@ -24,10 +24,10 @@
     "@modelcontextprotocol/sdk": "^1.27.0"
   },
   "devDependencies": {
-    "@anthropic-ai/sdk": "^0.99.0",
     "@types/node": "^20.0.0",
     "@vitejs/plugin-vue": "^5.2.0",
     "element-plus": "^2.8.0",
+    "openai": "^6.39.0",
     "tsx": "^4.19.0",
     "typescript": "^5.7.0",
     "vite": "^5.4.0",
