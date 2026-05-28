@@ -534,7 +534,17 @@ async function cmdJudge(args: string[]): Promise<number> {
     if (args.includes("--all")) names = await listSynthManifests();
     else {
       const pIdx = args.indexOf("--pattern");
-      names = pIdx >= 0 && args[pIdx + 1] ? [args[pIdx + 1]] : args.filter((a) => !a.startsWith("-") && a !== model && String(ablate) !== a);
+      if (pIdx >= 0 && args[pIdx + 1]) {
+        names = [args[pIdx + 1]];
+      } else {
+        // 仿 cmdSnapshot 的 index-based consumed Set 范式:
+        // 记录 flag 及其值的下标,positional name 取下标不在 consumed 且不以 - 开头的项。
+        // 避免 fixture 名恰好等于 model 串或 ablate 数字时被值比较误删。
+        const consumed = new Set<number>();
+        if (modelIdx >= 0) { consumed.add(modelIdx); consumed.add(modelIdx + 1); }
+        if (ablateIdx >= 0) { consumed.add(ablateIdx); consumed.add(ablateIdx + 1); }
+        names = args.filter((a, i) => !consumed.has(i) && !a.startsWith("-"));
+      }
     }
     if (names.length === 0) {
       process.stderr.write("[vortex-bench] judge 需要 --all / --pattern <name> / --url / --seeds / --current-tab\n");

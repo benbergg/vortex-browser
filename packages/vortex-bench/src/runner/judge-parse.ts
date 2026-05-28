@@ -25,26 +25,48 @@ function toMiss(item: unknown): ClaimedMiss | null {
   return { label: o.label, reason: o.reason, bbox: [nums[0], nums[1], nums[2], nums[3]] };
 }
 
-/** 从可能含围栏/散文的文本里提取第一个能 JSON.parse 的 {...} 块 */
+/**
+ * 从可能含围栏/散文的文本里提取含 misses 数组的 JSON 对象。
+ * 策略:扫描所有平衡 {...} 块,返回第一个能 JSON.parse 且含 misses 数组的;
+ * 都不含 misses 则返回最后一个能 parse 的(向后兼容纯 JSON 响应);都没有返回 null。
+ * 这样可避免前导散文内联对象(如 {"note":"x"})抢先被命中、真正的 misses 对象被丢弃。
+ */
 function extractFirstJsonObject(text: string): unknown {
-  // 去掉 ```json / ``` 围栏标记后,扫描首个平衡花括号块
+  // 去掉 ```json / ``` 围栏标记
   const stripped = text.replace(/```json/gi, "```");
-  const start = stripped.indexOf("{");
-  if (start < 0) return null;
-  let depth = 0;
-  for (let i = start; i < stripped.length; i++) {
-    const c = stripped[i];
-    if (c === "{") depth++;
-    else if (c === "}") {
-      depth--;
-      if (depth === 0) {
-        try {
-          return JSON.parse(stripped.slice(start, i + 1));
-        } catch {
-          return null;
-        }
+
+  // 收集所有平衡花括号块
+  const candidates: unknown[] = [];
+  let i = 0;
+  while (i < stripped.length) {
+    const start = stripped.indexOf("{", i);
+    if (start < 0) break;
+    let depth = 0;
+    let j = start;
+    for (; j < stripped.length; j++) {
+      const c = stripped[j];
+      if (c === "{") depth++;
+      else if (c === "}") {
+        depth--;
+        if (depth === 0) break;
       }
     }
+    if (depth === 0) {
+      try {
+        candidates.push(JSON.parse(stripped.slice(start, j + 1)));
+      } catch {
+        // 非法 JSON,跳过此块
+      }
+    }
+    i = j + 1;
   }
-  return null;
+
+  if (candidates.length === 0) return null;
+  // 优先返回第一个含 misses 数组的对象
+  const withMisses = candidates.find(
+    (c) => c && typeof c === "object" && Array.isArray((c as { misses?: unknown }).misses),
+  );
+  if (withMisses !== undefined) return withMisses;
+  // 向后兼容:无 misses 时返回最后一个能 parse 的(纯 JSON 响应)
+  return candidates[candidates.length - 1];
 }

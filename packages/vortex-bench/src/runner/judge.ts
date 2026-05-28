@@ -43,6 +43,27 @@ function extractText(res: unknown): string {
 }
 
 /**
+ * 从 screenshot MCP 响应的 content 数组里选出第一个含 savedTo 字段的 text block。
+ * withEvents() 会在 content 末尾追加 "[vortex-events]..." text block,
+ * 若将所有 text block 拼接后再 JSON.parse 则因多段文本拼接后非法 JSON 而抛错。
+ * 此函数逐块解析,只取第一个能 JSON.parse 且含 savedTo 字段的块,避免该问题。
+ */
+export function pickSavedToPath(content: unknown[]): string | null {
+  for (const block of content) {
+    if (!block || typeof block !== "object") continue;
+    const b = block as { type?: string; text?: unknown };
+    if (b.type !== "text" || typeof b.text !== "string") continue;
+    try {
+      const parsed = JSON.parse(b.text) as { savedTo?: unknown };
+      if (typeof parsed.savedTo === "string") return parsed.savedTo;
+    } catch {
+      // 非 JSON 或无 savedTo,继续遍历下一块
+    }
+  }
+  return null;
+}
+
+/**
  * screenshot MCP 返回的图像:
  *   - inline image block: content 里 {type:"image", data:<base64>, mimeType}
  *   - file/超大模式: text block,JSON 内含 {savedTo, width, height, bytes}
@@ -61,17 +82,13 @@ async function extractImage(res: unknown): Promise<JudgeImage> {
     return { base64: o.data, mimeType: o.mimeType };
   }
 
-  // file 模式:text block 内是 JSON { savedTo, width, height, bytes }
-  const txt = extractText(res);
-  try {
-    const meta = JSON.parse(txt) as { savedTo?: string };
-    if (meta.savedTo) {
-      const buf = await readFile(meta.savedTo);
-      const mime = meta.savedTo.endsWith(".png") ? "image/png" : "image/jpeg";
-      return { base64: buf.toString("base64"), mimeType: mime };
-    }
-  } catch {
-    // fallthrough — JSON 解析失败或无 savedTo
+  // file 模式:逐块解析 text block,取第一个含 savedTo 的 JSON 块
+  // (不能拼接所有 text block 再 parse,withEvents() 会追加非 JSON 的事件块导致拼接后非法)
+  const savedTo = pickSavedToPath(content);
+  if (savedTo) {
+    const buf = await readFile(savedTo);
+    const mime = savedTo.endsWith(".png") ? "image/png" : "image/jpeg";
+    return { base64: buf.toString("base64"), mimeType: mime };
   }
 
   throw new Error("无法从 screenshot 返回取得图像");
@@ -142,6 +159,11 @@ export async function judgePage(
 
     // synth 模式:消融 TP run(重渲染抽行后的列表喂第二次判官)
     if (target.synthPath) {
+      // 注意:ablateRows 用 observe 全部输出行作 interactive 代理。
+      // clean synth 页上 observe ≈ interactive,可接受。
+      // 若 observe 含 precision-miss 噪声(非真正可交互但被误报的元素),
+      // 会污染 TP 口径(ablated 含噪声行 → recovered 偏高 → 查全率偏宽松)。
+      // live Step 2 标定时知情,排他校验留 backlog。
       const { kept, ablated } = ablateRows(parsed.rows, opts.ablate);
       const ablatedParsed: ParsedObserve = { ...parsed, rows: kept };
       // TP run:把 kept 列表喂判官,判官报的 miss 里应含被抽掉的那些行

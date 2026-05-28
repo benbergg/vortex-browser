@@ -26,4 +26,21 @@ describe("parseJudgeResponse", () => {
   it("无法解析的垃圾 → []", () => {
     expect(parseJudgeResponse("sorry I cannot")).toEqual([]);
   });
+
+  // M2 回归测试:前导内联对象不吞 misses
+  it("M2 前导内联对象在前 — 取后面含 misses 的块", () => {
+    const raw = 'foo {"note":"x"} {"misses":[{"label":"a","bbox":[1,2,3,4],"reason":"r"}]}';
+    const r = parseJudgeResponse(raw);
+    expect(r.map((m) => m.label)).toEqual(["a"]);
+  });
+  it("M2 纯 JSON 仍正常(无前导对象)", () => {
+    const raw = '{"misses":[{"label":"btn","bbox":[0,0,50,20],"reason":"button"}]}';
+    const r = parseJudgeResponse(raw);
+    expect(r.map((m) => m.label)).toEqual(["btn"]);
+  });
+  it("M2 围栏内含 misses 仍正常", () => {
+    const raw = '分析完毕:\n```json\n{"misses":[{"label":"link","bbox":[5,5,30,15],"reason":"链接"}]}\n```';
+    const r = parseJudgeResponse(raw);
+    expect(r.map((m) => m.label)).toEqual(["link"]);
+  });
 });

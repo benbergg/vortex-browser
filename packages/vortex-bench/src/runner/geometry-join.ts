@@ -40,10 +40,8 @@ export function joinByGeometry(
   return { matches, unmatchedRows };
 }
 
-type Box4 = [number, number, number, number];
-
 /** IoU(交并比) */
-function iou(a: Box4, b: Box4): number {
+function iou(a: Box, b: Box): number {
   const ax2 = a[0] + a[2], ay2 = a[1] + a[3];
   const bx2 = b[0] + b[2], by2 = b[1] + b[3];
   const ix = Math.max(0, Math.min(ax2, bx2) - Math.max(a[0], b[0]));
@@ -54,6 +52,6 @@ function iou(a: Box4, b: Box4): number {
 }
 
 /** 两 bbox 是否指同一元素:互相中心落入 或 IoU≥0.3 */
-export function boxesMatch(a: Box4, b: Box4): boolean {
+export function boxesMatch(a: Box, b: Box): boolean {
   return centerInside(a, b) || centerInside(b, a) || iou(a, b) >= 0.3;
 }

@@ -13,13 +13,6 @@ export interface ClaimedMiss {
   reason: string;
 }
 
-/** 一轮 LLM 调用的结果 */
-export interface JudgePassResult {
-  misses: ClaimedMiss[];
-  /** 原始响应文本(调试/报告) */
-  raw: string;
-}
-
 /** synth 消融校准统计 */
 export interface CalibrationStats {
   /** 假阳测试:原样列表 2 轮取交集后判官报的 miss 数(理想 0) */

@@ -31,6 +31,10 @@ export function computeCalibration(
 ): CalibrationStats {
   let recovered = 0;
   for (const r of ablated) {
+    // 注意:boxesMatch 采用宽松匹配(IoU≥0.3 或互相中心落入)。
+    // tpMiss 可能匹配到被抽行附近的 kept 元素(而非真正重发现被抽元素),
+    // 导致查全率(ablatedRecovered / ablatedCount)偏宽松。
+    // live 解读时知情;排他校验(确保命中的 miss 不对应任何 kept 行)留 backlog。
     if (r.bbox && tpMisses.some((m) => boxesMatch(r.bbox!, m.bbox))) recovered++;
   }
   return {
