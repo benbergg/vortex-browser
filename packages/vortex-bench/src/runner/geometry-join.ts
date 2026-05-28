@@ -39,3 +39,21 @@ export function joinByGeometry(
   }
   return { matches, unmatchedRows };
 }
+
+type Box4 = [number, number, number, number];
+
+/** IoU(交并比) */
+function iou(a: Box4, b: Box4): number {
+  const ax2 = a[0] + a[2], ay2 = a[1] + a[3];
+  const bx2 = b[0] + b[2], by2 = b[1] + b[3];
+  const ix = Math.max(0, Math.min(ax2, bx2) - Math.max(a[0], b[0]));
+  const iy = Math.max(0, Math.min(ay2, by2) - Math.max(a[1], b[1]));
+  const inter = ix * iy;
+  const uni = a[2] * a[3] + b[2] * b[3] - inter;
+  return uni <= 0 ? 0 : inter / uni;
+}
+
+/** 两 bbox 是否指同一元素:互相中心落入 或 IoU≥0.3 */
+export function boxesMatch(a: Box4, b: Box4): boolean {
+  return centerInside(a, b) || centerInside(b, a) || iou(a, b) >= 0.3;
+}
