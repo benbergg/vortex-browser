@@ -373,7 +373,35 @@ async function scanOneFrame(
           if (lbl) ariaLabelCount.set(lbl, (ariaLabelCount.get(lbl) ?? 0) + 1);
         }
 
+        // 给元素打唯一 data-vortex-rid 并返回该 selector。供两类情况复用：
+        // (1) light-DOM 路径选择器歧义；(2) shadow-internal 元素（路径在 shadow 边界断裂）。
+        // setAttribute 失败（非 Element / sandbox shadow）时返回 null，由调用方回退。
+        // 注意：ridCounter 在 try 块之前自增，失败时 ridCounter 仍自增一格，无害——该 rid 不写入任何元素。
+        function stampRid(el: Element): string | null {
+          const rid = ridPrefix + ridCounter++;
+          try {
+            el.setAttribute("data-vortex-rid", rid);
+            return `[data-vortex-rid="${rid}"]`;
+          } catch (err) {
+            try {
+              console.warn("[vortex] data-vortex-rid stamp failed", err);
+            } catch {
+              // console 也可能被 sandbox，忽略。
+            }
+            return null;
+          }
+        }
+
         function buildSelector(el: Element): string {
+          // shadow-internal 元素无法用 light-DOM CSS 路径定位（路径在 shadow 边界断裂，
+          // 退化为裸 tag）。始终戳唯一 rid，交由穿 shadow 的 resolver 命中。
+          if (el.getRootNode() instanceof ShadowRoot) {
+            const stamped = stampRid(el);
+            if (stamped) return stamped;
+            // 戳记失败：回退裸 tag（仍优于崩溃；下游 deep resolver 命中即可，
+            // 多命中则 SELECTOR_AMBIGUOUS）。
+            return el.tagName.toLowerCase();
+          }
           if (el.id && /^[a-zA-Z][\w-]*$/.test(el.id)) return `#${CSS.escape(el.id)}`;
           const testId =
             el.getAttribute("data-testid") || el.getAttribute("data-test");
@@ -431,22 +459,9 @@ async function scanOneFrame(
           // element with a unique data-vortex-rid attribute and return
           // that — guarantees a 1:1 selector for downstream act/extract.
           if (document.querySelectorAll(sel).length > 1) {
-            const rid = ridPrefix + ridCounter++;
-            try {
-              el.setAttribute("data-vortex-rid", rid);
-              return `[data-vortex-rid="${rid}"]`;
-            } catch (err) {
-              // setAttribute can throw on non-Element nodes or sandboxed
-              // shadows; fall through to the (still-ambiguous) path so
-              // the runtime gets a legible SELECTOR_AMBIGUOUS instead of
-              // crashing the scan. Surface the failure to console so it
-              // shows up in vortex_debug_read instead of disappearing.
-              try {
-                console.warn("[vortex] data-vortex-rid stamp failed", err);
-              } catch {
-                // console may itself be sandboxed; ignore.
-              }
-            }
+            const stamped = stampRid(el);
+            if (stamped) return stamped;
+            // 戳记失败 → 落到（仍歧义的）路径，让运行时得到可读的 SELECTOR_AMBIGUOUS。
           }
           return sel;
         }

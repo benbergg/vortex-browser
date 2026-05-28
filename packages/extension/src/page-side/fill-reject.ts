@@ -8,6 +8,10 @@
 // Detection: el.closest(p.closestSelector) — faithful copy of original dom.ts page-side logic.
 // `patterns` is injected by the host-side at call time; this module does not persist them.
 
+// Tier 2：shadow-internal 元素 light-DOM querySelector 找不到，用 queryDeep 兜底。
+// 不走 window.__vortexDomResolve，避免加载顺序依赖（与 actionability.ts 同策略）。
+import { queryDeep } from "./shadow-walk.js";
+
 (function () {
   if ((window as any).__vortexFillReject?.version === 1) return;
 
@@ -40,7 +44,14 @@
     sel: string,
     rejectPatterns: FillRejectPattern[],
   ): RejectResult {
-    const el = document.querySelector(sel) as HTMLElement | null;
+    // light-DOM 优先；落空时穿 open shadow 兜底，处理 Tier 2 shadow-internal ref 目标。
+    let el: HTMLElement | null;
+    try {
+      el = (document.querySelector(sel) ?? queryDeep(sel, document)) as HTMLElement | null;
+    } catch {
+      // 无效 CSS 选择器（如裸快照 ref）——视为未匹配，直接跳过守卫。
+      el = null;
+    }
     if (!el) return { rejected: false };
 
     for (const p of rejectPatterns) {

@@ -21,7 +21,7 @@ const RETRY_INTERVAL_MS: Record<ActionabilityFailure, number> = {
   OBSCURED: 100,
   DISABLED: 200,
   NOT_EDITABLE: -1,   // do not retry — semantic error, throw immediately
-  OPEN_SHADOW: -1,    // issue #27: open-shadow element is permanently unresolvable by CSS selector — fail fast, don't retry into TIMEOUT
+  OPEN_SHADOW: -1,    // Tier 2 起不再由 probe 发射：findInOpenShadow 已让 open-shadow 元素可解析。保留作安全网——若未来出现不可解析的 shadow 路径，此非重试分支避免 TIMEOUT 空转。
 };
 
 export interface WaitOptions extends CheckOptions {

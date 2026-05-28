@@ -5,9 +5,11 @@
 // 6 checks: Attached / Visible / Stable / ReceivesEvents / Enabled / Editable.
 //
 // Implementation constraints:
-// - IIFE self-contained, no external imports (chrome.scripting files = plain script injection)
+// - IIFE bundle：vite 打包时 inline 本地 page-side import（如 shadow-walk），运行时无外部依赖。
 // - Defensive guard against double-load (page-side-loader is idempotent, but defend here too)
 // - All checks are sync except Stable (which uses RAF double-sample)
+
+import { queryDeep, deepElementFromPoint } from "./shadow-walk.js";
 
 export type ActionabilityFailure =
   | "NOT_ATTACHED"
@@ -16,7 +18,8 @@ export type ActionabilityFailure =
   | "OBSCURED"
   | "DISABLED"
   | "NOT_EDITABLE"
-  // issue #27: 元素在 open shadow 内,querySelector 解析不到 → 永久不可解析,快速失败。
+  // Tier 2 起不再由 probe 发射：findInOpenShadow 已让 open-shadow 元素可解析。保留作安全网——
+  // 若未来出现不可解析的 shadow 路径，此非重试分支避免 TIMEOUT 空转。
   | "OPEN_SHADOW";
 
 export type ActionabilityResult =
@@ -34,37 +37,14 @@ export type ActionabilityResult =
     return el.isConnected;
   }
 
-  // issue #27: 当 document.querySelector(selector) 落空时,探测该 selector 是否匹配
-  // 某个 open shadow root 内的元素。observe 经 querySelectorAllDeep 穿 open shadow 发出
-  // 这类 ref(且 buildSelector 在 shadow 边界断裂,常退化为裸 tag 如 "button"),但本 probe
-  // 与 act/fill 的 querySelector 不穿 shadow → 永久解析不到。命中 → 让 host 快速失败
-  // (OPEN_SHADOW 非重试)给出诊断,而非 NOT_ATTACHED 空转满 timeout(act hang >5s)。
-  // 仅在 querySelector 落空(失败路径)时调用。
-  function existsInOpenShadow(selector: string): boolean {
-    function walk(root: Document | ShadowRoot, depth: number): boolean {
-      if (depth > 10) return false;
-      let nodes: NodeListOf<Element>;
-      try {
-        nodes = root.querySelectorAll("*");
-      } catch {
-        return false;
-      }
-      for (const host of Array.from(nodes)) {
-        const sr = host.shadowRoot;
-        if (!sr) continue;
-        try {
-          if (sr.querySelector(selector)) return true;
-        } catch {
-          // selector 在该 scope 内非法 CSS — 忽略,继续
-        }
-        if (walk(sr, depth + 1)) return true;
-      }
-      return false;
-    }
+  // observe 经 querySelectorAllDeep 穿 open shadow 发出 shadow-internal ref（buildSelector
+  // 戳 data-vortex-rid）。light-DOM querySelector 看不到这些元素，故落空时用穿 shadow 的
+  // queryDeep 兜底解析。closed shadow 仍不可达（CE spec）。
+  function findInOpenShadow(selector: string): Element | null {
     try {
-      return walk(document, 0);
+      return queryDeep(selector, document);
     } catch {
-      return false;
+      return null;
     }
   }
 
@@ -134,7 +114,7 @@ export type ActionabilityResult =
     cx: number,
     cy: number,
   ): { ok: boolean; blocker?: string } {
-    const hit = document.elementFromPoint(cx, cy);
+    const hit = deepElementFromPoint(cx, cy);
     if (!hit) return { ok: false, blocker: "elementFromPoint=null" };
     if (hit === el || el.contains(hit) || hit.contains(el)) return { ok: true };
     // Backdrop compatibility: when an overlay (md-select dropdown / md-dialog /
@@ -231,14 +211,13 @@ export type ActionabilityResult =
     // chrome.scripting result triggering `null.ok` JS_EXECUTION_ERROR.
     let el: Element | null;
     try {
-      el = document.querySelector(selector);
+      // light-DOM 优先；落空时穿 open shadow 兜底（Tier 2：shadow-internal 元素现可操作）。
+      el = document.querySelector(selector) ?? findInOpenShadow(selector);
     } catch {
       el = null;
     }
     if (!el) {
-      // querySelector 落空:可能是元素未挂载(transient,可重试),也可能在 open shadow
-      // 内(永久不可解析,issue #27)。区分二者——后者快速失败给诊断,而非空转满 timeout。
-      if (existsInOpenShadow(selector)) return { ok: false, reason: "OPEN_SHADOW" };
+      // 真实未挂载 / 仅存在于 closed shadow → 可重试（transient）。
       return { ok: false, reason: "NOT_ATTACHED" };
     }
     if (!isAttached(el)) return { ok: false, reason: "NOT_ATTACHED" };
@@ -266,7 +245,7 @@ export type ActionabilityResult =
   async function probeStable(selector: string): Promise<{ ok: boolean }> {
     let el: Element | null;
     try {
-      el = document.querySelector(selector);
+      el = document.querySelector(selector) ?? findInOpenShadow(selector);
     } catch {
       el = null;
     }

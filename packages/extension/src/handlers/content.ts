@@ -3,6 +3,7 @@ import type { ActionRouter } from "../lib/router.js";
 import { getActiveTabId, buildExecuteTarget, ensureFrameAttached } from "../lib/tab-utils.js";
 import { resolveTargetOptional } from "../lib/resolve-target.js";
 import { truncateWithTextTrailer, truncateWithHtmlTrailer } from "../lib/truncate.js";
+import { loadPageSideModule } from "../adapter/page-side-loader.js";
 
 export function registerContentHandlers(router: ActionRouter): void {
   router.registerAll({
@@ -20,6 +21,8 @@ export function registerContentHandlers(router: ActionRouter): void {
       const tid = await getActiveTabId(__t?.boundTabId ?? (args.tabId as number | undefined) ?? tabId);
       const frameId = __t?.boundFrameId ?? (args.frameId as number | undefined);
       if (frameId != null) await ensureFrameAttached(tid, frameId);
+      // 加载 dom-resolve 模块，使 inline func 能通过 shadow 穿透解析 selector
+      await loadPageSideModule(tid, frameId, "dom-resolve");
       const results = await chrome.scripting.executeScript({
         target: buildExecuteTarget(tid, frameId),
         func: (sel: string | null, opts: { wantValue: boolean; wantAttrs: boolean; maxDepth: number }) => {
@@ -152,7 +155,7 @@ export function registerContentHandlers(router: ActionRouter): void {
             };
 
             const root: Element | null = sel
-              ? (document.querySelector(sel) as Element | null)
+              ? ((window as any).__vortexDomResolve.queryDeep(sel) as Element | null)
               : document.body;
             if (sel && !root) return { error: `Element not found: ${sel}` };
             if (!root) return { result: "" };
@@ -194,12 +197,14 @@ export function registerContentHandlers(router: ActionRouter): void {
       const tid = await getActiveTabId(args.tabId as number | undefined ?? tabId);
       const frameId = args.frameId as number | undefined;
       if (frameId != null) await ensureFrameAttached(tid, frameId);
+      // 加载 dom-resolve 模块，使 inline func 能通过 shadow 穿透解析 selector
+      await loadPageSideModule(tid, frameId, "dom-resolve");
       const results = await chrome.scripting.executeScript({
         target: buildExecuteTarget(tid, frameId),
         func: (sel: string | undefined) => {
           try {
             if (sel) {
-              const el = document.querySelector(sel);
+              const el = (window as any).__vortexDomResolve.queryDeep(sel);
               if (!el) return { error: `Element not found: ${sel}` };
               return { result: el.outerHTML };
             }
@@ -329,11 +334,13 @@ export function registerContentHandlers(router: ActionRouter): void {
       const tid = await getActiveTabId(args.tabId as number | undefined ?? tabId);
       const frameId = args.frameId as number | undefined;
       if (frameId != null) await ensureFrameAttached(tid, frameId);
+      // 加载 dom-resolve 模块，使 inline func 能通过 shadow 穿透解析 selector
+      await loadPageSideModule(tid, frameId, "dom-resolve");
       const results = await chrome.scripting.executeScript({
         target: buildExecuteTarget(tid, frameId),
         func: (sel: string) => {
           try {
-            const el = document.querySelector(sel);
+            const el = (window as any).__vortexDomResolve.queryDeep(sel);
             if (!el) return { error: `Element not found: ${sel}` };
             return { result: el.textContent };
           } catch (err) {
@@ -355,11 +362,13 @@ export function registerContentHandlers(router: ActionRouter): void {
       const tid = await getActiveTabId(args.tabId as number | undefined ?? tabId);
       const frameId = args.frameId as number | undefined;
       if (frameId != null) await ensureFrameAttached(tid, frameId);
+      // 加载 dom-resolve 模块，使 inline func 能通过 shadow 穿透解析 selector
+      await loadPageSideModule(tid, frameId, "dom-resolve");
       const results = await chrome.scripting.executeScript({
         target: buildExecuteTarget(tid, frameId),
         func: (sel: string, props: string[] | undefined) => {
           try {
-            const el = document.querySelector(sel);
+            const el = (window as any).__vortexDomResolve.queryDeep(sel);
             if (!el) return { error: `Element not found: ${sel}` };
             const style = window.getComputedStyle(el);
             const defaultProps = [

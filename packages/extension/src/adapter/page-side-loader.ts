@@ -13,7 +13,8 @@ export type PageSideModule =
   | "actionability"
   | "fill-reject"
   | "commit-checkbox-group"
-  | "commit-select";
+  | "commit-select"
+  | "dom-resolve";
 
 const loadedModules = new Map<string, true | Promise<void>>();
 
