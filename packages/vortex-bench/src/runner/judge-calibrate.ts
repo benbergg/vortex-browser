@@ -3,7 +3,7 @@
 
 import type { ObserveRow } from "../scan-types.js";
 import type { ClaimedMiss, CalibrationStats } from "../judge-types.js";
-import { boxesMatch } from "./geometry-join.js";
+import { labelsMatch } from "./judge-match.js";
 
 /** 合格行 = 主 frame + 有 bbox;按面积降序取前 k 抽掉(确定性,可复现) */
 export function ablateRows(rows: ObserveRow[], k: number): { kept: ObserveRow[]; ablated: ObserveRow[] } {
@@ -31,11 +31,11 @@ export function computeCalibration(
 ): CalibrationStats {
   let recovered = 0;
   for (const r of ablated) {
-    // 注意:boxesMatch 采用宽松匹配(IoU≥0.3 或互相中心落入)。
-    // tpMiss 可能匹配到被抽行附近的 kept 元素(而非真正重发现被抽元素),
-    // 导致查全率(ablatedRecovered / ablatedCount)偏宽松。
-    // live 解读时知情;排他校验(确保命中的 miss 不对应任何 kept 行)留 backlog。
-    if (r.bbox && tpMisses.some((m) => boxesMatch(r.bbox!, m.bbox))) recovered++;
+    // label exact 匹配:被抽行的 accessible name 与判官报的 miss label 规范化后相等。
+    // 替代旧 bbox 匹配的原因:Doubao/MiniMax 等多模态模型 bbox 在归一化坐标系
+    // 不兼容 viewport 像素。代价:同 label 多元素时 recovered 计数会偏宽松
+    // (任一同名 kept 行匹配也算),live 解读时知情;排他校验留 backlog。
+    if (tpMisses.some((m) => labelsMatch(m.label, r.name))) recovered++;
   }
   return {
     fpConfirmed: fpMisses.length,

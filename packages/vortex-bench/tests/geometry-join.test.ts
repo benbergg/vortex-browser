@@ -1,6 +1,6 @@
 // packages/vortex-bench/tests/geometry-join.test.ts
 import { describe, it, expect } from "vitest";
-import { centerInside, joinByGeometry } from "../src/runner/geometry-join.js";
+import { centerInside, joinByGeometry, boxesMatch } from "../src/runner/geometry-join.js";
 import type { ObserveRow, OracleRect } from "../src/scan-types.js";
 
 function row(ref: string, bbox: ObserveRow["bbox"]): ObserveRow {
@@ -13,6 +13,17 @@ describe("centerInside", () => {
   });
   it("bbox 中心在 rect 外 → false", () => {
     expect(centerInside([200, 200, 20, 20], [0, 0, 100, 100])).toBe(false);
+  });
+});
+
+// boxesMatch 不再被 judge-consistency / judge-calibrate 调用(已切 label-based),
+// 但函数本身保留作 utility(future 可能用于同坐标系 bbox 对齐场景)。
+describe("boxesMatch (utility,judge 路径已切 label-based)", () => {
+  it("中心互落入 → true", () => {
+    expect(boxesMatch([0, 0, 100, 100], [10, 10, 80, 80])).toBe(true);
+  });
+  it("完全不相交 → false", () => {
+    expect(boxesMatch([0, 0, 10, 10], [500, 500, 10, 10])).toBe(false);
   });
 });
 
