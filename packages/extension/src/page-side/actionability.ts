@@ -75,6 +75,31 @@ export type ActionabilityResult =
     return true;
   }
 
+  // content-visibility:auto 处于 skip 态(离屏)的元素被 checkVisibility 计为不可见,
+  // 但元素一旦滚进视口就渲染、完全可交互。判别式:contentVisibilityAuto:true 时不可见
+  // 而 contentVisibilityAuto:false 时可见 ⇒ 仅因 cv-auto skip(display:none 等真隐藏两
+  // 变体皆 false,不命中)。滚进视口 un-skip,使后续 visible/stable/occlusion 检查作用于
+  // 已渲染元素;否则死锁 NOT_VISIBLE(或空 rect 中心 hit-test→OBSCURED)。2026-06-01 R2。
+  function unskipIfContentVisibilityAuto(el: Element): void {
+    const cv = el as unknown as {
+      checkVisibility?: (opts: Record<string, boolean>) => boolean;
+      scrollIntoView?: (opts: ScrollIntoViewOptions) => void;
+    };
+    if (typeof cv.checkVisibility !== "function") return;
+    const base = {
+      checkOpacity: false,
+      opacityProperty: false,
+      visibilityProperty: true,
+      checkVisibilityCSS: true,
+    };
+    const skipped =
+      cv.checkVisibility({ ...base, contentVisibilityAuto: true }) === false &&
+      cv.checkVisibility({ ...base, contentVisibilityAuto: false }) === true;
+    if (skipped && typeof cv.scrollIntoView === "function") {
+      cv.scrollIntoView({ block: "center", inline: "center" });
+    }
+  }
+
   function isEnabled(el: Element): boolean {
     if (!(el instanceof HTMLElement)) return true;
     const aria = el.getAttribute("aria-disabled");
@@ -250,6 +275,7 @@ export type ActionabilityResult =
       return { ok: false, reason: "NOT_ATTACHED" };
     }
     if (!isAttached(el)) return { ok: false, reason: "NOT_ATTACHED" };
+    unskipIfContentVisibilityAuto(el); // cv-auto skip 死锁防护(R2):先滚动 un-skip
     if (!isVisible(el)) return { ok: false, reason: "NOT_VISIBLE" };
     if (!isEnabled(el)) return { ok: false, reason: "DISABLED" };
     if (needsEditable) {
