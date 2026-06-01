@@ -37,11 +37,15 @@ describe("fuzz-generate", () => {
     expect(ALL_PRIMITIVE_KINDS).toHaveLength(9);
   });
 
-  it("srcdoc-button names are unique within a page (name-join requires it)", () => {
-    for (let seed = 0; seed < 200; seed++) {
+  it("srcdoc-button names are globally unique on a page (no collision with any other primitive)", () => {
+    for (let seed = 0; seed < 300; seed++) {
       const prims = collectPrimitives(generate(seed).root);
       const srcdocNames = prims.filter((p) => p.kind === "srcdoc-button").map((p) => p.name);
+      const otherNames = new Set(prims.filter((p) => p.kind !== "srcdoc-button").map((p) => p.name));
+      // srcdoc names unique among themselves
       expect(new Set(srcdocNames).size).toEqual(srcdocNames.length);
+      // and disjoint from every other primitive's name
+      for (const n of srcdocNames) expect(otherNames.has(n)).toBe(false);
     }
   });
 });

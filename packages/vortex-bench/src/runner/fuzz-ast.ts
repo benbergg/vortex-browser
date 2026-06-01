@@ -92,10 +92,13 @@ export function deriveManifest(page: FuzzPage, fixture: string, path: string): S
   const entries: ManifestEntry[] = prims.map((p) => {
     const hidden = isUnderHidden(page.root, p.id) === true;
     const joinBy: "geometry" | "name" = p.kind === "srcdoc-button" ? "name" : "geometry";
+    // srcdoc-button 用 name-join,没有 precision 判定路径,iframe 外层可见性与内部
+    // 渲染相互独立——断言 interactive:false 会产生不可测的误报/误否,始终置 true。
+    const interactive = p.kind === "srcdoc-button" ? true : !hidden;
     return {
       id: p.id,
-      // 隐藏子树下的原语:observe 不该识别 → interactive:false(测 precision/误报)
-      interactive: !hidden,
+      // 隐藏子树下的非 srcdoc 原语:observe 不该识别 → interactive:false(测 precision/误报)
+      interactive,
       expectedName: p.name,
       expectedRole: null,
       pattern: `fuzz-${p.kind}`,

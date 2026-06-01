@@ -26,10 +26,15 @@ export function generate(seed: number): FuzzPage {
     primitives.push({ type: "primitive", kind, id: nextId(), name: r.pick(NAME_POOL) });
   }
 
-  // srcdoc-button 用 joinBy:"name" 匹配,同一页重名会导致第二个原语的召回失败被静默吞掉。
-  // 后处理:确保同一页内所有 srcdoc-button 的名称互不重复。
-  // 只对 srcdoc-button 处理,其他原语用几何 join,重名无害。
+  // srcdoc-button 用 joinBy:"name" 匹配,同一页任何原语与 srcdoc-button 重名都会导致
+  // name-join 被主 frame 元素静默命中,造成召回失败被吞掉。
+  // 后处理:确保同一页内所有 srcdoc-button 的名称全局唯一(不与任何其他原语重名)。
+  // 非 srcdoc 原语之间可以重名(几何 join,无害)。
   {
+    // 收集所有非 srcdoc 原语已占用的名称(全页保留集)
+    const reservedNames = new Set<string>(
+      primitives.filter((p) => p.kind !== "srcdoc-button").map((p) => p.name),
+    );
     const usedSrcdocNames = new Set<string>();
     // 构建扩展名池:原池 10 个,加数字后缀保底(原语最多 8 个,一般不会耗尽)
     const extendedPool = [...NAME_POOL];
@@ -38,12 +43,13 @@ export function generate(seed: number): FuzzPage {
     }
     for (const prim of primitives) {
       if (prim.kind !== "srcdoc-button") continue;
-      if (!usedSrcdocNames.has(prim.name)) {
+      // 名称必须不在已占用 srcdoc 集合里,也不在非 srcdoc 原语名集合里
+      if (!usedSrcdocNames.has(prim.name) && !reservedNames.has(prim.name)) {
         usedSrcdocNames.add(prim.name);
         continue;
       }
-      // 名称碰撞:用 PRNG 从未用候选里再选一个
-      const candidates = extendedPool.filter((n) => !usedSrcdocNames.has(n));
+      // 名称碰撞:从扩展名池里选一个既未被 srcdoc 占用、也未被其他原语保留的候选
+      const candidates = extendedPool.filter((n) => !usedSrcdocNames.has(n) && !reservedNames.has(n));
       prim.name = candidates.length > 0 ? r.pick(candidates) : `${prim.name}-${usedSrcdocNames.size}`;
       usedSrcdocNames.add(prim.name);
     }

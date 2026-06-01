@@ -65,6 +65,15 @@ describe("fuzz-ast deriveManifest", () => {
     const m = deriveManifest(noSrcdoc, "f", "/p.html");
     expect(m.frames).toBe("main");
   });
+  it("srcdoc-button under a hidden wrapper stays interactive:true (name-join can't test precision)", () => {
+    const p: FuzzPage = { seed: 4, root: { type: "noise", tag: "div", className: "n", children: [
+      { type: "noise", tag: "div", className: "h", hidden: "display-none", children: [
+        { type: "primitive", kind: "srcdoc-button", id: "s1", name: "子" },
+      ]},
+    ]}};
+    const m = deriveManifest(p, "f", "/p.html");
+    expect(m.entries.find((e) => e.id === "s1")!.interactive).toBe(true);
+  });
   it("aria-hidden wrapper does NOT make primitive non-interactive (still clickable)", () => {
     const ariaPage: FuzzPage = { seed: 3, root: { type: "noise", tag: "div", className: "n", children: [
       { type: "noise", tag: "div", className: "ah", hidden: "aria-hidden", children: [

@@ -626,13 +626,13 @@ async function cmdFuzz(args: string[]): Promise<number> {
   const runOpts = { mcpBin, playgroundUrl: url, synthDir: SYNTH_DIR };
 
   let seeds: number[];
-  if (seedIdx >= 0 && args[seedIdx + 1]) {
-    const seedVal = Number(args[seedIdx + 1]);
-    if (!Number.isFinite(seedVal)) {
-      process.stderr.write(`[vortex-bench] --seed 需要有效整数，得到: ${args[seedIdx + 1]}\n`);
+  if (seedIdx >= 0) {
+    const seedRaw = args[seedIdx + 1];
+    if (!seedRaw || !Number.isFinite(Number(seedRaw))) {
+      process.stderr.write(`[vortex-bench] --seed 需要有效整数，得到: ${seedRaw ?? "(无值)"}\n`);
       return 1;
     }
-    seeds = [seedVal];
+    seeds = [Number(seedRaw)];
   } else {
     const rawN = seedsIdx >= 0 && args[seedsIdx + 1] ? Number(args[seedsIdx + 1]) : 50;
     if (!Number.isInteger(rawN) || rawN < 1) {
@@ -671,7 +671,12 @@ async function cmdFuzz(args: string[]): Promise<number> {
           return extractDiscrepancies(p.seed, s).some((f) => f.cls === "structural");
         };
         const min = await shrink(page, stillFails);
-        const res = await promote(min, SYNTH_DIR, structural[0].kind);
+        // 收缩后重新扫描以获取最小页实际的 discrepancy kind（收缩可能改变原语组合）
+        const minScan = await runPage(min, runOpts);
+        const minFindings = extractDiscrepancies(min.seed, minScan);
+        const minStructural = minFindings.filter((f) => f.cls === "structural");
+        const promoteKind = minStructural.length > 0 ? minStructural[0].kind : structural[0].kind;
+        const res = await promote(min, SYNTH_DIR, promoteKind);
         if (res.promoted) promoted.push(res.fixture);
         process.stdout.write(`✗ seed=${seed} structural=${structural.length} → ${res.promoted ? `沉淀 ${res.fixture}` : `已存在 ${res.fixture}`}\n`);
       } else {

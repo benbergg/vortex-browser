@@ -58,10 +58,12 @@ export async function runSelfTest(
   const quarantined: PrimitiveKind[] = [];
   let idx = 0;
   for (const kind of ALL_PRIMITIVE_KINDS) {
+    // 每个单体页用 kind 作为名称,确保 srcdoc-button 的 name-join 不会与其他页面产生
+    // 歧义命中(所有 solo 页同名 "保存" 会让 srcdoc 的 name-join 结果不可区分)
     const page: FuzzPage = {
       seed: -1 - idx++,
       root: { type: "noise", tag: "div", className: "solo",
-        children: [{ type: "primitive", kind, id: "solo", name: "保存" }] },
+        children: [{ type: "primitive", kind, id: "solo", name: kind }] },
     };
     const scan = await runPage(page, opts);
     scans.push(scan);
