@@ -389,9 +389,25 @@ async function scanOneFrame(
             const content = el.querySelector(":scope > .el-tree-node__content") as HTMLElement | null;
             if (content) return normName(content.textContent);
           }
+          // <label> 包裹的 labelable 控件(input/select/textarea)若自带 aria-label,
+          // 该 aria-label 即控件——也即这个可点 <label>——的可达名。label 的
+          // textContent 此时常是快捷键角标(Excalidraw 工具栏 "1".."0")或为空,会盖过
+          // 真名,故优先取嵌套控件 aria-label。Element Plus el-radio/el-checkbox 的
+          // 嵌套 input 无 aria-label(可见文本在兄弟 span),不命中此分支,仍回退到
+          // 下面的 textContent 取 "北京" 等,无回归。(2026-06-01 excalidraw dogfood)
+          if (el.tagName === "LABEL") {
+            const ctrl = el.querySelector("input, select, textarea");
+            const ctrlAria = ctrl?.getAttribute("aria-label");
+            if (ctrlAria) return normName(ctrlAria);
+          }
           const text = normName(el.textContent);
           if (text) return text;
-          // 仅 svg/img 子且无文本时，从 className 兜底（如 `_closeIcon_1ygkr_39` → `closeIcon`）
+          // title 属性是 accname 规范的末位兜底名源:纯图标按钮常只有 title
+          // (Excalidraw "更多工具" 触发器只有 title + 一个 svg)。放在 textContent
+          // 之后、className 之前——有真文本时不抢,纯图标时优于 className hash。
+          const titleAttr = el.getAttribute("title");
+          if (titleAttr) return normName(titleAttr);
+          // 仅 svg/img 子且无文本无 title 时，从 className 兜底（如 `_closeIcon_1ygkr_39` → `closeIcon`）
           return iconNameFromClass(el);
         }
 
