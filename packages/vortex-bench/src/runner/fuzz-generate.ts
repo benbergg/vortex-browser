@@ -26,6 +26,29 @@ export function generate(seed: number): FuzzPage {
     primitives.push({ type: "primitive", kind, id: nextId(), name: r.pick(NAME_POOL) });
   }
 
+  // srcdoc-button 用 joinBy:"name" 匹配,同一页重名会导致第二个原语的召回失败被静默吞掉。
+  // 后处理:确保同一页内所有 srcdoc-button 的名称互不重复。
+  // 只对 srcdoc-button 处理,其他原语用几何 join,重名无害。
+  {
+    const usedSrcdocNames = new Set<string>();
+    // 构建扩展名池:原池 10 个,加数字后缀保底(原语最多 8 个,一般不会耗尽)
+    const extendedPool = [...NAME_POOL];
+    for (let i = 0; extendedPool.length < primitives.length + NAME_POOL.length; i++) {
+      extendedPool.push(`${NAME_POOL[i % NAME_POOL.length]}-${i}`);
+    }
+    for (const prim of primitives) {
+      if (prim.kind !== "srcdoc-button") continue;
+      if (!usedSrcdocNames.has(prim.name)) {
+        usedSrcdocNames.add(prim.name);
+        continue;
+      }
+      // 名称碰撞:用 PRNG 从未用候选里再选一个
+      const candidates = extendedPool.filter((n) => !usedSrcdocNames.has(n));
+      prim.name = candidates.length > 0 ? r.pick(candidates) : `${prim.name}-${usedSrcdocNames.size}`;
+      usedSrcdocNames.add(prim.name);
+    }
+  }
+
   // 噪声叶子/容器构造:深度受限,避免爆炸
   let classCounter = 0;
   const nextClass = (): string => `nx${classCounter++}`;

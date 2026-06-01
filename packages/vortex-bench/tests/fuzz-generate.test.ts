@@ -36,4 +36,12 @@ describe("fuzz-generate", () => {
   it("ALL_PRIMITIVE_KINDS covers the 9 starter primitives", () => {
     expect(ALL_PRIMITIVE_KINDS).toHaveLength(9);
   });
+
+  it("srcdoc-button names are unique within a page (name-join requires it)", () => {
+    for (let seed = 0; seed < 200; seed++) {
+      const prims = collectPrimitives(generate(seed).root);
+      const srcdocNames = prims.filter((p) => p.kind === "srcdoc-button").map((p) => p.name);
+      expect(new Set(srcdocNames).size).toEqual(srcdocNames.length);
+    }
+  });
 });

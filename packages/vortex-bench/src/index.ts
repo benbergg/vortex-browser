@@ -32,7 +32,7 @@ import { runPage, runSelfTest, cleanupTmp, extractDiscrepancies, selfTestPassed 
 import { shrink } from "./runner/fuzz-shrink.js";
 import { promote } from "./runner/fuzz-promote.js";
 import { renderFuzzMarkdown } from "./fuzz-report.js";
-import type { FuzzReport, FuzzFinding, FuzzPage } from "./fuzz-types.js";
+import type { FuzzReport, FuzzFinding, FuzzPage, PrimitiveKind } from "./fuzz-types.js";
 
 const USAGE = `vortex-bench <command>
 
@@ -627,45 +627,60 @@ async function cmdFuzz(args: string[]): Promise<number> {
 
   let seeds: number[];
   if (seedIdx >= 0 && args[seedIdx + 1]) {
-    seeds = [Number(args[seedIdx + 1])];
+    const seedVal = Number(args[seedIdx + 1]);
+    if (!Number.isFinite(seedVal)) {
+      process.stderr.write(`[vortex-bench] --seed 需要有效整数，得到: ${args[seedIdx + 1]}\n`);
+      return 1;
+    }
+    seeds = [seedVal];
   } else {
-    const n = seedsIdx >= 0 && args[seedsIdx + 1] ? Number(args[seedsIdx + 1]) : 50;
-    seeds = Array.from({ length: n }, (_, i) => i);
+    const rawN = seedsIdx >= 0 && args[seedsIdx + 1] ? Number(args[seedsIdx + 1]) : 50;
+    if (!Number.isInteger(rawN) || rawN < 1) {
+      process.stderr.write(`[vortex-bench] --seeds 需要正整数，得到: ${args[seedsIdx + 1]}\n`);
+      return 1;
+    }
+    seeds = Array.from({ length: rawN }, (_, i) => i);
   }
 
   process.stdout.write(`[vortex-bench] fuzz  playground=${url}  seeds=${seeds.length}\n`);
 
-  process.stdout.write(`[vortex-bench] 原语自检...\n`);
-  const { scans: soloScans, quarantined } = await runSelfTest(runOpts);
-  const selfTestOk = selfTestPassed(soloScans);
-  if (!selfTestOk) {
-    process.stderr.write(`⚠ 自检失败,隔离原语: ${quarantined.join(", ")}(继续但复合发现可能含这些原语的噪声)\n`);
-  }
-
   const findings: FuzzFinding[] = [];
   const promoted: string[] = [];
-  for (const seed of seeds) {
-    const page = generate(seed);
-    const scan = await runPage(page, runOpts);
-    const fs = extractDiscrepancies(seed, scan);
-    findings.push(...fs);
+  let selfTestOk = true;
+  let quarantined: PrimitiveKind[] = [];
 
-    const structural = fs.filter((f) => f.cls === "structural");
-    if (structural.length > 0 && !noPromote) {
-      const stillFails = async (p: FuzzPage): Promise<boolean> => {
-        const s = await runPage(p, runOpts);
-        return extractDiscrepancies(p.seed, s).some((f) => f.cls === "structural");
-      };
-      const min = await shrink(page, stillFails);
-      const res = await promote(min, SYNTH_DIR, structural[0].kind);
-      if (res.promoted) promoted.push(res.fixture);
-      process.stdout.write(`✗ seed=${seed} structural=${structural.length} → ${res.promoted ? `沉淀 ${res.fixture}` : `已存在 ${res.fixture}`}\n`);
-    } else {
-      process.stdout.write(`${fs.length === 0 ? "✓" : "·"} seed=${seed} findings=${fs.length}\n`);
+  try {
+    process.stdout.write(`[vortex-bench] 原语自检...\n`);
+    const selfTestResult = await runSelfTest(runOpts);
+    quarantined = selfTestResult.quarantined;
+    selfTestOk = selfTestPassed(selfTestResult.scans);
+    if (!selfTestOk) {
+      process.stderr.write(`⚠ 自检失败,隔离原语: ${quarantined.join(", ")}(继续但复合发现可能含这些原语的噪声)\n`);
     }
-  }
 
-  await cleanupTmp(SYNTH_DIR);
+    for (const seed of seeds) {
+      const page = generate(seed);
+      const scan = await runPage(page, runOpts);
+      const fs = extractDiscrepancies(seed, scan);
+      findings.push(...fs);
+
+      const structural = fs.filter((f) => f.cls === "structural");
+      if (structural.length > 0 && !noPromote) {
+        const stillFails = async (p: FuzzPage): Promise<boolean> => {
+          const s = await runPage(p, runOpts);
+          return extractDiscrepancies(p.seed, s).some((f) => f.cls === "structural");
+        };
+        const min = await shrink(page, stillFails);
+        const res = await promote(min, SYNTH_DIR, structural[0].kind);
+        if (res.promoted) promoted.push(res.fixture);
+        process.stdout.write(`✗ seed=${seed} structural=${structural.length} → ${res.promoted ? `沉淀 ${res.fixture}` : `已存在 ${res.fixture}`}\n`);
+      } else {
+        process.stdout.write(`${fs.length === 0 ? "✓" : "·"} seed=${seed} findings=${fs.length}\n`);
+      }
+    }
+  } finally {
+    await cleanupTmp(SYNTH_DIR);
+  }
 
   const report: FuzzReport = {
     generatedAt: new Date().toISOString(),
