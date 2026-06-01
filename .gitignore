@@ -9,6 +9,9 @@ dist/
 .idea/
 .serena/
 .context/
+.cursor/
+.codegraph/
+collect.log
 
 # 计划文档（按全局规范，写到知识库 12-Projects/，不入仓库）
 docs/plans/
