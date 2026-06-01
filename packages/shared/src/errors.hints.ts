@@ -212,6 +212,11 @@ export const DEFAULT_ERROR_META: Record<VtxErrorCode, VtxErrorMeta> = {
     recoverable: false,
   },
 
+  NO_MATCHING_OPTION: {
+    hint: "The select value matched no <option> by value attribute or visible text. Read the available options (listed in context.extras.available) and retry vortex_act select with an exact option value or label.",
+    recoverable: true,
+  },
+
   // -- L4 Task layer（@since 0.6.0 PR #4）--
   INVALID_TARGET: {
     hint: "Use a target ref string like @e3 (returned from vortex_observe) or a CSS selector. The Descriptor object form arrives in v0.6.x once the resolver lands.",

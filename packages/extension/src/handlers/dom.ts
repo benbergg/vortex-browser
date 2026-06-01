@@ -587,7 +587,27 @@ export function registerDomHandlers(
               };
             }
             // === select 操作 ===
-            el.value = val;
+            // 原生 <select>:el.value=val 仅按 option 的 value 属性匹配,且选不中时
+            // value 静默变 "" / selectedIndex 变 -1。调用方(尤其 agent)常只看得到可见
+            // 文本(observe 不枚举 option),故按 value → 可见文本(label) → label 属性
+            // 依次回退;全不中则报错而非假成功(2026-06-01 native-select dogfood)。
+            const opts = Array.from(el.options);
+            const norm = (s: string) => s.replace(/\s+/g, " ").trim();
+            const target = norm(String(val));
+            let opt =
+              opts.find((o) => o.value === val) ??
+              opts.find((o) => norm(o.text) === target) ??
+              opts.find((o) => o.label != null && norm(o.label) === target);
+            if (!opt) {
+              return {
+                errorCode: "NO_MATCHING_OPTION",
+                error: `<select> ${sel} has no option matching "${val}" (by value or visible text)`,
+                extras: {
+                  available: opts.map((o) => o.value || o.text).slice(0, 30),
+                },
+              };
+            }
+            el.value = opt.value;
             el.dispatchEvent(new Event("change", { bubbles: true }));
             return { result: { success: true, value: el.value } };
           } catch (err) {

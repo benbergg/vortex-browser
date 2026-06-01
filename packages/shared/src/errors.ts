@@ -60,6 +60,10 @@ export const VtxErrorCode = {
   ACTION_FAILED_ALL_PATHS: "ACTION_FAILED_ALL_PATHS",
   /** Drag operation but CDP unavailable */
   DRAG_REQUIRES_CDP: "DRAG_REQUIRES_CDP",
+  /** select action: 传入的 value 在 <select> 的 option 里既不匹配 value 属性、
+   *  也不匹配可见文本(label)。避免静默选不中却返回 success。
+   *  context.extras.available 带可选项清单供 agent 重新选取。*/
+  NO_MATCHING_OPTION: "NO_MATCHING_OPTION",
 
   // -- L3 Reasoning（9 类：8 @since 0.6.0 PR #3 + OPEN_SHADOW_DOM @issue #27）--
   /** a11y tree 不可用（CSP / sandboxed page），无法 getFullAXTree。*/
