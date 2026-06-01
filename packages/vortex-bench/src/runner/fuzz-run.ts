@@ -2,8 +2,13 @@
 // fuzz 跑一页:写临时 html → 跑 scanFixture → 提取分歧。
 // 纯函数(extractDiscrepancies / selfTestPassed)离线可测;runPage 需活 MCP(后续任务追加)。
 
+import { writeFile, mkdir, rm } from "node:fs/promises";
+import { resolve } from "node:path";
 import type { FixtureScanResult } from "../scan-types.js";
-import type { FuzzFinding } from "../fuzz-types.js";
+import type { FuzzFinding, FuzzPage, PrimitiveKind } from "../fuzz-types.js";
+import { scanFixture, type ScanOptions } from "./scan.js";
+import { renderHtml, deriveManifest } from "./fuzz-ast.js";
+import { ALL_PRIMITIVE_KINDS } from "./fuzz-generate.js";
 
 const STRUCTURAL_KINDS = new Set(["recall-miss", "precision-miss"]);
 
@@ -24,4 +29,50 @@ export function extractDiscrepancies(seed: number, scan: FixtureScanResult): Fuz
 /** 原语单体自检:任一单体页出结构性 finding → 自检失败(契约未对齐/原语自身 bug) */
 export function selfTestPassed(soloScans: FixtureScanResult[]): boolean {
   return soloScans.every((s) => !s.findings.some((f) => STRUCTURAL_KINDS.has(f.kind)));
+}
+
+export interface FuzzRunOptions extends ScanOptions {
+  /** synth 目录绝对路径(临时页写这里的 .fuzz-tmp/) */
+  synthDir: string;
+}
+
+const TMP_SUBDIR = ".fuzz-tmp";
+
+/** 把一页写到临时目录,跑 scanFixture,返回结果。调用方负责提取分歧。 */
+export async function runPage(page: FuzzPage, opts: FuzzRunOptions): Promise<FixtureScanResult> {
+  const tmpDir = resolve(opts.synthDir, TMP_SUBDIR);
+  await mkdir(tmpDir, { recursive: true });
+  const fname = `${page.seed}.html`;
+  const fixture = `fuzz-${page.seed}`;
+  const relPath = `/synth/${TMP_SUBDIR}/${fname}`;
+  await writeFile(resolve(tmpDir, fname), renderHtml(page), "utf-8");
+  const manifest = deriveManifest(page, fixture, relPath);
+  return scanFixture(manifest, { mcpBin: opts.mcpBin, playgroundUrl: opts.playgroundUrl });
+}
+
+/** 每个原语生成无噪声单体页,各跑一次 scan → 用于自检门 */
+export async function runSelfTest(
+  opts: FuzzRunOptions,
+): Promise<{ scans: FixtureScanResult[]; quarantined: PrimitiveKind[] }> {
+  const scans: FixtureScanResult[] = [];
+  const quarantined: PrimitiveKind[] = [];
+  let idx = 0;
+  for (const kind of ALL_PRIMITIVE_KINDS) {
+    const page: FuzzPage = {
+      seed: -1 - idx++,
+      root: { type: "noise", tag: "div", className: "solo",
+        children: [{ type: "primitive", kind, id: "solo", name: "保存" }] },
+    };
+    const scan = await runPage(page, opts);
+    scans.push(scan);
+    if (scan.findings.some((f) => f.kind === "recall-miss" || f.kind === "precision-miss")) {
+      quarantined.push(kind);
+    }
+  }
+  return { scans, quarantined };
+}
+
+/** 清理临时目录 */
+export async function cleanupTmp(synthDir: string): Promise<void> {
+  await rm(resolve(synthDir, TMP_SUBDIR), { recursive: true, force: true });
 }
