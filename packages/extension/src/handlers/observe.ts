@@ -577,9 +577,12 @@ async function scanOneFrame(
               }
             }
           }
+          // aria-disabled 须看值:规范里只有 "true" 表示禁用;
+          // 组件库(Element Plus 等)常给启用元素显式写 aria-disabled="false",
+          // 旧逻辑只判属性存在 → 把这类启用元素误标禁用(2026-06-01 dialog dogfood)。
           if (
             (el as HTMLInputElement).disabled === true ||
-            el.hasAttribute("aria-disabled")
+            el.getAttribute("aria-disabled") === "true"
           ) {
             s.disabled = true;
           }
