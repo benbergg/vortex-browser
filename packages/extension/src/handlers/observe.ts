@@ -264,6 +264,17 @@ async function scanOneFrame(
           "title",
         ];
 
+        // 显式声明为「纯文本/装饰、非控件」的 ARIA role。作者写下 role="text"
+        // 是比继承来的 cursor:pointer 更强的语义信号:它告诉辅助技术「这是文本,
+        // 不是控件」。cursor:pointer fallback 必须尊重这个声明,否则可点卡片把
+        // cursor 继承给内部观看数/时间戳文本时,这些 `role="text"` 叶子会被误收
+        // 进 interactive 列表(youtube `[text] "2.1万次观看"`,2026-06-01 dogfood)。
+        // 不含 heading/group——可折叠标题等带 cursor:pointer 的 heading 是真交互。
+        const NON_INTERACTIVE_ROLES = new Set([
+          "text",
+          "paragraph",
+        ]);
+
         function getRole(el: Element): string {
           const explicit = el.getAttribute("role");
           if (explicit) return explicit;
@@ -614,6 +625,10 @@ async function scanOneFrame(
           // (e.g. global drag layer) would otherwise pull the entire page
           // text in as a single candidate.
           if (el === docRoot || el === docBody) continue;
+          // 显式 role="text"/"paragraph" 是作者的「非控件」声明,优先于继承来的
+          // cursor:pointer。跳过避免可点卡片内的观看数/时间戳文本被误收。
+          const fallbackRole = el.getAttribute("role");
+          if (fallbackRole && NON_INTERACTIVE_ROLES.has(fallbackRole)) continue;
           // Skip wrappers that already contain a real interactive child —
           // we don't want both the <li> and the <button> inside it.
           // (Use INTERACTIVE_SELECTORS, not the table-extended set, so
