@@ -117,6 +117,35 @@ export type ActionabilityResult =
     const hit = deepElementFromPoint(cx, cy);
     if (!hit) return { ok: false, blocker: "elementFromPoint=null" };
     if (hit === el || el.contains(hit) || hit.contains(el)) return { ok: true };
+    // 复合输入控件(Element Plus el-select、各类 fake-input combobox)把可见显示层
+    // (placeholder / selected-item)作为兄弟节点叠在透明真控件之上。点击经显示层
+    // 冒泡仍到达同一 widget,但 hit-test 命中显示层兄弟——既非 target 也非其后代。
+    // carve-out:hit 自身非交互(无 role / 无 tabindex / 非 button·a·input·select·
+    // textarea)且与 target 同处一个交互 widget 容器(el 的最近交互祖先 contains hit)
+    // → 同 widget 装饰层,不算 obscured。foreign 模态覆盖时 hit 在 target widget 之外,
+    // contains 为 false,OBSCURED 保持(见 I6 invariant)。(2026-06-01 el-select dogfood)
+    const isInteractiveEl = (x: Element): boolean => {
+      const t = x.tagName.toLowerCase();
+      return (
+        !!x.getAttribute("role") ||
+        x.getAttribute("tabindex") != null ||
+        t === "button" ||
+        t === "a" ||
+        t === "input" ||
+        t === "select" ||
+        t === "textarea"
+      );
+    };
+    if (!isInteractiveEl(hit)) {
+      let w: Element | null = el.parentElement;
+      while (w && w !== document.documentElement) {
+        if (isInteractiveEl(w)) {
+          if (w.contains(hit)) return { ok: true };
+          break;
+        }
+        w = w.parentElement;
+      }
+    }
     // Backdrop compatibility: when an overlay (md-select dropdown / md-dialog /
     // CDK overlay / bootstrap modal) is open, its expected backdrop visually
     // covers the page area. elementFromPoint correctly returns the backdrop

@@ -293,6 +293,20 @@ async function scanOneFrame(
           return tag;
         }
 
+        // 元素是否带交互可供性(用于 occlusion carve-out 判定 widget 容器)。
+        function isInteractiveEl(x: Element): boolean {
+          const t = x.tagName.toLowerCase();
+          return (
+            !!x.getAttribute("role") ||
+            x.getAttribute("tabindex") != null ||
+            t === "button" ||
+            t === "a" ||
+            t === "input" ||
+            t === "select" ||
+            t === "textarea"
+          );
+        }
+
         // Icon-only fallback：先 svg `<title>` / img alt / aria-label，失败再 className。
         // 触发条件：元素含 svg/img 后代（典型 svg/img 图标按钮）。
         // **不**包含 `<i>` 标签兜底——空 `<i>` 多为 CSS pseudo-element 渲染的装饰。
@@ -773,11 +787,28 @@ async function scanOneFrame(
               Math.min(window.innerHeight - 1, rect.top + rect.height / 2),
             );
             const topEl = document.elementFromPoint(cx, cy);
+            // 复合输入控件(Element Plus el-select 等)把可见显示层作为兄弟节点叠在
+            // 透明真控件之上。hit-test 命中显示层兄弟时,若它非交互且与 htmlEl 同处
+            // 一个交互 widget 容器(htmlEl 最近交互祖先 contains hit),是同 widget
+            // 装饰层而非真遮挡,不应把真控件标记为不可见。与 actionability/cdp/dom
+            // 的 carve-out 同源(2026-06-01 el-select dogfood)。
+            let sameWidgetDecoration = false;
+            if (topEl && !isInteractiveEl(topEl)) {
+              let w: Element | null = htmlEl.parentElement;
+              while (w && w !== document.documentElement) {
+                if (isInteractiveEl(w)) {
+                  if (w.contains(topEl)) sameWidgetDecoration = true;
+                  break;
+                }
+                w = w.parentElement;
+              }
+            }
             if (
               topEl &&
               topEl !== htmlEl &&
               !htmlEl.contains(topEl) &&
-              !topEl.contains(htmlEl)
+              !topEl.contains(htmlEl) &&
+              !sameWidgetDecoration
             ) {
               visible = false;
               occludedBy = describeElement(topEl);

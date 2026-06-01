@@ -93,7 +93,41 @@ export async function cdpClickElement(
         const cyInner = rect.top + rect.height / 2;
         // occlusion 检查
         const topEl = document.elementFromPoint(cxInner, cyInner);
-        if (topEl && topEl !== el && !el.contains(topEl) && !topEl.contains(el)) {
+        // 复合输入控件(Element Plus el-select 等)把可见显示层(placeholder /
+        // selected-item)作为兄弟节点叠在透明真控件之上。hit-test 命中显示层兄弟——
+        // 既非 target 也非其后代——但它非交互且与 target 同处一个交互 widget 容器
+        // (el 的最近交互祖先 contains hit),点击经显示层冒泡仍到达控件,非真遮挡。
+        // 与 actionability.ts receivesEvents 的 carve-out 同源(2026-06-01 el-select dogfood)。
+        const isInteractiveEl = (x: Element): boolean => {
+          const t = x.tagName.toLowerCase();
+          return (
+            !!x.getAttribute("role") ||
+            x.getAttribute("tabindex") != null ||
+            t === "button" ||
+            t === "a" ||
+            t === "input" ||
+            t === "select" ||
+            t === "textarea"
+          );
+        };
+        let sameWidgetDecoration = false;
+        if (topEl && !isInteractiveEl(topEl)) {
+          let w: Element | null = el.parentElement;
+          while (w && w !== document.documentElement) {
+            if (isInteractiveEl(w)) {
+              if (w.contains(topEl)) sameWidgetDecoration = true;
+              break;
+            }
+            w = w.parentElement;
+          }
+        }
+        if (
+          topEl &&
+          topEl !== el &&
+          !el.contains(topEl) &&
+          !topEl.contains(el) &&
+          !sameWidgetDecoration
+        ) {
           const classStr =
             typeof topEl.className === "string" && topEl.className
               ? "." + topEl.className.split(" ").filter(Boolean).join(".")
