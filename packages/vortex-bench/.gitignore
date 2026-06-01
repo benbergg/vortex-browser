@@ -23,3 +23,6 @@ reports/robustness-live/
 
 # judge 运行产物(同 scan/robustness,transient,不入库)
 reports/judge/
+
+# fuzz 运行产物(同 scan/robustness,transient discovery 报告,不入库)
+reports/fuzz/
