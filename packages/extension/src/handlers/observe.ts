@@ -117,6 +117,31 @@ function safeOrigin(url: string | undefined): string | null {
   }
 }
 
+/**
+ * 走 parent chain 跨过 opaque origin 找第一个具体 origin。
+ * Spec: `<iframe srcdoc>` 继承父文档 origin —— about:srcdoc 是 opaque URL
+ * (`new URL("about:srcdoc").origin` 返回字面量 "null"),srcdoc 嵌 srcdoc 时递归
+ * 继承。找不到具体 origin 返回 null。
+ * Issue #15: 据此把 srcdoc 子框归入其继承的源。
+ */
+function inheritedOrigin(
+  f: chrome.webNavigation.GetAllFrameResultDetails,
+  byId: Map<number, chrome.webNavigation.GetAllFrameResultDetails>,
+): string | null {
+  let cur: chrome.webNavigation.GetAllFrameResultDetails | undefined = f;
+  let depth = 0;
+  while (cur && depth < 16) {
+    const o = safeOrigin(cur.url);
+    // 具体 origin(非 opaque)。opaque URL 的 origin 是字面量 "null"。
+    if (o && o !== "null") return o;
+    const parentId = cur.parentFrameId;
+    if (parentId == null || parentId < 0) return null;
+    cur = byId.get(parentId);
+    depth++;
+  }
+  return null;
+}
+
 /** Exported for unit tests; production callers go through the snapshot handler. */
 export async function resolveTargetFrames(
   tabId: number,
@@ -152,31 +177,8 @@ export async function resolveTargetFrames(
     const main = all.find((f) => f.frameId === 0);
     const mainOrigin = safeOrigin(main?.url);
     if (!mainOrigin) return main ? asTargets([main]) : [];
-    // Spec: `<iframe srcdoc>` inherits its parent document's origin
-    // (about:srcdoc is an opaque URL — `new URL("about:srcdoc").origin`
-    // returns the literal string "null"). Same applies recursively for
-    // a srcdoc nested inside a srcdoc. Walk the parent chain past
-    // opaque origins to find the first concrete one, then compare.
-    // Issue #15: without this, all-same-origin silently dropped srcdoc
-    // iframes that should have been included.
     const byId = new Map(all.map((f) => [f.frameId, f]));
-    const inheritedOrigin = (
-      f: chrome.webNavigation.GetAllFrameResultDetails,
-    ): string | null => {
-      let cur: chrome.webNavigation.GetAllFrameResultDetails | undefined = f;
-      let depth = 0;
-      while (cur && depth < 16) {
-        const o = safeOrigin(cur.url);
-        // Concrete origin (non-opaque). Opaque URLs surface as "null".
-        if (o && o !== "null") return o;
-        const parentId = cur.parentFrameId;
-        if (parentId == null || parentId < 0) return null;
-        cur = byId.get(parentId);
-        depth++;
-      }
-      return null;
-    };
-    return asTargets(all.filter((f) => inheritedOrigin(f) === mainOrigin));
+    return asTargets(all.filter((f) => inheritedOrigin(f, byId) === mainOrigin));
   }
   // 默认 "main"
   const main = all.find((f) => f.frameId === 0);
@@ -922,8 +924,26 @@ export function registerObserveHandlers(router: ActionRouter): void {
           const allFrames = (await chrome.webNavigation.getAllFrames({ tabId: tid })) ?? [];
           const hasChildFrames = allFrames.some((f) => f.frameId !== 0);
           if (hasChildFrames) {
+            // 同源 srcdoc(about:srcdoc)的 url 非 http,isFrameInPermissions 会拒掉。
+            // 补一条 inherited same-origin 通道,让 auto-fallback 与 all-same-origin
+            // 模式一致地纳入 srcdoc 子框(judge iframe-srcdoc-inherit fixture 暴露:
+            // 主框近空触发 fallback 时,srcdoc 内的子按钮被静默丢弃 → observe 漏报)。
+            const byId = new Map(allFrames.map((f) => [f.frameId, f]));
+            const mainOrigin = safeOrigin(allFrames.find((f) => f.frameId === 0)?.url);
             const newTargets = allFrames
-              .filter((f) => f.frameId !== 0 && isFrameInPermissions(f.url))
+              .filter((f) => {
+                if (f.frameId === 0) return false;
+                if (isFrameInPermissions(f.url)) return true;
+                // 仅对 opaque-origin 子框走 inherited same-origin 兜底:
+                // about:srcdoc 自身 url 无法匹配 host_permissions,但继承父文档源
+                // 且与父同 tree(注入权限随父)。独立 http 子框仍以 host_permissions
+                // 为准,不被同源放宽(它们需各自的注入权限)。
+                const self = safeOrigin(f.url);
+                const isOpaque = self === null || self === "null";
+                return (
+                  isOpaque && mainOrigin != null && inheritedOrigin(f, byId) === mainOrigin
+                );
+              })
               .filter((f) => !scans.some((s) => s.frameId === f.frameId))
               .map((f) => ({
                 frameId: f.frameId,
