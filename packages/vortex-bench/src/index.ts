@@ -674,9 +674,12 @@ async function cmdFuzz(args: string[]): Promise<number> {
   };
   await mkdir(FUZZ_REPORTS_DIR, { recursive: true });
   const ts = report.generatedAt.replace(/[:.]/g, "-");
-  await writeFile(resolve(FUZZ_REPORTS_DIR, `${ts}.json`), JSON.stringify(report, null, 2), "utf-8");
-  await writeFile(resolve(FUZZ_REPORTS_DIR, `${ts}.md`), renderFuzzMarkdown(report), "utf-8");
+  const jsonPath = join(FUZZ_REPORTS_DIR, `${ts}.json`);
+  const mdPath = join(FUZZ_REPORTS_DIR, `${ts}.md`);
+  await writeFile(jsonPath, JSON.stringify(report, null, 2), "utf-8");
+  await writeFile(mdPath, renderFuzzMarkdown(report), "utf-8");
   process.stdout.write(`\n[vortex-bench] fuzz 完成: structural=${findings.filter((f) => f.cls === "structural").length} name=${findings.filter((f) => f.cls === "name").length} 沉淀=${promoted.length}\n`);
+  process.stdout.write(`\n[report] ${mdPath}\n[report] ${jsonPath}\n`);
   return 0;
 }
 
