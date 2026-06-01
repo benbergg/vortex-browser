@@ -11,7 +11,8 @@ export const ALL_PRIMITIVE_KINDS: PrimitiveKind[] = [
 ];
 
 const NAME_POOL = ["保存", "打开菜单", "关闭", "搜索", "提交", "取消", "下一步", "返回", "编辑", "删除"];
-const HIDDEN_MODES = ["display-none", "visibility-hidden", "aria-hidden"] as const;
+// aria-hidden 元素仍可渲染/点击,不是可证明非交互的隐藏方式,故从生成器中排除
+const HIDDEN_MODES = ["display-none", "visibility-hidden"] as const;
 
 export function generate(seed: number): FuzzPage {
   const r = makePrng(seed);

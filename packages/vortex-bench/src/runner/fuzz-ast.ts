@@ -77,7 +77,8 @@ function isUnderHidden(root: NoiseNode, targetId: string, hiddenAbove = false): 
     if (c.type === "primitive") {
       if (c.id === targetId) return hiddenAbove;
     } else {
-      const next = hiddenAbove || c.hidden != null;
+      // aria-hidden 仅从无障碍树隐藏,元素仍可渲染/点击,不算真正非交互
+      const next = hiddenAbove || c.hidden === "display-none" || c.hidden === "visibility-hidden";
       const r = isUnderHidden(c, targetId, next);
       if (r !== null) return r;
     }

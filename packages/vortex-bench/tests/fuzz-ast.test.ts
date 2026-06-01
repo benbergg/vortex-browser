@@ -65,4 +65,17 @@ describe("fuzz-ast deriveManifest", () => {
     const m = deriveManifest(noSrcdoc, "f", "/p.html");
     expect(m.frames).toBe("main");
   });
+  it("aria-hidden wrapper does NOT make primitive non-interactive (still clickable)", () => {
+    const ariaPage: FuzzPage = { seed: 3, root: { type: "noise", tag: "div", className: "n", children: [
+      { type: "noise", tag: "div", className: "ah", hidden: "aria-hidden", children: [
+        { type: "primitive", kind: "native-button", id: "ah1", name: "提交" },
+      ]},
+      { type: "noise", tag: "div", className: "dn", hidden: "display-none", children: [
+        { type: "primitive", kind: "native-button", id: "dn1", name: "隐藏" },
+      ]},
+    ]}};
+    const m = deriveManifest(ariaPage, "f", "/p.html");
+    expect(m.entries.find((e) => e.id === "ah1")!.interactive).toBe(true);   // aria-hidden 仍可点
+    expect(m.entries.find((e) => e.id === "dn1")!.interactive).toBe(false);  // display:none 真非交互
+  });
 });
