@@ -233,8 +233,10 @@ async function scanOneFrame(
           // 原生 disclosure 触发器：<details> 的首个 <summary> 是可点开合的控件
           // (GitHub 菜单 / MDN / 文档站 FAQ 折叠大量使用)。它本身是交互入口,
           // 而关闭态 <details> 的内部内容由下方 checkVisibility 门挡掉
-          // (content-visibility:hidden,2026-06-02 dogfood)。
-          "details > summary",
+          // (content-visibility:hidden,2026-06-02 dogfood)。:first-of-type 限定
+          // 首个——HTML 规范里仅第一个 <summary> 是 disclosure 控件,第 2+ 个是
+          // 普通流内容点了无效,收进来会误导 agent(评审 #1 LOW)。
+          "details > summary:first-of-type",
           "label:has(input[type=radio]), label:has(input[type=checkbox])",
           "[role=button]",
           "[role=link]",
@@ -1122,7 +1124,7 @@ export function registerObserveHandlers(router: ActionRouter): void {
         tag: string;
         role: string;
         name: string;
-        state?: { checked?: boolean; selected?: boolean; active?: boolean; disabled?: boolean };
+        state?: { checked?: boolean; selected?: boolean; active?: boolean; disabled?: boolean; expanded?: boolean; required?: boolean };
         frameId: number;
         // Issue #21 — populated only when input.includeBoxes && e.inViewport (T4).
         bbox?: [number, number, number, number];

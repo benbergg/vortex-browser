@@ -26,12 +26,13 @@ const OBSERVE_SRC = readFileSync(
 );
 
 describe("observe native <details>/<summary> disclosure (2026-06-02 dogfood)", () => {
-  it("S1: INTERACTIVE_SELECTORS 收录 details > summary disclosure 触发器", () => {
+  it("S1: INTERACTIVE_SELECTORS 收录 details > summary disclosure 触发器(限首个)", () => {
     const block = OBSERVE_SRC.match(
       /const INTERACTIVE_SELECTORS = \[([\s\S]*?)\]\.join/,
     );
     expect(block).not.toBeNull();
-    expect(block?.[1]).toMatch(/"details > summary"/);
+    // :first-of-type 限定——仅首个 <summary> 是 disclosure 控件(评审 #1 LOW)。
+    expect(block?.[1]).toMatch(/"details > summary:first-of-type"/);
   });
 
   it("S1: getRole 把 summary 映射为 button(交互模型等同按钮)", () => {
