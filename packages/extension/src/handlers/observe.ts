@@ -664,10 +664,17 @@ async function scanOneFrame(
             tag === "meter";
           if (!VALUE_ROLES.has(role) && !isNativeValue) return undefined;
           const valueText = el.getAttribute("aria-valuetext");
-          if (valueText) return valueText.slice(0, 40);
+          // 归一化空白(换行/制表 → 单空格)再截断,避免破坏单行输出;render 侧
+          // 对含空格的值加引号。
+          if (valueText) return valueText.replace(/\s+/g, " ").trim().slice(0, 40);
           let now = el.getAttribute("aria-valuenow");
           let max = el.getAttribute("aria-valuemax");
           if ((now == null || now === "") && isNativeValue) {
+            // indeterminate <progress>(无 value 属性,.position === -1)进度未知,
+            // 不能报 .value(IDL 对 indeterminate 返 0)否则 agent 误判「卡在 0%」。
+            if (tag === "progress" && (el as HTMLProgressElement).position === -1) {
+              return undefined;
+            }
             // 原生控件:range/number 用 .value;progress/meter 用 .value/.max。
             const v = (el as HTMLInputElement | HTMLProgressElement | HTMLMeterElement).value;
             now = v != null ? String(v) : null;
@@ -836,8 +843,8 @@ async function scanOneFrame(
           occludedBy?: string;
           attrs: Record<string, string>;
           state?: { checked?: boolean; selected?: boolean; active?: boolean; disabled?: boolean; expanded?: boolean; required?: boolean; current?: boolean };
-  /** 值域控件(slider/spinbutton/progressbar/meter 及原生 range/number/progress)的当前值,如 "30" 或 "30/100"。@since dogfood 2026-06-02 */
-  valueNow?: string;
+          /** 值域控件当前值,如 "30" 或 "30/100"(getValueInfo 严格限定值域控件)。 */
+          valueNow?: string;
           _sel: string;
         }> = [];
 
@@ -1180,8 +1187,8 @@ export function registerObserveHandlers(router: ActionRouter): void {
         role: string;
         name: string;
         state?: { checked?: boolean; selected?: boolean; active?: boolean; disabled?: boolean; expanded?: boolean; required?: boolean; current?: boolean };
-  /** 值域控件(slider/spinbutton/progressbar/meter 及原生 range/number/progress)的当前值,如 "30" 或 "30/100"。@since dogfood 2026-06-02 */
-  valueNow?: string;
+        /** 值域控件当前值,如 "30" 或 "30/100"(getValueInfo 严格限定值域控件)。 */
+        valueNow?: string;
         frameId: number;
         // Issue #21 — populated only when input.includeBoxes && e.inViewport (T4).
         bbox?: [number, number, number, number];

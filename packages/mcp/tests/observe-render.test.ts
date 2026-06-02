@@ -68,6 +68,20 @@ describe("renderObserveCompact", () => {
     expect(out).not.toMatch(/普通" value=/);
   });
 
+  it("含空格的 valueNow(aria-valuetext)加引号,避免破坏分段(评审修复)", () => {
+    const spaced = {
+      ...sample,
+      elements: [
+        { index: 0, tag: "div", role: "slider", name: "评分", valueNow: "3 of 5 stars", frameId: 0 },
+        { index: 1, tag: "div", role: "slider", name: "音量", valueNow: "30/100", frameId: 0 },
+      ] as CompactElement[],
+    };
+    const out = renderObserveCompact(spaced, null);
+    expect(out).toContain(`@e0 [slider] "评分" value="3 of 5 stars"`);
+    // 无空格的数值不加引号(保持简洁)。
+    expect(out).toContain(`@e1 [slider] "音量" value=30/100`);
+  });
+
   it("value= 段在 state flag 之后(X 与 W/Y 组合顺序)", () => {
     const combo = {
       ...sample,

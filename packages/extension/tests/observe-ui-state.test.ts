@@ -99,4 +99,13 @@ describe("observe UI state extraction (@since 0.4.0 O-8)", () => {
     expect(OBSERVE_SRC).toMatch(/t === "range"\)\s*return "slider";/);
     expect(OBSERVE_SRC).toMatch(/t === "number"\)\s*return "spinbutton";/);
   });
+
+  it("indeterminate <progress>(position===-1)不报值,避免 value=0 误导(评审修复)", () => {
+    // IDL .value 对 indeterminate progress 返 0,会让 agent 误判「卡在 0%」。
+    expect(OBSERVE_SRC).toMatch(/tag === "progress"\s*&&\s*\(el as HTMLProgressElement\)\.position === -1/);
+  });
+
+  it("aria-valuetext 归一化空白后再截断(评审修复:防破坏单行)", () => {
+    expect(OBSERVE_SRC).toMatch(/valueText\.replace\(\/\\s\+\/g, " "\)/);
+  });
 });

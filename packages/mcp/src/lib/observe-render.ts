@@ -81,8 +81,12 @@ export function renderObserveCompact(
     const bboxSeg =
       includeBoxes && el.bbox !== undefined ? ` bbox=[${el.bbox.join(",")}]` : "";
     // 值域控件当前值:slider/spinbutton/progressbar 等才有(observe 严格限定),
-    // 让 agent 知道控件当前设到几。放在 state flag 后、bbox 前。
-    const valueSeg = el.valueNow !== undefined ? ` value=${el.valueNow}` : "";
+    // 让 agent 知道控件当前设到几。放在 state flag 后、bbox 前。含空格的值
+    // (aria-valuetext 如 "3 of 5 stars")加引号,避免破坏按空格分段的解析。
+    const valueSeg =
+      el.valueNow !== undefined
+        ? ` value=${/\s/.test(el.valueNow) ? JSON.stringify(el.valueNow) : el.valueNow}`
+        : "";
     lines.push(
       `${refOf(el, snapshotHash)} [${el.role}]${name}${stateFlags(el.state)}${valueSeg}${bboxSeg}`,
     );

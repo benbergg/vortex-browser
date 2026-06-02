@@ -60,4 +60,25 @@ describe("parseObserveSnapshot", () => {
     const p = parseObserveSnapshot("SnapshotId: s\nURL: u\n\n@e0 [button] \"x\"");
     expect(p.rows[0].bbox).toBeNull();
   });
+
+  it("容忍值域控件 value= 段不丢行(2026-06-02 dogfood W/X)", () => {
+    // observe-render 给 slider/spinbutton/progressbar 注入 value= 段(裸 token
+    // 或带引号),解析器须容忍跳过、行仍被识别(否则值域控件行整行失配被丢)。
+    const text = `SnapshotId: s
+URL: u
+
+@e0 [slider] "音量" value=30/100
+@e1 [spinbutton] "数量" [required] value=4
+@e2 [slider] "评分" value="3 of 5 stars" bbox=[1,2,3,4]
+@e3 [button] "普通"`;
+    const p = parseObserveSnapshot(text);
+    expect(p.rows).toHaveLength(4);
+    expect(p.rows[0].role).toBe("slider");
+    expect(p.rows[0].name).toBe("音量");
+    // value= 后仍能解析 flags 与 bbox。
+    expect(p.rows[1].flags).toEqual(["required"]);
+    expect(p.rows[2].name).toBe("评分");
+    expect(p.rows[2].bbox).toEqual([1, 2, 3, 4]);
+    expect(p.rows[3].name).toBe("普通");
+  });
 });
