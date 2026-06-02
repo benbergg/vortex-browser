@@ -299,7 +299,10 @@ async function scanOneFrame(
             const t = (el as HTMLInputElement).type;
             if (t === "checkbox") return "checkbox";
             if (t === "radio") return "radio";
-            if (t === "submit" || t === "button") return "button";
+            // submit/button/reset/image 均映射 button(HTML-AAM:这四种 input
+            // 的 ARIA role 都是 button)。旧逻辑漏了 reset/image → 它们错报 textbox
+            // (2026-06-02 saucedemo dogfood AH 连带)。
+            if (t === "submit" || t === "button" || t === "reset" || t === "image") return "button";
             // range/number 是值域控件,role 精确化为 slider/spinbutton 让 agent
             // 知道这是可调数值(配合下方 valueNow 暴露当前值,2026-06-02 dogfood)。
             if (t === "range") return "slider";
@@ -398,7 +401,11 @@ async function scanOneFrame(
             const label = document.getElementById(labelledBy);
             if (label) return normName(label.textContent);
           }
-          if (el.tagName === "INPUT" || el.tagName === "TEXTAREA") {
+          if (
+            el.tagName === "INPUT" ||
+            el.tagName === "TEXTAREA" ||
+            el.tagName === "SELECT"
+          ) {
             const id = el.id;
             if (id) {
               const lbl = document.querySelector(`label[for="${id}"]`);
@@ -410,6 +417,27 @@ async function scanOneFrame(
               const wrapLabel = el.closest("label");
               if (wrapLabel) return normName(wrapLabel.textContent);
             }
+            // AH: <input type=submit|button|reset|image> 的可访问名取 value 属性
+            // (HTML-AAM)。表单提交/搜索/登录按钮极常见(saucedemo 登录/结账按钮都是
+            // <input type=submit value="Login/Continue">),旧逻辑只读 label/placeholder
+            // → 全显示为无名 [button]。image 优先 alt;value 缺省回退类型默认名。
+            // 严格限定这几种「value 是静态标签」的类型,绝不读 text/password 的 value
+            // (那是用户输入/敏感内容,与 getValueInfo 同纪律)(2026-06-02 dogfood AH)。
+            if (t === "submit" || t === "button" || t === "reset" || t === "image") {
+              if (t === "image") {
+                const alt = el.getAttribute("alt");
+                if (alt) return normName(alt);
+              }
+              const v = (el as HTMLInputElement).value;
+              if (v) return normName(v);
+              if (t === "submit") return "Submit";
+              if (t === "reset") return "Reset";
+              if (t === "image") return "Submit Query";
+            }
+            // AI: <select> 不能落到下面 textContent 兜底——select 的 textContent 是
+            // 全部 <option> 文本的拼接("Name (A to Z)Name (Z to A)Price..."噪声)。
+            // 名应来自 label/aria(已在上面解析),无 label 则返空(当前选中值由
+            // getValueInfo 以 value= 暴露)(2026-06-02 dogfood AI)。
             return (
               el.getAttribute("placeholder") || el.getAttribute("title") || ""
             );
@@ -736,6 +764,16 @@ async function scanOneFrame(
         ]);
         function getValueInfo(el: HTMLElement, role: string): string | undefined {
           const tag = el.tagName.toLowerCase();
+          // AI: 原生 <select> 的当前选中项文本。select 名常无 label(saucedemo 排序
+          // 下拉),其「当前选了什么」才是 agent 调它前最需要的信息。选项是有界标签
+          // (非自由文本/非 password),安全暴露——与「不暴露 text/password value」不冲突。
+          // multiple 列出全部选中项逗号分隔;空选返 undefined(2026-06-02 dogfood AI)。
+          if (tag === "select") {
+            const opts = Array.from((el as HTMLSelectElement).selectedOptions);
+            if (opts.length === 0) return undefined;
+            const txt = opts.map((o) => o.text).join(", ").replace(/\s+/g, " ").trim();
+            return txt ? txt.slice(0, 60) : undefined;
+          }
           const inputType =
             tag === "input" ? (el as HTMLInputElement).type : "";
           const isNativeValue =
