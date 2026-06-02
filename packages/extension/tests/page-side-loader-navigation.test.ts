@@ -97,6 +97,43 @@ describe("page-side-loader navigation cache invalidation (Bug E)", () => {
     expect(executeScriptMock).toHaveBeenCalledTimes(1);
   });
 
+  it("executeScript 永不 settle 时超时 reject + 驱逐缓存,后续调用可重试(2026-06-02 wedge 调查)", async () => {
+    // 根因:chrome.scripting.executeScript 在 SW/tab 异常态下会永不 settle。
+    // 旧代码把该 pending promise 缓存,后续每次 await 同样永久挂——把瞬时卡顿放大
+    // 成永久 wedge(仅 SW 重启才恢复)。修复:注入超时 → reject → 驱逐缓存 → 可重试。
+    vi.useFakeTimers();
+    try {
+      const { loadPageSideModule } = await importLoaderWithFreshChrome();
+      // 第一次:executeScript 永不 settle。
+      executeScriptMock.mockReturnValueOnce(new Promise(() => {}));
+
+      const first = loadPageSideModule(100, undefined, "actionability");
+      // 防 unhandledRejection 噪声:挂一个 catch,断言留给下方。
+      const firstSettled = first.then(
+        () => "resolved",
+        (e: Error) => e.message,
+      );
+      // 推进到超时点(INJECT_TIMEOUT_MS=3000,须低于 waitActionable 5000 预算;
+      // 并冲洗微任务)。
+      await vi.advanceTimersByTimeAsync(3000);
+      const outcome = await firstSettled;
+      expect(outcome).toContain("timed out");
+
+      // 缓存已驱逐:第二次调用应**重新**注入(不是短路命中陈旧 pending promise)。
+      executeScriptMock.mockResolvedValueOnce([{ result: undefined }]);
+      executeScriptMock.mockClear();
+      await loadPageSideModule(100, undefined, "actionability");
+      expect(executeScriptMock).toHaveBeenCalledTimes(1);
+
+      // 第三次:已成功加载 → 命中缓存,不再注入。
+      executeScriptMock.mockClear();
+      await loadPageSideModule(100, undefined, "actionability");
+      expect(executeScriptMock).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("tabs.onRemoved still evicts entire tab (existing behaviour preserved)", async () => {
     const { loadPageSideModule } = await importLoaderWithFreshChrome();
     await loadPageSideModule(100, undefined, "actionability");
