@@ -37,8 +37,10 @@ describe("observe UI state extraction (@since 0.4.0 O-8)", () => {
     expect(OBSERVE_SRC).toMatch(/aria-pressed/);
   });
 
-  it("derives disabled from element.disabled OR aria-disabled", () => {
-    expect(OBSERVE_SRC).toMatch(/\.disabled\s*===\s*true/);
+  it("derives disabled from :disabled pseudo (covers fieldset cascade) OR aria-disabled", () => {
+    // 用 :disabled 伪类而非 IDL .disabled,以覆盖 <fieldset disabled> 级联禁用
+    // 的子控件(IDL .disabled 仍为 false,2026-06-02 dogfood)。
+    expect(OBSERVE_SRC).toMatch(/\.matches\(":disabled"\)/);
     expect(OBSERVE_SRC).toMatch(/aria-disabled/);
   });
 

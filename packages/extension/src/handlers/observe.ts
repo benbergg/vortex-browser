@@ -585,11 +585,16 @@ async function scanOneFrame(
               }
             }
           }
-          // aria-disabled 须看值:规范里只有 "true" 表示禁用;
-          // 组件库(Element Plus 等)常给启用元素显式写 aria-disabled="false",
-          // 旧逻辑只判属性存在 → 把这类启用元素误标禁用(2026-06-01 dialog dogfood)。
+          // 禁用判定用 :disabled 伪类而非 IDL .disabled 属性:<fieldset disabled>
+          // 会级联禁用内部所有控件(浏览器真禁用、阻断交互),但子控件的 IDL
+          // .disabled 仍返 false——只有 :disabled 伪类反映级联真状态(同样覆盖
+          // disabled <optgroup>/<select> 内的 option)。旧逻辑只看 .disabled →
+          // 漏标 fieldset 级联禁用控件,agent 误以为可点、白等满 timeout 才 DISABLED
+          // 失败(2026-06-02 dogfood)。:disabled 是 .disabled 的严格超集,无回归。
+          // aria-disabled 仍须看值:组件库常给启用元素显式写 aria-disabled="false",
+          // 只判属性存在会把启用元素误标禁用(2026-06-01 dialog dogfood)。
           if (
-            (el as HTMLInputElement).disabled === true ||
+            (typeof el.matches === "function" && el.matches(":disabled")) ||
             el.getAttribute("aria-disabled") === "true"
           ) {
             s.disabled = true;

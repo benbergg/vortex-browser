@@ -23,7 +23,15 @@ describe("observe aria-disabled 按值判定", () => {
     expect(OBSERVE_SRC).not.toMatch(/hasAttribute\("aria-disabled"\)/);
   });
 
-  it("原生 disabled 属性判定保留", () => {
-    expect(OBSERVE_SRC).toMatch(/\.disabled === true/);
+  it("原生禁用用 :disabled 伪类判定(覆盖 fieldset 级联,2026-06-02 dogfood)", () => {
+    // <fieldset disabled> 级联禁用的子控件 IDL .disabled 仍为 false,只有
+    // :disabled 伪类反映真状态。故必须用 matches(":disabled") 而非 .disabled。
+    expect(OBSERVE_SRC).toMatch(/\.matches\(":disabled"\)/);
+  });
+
+  it("不再用 IDL .disabled 判原生禁用(会漏 fieldset 级联禁用控件)", () => {
+    // 严格超集:matches(":disabled") 同时覆盖直接 disabled + fieldset 级联,
+    // 不应残留旧的 IDL 判定回退。
+    expect(OBSERVE_SRC).not.toMatch(/\(el as HTMLInputElement\)\.disabled === true/);
   });
 });
