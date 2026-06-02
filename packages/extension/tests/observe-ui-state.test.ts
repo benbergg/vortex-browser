@@ -53,7 +53,7 @@ describe("observe UI state extraction (@since 0.4.0 O-8)", () => {
   it("ScannedElement and elementsOut types include optional state field", () => {
     // 类型层把 state 暴露出来，不要让它只出现在页面内然后被 outer 丢掉
     expect(OBSERVE_SRC).toMatch(
-      /state\?:\s*\{\s*checked\?:\s*boolean[\s\S]{0,280}?invalid\?:\s*boolean\s*\}/,
+      /state\?:\s*\{\s*checked\?:\s*boolean[\s\S]{0,360}?invalid\?:\s*boolean[\s\S]{0,90}?\}/,
     );
   });
 
@@ -116,5 +116,18 @@ describe("observe UI state extraction (@since 0.4.0 O-8)", () => {
 
   it("aria-valuetext 归一化空白后再截断(评审修复:防破坏单行)", () => {
     expect(OBSERVE_SRC).toMatch(/valueText\.replace\(\/\\s\+\/g, " "\)/);
+  });
+
+  it("derives sort from aria-sort 排序列方向(AC,2026-06-02 dogfood)", () => {
+    // ascending/descending 原样存方向,none → 标 sortable(可排未排,区别普通表头);
+    // 只查元素自身(aria-sort 按 ARIA 惯例落在 columnheader 自身)。
+    expect(OBSERVE_SRC).toMatch(/getAttribute\("aria-sort"\)/);
+    expect(OBSERVE_SRC).toMatch(
+      /ariaSort === "ascending" \|\| ariaSort === "descending"/,
+    );
+    expect(OBSERVE_SRC).toMatch(/s\.sort = ariaSort/);
+    // none 与 other(罕见,非升降序)都 → sortable
+    expect(OBSERVE_SRC).toMatch(/ariaSort === "none" \|\| ariaSort === "other"/);
+    expect(OBSERVE_SRC).toMatch(/s\.sort = "none"/);
   });
 });

@@ -5,7 +5,7 @@ export interface CompactElement {
   tag: string;
   role: string;
   name: string;
-  state?: { checked?: boolean; selected?: boolean; active?: boolean; disabled?: boolean; required?: boolean; expanded?: boolean; current?: boolean; invalid?: boolean };
+  state?: { checked?: boolean; selected?: boolean; active?: boolean; disabled?: boolean; required?: boolean; expanded?: boolean; current?: boolean; invalid?: boolean; sort?: "ascending" | "descending" | "none" };
   // 值域控件(slider/spinbutton/progressbar/meter 等)的当前值,如 "30" / "30/100"。
   valueNow?: string;
   frameId: number;
@@ -52,6 +52,10 @@ function stateFlags(state?: CompactElement["state"]): string {
   if (state.expanded) flags.push("expanded");
   if (state.current) flags.push("current");
   if (state.invalid) flags.push("invalid");
+  // aria-sort:可排序列当前方向。asc/desc 含方向,none=可排未排(标 sortable)。
+  if (state.sort === "ascending") flags.push("sort:asc");
+  else if (state.sort === "descending") flags.push("sort:desc");
+  else if (state.sort === "none") flags.push("sortable");
   return flags.length ? " " + flags.map((f) => `[${f}]`).join(" ") : "";
 }
 

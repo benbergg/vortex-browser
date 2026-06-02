@@ -51,6 +51,24 @@ describe("renderObserveCompact", () => {
     expect(out).not.toMatch(/用户名" \[invalid\]/);
   });
 
+  it("aria-sort 渲染 [sort:asc]/[sort:desc]/[sortable] 标记(AC,2026-06-02 dogfood)", () => {
+    const withSort = {
+      ...sample,
+      elements: [
+        { index: 0, tag: "th", role: "columnheader", name: "姓名", state: { sort: "ascending" }, frameId: 0 },
+        { index: 1, tag: "th", role: "columnheader", name: "年龄", state: { sort: "descending" }, frameId: 0 },
+        { index: 2, tag: "th", role: "columnheader", name: "城市", state: { sort: "none" }, frameId: 0 },
+        { index: 3, tag: "th", role: "columnheader", name: "无排序", frameId: 0 },
+      ] as CompactElement[],
+    };
+    const out = renderObserveCompact(withSort, null);
+    expect(out).toContain(`@e0 [columnheader] "姓名" [sort:asc]`);
+    expect(out).toContain(`@e1 [columnheader] "年龄" [sort:desc]`);
+    expect(out).toContain(`@e2 [columnheader] "城市" [sortable]`);
+    // 无 aria-sort 的普通表头不带任何排序标记
+    expect(out).toMatch(/@e3 \[columnheader\] "无排序"\s*$/m);
+  });
+
   it("aria-current 渲染 [current] 标记(W,2026-06-02 dogfood)", () => {
     const withCurrent = {
       ...sample,

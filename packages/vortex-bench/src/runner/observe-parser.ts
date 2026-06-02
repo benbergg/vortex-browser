@@ -8,9 +8,11 @@ import type { ObserveRow, ObserveHeader, ParsedObserve } from "../scan-types.js"
 // value= 段(值域控件当前值,observe-render.ts 注入)用非捕获组容忍并跳过——
 // 取值可为裸 token(value=30/100)或带引号(value="3 of 5 stars"),不进 ObserveRow
 // (bench oracle 不比对值,只需不让该行整行失配被丢)。
+// flag 段容忍 `:`:aria-sort 渲染为 [sort:asc]/[sort:desc](observe-render.ts),
+// 旧 [a-z]+ 不含冒号会让整行失配被静默丢(2026-06-02 AC,同 value= 段教训)。
 const ROW_RE =
-  /^(@[\w:]+)\s+\[([^\]]+)\](?:\s+"((?:\\.|[^"\\])*)")?((?:\s+\[[a-z]+\])*)(?:\s+value=(?:"(?:\\.|[^"\\])*"|\S+))?(?:\s+bbox=\[(\d+),(\d+),(\d+),(\d+)\])?\s*$/;
-const FLAG_RE = /\[([a-z]+)\]/g;
+  /^(@[\w:]+)\s+\[([^\]]+)\](?:\s+"((?:\\.|[^"\\])*)")?((?:\s+\[[a-z:]+\])*)(?:\s+value=(?:"(?:\\.|[^"\\])*"|\S+))?(?:\s+bbox=\[(\d+),(\d+),(\d+),(\d+)\])?\s*$/;
+const FLAG_RE = /\[([a-z:]+)\]/g;
 const OFFSET_RE = /^#\s+frame\s+(\d+)\s+offset=\[(\d+),(\d+)\]/;
 const VIEWPORT_RE = /^Viewport:\s+(\d+)x(\d+),\s+scrollY=(\d+)\/(\d+)/;
 

@@ -81,4 +81,23 @@ URL: u
     expect(p.rows[2].bbox).toEqual([1, 2, 3, 4]);
     expect(p.rows[3].name).toBe("普通");
   });
+
+  it("容忍含冒号的排序 flag [sort:asc] 不丢行(2026-06-02 dogfood AC)", () => {
+    // observe-render 给可排序列注入 [sort:asc]/[sort:desc]/[sortable]。
+    // 旧 flag 正则 [a-z]+ 不含冒号 → [sort:asc] 让整行失配被静默丢。
+    const text = `SnapshotId: s
+URL: u
+
+@e0 [columnheader] "姓名" [sort:asc]
+@e1 [columnheader] "年龄" [sort:desc] bbox=[1,2,3,4]
+@e2 [columnheader] "城市" [sortable]
+@e3 [columnheader] "普通"`;
+    const p = parseObserveSnapshot(text);
+    expect(p.rows).toHaveLength(4);
+    expect(p.rows[0].flags).toEqual(["sort:asc"]);
+    expect(p.rows[1].flags).toEqual(["sort:desc"]);
+    expect(p.rows[1].bbox).toEqual([1, 2, 3, 4]);
+    expect(p.rows[2].flags).toEqual(["sortable"]);
+    expect(p.rows[3].name).toBe("普通");
+  });
 });

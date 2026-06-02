@@ -90,7 +90,7 @@ interface ScannedElement {
   occludedBy?: string;
   attrs: Record<string, string>;
   /** Framework UI state derived from class / aria. @since 0.4.0 (O-8) */
-  state?: { checked?: boolean; selected?: boolean; active?: boolean; disabled?: boolean; expanded?: boolean; required?: boolean; current?: boolean; invalid?: boolean };
+  state?: { checked?: boolean; selected?: boolean; active?: boolean; disabled?: boolean; expanded?: boolean; required?: boolean; current?: boolean; invalid?: boolean; sort?: "ascending" | "descending" | "none" };
   /** 值域控件(slider/spinbutton/progressbar/meter 及原生 range/number/progress)的当前值,如 "30" 或 "30/100"。@since dogfood 2026-06-02 */
   valueNow?: string;
   _sel: string;
@@ -575,6 +575,7 @@ async function scanOneFrame(
           required?: boolean;
           current?: boolean;
           invalid?: boolean;
+          sort?: "ascending" | "descending" | "none";
         } | undefined {
           const s: {
             checked?: boolean;
@@ -585,6 +586,7 @@ async function scanOneFrame(
             required?: boolean;
             current?: boolean;
             invalid?: boolean;
+            sort?: "ascending" | "descending" | "none";
           } = {};
           let cur: Element | null = el;
           for (let i = 0; i < 3 && cur; i++, cur = cur.parentElement) {
@@ -677,6 +679,19 @@ async function scanOneFrame(
           const ariaInvalid = el.getAttribute("aria-invalid");
           if (ariaInvalid != null && ariaInvalid !== "false") {
             s.invalid = true;
+          }
+          // aria-sort:可排序列表头的当前排序方向。排序表头 observe 输出本来完全
+          // 相同,agent 不知当前按哪列、何方向(会重复点已排好的列、或漏判已排序
+          // 状态)。ascending/descending → [sort:asc]/[sort:desc];none → [sortable]
+          // (是排序控件但当前未排,区别于无 aria-sort 的普通表头)。aria-sort 按
+          // ARIA 惯例落在 columnheader 自身,只查元素自身(2026-06-02 dogfood AC)。
+          const ariaSort = el.getAttribute("aria-sort");
+          if (ariaSort === "ascending" || ariaSort === "descending") {
+            s.sort = ariaSort;
+          } else if (ariaSort === "none" || ariaSort === "other") {
+            // "other"=以非升降序排序(ARIA 合法值,罕见)。无方向可报,但仍是
+            // 排序控件 → 标 sortable 保留可排序提示(评审 advisory)。
+            s.sort = "none";
           }
           return Object.keys(s).length > 0 ? s : undefined;
         }
@@ -880,7 +895,7 @@ async function scanOneFrame(
           inViewport: boolean;
           occludedBy?: string;
           attrs: Record<string, string>;
-          state?: { checked?: boolean; selected?: boolean; active?: boolean; disabled?: boolean; expanded?: boolean; required?: boolean; current?: boolean; invalid?: boolean };
+          state?: { checked?: boolean; selected?: boolean; active?: boolean; disabled?: boolean; expanded?: boolean; required?: boolean; current?: boolean; invalid?: boolean; sort?: "ascending" | "descending" | "none" };
           /** 值域控件当前值,如 "30" 或 "30/100"(getValueInfo 严格限定值域控件)。 */
           valueNow?: string;
           _sel: string;
@@ -1255,7 +1270,7 @@ export function registerObserveHandlers(router: ActionRouter): void {
         tag: string;
         role: string;
         name: string;
-        state?: { checked?: boolean; selected?: boolean; active?: boolean; disabled?: boolean; expanded?: boolean; required?: boolean; current?: boolean; invalid?: boolean };
+        state?: { checked?: boolean; selected?: boolean; active?: boolean; disabled?: boolean; expanded?: boolean; required?: boolean; current?: boolean; invalid?: boolean; sort?: "ascending" | "descending" | "none" };
         /** 值域控件当前值,如 "30" 或 "30/100"(getValueInfo 严格限定值域控件)。 */
         valueNow?: string;
         frameId: number;
