@@ -1,0 +1,150 @@
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import type { NmRequest } from "@bytenew/vortex-shared";
+import { ActionRouter } from "../src/lib/router.js";
+import { registerJsHandlers } from "../src/handlers/js.js";
+
+/**
+ * 真实站 dogfood(2026-06-02 github.com round 11)发现:页面 CSP 禁 `unsafe-eval`
+ * (GitHub / Twitter / Shopify / 多数银行 SaaS 普遍)时,vortex_evaluate 注入 func 内
+ * 的 eval / new Function 被**直接拒绝**——这与 Trusted Types 是两套独立机制,命名
+ * policy 救不了(eval 本身不被允许)。observe/act 走 executeScript({func}) 不受影响,
+ * 唯 evaluate 失效。
+ *
+ * 修复:eval 报 unsafe-eval 时回退 CDP Runtime.evaluate(debugger 级求值绕过页面
+ * CSP,与 Playwright 同路)。仅主 frame;只 attach 不 enable domain,求值后
+ * detachIfNoDomains 移除横幅(不误伤已 enable domain 的 Network/Console)。
+ *
+ * 测试面:host 侧逻辑——executeScript 返回 unsafe-eval 错误时,断言 handler 调用
+ * mock debuggerMgr 的 attach + Runtime.evaluate + detachIfNoDomains 并返回其值。
+ */
+
+const UNSAFE_EVAL_MSG =
+  "Evaluating a string as JavaScript violates the following Content Security Policy " +
+  "directive because 'unsafe-eval' is not an allowed source of script";
+
+function mkReq(tool: string, args: Record<string, unknown> = {}, tabId = 42): NmRequest {
+  return { type: "tool_request", tool, args, requestId: "r-1", tabId };
+}
+
+/** dispatch 返回 {result} 或 {error:{code,message}} 信封。 */
+type Resp = { result?: unknown; error?: { code: string; message: string } };
+
+interface MockDebuggerMgr {
+  attach: ReturnType<typeof vi.fn>;
+  sendCommand: ReturnType<typeof vi.fn>;
+}
+
+describe("js.evaluate CSP unsafe-eval → CDP Runtime.evaluate 回退 (github dogfood 2026-06-02)", () => {
+  let router: ActionRouter;
+  let executeScript: ReturnType<typeof vi.fn>;
+  let dbg: MockDebuggerMgr;
+
+  beforeEach(() => {
+    vi.unstubAllGlobals();
+    router = new ActionRouter();
+    executeScript = vi.fn();
+    vi.stubGlobal("chrome", {
+      tabs: { query: vi.fn().mockResolvedValue([{ id: 42 }]) },
+      webNavigation: {
+        getAllFrames: vi.fn().mockResolvedValue([
+          { frameId: 0, parentFrameId: -1, url: "https://github.com/" },
+          { frameId: 3, parentFrameId: 0, url: "https://github.com/sub" },
+        ]),
+      },
+      scripting: { executeScript },
+      runtime: { getManifest: vi.fn().mockReturnValue({ host_permissions: ["<all_urls>"] }) },
+    });
+    dbg = {
+      attach: vi.fn().mockResolvedValue(undefined),
+      sendCommand: vi.fn(),
+    };
+    registerJsHandlers(router, dbg as unknown as Parameters<typeof registerJsHandlers>[1]);
+  });
+
+  it("eval 报 unsafe-eval 时,回退 CDP Runtime.evaluate 并返回其值", async () => {
+    executeScript.mockResolvedValue([{ result: { error: UNSAFE_EVAL_MSG } }]);
+    dbg.sendCommand.mockResolvedValue({ result: { value: 42 } });
+
+    const out = (await router.dispatch(mkReq("js.evaluate", { code: "40 + 2" }))) as Resp;
+    expect(out.error).toBeUndefined();
+    expect(out.result).toBe(42);
+    // attach → Runtime.evaluate(returnByValue/awaitPromise) → detach 横幅。
+    expect(dbg.attach).toHaveBeenCalledWith(42);
+    expect(dbg.sendCommand).toHaveBeenCalledWith(
+      42,
+      "Runtime.evaluate",
+      expect.objectContaining({ expression: "40 + 2", returnByValue: true, awaitPromise: true }),
+    );
+  });
+
+  it("不主动 detach(与 bare-attach mouse/dom 一致,避免误 detach 对方在途会话)", async () => {
+    executeScript.mockResolvedValue([{ result: { error: UNSAFE_EVAL_MSG } }]);
+    dbg.sendCommand.mockResolvedValue({ result: { value: 1 } });
+    await router.dispatch(mkReq("js.evaluate", { code: "1" }));
+    // 不应存在 detach 调用(保持 attach,横幅与 Input.* CDP 路径同样常驻)。
+    expect((dbg as Record<string, unknown>).detachIfNoDomains).toBeUndefined();
+    expect((dbg as Record<string, unknown>).detach).toBeUndefined();
+  });
+
+  it("CDP 下 top-level return 非法 → auto-IIFE 包装重试", async () => {
+    executeScript.mockResolvedValue([{ result: { error: UNSAFE_EVAL_MSG } }]);
+    dbg.sendCommand
+      .mockResolvedValueOnce({
+        exceptionDetails: { exception: { description: "SyntaxError: Illegal return statement" } },
+      })
+      .mockResolvedValueOnce({ result: { value: 7 } });
+
+    const out = (await router.dispatch(mkReq("js.evaluate", { code: "return 3 + 4" }))) as Resp;
+    expect(out.result).toBe(7);
+    expect(dbg.sendCommand).toHaveBeenCalledTimes(2);
+    // 第二次用 (function(){...})() 包装。
+    expect(dbg.sendCommand.mock.calls[1][2]).toMatchObject({
+      expression: "(function(){return 3 + 4})()",
+    });
+  });
+
+  it("CDP Runtime.evaluate 真异常(非 return)→ 包成 JS_EXECUTION_ERROR 抛出", async () => {
+    executeScript.mockResolvedValue([{ result: { error: UNSAFE_EVAL_MSG } }]);
+    dbg.sendCommand.mockResolvedValue({
+      exceptionDetails: { exception: { description: "ReferenceError: foo is not defined" } },
+    });
+    const out = (await router.dispatch(mkReq("js.evaluate", { code: "foo" }))) as Resp;
+    expect(out.error?.message).toMatch(/foo is not defined/);
+  });
+
+  it("非 unsafe-eval 错误**不**触发 CDP 回退,抛原错", async () => {
+    executeScript.mockResolvedValue([{ result: { error: "TypeError: x is not a function" } }]);
+    const out = (await router.dispatch(mkReq("js.evaluate", { code: "x()" }))) as Resp;
+    expect(out.error?.message).toMatch(/x is not a function/);
+    expect(dbg.attach).not.toHaveBeenCalled();
+  });
+
+  it("子 frame(frameId != null)不走 CDP 回退(暂不支持),抛原 unsafe-eval 错", async () => {
+    executeScript.mockResolvedValue([{ result: { error: UNSAFE_EVAL_MSG } }]);
+    const out = (await router.dispatch(
+      mkReq("js.evaluate", { code: "1+1", frameId: 3 }),
+    )) as Resp;
+    expect(out.error?.message).toMatch(/unsafe-eval/);
+    expect(dbg.attach).not.toHaveBeenCalled();
+  });
+
+  it("js.evaluateAsync 报 unsafe-eval 时,回退 CDP 用 async 包装 + awaitPromise", async () => {
+    executeScript.mockResolvedValue([{ result: { error: UNSAFE_EVAL_MSG } }]);
+    dbg.sendCommand.mockResolvedValue({ result: { value: 99 } });
+
+    const out = (await router.dispatch(mkReq("js.evaluateAsync", { code: "return 99" }))) as Resp;
+    expect(out.result).toBe(99);
+    expect(dbg.sendCommand.mock.calls[0][2]).toMatchObject({
+      expression: "(async () => { return 99 })()",
+      awaitPromise: true,
+    });
+  });
+
+  it("无 debuggerMgr 时(未注入)不回退,抛原错(向后兼容)", async () => {
+    const r2 = new ActionRouter();
+    registerJsHandlers(r2); // 不传 debuggerMgr
+    executeScript.mockResolvedValue([{ result: { error: UNSAFE_EVAL_MSG } }]);
+    const out = (await r2.dispatch(mkReq("js.evaluate", { code: "1+1" }))) as Resp;
+    expect(out.error?.message).toMatch(/unsafe-eval/);
+  });
+});

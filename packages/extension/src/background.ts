@@ -29,7 +29,7 @@ const debuggerMgr = new DebuggerManager();
 registerTabHandlers(router);
 registerFramesHandlers(router);
 registerPageHandlers(router, debuggerMgr);
-registerJsHandlers(router);
+registerJsHandlers(router, debuggerMgr);
 registerDomHandlers(router, debuggerMgr);
 registerContentHandlers(router);
 registerStorageHandlers(router);

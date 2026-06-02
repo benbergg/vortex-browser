@@ -1,6 +1,59 @@
 import { JsActions, VtxErrorCode, vtxError } from "@bytenew/vortex-shared";
 import type { ActionRouter } from "../lib/router.js";
+import type { DebuggerManager } from "../lib/debugger-manager.js";
 import { getActiveTabId, buildExecuteTarget, ensureFrameAttached } from "../lib/tab-utils.js";
+
+/**
+ * 页面 CSP 禁 `unsafe-eval`(GitHub / Twitter / Shopify / 多数银行 SaaS 普遍)时,
+ * 注入 func 内的 eval/new Function 被**直接拒绝**——这与 Trusted Types
+ * (require-trusted-types-for)是两套独立机制,命名 policy 救不了(eval 本身不允许)。
+ * 据此回退到 CDP Runtime.evaluate。
+ *
+ * 用 Chrome CSP 拒绝的**完整特征短语**「'unsafe-eval' is not an allowed」而非裸词
+ * `unsafe-eval`:后者会把用户代码里恰好抛含 "unsafe-eval" 的普通错误(校验 CSP 串 /
+ * linter 规则名 / 诊断信息)误判为 CSP 拒绝,从而把有副作用的 code 经 CDP **二次执行**
+ * (与同文件 isTT 收紧精确短语同因,评审 MEDIUM)。覆盖两种真实措辞:
+ * "Refused to evaluate a string … because 'unsafe-eval' is not an allowed source" 与
+ * "Evaluating a string … because 'unsafe-eval' is not an allowed source"。
+ */
+function isUnsafeEvalBlocked(msg: string): boolean {
+  return /'unsafe-eval' is not an allowed/i.test(msg);
+}
+
+/**
+ * CDP Runtime.evaluate 回退:经 chrome.debugger 求值,**不受页面 CSP 约束**
+ * (debugger 级求值绕过 unsafe-eval),与 Playwright 同路。只 attach 不 enable
+ * domain(Runtime.evaluate 无需 Runtime.enable)。**求值后不主动 detach**——与
+ * mouse/keyboard/dom 的 Input.* CDP 路径一致(它们同样 bare-attach 且常驻不 detach,
+ * 调试横幅本就已存在)。曾有「无 domain 即 detach」版本,但 bare-attach 特性 domains
+ * 也为空,并发交错时会把对方在途的 CDP 会话误 detach(评审 HIGH 回归);保持 attach
+ * 零竞态、零新横幅成本。returnByValue 与 executeScript 序列化语义一致;awaitPromise
+ * 兼容同步值与 Promise。抛 Error(由调用方包成 vtxError)。
+ */
+async function cdpEvaluate(
+  debuggerMgr: DebuggerManager,
+  tabId: number,
+  expression: string,
+): Promise<unknown> {
+  await debuggerMgr.attach(tabId);
+  const res = (await debuggerMgr.sendCommand(tabId, "Runtime.evaluate", {
+    expression,
+    returnByValue: true,
+    awaitPromise: true,
+    userGesture: false,
+  })) as {
+    result?: { value?: unknown };
+    exceptionDetails?: { exception?: { description?: string }; text?: string };
+  };
+  if (res.exceptionDetails) {
+    throw new Error(
+      res.exceptionDetails.exception?.description ??
+        res.exceptionDetails.text ??
+        "CDP Runtime.evaluate failed",
+    );
+  }
+  return res.result?.value;
+}
 
 /**
  * Map a raw page-side JS exception message to a VtxError with a code-specific hint.
@@ -22,7 +75,10 @@ function jsExecutionError(message: string): ReturnType<typeof vtxError> {
   return vtxError(VtxErrorCode.JS_EXECUTION_ERROR, message);
 }
 
-export function registerJsHandlers(router: ActionRouter): void {
+export function registerJsHandlers(
+  router: ActionRouter,
+  debuggerMgr?: DebuggerManager,
+): void {
   router.registerAll({
     [JsActions.EVALUATE]: async (args, tabId) => {
       const code = args.code as string;
@@ -97,7 +153,23 @@ export function registerJsHandlers(router: ActionRouter): void {
         world: "MAIN",
       });
       const res = results[0]?.result as { result?: unknown; error?: string; autoIIFE?: boolean };
-      if (res?.error) throw jsExecutionError(res.error);
+      if (res?.error) {
+        // CSP 禁 unsafe-eval 时回退 CDP Runtime.evaluate(仅主 frame——子 frame 需
+        // executionContextId 定位,暂不支持,保留原错)。CDP 下 top-level return 同样
+        // 非法 → 镜像 page-side 的 auto-IIFE,包成 (function(){...})() 重试。
+        if (debuggerMgr && frameId == null && isUnsafeEvalBlocked(res.error)) {
+          try {
+            return await cdpEvaluate(debuggerMgr, tid, code);
+          } catch (e) {
+            const m = e instanceof Error ? e.message : String(e);
+            if (/Illegal return/.test(m)) {
+              return await cdpEvaluate(debuggerMgr, tid, `(function(){${code}})()`);
+            }
+            throw jsExecutionError(m);
+          }
+        }
+        throw jsExecutionError(res.error);
+      }
       return res?.result;
     },
 
@@ -151,7 +223,18 @@ export function registerJsHandlers(router: ActionRouter): void {
         world: "MAIN",
       });
       const res = results[0]?.result as { result?: unknown; error?: string };
-      if (res?.error) throw jsExecutionError(res.error);
+      if (res?.error) {
+        // CSP 禁 unsafe-eval 时回退 CDP Runtime.evaluate(仅主 frame)。异步代码包成
+        // (async()=>{...})() + awaitPromise,与 page-side 包装一致。
+        if (debuggerMgr && frameId == null && isUnsafeEvalBlocked(res.error)) {
+          try {
+            return await cdpEvaluate(debuggerMgr, tid, `(async () => { ${code} })()`);
+          } catch (e) {
+            throw jsExecutionError(e instanceof Error ? e.message : String(e));
+          }
+        }
+        throw jsExecutionError(res.error);
+      }
       return res?.result;
     },
 
