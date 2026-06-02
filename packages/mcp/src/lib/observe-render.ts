@@ -5,7 +5,7 @@ export interface CompactElement {
   tag: string;
   role: string;
   name: string;
-  state?: { checked?: boolean; selected?: boolean; active?: boolean; disabled?: boolean; required?: boolean; expanded?: boolean; current?: boolean };
+  state?: { checked?: boolean; selected?: boolean; active?: boolean; disabled?: boolean; required?: boolean; expanded?: boolean; current?: boolean; invalid?: boolean };
   // 值域控件(slider/spinbutton/progressbar/meter 等)的当前值,如 "30" / "30/100"。
   valueNow?: string;
   frameId: number;
@@ -51,6 +51,7 @@ function stateFlags(state?: CompactElement["state"]): string {
   if (state.required) flags.push("required");
   if (state.expanded) flags.push("expanded");
   if (state.current) flags.push("current");
+  if (state.invalid) flags.push("invalid");
   return flags.length ? " " + flags.map((f) => `[${f}]`).join(" ") : "";
 }
 

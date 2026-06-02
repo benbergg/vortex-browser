@@ -53,7 +53,7 @@ describe("observe UI state extraction (@since 0.4.0 O-8)", () => {
   it("ScannedElement and elementsOut types include optional state field", () => {
     // 类型层把 state 暴露出来，不要让它只出现在页面内然后被 outer 丢掉
     expect(OBSERVE_SRC).toMatch(
-      /state\?:\s*\{\s*checked\?:\s*boolean[\s\S]{0,240}?current\?:\s*boolean\s*\}/,
+      /state\?:\s*\{\s*checked\?:\s*boolean[\s\S]{0,280}?invalid\?:\s*boolean\s*\}/,
     );
   });
 
@@ -80,6 +80,15 @@ describe("observe UI state extraction (@since 0.4.0 O-8)", () => {
     expect(OBSERVE_SRC).toMatch(/getAttribute\("aria-current"\)/);
     expect(OBSERVE_SRC).toMatch(/!==\s*"false"/);
     expect(OBSERVE_SRC).toMatch(/s\.current = true/);
+  });
+
+  it("derives invalid from aria-invalid 按值判定(Z,2026-06-02 dogfood)", () => {
+    // true/grammar/spelling 均为无效,false/缺省有效。用 aria-invalid 显式信号,
+    // 不用 :invalid 伪类(后者对初始空 required 字段噪声大)。
+    expect(OBSERVE_SRC).toMatch(/getAttribute\("aria-invalid"\)/);
+    expect(OBSERVE_SRC).toMatch(/s\.invalid = true/);
+    // 不用 :invalid 伪类。
+    expect(OBSERVE_SRC).not.toMatch(/matches\(":invalid"\)/);
   });
 
   it("getValueInfo 严格限定值域 role/控件,不对普通文本输入暴露 value(X)", () => {

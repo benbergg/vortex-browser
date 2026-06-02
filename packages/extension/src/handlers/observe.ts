@@ -90,7 +90,7 @@ interface ScannedElement {
   occludedBy?: string;
   attrs: Record<string, string>;
   /** Framework UI state derived from class / aria. @since 0.4.0 (O-8) */
-  state?: { checked?: boolean; selected?: boolean; active?: boolean; disabled?: boolean; expanded?: boolean; required?: boolean; current?: boolean };
+  state?: { checked?: boolean; selected?: boolean; active?: boolean; disabled?: boolean; expanded?: boolean; required?: boolean; current?: boolean; invalid?: boolean };
   /** 值域控件(slider/spinbutton/progressbar/meter 及原生 range/number/progress)的当前值,如 "30" 或 "30/100"。@since dogfood 2026-06-02 */
   valueNow?: string;
   _sel: string;
@@ -569,6 +569,7 @@ async function scanOneFrame(
           expanded?: boolean;
           required?: boolean;
           current?: boolean;
+          invalid?: boolean;
         } | undefined {
           const s: {
             checked?: boolean;
@@ -578,6 +579,7 @@ async function scanOneFrame(
             expanded?: boolean;
             required?: boolean;
             current?: boolean;
+            invalid?: boolean;
           } = {};
           let cur: Element | null = el;
           for (let i = 0; i < 3 && cur; i++, cur = cur.parentElement) {
@@ -639,6 +641,15 @@ async function scanOneFrame(
           const ariaCurrent = el.getAttribute("aria-current");
           if (ariaCurrent != null && ariaCurrent !== "false") {
             s.current = true;
+          }
+          // aria-invalid:表单字段校验失败(true/grammar/spelling 均为无效,false/
+          // 缺省为有效)。agent 修表单时需知道哪些字段没通过校验,否则反复提交。
+          // 只认作者显式的 aria-invalid(非 :invalid 伪类——后者对初始空 required
+          // 字段也匹配,噪声大;aria-invalid 是「确实校验失败了」的明确信号)。
+          // 值语义判定,aria-invalid="false" 不误标(2026-06-02 dogfood)。
+          const ariaInvalid = el.getAttribute("aria-invalid");
+          if (ariaInvalid != null && ariaInvalid !== "false") {
+            s.invalid = true;
           }
           return Object.keys(s).length > 0 ? s : undefined;
         }
@@ -842,7 +853,7 @@ async function scanOneFrame(
           inViewport: boolean;
           occludedBy?: string;
           attrs: Record<string, string>;
-          state?: { checked?: boolean; selected?: boolean; active?: boolean; disabled?: boolean; expanded?: boolean; required?: boolean; current?: boolean };
+          state?: { checked?: boolean; selected?: boolean; active?: boolean; disabled?: boolean; expanded?: boolean; required?: boolean; current?: boolean; invalid?: boolean };
           /** 值域控件当前值,如 "30" 或 "30/100"(getValueInfo 严格限定值域控件)。 */
           valueNow?: string;
           _sel: string;
@@ -1186,7 +1197,7 @@ export function registerObserveHandlers(router: ActionRouter): void {
         tag: string;
         role: string;
         name: string;
-        state?: { checked?: boolean; selected?: boolean; active?: boolean; disabled?: boolean; expanded?: boolean; required?: boolean; current?: boolean };
+        state?: { checked?: boolean; selected?: boolean; active?: boolean; disabled?: boolean; expanded?: boolean; required?: boolean; current?: boolean; invalid?: boolean };
         /** 值域控件当前值,如 "30" 或 "30/100"(getValueInfo 严格限定值域控件)。 */
         valueNow?: string;
         frameId: number;

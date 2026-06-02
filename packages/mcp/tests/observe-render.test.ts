@@ -38,6 +38,19 @@ describe("renderObserveCompact", () => {
     expect(out).toContain(`@e2 [button] "提交" [disabled]`);
   });
 
+  it("aria-invalid 渲染 [invalid] 标记(Z,2026-06-02 dogfood)", () => {
+    const withInvalid = {
+      ...sample,
+      elements: [
+        { index: 0, tag: "input", role: "textbox", name: "邮箱", state: { invalid: true }, frameId: 0 },
+        { index: 1, tag: "input", role: "textbox", name: "用户名", frameId: 0 },
+      ] as CompactElement[],
+    };
+    const out = renderObserveCompact(withInvalid, null);
+    expect(out).toContain(`@e0 [textbox] "邮箱" [invalid]`);
+    expect(out).not.toMatch(/用户名" \[invalid\]/);
+  });
+
   it("aria-current 渲染 [current] 标记(W,2026-06-02 dogfood)", () => {
     const withCurrent = {
       ...sample,
