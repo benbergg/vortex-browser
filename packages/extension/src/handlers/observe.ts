@@ -227,9 +227,14 @@ async function scanOneFrame(
         const INTERACTIVE_SELECTORS = [
           "button",
           "a[href]",
-          // 排除 radio/checkbox：Element Plus 等组件库把它们 visually hidden，
-          // 真正可点的是包它们的 <label>（下方收）。普通 input 仍正常收。
-          "input:not([type=hidden]):not([type=radio]):not([type=checkbox])",
+          // 原生 radio/checkbox 也收。组件库(Element Plus/Ant 等)把真 input
+          // visually-hidden 藏在可点的 <label> 下,真正可点的是外层 label
+          // (下方 label:has(...) 收),这类 surrogate input 由扫描循环里的
+          // closest("label")/opacity 门挡掉避免双现;而裸露的原生 input
+          // (兄弟式 <label for> / 纯 aria-label / 无 label)以前被整类排除 →
+          // 完全隐形(记住密码/同意条款/性别单选等最常见原生表单全盲),
+          // 现直接收(2026-06-02 dogfood AB)。
+          "input:not([type=hidden])",
           "select",
           "textarea",
           // 原生 disclosure 触发器：<details> 的首个 <summary> 是可点开合的控件
@@ -601,6 +606,28 @@ async function scanOneFrame(
               }
             }
           }
+          // 原生 checkbox/radio 的勾选态在 IDL .checked(不在 class/aria)。组件库
+          // 把状态放 label.is-checked 上由上面的循环覆盖;此处补两类:裸露的原生
+          // input(AB 修复后才可见)读自身 .checked;包裹式 <label>(surface 元素
+          // 是 label、内嵌 input 被 surrogate 门去重)读其内嵌 checkbox/radio——
+          // 否则普通 <label><input checked> 永远不显示勾选态(2026-06-02 dogfood AB)。
+          if (s.checked === undefined) {
+            let probe: HTMLInputElement | null = null;
+            if (el.tagName === "INPUT") {
+              probe = el as HTMLInputElement;
+            } else if (el.tagName === "LABEL") {
+              probe = el.querySelector(
+                "input[type=checkbox], input[type=radio]",
+              ) as HTMLInputElement | null;
+            }
+            if (
+              probe &&
+              (probe.type === "checkbox" || probe.type === "radio") &&
+              probe.checked === true
+            ) {
+              s.checked = true;
+            }
+          }
           // 禁用判定用 :disabled 伪类而非 IDL .disabled 属性:<fieldset disabled>
           // 会级联禁用内部所有控件(浏览器真禁用、阻断交互),但子控件的 IDL
           // .disabled 仍返 false——只有 :disabled 伪类反映级联真状态(同样覆盖
@@ -887,6 +914,37 @@ async function scanOneFrame(
             computedStyle.visibility === "collapse"
           ) {
             continue;
+          }
+
+          // 原生 checkbox/radio surrogate 去重:组件库(Element Plus/Ant Design
+          // 等)把真 <input> 包进可点的 <label> 并 visually-hidden(opacity:0),
+          // 由 label:has(input[type=checkbox/radio]) 表述外层 label。此处挡掉
+          // 这两种 surrogate——(1) 有包裹 <label> 祖先的(label 已收,收 input 会
+          // 双现);(2) opacity:0 的自绘 surrogate——只放行裸露的真 input
+          // (兄弟式 <label for> / 纯 aria-label / 无 label),修 AB 隐形 bug 而
+          // 不回归组件库单现(2026-06-02 dogfood AB)。
+          if (htmlEl.tagName === "INPUT") {
+            const inputType = (htmlEl as HTMLInputElement).type;
+            if (inputType === "checkbox" || inputType === "radio") {
+              // opacity:0 自绘 surrogate(Ant Design inset:0 opacity:0 非 0 rect):
+              // 真 input 透明、可见控件是别的元素,跳过避免收进不可见的 input。
+              if (parseFloat(computedStyle.opacity) === 0) {
+                continue;
+              }
+              // 有包裹 <label> 且该 label 自身可被收(非零尺寸)→ 控件由
+              // label:has(input[...]) 经外层 label 表述,跳过 input 避免双现。
+              // 但 display:contents 等零尺寸 label 会被上面的 rect 门丢弃,此时
+              // 不能跳——否则 input 和 label 双双消失、整控件隐形(评审 Finding 1)。
+              // 零尺寸 label 时保留 input,由 input 直接代表控件。
+              const wrapLabel =
+                typeof htmlEl.closest === "function"
+                  ? htmlEl.closest("label")
+                  : null;
+              if (wrapLabel) {
+                const lr = wrapLabel.getBoundingClientRect();
+                if (lr.width > 0 && lr.height > 0) continue;
+              }
+            }
           }
 
           // content-visibility:hidden 盲区:关闭态 <details> 的内部内容(及手动
