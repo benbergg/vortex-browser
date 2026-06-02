@@ -38,6 +38,18 @@ describe("renderObserveCompact", () => {
     expect(out).toContain(`@e2 [button] "提交" [disabled]`);
   });
 
+  it("required 状态渲染 [required] 标记(Y,2026-06-02 dogfood)", () => {
+    // observe-render 早支持 [required],本轮补上 producer(getUiState)接线。
+    const withRequired = {
+      ...sample,
+      elements: [
+        { index: 0, tag: "input", role: "textbox", name: "邮箱", state: { required: true }, frameId: 0 },
+      ] as CompactElement[],
+    };
+    const out = renderObserveCompact(withRequired, null);
+    expect(out).toContain(`@e0 [textbox] "邮箱" [required]`);
+  });
+
   it("aria-expanded=true 渲染 [expanded] 标记(T2,2026-06-02 dogfood)", () => {
     // 折叠 / 展开态菜单按钮原本输出完全相同,agent 无法判断下拉是否已打开。
     const withExpanded = {

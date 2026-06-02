@@ -90,7 +90,7 @@ interface ScannedElement {
   occludedBy?: string;
   attrs: Record<string, string>;
   /** Framework UI state derived from class / aria. @since 0.4.0 (O-8) */
-  state?: { checked?: boolean; selected?: boolean; active?: boolean; disabled?: boolean; expanded?: boolean };
+  state?: { checked?: boolean; selected?: boolean; active?: boolean; disabled?: boolean; expanded?: boolean; required?: boolean };
   _sel: string;
 }
 
@@ -559,6 +559,7 @@ async function scanOneFrame(
           active?: boolean;
           disabled?: boolean;
           expanded?: boolean;
+          required?: boolean;
         } | undefined {
           const s: {
             checked?: boolean;
@@ -566,6 +567,7 @@ async function scanOneFrame(
             active?: boolean;
             disabled?: boolean;
             expanded?: boolean;
+            required?: boolean;
           } = {};
           let cur: Element | null = el;
           for (let i = 0; i < 3 && cur; i++, cur = cur.parentElement) {
@@ -609,6 +611,16 @@ async function scanOneFrame(
           // 把无关父级的展开态错配到子按钮(2026-06-02 dogfood)。
           if (el.getAttribute("aria-expanded") === "true") {
             s.expanded = true;
+          }
+          // 必填字段:agent 填表前需知道哪些字段必填(否则提交才报错)。
+          // observe-render 早已支持 [required] 标记,但 producer 一直没接线
+          // (死标记)。原生 required 属性(input/select/textarea)+ ARIA
+          // aria-required="true" 双覆盖(2026-06-02 dogfood)。
+          if (
+            (el as HTMLInputElement).required === true ||
+            el.getAttribute("aria-required") === "true"
+          ) {
+            s.required = true;
           }
           return Object.keys(s).length > 0 ? s : undefined;
         }
@@ -770,7 +782,7 @@ async function scanOneFrame(
           inViewport: boolean;
           occludedBy?: string;
           attrs: Record<string, string>;
-          state?: { checked?: boolean; selected?: boolean; active?: boolean; disabled?: boolean; expanded?: boolean };
+          state?: { checked?: boolean; selected?: boolean; active?: boolean; disabled?: boolean; expanded?: boolean; required?: boolean };
           _sel: string;
         }> = [];
 
@@ -779,6 +791,15 @@ async function scanOneFrame(
           const htmlEl = el as HTMLElement;
           const rect = htmlEl.getBoundingClientRect();
           if (rect.width === 0 || rect.height === 0) continue;
+
+          // inert 子树:`inert` 属性(及其继承)让整个子树非交互——浏览器禁止
+          // 点击/聚焦,并从无障碍树移除。典型用于模态背景、关闭态抽屉、loading
+          // 遮罩。inert 不影响 checkVisibility(返 true)也不是 :disabled,故上面
+          // 两道门都漏掉 → 不可交互元素被误报。closest("[inert]") 是可靠信号
+          // (无 :inert 伪类可用),命中即整体跳过(2026-06-02 dogfood)。
+          if (typeof htmlEl.closest === "function" && htmlEl.closest("[inert]")) {
+            continue;
+          }
 
           // Skip elements hidden via CSS `visibility` (inherited from
           // any ancestor). These keep layout space and a nonzero rect

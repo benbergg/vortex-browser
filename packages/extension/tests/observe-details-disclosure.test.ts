@@ -58,3 +58,19 @@ describe("observe native <details>/<summary> disclosure (2026-06-02 dogfood)", (
     expect(gate?.[1]?.trim()).toBe("");
   });
 });
+
+describe("observe inert 子树排除(V,2026-06-02 dogfood)", () => {
+  it("V: 用 closest(\"[inert]\") 排除 inert 子树内元素", () => {
+    // inert 让子树非交互(浏览器禁止点击/聚焦),但 checkVisibility 仍 true、
+    // 也非 :disabled → 既有两门漏掉。closest("[inert]") 命中即 continue 跳过。
+    expect(OBSERVE_SRC).toMatch(
+      /htmlEl\.closest\("\[inert\]"\)\s*\)\s*\{\s*continue;/,
+    );
+  });
+
+  it("V: inert 门带 typeof 守卫(jsdom / 老环境无 closest)", () => {
+    expect(OBSERVE_SRC).toMatch(
+      /typeof htmlEl\.closest === "function" && htmlEl\.closest\("\[inert\]"\)/,
+    );
+  });
+});

@@ -53,7 +53,7 @@ describe("observe UI state extraction (@since 0.4.0 O-8)", () => {
   it("ScannedElement and elementsOut types include optional state field", () => {
     // 类型层把 state 暴露出来，不要让它只出现在页面内然后被 outer 丢掉
     expect(OBSERVE_SRC).toMatch(
-      /state\?:\s*\{\s*checked\?:\s*boolean[\s\S]{0,160}?expanded\?:\s*boolean\s*\}/,
+      /state\?:\s*\{\s*checked\?:\s*boolean[\s\S]{0,200}?required\?:\s*boolean\s*\}/,
     );
   });
 
@@ -64,5 +64,13 @@ describe("observe UI state extraction (@since 0.4.0 O-8)", () => {
       /getAttribute\("aria-expanded"\)\s*===\s*"true"/,
     );
     expect(OBSERVE_SRC).toMatch(/s\.expanded = true/);
+  });
+
+  it("derives required from native required OR aria-required (Y,2026-06-02 dogfood)", () => {
+    // observe-render 早支持 [required] 标记但 producer 从未接线(死标记),
+    // agent 填表不知哪些必填。原生 required + aria-required="true" 双覆盖。
+    expect(OBSERVE_SRC).toMatch(/\.required === true/);
+    expect(OBSERVE_SRC).toMatch(/getAttribute\("aria-required"\)\s*===\s*"true"/);
+    expect(OBSERVE_SRC).toMatch(/s\.required = true/);
   });
 });
