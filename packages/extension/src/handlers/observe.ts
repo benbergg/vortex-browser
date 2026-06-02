@@ -230,6 +230,11 @@ async function scanOneFrame(
           "input:not([type=hidden]):not([type=radio]):not([type=checkbox])",
           "select",
           "textarea",
+          // 原生 disclosure 触发器：<details> 的首个 <summary> 是可点开合的控件
+          // (GitHub 菜单 / MDN / 文档站 FAQ 折叠大量使用)。它本身是交互入口,
+          // 而关闭态 <details> 的内部内容由下方 checkVisibility 门挡掉
+          // (content-visibility:hidden,2026-06-02 dogfood)。
+          "details > summary",
           "label:has(input[type=radio]), label:has(input[type=checkbox])",
           "[role=button]",
           "[role=link]",
@@ -290,6 +295,9 @@ async function scanOneFrame(
           }
           if (tag === "select") return "combobox";
           if (tag === "textarea") return "textbox";
+          // <summary> 是 disclosure 开合控件,交互模型等同按钮,role 报 button 让
+          // LLM 直接理解为可点(原生 <details>/<summary>,2026-06-02 dogfood)。
+          if (tag === "summary") return "button";
           return tag;
         }
 
@@ -767,6 +775,22 @@ async function scanOneFrame(
           if (
             computedStyle.visibility === "hidden" ||
             computedStyle.visibility === "collapse"
+          ) {
+            continue;
+          }
+
+          // content-visibility:hidden 盲区:关闭态 <details> 的内部内容(及手动
+          // content-visibility:hidden 的折叠区)保留非 0 layout rect、自身
+          // getComputedStyle 的 visibility/content-visibility 仍报 "visible"
+          // (隐藏施加在 ::details-content 伪元素上,子元素查不到),故上面的
+          // visibility 门和下方 elementFromPoint 遮挡判定都漏掉它,导致不可达的
+          // 隐藏控件被误报为可交互(2026-06-02 dogfood)。checkVisibility() 默认
+          // (所有选项 false)对 content-visibility:hidden 链返回 false,而对
+          // content-visibility:auto 的离屏可达内容(滚动即渲染,R1)仍返回 true,
+          // 对可见 <summary> 也返回 true——正好只挡 cv:hidden,不误伤可达元素。
+          if (
+            typeof htmlEl.checkVisibility === "function" &&
+            !htmlEl.checkVisibility()
           ) {
             continue;
           }
