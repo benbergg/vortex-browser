@@ -13,6 +13,9 @@
 
   // Page-side inline helpers (matching original dom.ts page-side func; cannot import across files)
   const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  // 折叠内部空白:el-checkbox label 里夹图标/换行时 innerText 会带多余空白/换行,
+  // 严格 === 会把真实可选项判成 Unknown(2026-06-03 act 原语白盒审计族 I #25)。
+  const norm = (s: string) => s.replace(/\s+/g, " ").trim();
 
   /**
    * Run checkbox-group commit.
@@ -68,7 +71,7 @@
         errorCode: "INVALID_PARAMS",
       };
     }
-    const target2 = new Set(labels.map((s) => String(s).trim()));
+    const target2 = new Set(labels.map((s) => norm(String(s))));
 
     // Support button style (.el-checkbox-button) and label style (.el-checkbox)
     const btns = Array.from(
@@ -82,10 +85,10 @@
       };
     }
     const unknownTargets = [...target2].filter(
-      (name) => !btns.some((b) => (b.innerText || "").trim() === name),
+      (name) => !btns.some((b) => norm(b.innerText || "") === name),
     );
     if (unknownTargets.length > 0) {
-      const available = btns.map((b) => (b.innerText || "").trim());
+      const available = btns.map((b) => norm(b.innerText || ""));
       return {
         error: `Unknown label(s): ${unknownTargets.join(",")}. Available: ${available.join(",")}`,
         errorCode: "INVALID_PARAMS",
@@ -105,7 +108,7 @@
 
     const toggled: string[] = [];
     for (const b of btns) {
-      const name = (b.innerText || "").trim();
+      const name = norm(b.innerText || "");
       const isChecked = b.classList.contains("is-checked");
       const shouldCheck = target2.has(name);
       if (isChecked === shouldCheck) continue;
@@ -117,7 +120,7 @@
     // Verify: re-read actual checked state and require it matches target
     const checkedNow = btns
       .filter((b) => b.classList.contains("is-checked"))
-      .map((b) => (b.innerText || "").trim())
+      .map((b) => norm(b.innerText || ""))
       .sort();
     const wanted = [...target2].sort();
     const ok =

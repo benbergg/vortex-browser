@@ -86,6 +86,9 @@
     const labels = Array.isArray(val)
       ? (val as unknown[]).map((v) => String(v))
       : [String(val)];
+    // 折叠内部空白:选项 label 夹图标/换行时 textContent 带多余空白/换行,
+    // 严格匹配会判 Unknown(2026-06-03 act 原语白盒审计族 I #25)。
+    const norm = (s: string) => s.replace(/\s+/g, " ").trim();
     const isMultiple = Array.isArray(val) || root.classList.contains("is-multiple");
 
     // trigger: el-select 2.x uses .el-select__wrapper, older versions use .select-trigger
@@ -167,11 +170,42 @@
         await sleep(150);
       }
 
-      const items = Array.from(
-        dropdown.querySelectorAll(".el-select-dropdown__item"),
-      ) as HTMLElement[];
-      const hit = items.find((it) => (it.textContent || "").trim() === label);
+      const wantLabel = norm(label);
+      // 轮询等选项渲染:remote/懒加载首帧 dropdown 为空,一次性枚举会误报 Unknown
+      // (族 I #22)。每轮重算 querySelectorAll 拾取后插入的 item;只取启用项精确
+      // 匹配(norm 折叠空白 #25,跳过 .is-disabled #21,点禁用项无效 verify 会失败)。
+      const optWait = Math.min(timeoutMs, 3000);
+      const hit = await waitFor(
+        () =>
+          (
+            Array.from(
+              dropdown.querySelectorAll(".el-select-dropdown__item"),
+            ) as HTMLElement[]
+          ).find(
+            (it) =>
+              !it.classList.contains("is-disabled") &&
+              norm(it.textContent || "") === wantLabel,
+          ) ?? null,
+        optWait,
+      );
       if (!hit) {
+        // 区分:文本存在但禁用 → 明确报 disabled(#21);否则才是 unknown(#22 已等过)
+        const disabledHit = (
+          Array.from(
+            dropdown.querySelectorAll(".el-select-dropdown__item"),
+          ) as HTMLElement[]
+        ).find(
+          (it) =>
+            it.classList.contains("is-disabled") &&
+            norm(it.textContent || "") === wantLabel,
+        );
+        if (disabledHit) {
+          return {
+            error: `Option "${label}" is disabled and cannot be selected`,
+            errorCode: "INVALID_PARAMS",
+            extras: { disabled: label },
+          };
+        }
         unknown.push(label);
         continue;
       }
@@ -208,7 +242,6 @@
     // 真 commit(disabled option / 动画期丢 click / 单选被传多 label / 异步未 settle 都会
     // 「点了但没选上」),仅凭 clicked 返回 success 是 silent false-success。对照同目录
     // checkbox-group 的 is-checked 回读范式(2026-06-03 act 原语白盒审计族 A,#20)。
-    const norm = (s: string) => s.replace(/\s+/g, " ").trim();
     // 优先读独立的已选项元素(multi 的 tag / single 的 selected-item)做精确匹配,
     // 避免触发器整体文本的子串误判(label 是 placeholder 或另一 tag 子串时假通过)。
     const itemEls = wrapper.querySelectorAll(

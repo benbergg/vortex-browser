@@ -661,7 +661,7 @@ export function registerDomHandlers(
       } | undefined>(
         tid,
         frameId,
-        (sel: string, val: string | string[]) => {
+        async (sel: string, val: string | string[], timeoutMs: number) => {
           try {
             // === 探测（与 CLICK 同步）===
             const els = (window as any).__vortexDomResolve.queryAllDeep(sel) as Element[];
@@ -702,7 +702,7 @@ export function registerDomHandlers(
             // value 静默变 "" / selectedIndex 变 -1。调用方(尤其 agent)常只看得到可见
             // 文本(observe 不枚举 option),故按 value → 可见文本(label) → label 属性
             // 依次回退;全不中则报错而非假成功(2026-06-01 native-select dogfood)。
-            const opts = Array.from(el.options);
+            let opts = Array.from(el.options);
             const norm = (s: string) => s.replace(/\s+/g, " ").trim();
             const matchOption = (one: string): HTMLOptionElement | null => {
               const t = norm(String(one));
@@ -713,6 +713,22 @@ export function registerDomHandlers(
                 null
               );
             };
+
+            // 轮询等异步选项渲染:options 被 Ajax/远程填充,首帧可能为空,同步枚举一次
+            // 会误报 NO_MATCHING_OPTION(2026-06-03 act 原语白盒审计族 I #23)。el.options
+            // 是 live collection,每轮重读即可拾取后插入的 option。common case 首次即全
+            // 匹配,不进轮询(零额外开销,与原同步行为一致,低回归风险)。
+            const wantList = Array.isArray(val) ? (val as string[]) : [val as string];
+            const allMatchable = () => wantList.every((one) => matchOption(one) != null);
+            if (!allMatchable()) {
+              const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+              const deadline = Date.now() + Math.min(timeoutMs, 4000);
+              while (Date.now() < deadline) {
+                await sleep(50);
+                opts = Array.from(el.options);
+                if (allMatchable()) break;
+              }
+            }
 
             // 数组 value = 多选(原生 <select multiple>)。单值赋值 el.value 只能选中
             // 一个 option,多选必须逐 option 设 .selected;全中才提交,任一不中报错而非
@@ -785,7 +801,7 @@ export function registerDomHandlers(
             return { error: err instanceof Error ? err.message : String(err) };
           }
         },
-        [selector, value],
+        [selector, value, (args.timeout as number | undefined) ?? 5000],
       );
       if (res?.error) mapPageError(res, selector);
       return res?.result;
