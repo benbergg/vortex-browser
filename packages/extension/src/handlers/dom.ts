@@ -657,12 +657,22 @@ export function registerDomHandlers(
                   error: `<select> ${sel} is not multiple; pass a single value, not an array`,
                 };
               }
+              // 去重:数组里两项可能解析到同一 option(如 ["Apple","Apple"],或一个按
+              // value、一个按可见文本命中同一项)。不去重则 matched 计数 > selectedOptions
+              // 实际选中数,下面回读校验会误报 NO_EFFECT。
               const matched: HTMLOptionElement[] = [];
+              const seen = new Set<HTMLOptionElement>();
               const unmatched: string[] = [];
               for (const one of val as string[]) {
                 const m = matchOption(one);
-                if (m) matched.push(m);
-                else unmatched.push(String(one));
+                if (!m) {
+                  unmatched.push(String(one));
+                  continue;
+                }
+                if (!seen.has(m)) {
+                  seen.add(m);
+                  matched.push(m);
+                }
               }
               if (unmatched.length > 0) {
                 return {

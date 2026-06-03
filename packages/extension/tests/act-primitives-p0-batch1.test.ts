@@ -76,6 +76,13 @@ describe("族 E — native <select multiple> 多选(#4)", () => {
     expect(DOM_SRC).toMatch(/el\.selectedOptions/);
     expect(DOM_SRC).toMatch(/errorCode:\s*"NO_EFFECT"/);
   });
+
+  it("matched 去重避免重复匹配同一 option 误报 NO_EFFECT(评审 M1)", () => {
+    // ["Apple","Apple"] 或 value+文本命中同一项时,不去重会让 matched.length >
+    // selectedOptions.length 误报。用 Set 去重。
+    expect(DOM_SRC).toMatch(/const seen = new Set<HTMLOptionElement>\(\)/);
+    expect(DOM_SRC).toMatch(/if \(!seen\.has\(m\)\)/);
+  });
 });
 
 describe("族 C — HOVER 走 CDP 真鼠标触发 CSS :hover(#2)", () => {
