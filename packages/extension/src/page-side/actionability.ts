@@ -9,7 +9,7 @@
 // - Defensive guard against double-load (page-side-loader is idempotent, but defend here too)
 // - All checks are sync except Stable (which uses RAF double-sample)
 
-import { queryDeep, deepElementFromPoint } from "./shadow-walk.js";
+import { queryDeep, deepElementFromPoint, isEnabledElement } from "./shadow-walk.js";
 
 export type ActionabilityFailure =
   | "NOT_ATTACHED"
@@ -100,14 +100,10 @@ export type ActionabilityResult =
     }
   }
 
+  // 门的 disabled 判定与 dom-resolve 探测共用 shadow-walk.isEnabledElement(单一真源,
+  // 防探测/门漂移——批次 5 族 H)。
   function isEnabled(el: Element): boolean {
-    if (!(el instanceof HTMLElement)) return true;
-    const aria = el.getAttribute("aria-disabled");
-    if (aria === "true") return false;
-    if ((el as HTMLInputElement).disabled === true) return false;
-    const fs = el.closest("fieldset[disabled]");
-    if (fs) return false;
-    return true;
+    return isEnabledElement(el);
   }
 
   // Calibration #2: vortex decision — include SELECT readonly check.

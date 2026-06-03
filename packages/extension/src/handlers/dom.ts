@@ -684,7 +684,8 @@ export function registerDomHandlers(
               };
             }
             const el = els[0] as HTMLSelectElement;
-            if (el.disabled === true) {
+            // 探测 disabled 走门同款 isEnabled(含 aria-disabled),与 CLICK/TYPE/FILL 一致(#26)。
+            if (!(window as any).__vortexDomResolve.isEnabled(el)) {
               return { errorCode: "ELEMENT_DISABLED", error: `Element ${sel} is disabled` };
             }
             const rect = el.getBoundingClientRect();

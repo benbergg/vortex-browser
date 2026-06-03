@@ -125,14 +125,26 @@ const RESOLVE_SRC = readFileSync(
   join(__dirname, "../src/page-side/dom-resolve.ts"),
   "utf8",
 );
+const SHADOW_SRC = readFileSync(
+  join(__dirname, "../src/page-side/shadow-walk.ts"),
+  "utf8",
+);
+const ACTIONABILITY_SRC = readFileSync(
+  join(__dirname, "../src/page-side/actionability.ts"),
+  "utf8",
+);
 
-describe("#26/#29 dom-resolve.isEnabled — 探测层单一 disabled 判定(镜像门)", () => {
-  it("__vortexDomResolve 暴露 isEnabled", () => {
-    expect(RESOLVE_SRC).toMatch(/isEnabled:/);
+describe("#26/#29 isEnabled 单一真源 — 门与探测共用 shadow-walk.isEnabledElement", () => {
+  it("shadow-walk 导出 isEnabledElement,逻辑含 aria-disabled + .disabled + fieldset[disabled]", () => {
+    expect(SHADOW_SRC).toMatch(/export function isEnabledElement/);
+    expect(SHADOW_SRC).toMatch(/aria-disabled/);
+    expect(SHADOW_SRC).toMatch(/fieldset\[disabled\]/);
   });
-  it("isEnabled 镜像门:aria-disabled + .disabled + fieldset[disabled]", () => {
-    expect(RESOLVE_SRC).toMatch(/aria-disabled/);
-    expect(RESOLVE_SRC).toMatch(/fieldset\[disabled\]/);
+  it("__vortexDomResolve.isEnabled 委托 isEnabledElement(不再各持一份)", () => {
+    expect(RESOLVE_SRC).toMatch(/isEnabled:.*isEnabledElement\(el\)/);
+  });
+  it("门 actionability.isEnabled 也委托同一 isEnabledElement(防漂移)", () => {
+    expect(ACTIONABILITY_SRC).toMatch(/return isEnabledElement\(el\)/);
   });
 });
 

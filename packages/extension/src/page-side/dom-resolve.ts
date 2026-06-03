@@ -2,7 +2,12 @@
 // inline func 经 nativePageQuery 在 MAIN world 执行，闭包不能序列化，故经 window 全局共享。
 // 由 loadPageSideModule(tid, frameId, "dom-resolve") 预注入（同 MAIN world，可见）。
 // 命名空间 + version 守卫，与 fill-reject / actionability 等 page-side module 约定一致。
-import { queryDeep, queryAllDeep, deepElementFromPoint } from "./shadow-walk.js";
+import {
+  queryDeep,
+  queryAllDeep,
+  deepElementFromPoint,
+  isEnabledElement,
+} from "./shadow-walk.js";
 
 (function () {
   if ((window as any).__vortexDomResolve?.version === 1) return;
@@ -38,21 +43,11 @@ import { queryDeep, queryAllDeep, deepElementFromPoint } from "./shadow-walk.js"
         return null;
       }
     },
-    // 单一 disabled 判定，镜像门 actionability.isEnabled(aria-disabled + 原生 disabled
-    // + fieldset[disabled])。CLICK/TYPE/FILL inline 探测与 cdp.ts useRealMouse 探测旧版
-    // 只判 .disabled,漏 aria-disabled,与门不一致(探测放行→门拦,或 div[role=textbox]
-    // aria-disabled 探测漏判)。收敛到此处保证探测==门(#26/#29)。
-    isEnabled: (el: Element): boolean => {
-      try {
-        if (!(el instanceof HTMLElement)) return true;
-        if (el.getAttribute("aria-disabled") === "true") return false;
-        if ((el as HTMLInputElement).disabled === true) return false;
-        if (el.closest("fieldset[disabled]")) return false;
-        return true;
-      } catch {
-        return true;
-      }
-    },
+    // 单一 disabled 判定,与门 actionability.isEnabled 共用 shadow-walk.isEnabledElement
+    // (aria-disabled + 原生 disabled + fieldset[disabled])。CLICK/TYPE/FILL inline 探测与
+    // cdp.ts useRealMouse 探测旧版只判 .disabled 漏 aria-disabled,与门不一致(探测放行→门拦,
+    // 或 div[role=textbox] aria-disabled 探测漏判)。收敛到单一真源保证探测==门(#26/#29)。
+    isEnabled: (el: Element): boolean => isEnabledElement(el),
   };
 })();
 export {};
