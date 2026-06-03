@@ -423,9 +423,12 @@ export function registerDomHandlers(
               else (el as HTMLInputElement).value = v;
             };
             // clear-before:type 语义是「把这段文本输入到字段」,不清空会得到 旧值+新值
-            // 的拼接(族 F #9)。先清空再输入。
-            setValue("");
-            el.dispatchEvent(new InputEvent("input", { bubbles: true }));
+            // 的拼接(族 F #9)。先清空再输入。仅在有文本要输入时清空——type("") 保持
+            // no-op,避免破坏性清空已有值(评审 M2)。
+            if (String(txt) !== "") {
+              setValue("");
+              el.dispatchEvent(new InputEvent("input", { bubbles: true }));
+            }
 
             // number/date/range 等非 text 类型逐字累加会产生无效中间态(如 "1"→"1.")
             // 被原生置空,final value≠text(族 F #10)。这类整体写入一次,不逐字模拟。
@@ -438,11 +441,15 @@ export function registerDomHandlers(
               el.dispatchEvent(new InputEvent("input", { bubbles: true }));
               el.dispatchEvent(new Event("change", { bubbles: true }));
             } else {
+              // 用累加器而非每次读 el.value:delay>0 时受控组件可能在 setTimeout 间隙把
+              // el.value 改回 state 值,读回累加会错乱(只剩末字符/重复,评审 M1)。
+              let acc = "";
               for (const char of txt) {
                 const eventInit = { key: char, bubbles: true, cancelable: true };
                 el.dispatchEvent(new KeyboardEvent("keydown", eventInit));
                 el.dispatchEvent(new KeyboardEvent("keypress", eventInit));
-                setValue(((el as HTMLInputElement).value ?? "") + char);
+                acc += char;
+                setValue(acc);
                 el.dispatchEvent(new InputEvent("input", { bubbles: true, data: char }));
                 el.dispatchEvent(new KeyboardEvent("keyup", eventInit));
                 if (delayMs > 0) {
