@@ -560,6 +560,17 @@ export function registerDomHandlers(
             }
             el.dispatchEvent(new Event("input", { bubbles: true }));
             el.dispatchEvent(new Event("change", { bubbles: true }));
+            // 回读校验副作用真发生:type=number/date/email 等对非法格式的值,原生 setter
+            // 静默置空(el.value="")。传了非空值却读回空 = 输入被拒,报 NO_EFFECT 而非
+            // 假成功(2026-06-03 act 原语白盒审计族 A,#7)。仅判「非空→空」的明确拒绝,
+            // 不误伤值规范化(如 number "007"→"7")。
+            if (String(val) !== "" && (el as HTMLInputElement).value === "") {
+              return {
+                errorCode: "NO_EFFECT",
+                error: `Element ${sel} rejected value "${String(val)}" (likely a format/type constraint, e.g. type=number/date); value is empty after fill`,
+                extras: { attempted: String(val), type: (el as HTMLInputElement).type },
+              };
+            }
             return { result: { success: true } };
           } catch (err) {
             return { error: err instanceof Error ? err.message : String(err) };
@@ -768,6 +779,14 @@ export function registerDomHandlers(
               return null;
             };
 
+            // 读滚动位置(回读校验副作用:scroll 必须返回是否真滚动,否则到边界/
+            // 容器解析错时静默假成功,agent 以为滚到了实际没动 → 后续 act 找不到目标
+            // 陷入循环。2026-06-03 act 原语白盒审计族 A,#18/#19)。
+            const readPos = (t: Element | Window): { top: number; left: number } =>
+              t instanceof Window
+                ? { top: t.scrollY, left: t.scrollX }
+                : { top: (t as Element).scrollTop, left: (t as Element).scrollLeft };
+
             // 确定滚动容器
             let scrollTarget: Element | Window = window;
             if (cont) {
@@ -788,39 +807,63 @@ export function registerDomHandlers(
               }
               // fall through to position branch（scrollTarget 已切换）
             } else if (sel) {
-              // 仅 selector（无 position）：保持原 scrollIntoView 语义
+              // 仅 selector（无 position）：scrollIntoView 把元素居中。用 behavior:"auto"
+              // (instant)而非 smooth——平滑动画异步,scrollTo 立即返回而滚动未完成,
+              // 后续 observe/act 读到中途位置(#19)。回读元素 rect 判断是否真移动 + 是否
+              // 已在视口。
               const el = document.querySelector(sel);
               if (!el) return { error: `Element not found: ${sel}` };
-              el.scrollIntoView({ behavior: "smooth", block: "center" });
-              return { result: { success: true } };
+              const beforeTop = el.getBoundingClientRect().top;
+              el.scrollIntoView({ behavior: "auto", block: "center" });
+              const afterRect = el.getBoundingClientRect();
+              const inView =
+                afterRect.top < window.innerHeight && afterRect.bottom > 0;
+              return {
+                result: {
+                  success: true,
+                  moved: Math.abs(afterRect.top - beforeTop) > 1,
+                  inView,
+                },
+              };
             }
 
-            // 根据 position 滚动
+            const doScroll = (opts: ScrollToOptions): { success: true; moved: boolean; scrollTop: number; scrollLeft: number } => {
+              const before = readPos(scrollTarget);
+              const scrollOpts: ScrollToOptions = { ...opts, behavior: "auto" };
+              if (scrollTarget instanceof Window) {
+                scrollTarget.scrollTo(scrollOpts);
+              } else {
+                (scrollTarget as Element).scrollTo(scrollOpts);
+              }
+              const after = readPos(scrollTarget);
+              return {
+                success: true,
+                // 回读:位置无变化(已在目标边界 / 容器不可滚 / 容器解析错)时 moved:false,
+                // agent 据此判断是否真滚动而非盲信 success(#18)。
+                moved:
+                  Math.abs(after.top - before.top) > 1 ||
+                  Math.abs(after.left - before.left) > 1,
+                scrollTop: after.top,
+                scrollLeft: after.left,
+              };
+            };
+
+            // 根据 position 滚动(behavior:auto instant,#19)
             if (pos) {
-              const scrollOpts: ScrollToOptions = { behavior: "smooth" };
+              const scrollOpts: ScrollToOptions = {};
               if (pos === "top") { scrollOpts.top = 0; }
               else if (pos === "bottom") { scrollOpts.top = 999999; }
               else if (pos === "left") { scrollOpts.left = 0; }
               else if (pos === "right") { scrollOpts.left = 999999; }
-              if (scrollTarget instanceof Window) {
-                scrollTarget.scrollTo(scrollOpts);
-              } else {
-                (scrollTarget as Element).scrollTo(scrollOpts);
-              }
-              return { result: { success: true } };
+              return { result: doScroll(scrollOpts) };
             }
 
             // 滚动到指定坐标
             if (sx !== undefined || sy !== undefined) {
-              const scrollOpts: ScrollToOptions = { behavior: "smooth" };
+              const scrollOpts: ScrollToOptions = {};
               if (sx !== undefined) scrollOpts.left = sx;
               if (sy !== undefined) scrollOpts.top = sy;
-              if (scrollTarget instanceof Window) {
-                scrollTarget.scrollTo(scrollOpts);
-              } else {
-                (scrollTarget as Element).scrollTo(scrollOpts);
-              }
-              return { result: { success: true } };
+              return { result: doScroll(scrollOpts) };
             }
 
             return { error: "Must specify selector, position, or x/y coordinates" };

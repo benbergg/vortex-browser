@@ -204,6 +204,21 @@
       };
     }
 
+    // Verify: 回读触发器显示的已选文本——每个 label 都应反映在其中。点中 DOM item
+    // 不等于 Vue 真 commit(disabled option / 动画期丢 click / 异步未 settle 都会
+    // 「点了但没选上」),仅凭 clicked 返回 success 是 silent false-success。对照同
+    // 目录 checkbox-group 的 is-checked 回读范式(2026-06-03 act 原语白盒审计族 A,#20)。
+    const displayed = (wrapper.innerText || "").replace(/\s+/g, " ").trim();
+    const notReflected = labels.filter((l) => !displayed.includes(l));
+    if (notReflected.length > 0) {
+      return {
+        error: `Selected option(s) not reflected after commit: ${notReflected.join(", ")} (trigger shows "${displayed}"). Likely a disabled option or a dropped click.`,
+        errorCode: "COMMIT_FAILED",
+        stage: "verify",
+        extras: { notReflected, displayed, clicked },
+      };
+    }
+
     return {
       result: {
         success: true,

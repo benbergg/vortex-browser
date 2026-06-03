@@ -39,6 +39,41 @@ async function getActiveTabId(tabId?: number): Promise<number> {
 }
 
 /**
+ * 读主 frame 当前聚焦元素的简短描述。PRESS 是全局 fire-and-forget——按键投递到
+ * document.activeElement,而非某个指定 target。焦点不在预期元素时(如 observe 后焦点
+ * 仍在 body)按键落空但 handler 仍返回 success,是 silent false-success。回传焦点上下文,
+ * 让 agent 知道按键去了哪、不被盲目 success 误导(2026-06-03 act 原语白盒审计族 A,#15)。
+ * 读失败(无注入权限等)返回空串,不影响 PRESS 本身。
+ */
+async function probeFocus(tabId: number): Promise<string> {
+  try {
+    const res = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: () => {
+        const a = document.activeElement;
+        if (!a || a === document.body || a === document.documentElement) {
+          return "body (no element focused — key may have no effect)";
+        }
+        const tag = a.tagName.toLowerCase();
+        const id = a.id ? "#" + a.id : "";
+        const role = a.getAttribute("role");
+        const name =
+          a.getAttribute("aria-label") ||
+          a.getAttribute("name") ||
+          a.getAttribute("placeholder") ||
+          "";
+        return (
+          tag + id + (role ? `[role=${role}]` : "") + (name ? ` "${name.slice(0, 40)}"` : "")
+        );
+      },
+    });
+    return (res[0]?.result as string | undefined) ?? "";
+  } catch {
+    return "";
+  }
+}
+
+/**
  * Parse a key expression like "Enter" / "Ctrl+S" / "Shift+Ctrl+ArrowDown".
  *
  * - parts.length === 1: single key, no modifiers
@@ -118,11 +153,13 @@ export function registerKeyboardHandlers(
       const { key, modifiers, modifierKeys } = parseKeyExpression(expr);
 
       await debuggerMgr.attach(tid);
+      // 投递前读焦点——按键将作用于此元素(回传给 agent,避免盲目 success,#15)。
+      const focusedElement = await probeFocus(tid);
 
       // Plain single-key path stays byte-identical to v0.8 behavior.
       if (modifierKeys.length === 0) {
         await dispatchKey(debuggerMgr, tid, key, 0);
-        return { success: true, key: expr };
+        return { success: true, key: expr, focusedElement };
       }
 
       // Combo path: hold modifiers across main-key dispatch, then
@@ -154,7 +191,7 @@ export function registerKeyboardHandlers(
           modifiers: pressed,
         });
       }
-      return { success: true, key: expr };
+      return { success: true, key: expr, focusedElement };
     },
 
     [KeyboardActions.SHORTCUT]: async (args, tabId) => {
