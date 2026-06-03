@@ -1,0 +1,28 @@
+{
+  "fixture": "native-form-baseline",
+  "path": "/synth/native-form-baseline.html",
+  "frames": "main",
+  "source": "https://www.selenium.dev/selenium/web/web-form.html",
+  "tier": "easy",
+  "capturedAt": "2026-06-03T13:22:05.343Z",
+  "entries": [
+    { "id": "c0", "interactive": true, "expectedName": null, "expectedRole": null, "pattern": "native", "note": "text input;label 无 for 故无编程名,observe 返回 null name 正确" },
+    { "id": "c1", "interactive": true, "expectedName": null, "expectedRole": null, "pattern": "native", "note": "password input" },
+    { "id": "c2", "interactive": true, "expectedName": null, "expectedRole": null, "pattern": "native", "note": "textarea" },
+    { "id": "c3", "interactive": true, "expectedName": null, "expectedRole": null, "pattern": "native", "note": "disabled input;observe 按设计输出并打 disabled flag(:disabled 伪类,2026-06-02 dogfood),agent 据此知禁用不白等;disabled 态在 flags 不在此校验" },
+    { "id": "c4", "interactive": true, "expectedName": null, "expectedRole": null, "pattern": "native", "note": "readonly input;可聚焦/选中,仍算可交互" },
+    { "id": "c5", "interactive": true, "expectedName": "Return to index", "expectedRole": null, "pattern": "native", "note": "链接" },
+    { "id": "c6", "interactive": true, "expectedName": null, "expectedRole": null, "pattern": "native", "note": "原生 select;无 label 故无编程 accessible name,observe 返回 \"\" 正确" },
+    { "id": "c7", "interactive": true, "expectedName": null, "expectedRole": null, "pattern": "native", "note": "datalist input" },
+    { "id": "c8", "interactive": true, "expectedName": null, "expectedRole": null, "pattern": "native", "note": "file input" },
+    { "id": "c9", "interactive": true, "expectedName": "Checked checkbox", "expectedRole": null, "pattern": "native", "joinBy": "name", "note": "checkbox;observe 经包裹 label name-from-content 返回(1ad1be7),按 name join" },
+    { "id": "c10", "interactive": true, "expectedName": "Default checkbox", "expectedRole": null, "pattern": "native", "joinBy": "name" },
+    { "id": "c11", "interactive": true, "expectedName": "Checked radio", "expectedRole": null, "pattern": "native", "joinBy": "name" },
+    { "id": "c12", "interactive": true, "expectedName": "Default radio", "expectedRole": null, "pattern": "native", "joinBy": "name" },
+    { "id": "c13", "interactive": true, "expectedName": "Submit", "expectedRole": null, "pattern": "native", "note": "提交按钮" },
+    { "id": "c14", "interactive": true, "expectedName": null, "expectedRole": null, "pattern": "native", "note": "color picker" },
+    { "id": "c15", "interactive": true, "expectedName": null, "expectedRole": null, "pattern": "native", "note": "date picker(text input)" },
+    { "id": "c16", "interactive": true, "expectedName": null, "expectedRole": null, "pattern": "native", "note": "range slider" },
+    { "id": "c17", "interactive": false, "expectedName": null, "expectedRole": null, "pattern": "native-noise", "note": "hidden input;observe 正确省略(对照:不应返回)" }
+  ]
+}
