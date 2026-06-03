@@ -6,6 +6,7 @@ import { resolveTarget, resolveTargetOptional } from "../lib/resolve-target.js";
 import { pageQuery as nativePageQuery, mapPageError } from "../adapter/native.js";
 import { loadPageSideModule } from "../adapter/page-side-loader.js";
 import { clickBBox as cdpClickBBox, cdpClickElement } from "../adapter/cdp.js";
+import { getIframeOffset } from "../lib/iframe-offset.js";
 import {
   runCascaderDriverCDP,
   runDateRangeDriverCDP,
@@ -505,14 +506,36 @@ export function registerDomHandlers(
                 error: `Element ${sel} is outside the viewport`,
               };
             }
-            // contenteditable 不是 value-bearing 元素,fill 的原生 value setter 对它
-            // 无效;若回退 `el.value = val` 只会写一个幽灵 expando 属性并 dispatch 事件,
-            // 伪装成 success:true 实则页面无变化(silent false-success)。明确报错指引改用
-            // type action(其走 CDP Input.insertText 正确驱动 contenteditable)。
+            // 元素类型分流:isEditable 门放行的类型(input/textarea/select/
+            // contenteditable)比 fill 写值逻辑能正确处理的多。对非 text-like 的元素,
+            // 回退 `el.value = val` 要么被原生静默忽略、要么写错属性,伪装成
+            // success:true 实则页面无变化(silent false-success)。逐类响亮报错指引正确 action。
+            // (2026-06-03 act 原语白盒审计族 B)
+            //
+            // contenteditable → type(走 CDP Input.insertText 正确驱动)。
             if (el.isContentEditable) {
               return {
                 errorCode: "INVALID_TARGET",
                 error: `Element ${sel} is contentEditable; use action "type" instead of "fill"`,
+              };
+            }
+            // 原生 <select> → select(fill 设 el.value 仅按 option value 匹配,传可见
+            // 文本会被静默忽略并清空选中;SELECT handler 有 value→文本→label 回退)。
+            if (el instanceof HTMLSelectElement) {
+              return {
+                errorCode: "INVALID_TARGET",
+                error: `Element ${sel} is a <select>; use action "select" instead of "fill"`,
+              };
+            }
+            // checkbox/radio → click(fill 的原生 value setter 写的是 value 属性即
+            // 提交值,不是 checked 状态;勾选/取消勾选要靠 click 切换)。
+            if (
+              el instanceof HTMLInputElement &&
+              (el.type === "checkbox" || el.type === "radio")
+            ) {
+              return {
+                errorCode: "INVALID_TARGET",
+                error: `Element ${sel} is a ${el.type}; use action "click" to toggle it instead of "fill"`,
               };
             }
             // === fill operation ===
@@ -551,7 +574,8 @@ export function registerDomHandlers(
     [DomActions.SELECT]: async (args, tabId) => {
       const __t = resolveTarget(args);
       const selector = __t.selector;
-      const value = args.value as string;
+      // value 可为单值(string)或数组(string[],原生 <select multiple> 多选)。
+      const value = args.value as string | string[];
       if (value == null) throw vtxError(VtxErrorCode.INVALID_PARAMS, "Missing required param: value");
       const tid = await getActiveTabId(__t.boundTabId ?? (args.tabId as number | undefined) ?? tabId);
       const frameId = __t.boundFrameId ?? (args.frameId as number | undefined);
@@ -570,7 +594,7 @@ export function registerDomHandlers(
       } | undefined>(
         tid,
         frameId,
-        (sel: string, val: string) => {
+        (sel: string, val: string | string[]) => {
           try {
             // === 探测（与 CLICK 同步）===
             const els = (window as any).__vortexDomResolve.queryAllDeep(sel) as Element[];
@@ -613,15 +637,65 @@ export function registerDomHandlers(
             // 依次回退;全不中则报错而非假成功(2026-06-01 native-select dogfood)。
             const opts = Array.from(el.options);
             const norm = (s: string) => s.replace(/\s+/g, " ").trim();
-            const target = norm(String(val));
-            let opt =
-              opts.find((o) => o.value === val) ??
-              opts.find((o) => norm(o.text) === target) ??
-              opts.find((o) => o.label != null && norm(o.label) === target);
+            const matchOption = (one: string): HTMLOptionElement | null => {
+              const t = norm(String(one));
+              return (
+                opts.find((o) => o.value === one) ??
+                opts.find((o) => norm(o.text) === t) ??
+                opts.find((o) => o.label != null && norm(o.label) === t) ??
+                null
+              );
+            };
+
+            // 数组 value = 多选(原生 <select multiple>)。单值赋值 el.value 只能选中
+            // 一个 option,多选必须逐 option 设 .selected;全中才提交,任一不中报错而非
+            // 部分假成功(2026-06-03 多选 dogfood,act 原语白盒审计族 E)。
+            if (Array.isArray(val)) {
+              if (!el.multiple) {
+                return {
+                  errorCode: "INVALID_PARAMS",
+                  error: `<select> ${sel} is not multiple; pass a single value, not an array`,
+                };
+              }
+              const matched: HTMLOptionElement[] = [];
+              const unmatched: string[] = [];
+              for (const one of val as string[]) {
+                const m = matchOption(one);
+                if (m) matched.push(m);
+                else unmatched.push(String(one));
+              }
+              if (unmatched.length > 0) {
+                return {
+                  errorCode: "NO_MATCHING_OPTION",
+                  error: `<select> ${sel} has no option matching ${JSON.stringify(unmatched)} (by value or visible text)`,
+                  extras: {
+                    unmatched,
+                    available: opts.map((o) => o.value || o.text).slice(0, 30),
+                  },
+                };
+              }
+              for (const o of opts) o.selected = false;
+              for (const m of matched) m.selected = true;
+              el.dispatchEvent(new Event("change", { bubbles: true }));
+              // 回读校验副作用真发生(disabled option 可能拒绝选中):selectedOptions
+              // 必须与意图一致,否则报 NO_EFFECT 而非假成功。
+              const selectedNow = Array.from(el.selectedOptions).map((o) => o.value);
+              if (selectedNow.length !== matched.length) {
+                return {
+                  errorCode: "NO_EFFECT",
+                  error: `<select> ${sel} multi-select did not fully apply (expected ${matched.length} selected, got ${selectedNow.length}; check for disabled options)`,
+                  extras: { selected: selectedNow },
+                };
+              }
+              return { result: { success: true, value: selectedNow } };
+            }
+
+            // 单值
+            const opt = matchOption(val as string);
             if (!opt) {
               return {
                 errorCode: "NO_MATCHING_OPTION",
-                error: `<select> ${sel} has no option matching "${val}" (by value or visible text)`,
+                error: `<select> ${sel} has no option matching "${String(val)}" (by value or visible text)`,
                 extras: {
                   available: opts.map((o) => o.value || o.text).slice(0, 30),
                 },
@@ -781,6 +855,9 @@ export function registerDomHandlers(
               };
             }
             const el = els[0] as HTMLElement;
+            // 滚入视口:真鼠标(下面 CDP mouseMoved)只能移到视口内坐标,离屏元素
+            // hover 无效。滚动后再取 rect 算中心(2026-06-03 act 原语白盒审计族 C)。
+            el.scrollIntoView({ block: "center", inline: "center" });
             const rect = el.getBoundingClientRect();
             if (rect.width === 0 || rect.height === 0) {
               return {
@@ -788,9 +865,14 @@ export function registerDomHandlers(
                 error: `Element ${sel} has zero dimensions (detached or hidden)`,
               };
             }
-            // === hover 操作 ===
-            el.dispatchEvent(new MouseEvent("mouseenter", { bubbles: true, cancelable: true }));
+            const cx = rect.left + rect.width / 2;
+            const cy = rect.top + rect.height / 2;
+            // === hover 操作(合成事件回退)===
+            // 合成事件供监听 page-side mouseover 的库即时反应;真实 CSS :hover 态由
+            // handler 侧的 CDP mouseMoved 触发(合成 JS 事件不更新浏览器 hover 态)。
+            // mouseenter 规范上不冒泡,用 bubbles:false 修正语义。
             el.dispatchEvent(new MouseEvent("mouseover", { bubbles: true, cancelable: true }));
+            el.dispatchEvent(new MouseEvent("mouseenter", { bubbles: false, cancelable: true }));
             // 静态 tooltip 信息：CSS `title` 的 OS 级 tooltip 不依赖 JS 事件
             // 触发（需要鼠标在元素上真停留），JS 无法可靠等到。所以直接读
             // 元素的 tooltip 相关属性返回，调用方不再依赖 DOM 渲染（P2-8,
@@ -811,7 +893,7 @@ export function registerDomHandlers(
             }
             const dataTooltip = el.getAttribute("data-tooltip") || el.getAttribute("data-original-title");
             if (dataTooltip) tooltipInfo.dataTooltip = dataTooltip;
-            return { result: { success: true, ...tooltipInfo } };
+            return { result: { cx, cy, tooltip: tooltipInfo } };
           } catch (err) {
             return { error: err instanceof Error ? err.message : String(err) };
           }
@@ -819,7 +901,22 @@ export function registerDomHandlers(
         [selector],
       );
       if (res?.error) mapPageError(res, selector);
-      return res?.result;
+      const hr = res?.result as
+        | { cx: number; cy: number; tooltip: Record<string, string> }
+        | undefined;
+      // CDP 真鼠标移到元素中心:更新浏览器 hover 态,触发 CSS :hover + 原生
+      // pointerover/mousemove/mouseover——合成 JS 事件无法触发 CSS :hover,纯 CSS
+      // 悬停菜单/tooltip 因此永不展开(2026-06-03 act 原语白盒审计族 C,P0)。
+      if (hr) {
+        const { x: ox, y: oy } = await getIframeOffset(tid, frameId);
+        await debuggerMgr.attach(tid);
+        await debuggerMgr.sendCommand(tid, "Input.dispatchMouseEvent", {
+          type: "mouseMoved",
+          x: hr.cx + ox,
+          y: hr.cy + oy,
+        });
+      }
+      return { success: true, ...(hr?.tooltip ?? {}) };
     },
 
     [DomActions.GET_ATTRIBUTE]: async (args, tabId) => {

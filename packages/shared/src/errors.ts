@@ -64,6 +64,10 @@ export const VtxErrorCode = {
    *  也不匹配可见文本(label)。避免静默选不中却返回 success。
    *  context.extras.available 带可选项清单供 agent 重新选取。*/
   NO_MATCHING_OPTION: "NO_MATCHING_OPTION",
+  /** 赋值/驱动类 act 原语(select 多选 / scroll / press 等)dispatch 后回读校验,
+   *  发现副作用未真正发生(选项未选中 / 未滚动 / 状态未变)。避免 dispatch 即返回
+   *  success 的 silent false-success(2026-06-03 act 原语白盒审计族 A)。*/
+  NO_EFFECT: "NO_EFFECT",
 
   // -- L3 Reasoning（9 类：8 @since 0.6.0 PR #3 + OPEN_SHADOW_DOM @issue #27）--
   /** a11y tree 不可用（CSP / sandboxed page），无法 getFullAXTree。*/

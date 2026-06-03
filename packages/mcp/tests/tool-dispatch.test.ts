@@ -271,6 +271,30 @@ describe("dispatchNewTool", () => {
     expect(params.text).toBe("abc");
   });
 
+  // 2026-06-03 act 原语白盒审计族 E:原生 <select multiple> 多选传数组 value,
+  // 但 client 把数组序列化成 JSON 字符串,旧 dispatch 只对 scroll 走
+  // parseStructuredValue,select 数组当字符串 '["x","z"]' 整体匹配 → NO_MATCHING_OPTION。
+  // 修复:select 的 value 也走 parseStructuredValue。
+  it("vortex_act(select, value 为 JSON 字符串数组) 解析回数组(多选)", () => {
+    const { action, params } = dispatchNewTool("vortex_act", {
+      action: "select",
+      target: "@e1",
+      value: '["x","z"]', // client 序列化后的字符串
+    })!;
+    expect(action).toBe("dom.select");
+    expect(params.value).toEqual(["x", "z"]);
+  });
+
+  it("vortex_act(select, value 为单值文本) 原样透传不误伤(单选)", () => {
+    const { action, params } = dispatchNewTool("vortex_act", {
+      action: "select",
+      target: "@e1",
+      value: "Banana",
+    })!;
+    expect(action).toBe("dom.select");
+    expect(params.value).toBe("Banana");
+  });
+
   // BUG lead(同 G 根因):client 把 fill 结构化 kind 的数组/对象 value 也序列化成
   // JSON 字符串，dom.commit driver 期望 string[] / {values} → `Array.isArray` 判否
   // 报 "value must be a non-empty label path array"。修复:结构化 kind 的字符串

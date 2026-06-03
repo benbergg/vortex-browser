@@ -9,16 +9,18 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const DOM_SRC = readFileSync(join(__dirname, "../src/handlers/dom.ts"), "utf8");
 
 describe("SELECT handler native <select> option 匹配", () => {
+  // 2026-06-03 多选支持把单值匹配抽成 matchOption(one) helper:val→one、target→t,
+  // 回退链(value → 可见文本 → label 属性)逻辑不变。
   it("按 value 属性匹配 option", () => {
-    expect(DOM_SRC).toMatch(/opts\.find\(\(o\)\s*=>\s*o\.value === val\)/);
+    expect(DOM_SRC).toMatch(/opts\.find\(\(o\)\s*=>\s*o\.value === one\)/);
   });
 
   it("回退按可见文本(label)匹配 option", () => {
-    expect(DOM_SRC).toMatch(/norm\(o\.text\)\s*===\s*target/);
+    expect(DOM_SRC).toMatch(/norm\(o\.text\)\s*===\s*t\b/);
   });
 
   it("回退按 label 属性匹配 option", () => {
-    expect(DOM_SRC).toMatch(/o\.label != null && norm\(o\.label\)\s*===\s*target/);
+    expect(DOM_SRC).toMatch(/o\.label != null && norm\(o\.label\)\s*===\s*t\b/);
   });
 
   it("全不中报 NO_MATCHING_OPTION 而非假成功", () => {

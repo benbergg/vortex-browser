@@ -168,6 +168,12 @@ export function dispatchNewTool(
         }
       } else if (actionName === "type") {
         if (value !== undefined) next.text = value;
+      } else if (actionName === "select") {
+        // select 的 value 可能是数组(原生 <select multiple> 多选)。client 已把
+        // 数组实参序列化成 JSON 字符串,必须还原,否则 dom.select 收到字符串
+        // '["x","z"]' 当单值匹配 → NO_MATCHING_OPTION(2026-06-03 多选 dogfood)。
+        // 单值文本("北京"/option label)经 parseStructuredValue 原样透传不误伤。
+        if (value !== undefined) next.value = parseStructuredValue(value);
       } else if (value !== undefined) {
         next.value = value;
       }

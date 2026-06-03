@@ -216,6 +216,10 @@ export const DEFAULT_ERROR_META: Record<VtxErrorCode, VtxErrorMeta> = {
     hint: "The select value matched no <option> by value attribute or visible text. Read the available options (listed in context.extras.available) and retry vortex_act select with an exact option value or label.",
     recoverable: true,
   },
+  NO_EFFECT: {
+    hint: "The action dispatched but a post-action read-back showed no real change (option not selected, page not scrolled, state unchanged). The target may be a disabled option or a no-op scroll. Re-observe and verify the element is operable before retrying.",
+    recoverable: true,
+  },
 
   // -- L4 Task layer（@since 0.6.0 PR #4）--
   INVALID_TARGET: {

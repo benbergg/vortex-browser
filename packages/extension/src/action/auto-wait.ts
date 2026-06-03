@@ -14,6 +14,14 @@ import {
 
 const DEFAULT_TIMEOUT_MS = 5000;
 
+// 内层 actionability 等待必须严格小于 MCP 传输层硬超时(client.ts requestOnce,
+// 默认 VORTEX_TIMEOUT_MS=30000ms)。调用方可经 act options.timeout 传任意大值且
+// schema 无上界(schemas-public.ts),若不 cap,传输层会以微弱差距先放弃,真实门
+// 失败原因(NOT_VISIBLE/OBSCURED…)到不了 caller,只剩误导的 "no response"。
+// 25s 留 5s margin(同 navigate 的 NAVIGATE_LOAD_TIMEOUT_MS,2026-06-03 act 原语
+// 白盒审计族 D;根因同 round16 navigate)。影响所有 gated 原语:click/fill/type/select。
+const MAX_ACTIONABLE_TIMEOUT_MS = 25_000;
+
 const RETRY_INTERVAL_MS: Record<ActionabilityFailure, number> = {
   NOT_ATTACHED: 0,    // immediate retry
   NOT_VISIBLE: 50,
@@ -44,7 +52,10 @@ export async function waitActionable(
   selector: string,
   options: WaitOptions = {},
 ): Promise<WaitOk> {
-  const timeout = options.timeout ?? DEFAULT_TIMEOUT_MS;
+  const timeout = Math.min(
+    options.timeout ?? DEFAULT_TIMEOUT_MS,
+    MAX_ACTIONABLE_TIMEOUT_MS,
+  );
   const start = Date.now();
   let lastReason: ActionabilityFailure | null = null;
   let lastExtras: Record<string, unknown> | undefined;
