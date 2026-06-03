@@ -10,10 +10,41 @@ async function getActiveTabId(tabId?: number): Promise<number> {
   return tab.id;
 }
 
-function waitForTabLoad(tabId: number, timeoutMs: number = 30_000): Promise<void> {
+// 探一次目标 tab 的 document.readyState（仅主 frame）。executeScript 异常时返回
+// 空串，调用方按"未就绪"处理。
+async function probeReadyState(tabId: number): Promise<string> {
+  try {
+    const res = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: () => document.readyState,
+    });
+    return (res[0]?.result as string | undefined) ?? "";
+  } catch {
+    return "";
+  }
+}
+
+// 等 tab 加载完成。监听 chrome.tabs.onUpdated 的 status === "complete"——这是 **tab
+// 级**加载态，反映**所有**网络活动（图片/广告/tracker/持久连接）。真实站 `load`
+// 等所有子资源，常态 >30s 甚至永不触发（DDG dogfood 2026-06-03）。
+//
+// 超时优雅降级：load 超时不代表页面不可用。超时时探一次 document.readyState——若已
+// `interactive`/`complete`（DOM 已解析、可 query 可交互），解析为 { degraded: true }
+// 让 navigate 成功返回（附 degraded 标记），agent 可继续 observe/act，而非硬 throw
+// 把 agent 困死。仅 DOM 仍 `loading`（真未就绪）才 reject TIMEOUT。与 networkidle
+// 路径的优雅降级语义保持一致。
+function waitForTabLoad(
+  tabId: number,
+  timeoutMs: number = 30_000,
+): Promise<{ degraded: boolean }> {
   return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => {
+    const timer = setTimeout(async () => {
       chrome.tabs.onUpdated.removeListener(listener);
+      const ready = await probeReadyState(tabId);
+      if (ready === "interactive" || ready === "complete") {
+        resolve({ degraded: true });
+        return;
+      }
       reject(vtxError(VtxErrorCode.TIMEOUT, `Navigation timeout after ${timeoutMs}ms`));
     }, timeoutMs);
 
@@ -21,12 +52,22 @@ function waitForTabLoad(tabId: number, timeoutMs: number = 30_000): Promise<void
       if (updatedTabId === tabId && changeInfo.status === "complete") {
         clearTimeout(timer);
         chrome.tabs.onUpdated.removeListener(listener);
-        resolve();
+        resolve({ degraded: false });
       }
     }
     chrome.tabs.onUpdated.addListener(listener);
   });
 }
+
+export { waitForTabLoad };
+
+// MCP 传输层（client.ts requestOnce）对每次工具调用有硬超时（VORTEX_TIMEOUT_MS，
+// 默认 30s），到点直接向 caller 抛 "no response for page.navigate"。navigate 的内部
+// load 等待若也用满 30s，传输层会以微弱差距先放弃，优雅降级（{degraded:true}）的响应
+// 永远到不了 caller —— agent 仍见硬超时而非降级成功（DDG dogfood 2026-06-03 实测）。
+// 故内部 load 等待要 < 传输超时，留 5s margin（25s）覆盖 readyState 探测 + WS 回程。
+// 注：用户把 VORTEX_TIMEOUT_MS 调到 <25s 时仍可能被传输层先截断——属显式短预算选择。
+const NAVIGATE_LOAD_TIMEOUT_MS = 25_000;
 
 export function registerPageHandlers(router: ActionRouter, debuggerMgr: DebuggerManager): void {
   router.registerAll({
@@ -48,19 +89,13 @@ export function registerPageHandlers(router: ActionRouter, debuggerMgr: Debugger
       const waitUntil = (args.waitUntil as string | undefined) ?? "load";
       const outerTimeout = (args.timeout as number) ?? 30_000;
       await chrome.tabs.update(tid, { url });
+      let degraded = false;
       if (waitForLoad) {
-        if (waitUntil === "domcontentloaded") {
-          // Chrome tabs API 不直接暴露 DOMContentLoaded，用 readyState 轮询
-          // 一次即可（status 转 loading 后 DOM 已可访问）。fallback 至 load。
-          try {
-            await waitForTabLoad(tid, outerTimeout);
-          } catch (err) {
-            // domcontentloaded 不应该比 load 更严格
-            throw err;
-          }
-        } else {
-          await waitForTabLoad(tid, outerTimeout);
-        }
+        // load / domcontentloaded 都走 waitForTabLoad；超时时若 DOM 已就绪则优雅降级
+        // 返回（degraded: true），仅 DOM 仍 loading 才 throw。内部 load 等待 cap 在
+        // NAVIGATE_LOAD_TIMEOUT_MS（< 传输超时），确保降级响应能回到 caller。
+        const loadWait = Math.min(outerTimeout, NAVIGATE_LOAD_TIMEOUT_MS);
+        ({ degraded } = await waitForTabLoad(tid, loadWait));
         if (waitUntil === "networkidle") {
           const idleTimeout = 5_000;
           try {
@@ -73,7 +108,12 @@ export function registerPageHandlers(router: ActionRouter, debuggerMgr: Debugger
         }
       }
       const tab = await chrome.tabs.get(tid);
-      return { url: tab.url, title: tab.title, status: tab.status };
+      return {
+        url: tab.url,
+        title: tab.title,
+        status: tab.status,
+        ...(degraded ? { degraded: true } : {}),
+      };
     },
 
     [PageActions.RELOAD]: async (args, tabId) => {
