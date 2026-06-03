@@ -50,8 +50,20 @@
       clientY: rect.top + rect.height / 2,
     };
     // react-select 在 option 的 mousedown 上提交(避免 input blur 抢先),故 mousedown
-    // 必须先发且与 click 一致命中元素中心。
+    // 必须先发且与 click 一致命中元素中心。Radix/Headless UI 以 pointer 事件为主,
+    // 故 pointerdown/pointerup 一并补发(评审 H4),最大化合成事件的跨库兼容。
+    const pOpts = { ...opts, pointerId: 1, pointerType: "mouse", isPrimary: true };
+    try {
+      el.dispatchEvent(new PointerEvent("pointerdown", pOpts));
+    } catch {
+      /* PointerEvent 不可用的老环境忽略,退化为纯 mouse 事件 */
+    }
     el.dispatchEvent(new MouseEvent("mousedown", opts));
+    try {
+      el.dispatchEvent(new PointerEvent("pointerup", pOpts));
+    } catch {
+      /* 同上 */
+    }
     el.dispatchEvent(new MouseEvent("mouseup", opts));
     el.dispatchEvent(new MouseEvent("click", opts));
   }
@@ -97,15 +109,23 @@
     const startTs = Date.now();
     const remaining = () => Math.max(0, startTs + timeoutMs - Date.now());
 
-    // 可点击的 trigger:优先 root 自身或其内的 combobox/haspopup 元素。
-    const trigger = ((root.matches('[role="combobox"], [aria-haspopup="listbox"]')
-      ? root
-      : null) ??
-      root.querySelector('[role="combobox"], [aria-haspopup="listbox"]') ??
-      root) as HTMLElement;
+    // 可点击的 trigger:候选 = root 自身(若是 combobox/haspopup)+ 其内的 combobox/
+    // haspopup 元素 + root 兜底,**取第一个可见**的。react-select 的 [role="combobox"]
+    // 是内层 0×0 隐藏 input,点它不开弹层;可见性过滤让 trigger 落到外层可点击 control
+    // (评审 H2)。
+    const triggerCandidates: HTMLElement[] = [];
+    if (root.matches('[role="combobox"], [aria-haspopup="listbox"]')) triggerCandidates.push(root);
+    triggerCandidates.push(
+      ...(Array.from(
+        root.querySelectorAll('[role="combobox"], [aria-haspopup="listbox"]'),
+      ) as HTMLElement[]),
+    );
+    triggerCandidates.push(root);
+    const trigger = triggerCandidates.find((c) => isVisible(c)) ?? root;
 
     // 定位弹层 listbox:trigger/root 的 aria-controls/aria-owns(可能多 id),否则文档级
-    // 扫可见 [role="listbox"](覆盖 portal 到 body 的弹层)。
+    // 扫可见 [role="listbox"](覆盖 portal 到 body 的弹层)。多个弹层同时可见时(页面
+    // 多个 select 组件)取**几何上离 trigger 最近**的,避免错配别处残留弹层(评审 M1)。
     const findListbox = (): HTMLElement | null => {
       const idAttr =
         trigger.getAttribute("aria-controls") ||
@@ -118,10 +138,24 @@
           if (isVisible(el)) return el;
         }
       }
-      for (const el of Array.from(document.querySelectorAll('[role="listbox"]'))) {
-        if (isVisible(el)) return el as HTMLElement;
+      const visibles = (
+        Array.from(document.querySelectorAll('[role="listbox"]')) as HTMLElement[]
+      ).filter(isVisible);
+      if (visibles.length <= 1) return visibles[0] ?? null;
+      const tr = trigger.getBoundingClientRect();
+      let best: HTMLElement | null = null;
+      let bestD = Infinity;
+      for (const el of visibles) {
+        const r = el.getBoundingClientRect();
+        const dx = Math.max(0, tr.left - r.right, r.left - tr.right);
+        const dy = Math.max(0, tr.top - r.bottom, r.top - tr.bottom);
+        const d = dx * dx + dy * dy;
+        if (d < bestD) {
+          bestD = d;
+          best = el;
+        }
       }
-      return null;
+      return best;
     };
 
     const optionsIn = (lb: HTMLElement): HTMLElement[] =>
@@ -149,31 +183,45 @@
       }
 
       // 2. 找选项:轮询等异步/remote 渲染,只取非 aria-disabled 的精确(norm)匹配。
+      //    per-label cap:一个 unknown label 不该耗尽共享 deadline 把后续合法 label 也
+      //    饿成 unknown(评审 H3)。cap 3000ms 足够 remote 渲染又留预算给其余 label。
       const findEnabled = (): HTMLElement | null =>
         optionsIn(findListbox() ?? listbox!).find(
           (o) =>
             o.getAttribute("aria-disabled") !== "true" &&
             norm(o.textContent || "") === wantLabel,
         ) ?? null;
-      let hit = await waitFor(findEnabled, remaining());
+      const optWait = () => Math.min(remaining(), 3000);
+      let hit = await waitFor(findEnabled, optWait());
 
-      // 3. typeahead 兜底:仍找不到且控件内有文本 input(react-select/antd 搜索式),
-      //    写 label 过滤(原生 value setter 绕受控)再重试。
+      // 3. typeahead 兜底:仍找不到且是**搜索式** combobox(role=combobox / aria-autocomplete
+      //    / trigger 本身是 input)才写 label 过滤——避免污染无关 input 的受控状态(评审 M2)。
+      //    写前先清空(对齐 el-select),防多选时上一 label 过滤串残留叠加。
       if (!hit) {
-        const input = (trigger.matches("input")
+        const inputEl = (trigger.matches("input")
           ? (trigger as HTMLInputElement)
           : (root.querySelector('input:not([type="hidden"])') as HTMLInputElement | null)) as
           | HTMLInputElement
           | null;
-        if (input) {
+        const isSearchInput =
+          !!inputEl &&
+          (inputEl.getAttribute("role") === "combobox" ||
+            inputEl.hasAttribute("aria-autocomplete") ||
+            inputEl === trigger);
+        if (inputEl && isSearchInput) {
           const setVal = Object.getOwnPropertyDescriptor(
             window.HTMLInputElement.prototype,
             "value",
           )?.set;
-          if (setVal) setVal.call(input, wantLabel);
-          else input.value = wantLabel;
-          input.dispatchEvent(new Event("input", { bubbles: true }));
-          hit = await waitFor(findEnabled, remaining());
+          const writeFilter = (v: string) => {
+            if (setVal) setVal.call(inputEl, v);
+            else inputEl.value = v;
+            inputEl.dispatchEvent(new Event("input", { bubbles: true }));
+          };
+          writeFilter("");
+          await sleep(30);
+          writeFilter(wantLabel);
+          hit = await waitFor(findEnabled, optWait());
         }
       }
 
@@ -197,7 +245,7 @@
 
       dispatchMouseClick(hit);
       clicked.push(label);
-      await sleep(60); // 让框架提交;单选弹层会关、多选保持
+      await sleep(60); // 让框架提交一拍;单选弹层会关、多选保持
     }
 
     if (unknown.length > 0) {
@@ -211,13 +259,15 @@
     }
 
     // 4. verify 回读:仅凭点击成功是 silent-false-success(disabled/动画丢 click/未 settle
-    //    都会「点了没选上」)。两路正向证据 union:
+    //    都会「点了没选上」)。三路正向证据 union,exact 优先再 substring(评审 M4):
     //    (a) valueText —— root 文本但**排除 [role=listbox] 子树**(react-select 默认菜单
-    //        inline 在容器内,不排除会把菜单里所有选项文本当成 value 假阳);单选看 value
-    //        显示、多选看 chip。
-    //    (b) 存活的 [role=option][aria-selected="true"] 文本(弹层仍开时的权威信号)。
-    await sleep(60);
-    const valueText = ((): string => {
+    //        inline 在容器内,不排除会把菜单里所有选项文本当 value 假阳);单选看 value 显示、
+    //        多选看 chip。
+    //    (b) root 内 input.value —— react-select/antd/MUI 单选选中值常回填到 <input value>,
+    //        不进 textContent,只看 valueText 会假报 COMMIT_FAILED(评审 H1)。
+    //    (c) 存活的 [role=option][aria-selected="true"] 文本(弹层仍开时的权威信号)。
+    //    用 waitFor 轮询(而非固定 sleep)等框架异步提交 + 关闭动画 settle(评审 M3)。
+    const valueText = (): string => {
       let t = "";
       const walk = (node: Node): void => {
         for (const child of Array.from(node.childNodes)) {
@@ -231,23 +281,40 @@
       };
       walk(root);
       return norm(t);
-    })();
-    const lbNow = findListbox();
-    const selectedTexts = lbNow
-      ? (Array.from(lbNow.querySelectorAll('[role="option"][aria-selected="true"]')) as HTMLElement[]).map(
-          (o) => norm(o.textContent || ""),
-        )
-      : [];
-    const notReflected = labels.filter((l) => {
+    };
+    const inputValues = (): string[] =>
+      (Array.from(root.querySelectorAll('input:not([type="hidden"])')) as HTMLInputElement[]).map(
+        (i) => norm(i.value || ""),
+      );
+    const selectedTexts = (): string[] => {
+      const lb = findListbox();
+      return lb
+        ? (Array.from(lb.querySelectorAll('[role="option"][aria-selected="true"]')) as HTMLElement[]).map(
+            (o) => norm(o.textContent || ""),
+          )
+        : [];
+    };
+    const reflected = (l: string): boolean => {
       const w = norm(l);
-      return !valueText.includes(w) && !selectedTexts.some((t) => t === w);
-    });
-    if (notReflected.length > 0) {
+      const vt = valueText();
+      const ivs = inputValues();
+      const sel = selectedTexts();
+      // exact 优先(单值显示/aria-selected/input 回填),避免 "Apple Pie" includes "Apple" 假阳
+      if (sel.some((t) => t === w) || ivs.some((t) => t === w) || vt === w) return true;
+      // 再 substring(多选 chip 拼接 / 值显示含额外文本)——best-effort,同 el-select 限制
+      return vt.includes(w) || ivs.some((t) => t.includes(w));
+    };
+    const allReflected = await waitFor(
+      () => (labels.every(reflected) ? true : null),
+      Math.min(remaining(), 1500),
+    );
+    if (!allReflected) {
+      const notReflected = labels.filter((l) => !reflected(l));
       return {
-        error: `Selected option(s) not reflected after commit: ${notReflected.join(", ")} (combobox value shows "${valueText}"). Likely a dropped click, a single-select given multiple labels, or async not settled.`,
+        error: `Selected option(s) not reflected after commit: ${notReflected.join(", ")} (combobox value shows "${valueText()}"). Likely a dropped click, a single-select given multiple labels, or async not settled.`,
         errorCode: "COMMIT_FAILED",
         stage: "verify",
-        extras: { notReflected, valueText, clicked },
+        extras: { notReflected, valueText: valueText(), clicked },
       };
     }
 

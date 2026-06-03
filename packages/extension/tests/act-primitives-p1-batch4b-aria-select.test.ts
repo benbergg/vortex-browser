@@ -93,3 +93,31 @@ describe("#24 COMMIT handler 接线", () => {
     expect(DOM_SRC).toMatch(/__vortexCommitAriaSelect/);
   });
 });
+
+describe("#24 评审修复 — 跨库鲁棒性", () => {
+  it("H4 dispatchMouseClick 补发 pointerdown/pointerup(Radix/Headless)", () => {
+    expect(ARIA_SRC).toMatch(/new PointerEvent\("pointerdown"/);
+    expect(ARIA_SRC).toMatch(/new PointerEvent\("pointerup"/);
+  });
+  it("H2 trigger 取第一个可见候选(避开 react-select 0×0 input)", () => {
+    expect(ARIA_SRC).toMatch(/triggerCandidates\.find\(\(c\) => isVisible\(c\)\)/);
+  });
+  it("H3 per-label 选项等待 cap(unknown 不饿死后续 label)", () => {
+    expect(ARIA_SRC).toMatch(/Math\.min\(remaining\(\), 3000\)/);
+  });
+  it("M1 findListbox 多弹层取离 trigger 最近", () => {
+    expect(ARIA_SRC).toMatch(/bestD/);
+  });
+  it("M2 typeahead 仅对搜索式 input 写值 + 写前清空", () => {
+    expect(ARIA_SRC).toMatch(/aria-autocomplete/);
+    expect(ARIA_SRC).toMatch(/isSearchInput/);
+    expect(ARIA_SRC).toMatch(/writeFilter\(""\)/);
+  });
+  it("H1 verify 纳入 input.value 证据 + exact 优先", () => {
+    expect(ARIA_SRC).toMatch(/const inputValues = \(\)/);
+    expect(ARIA_SRC).toMatch(/ivs\.some\(\(t\) => t === w\)/);
+  });
+  it("M3 verify 用 waitFor 轮询而非固定 sleep", () => {
+    expect(ARIA_SRC).toMatch(/const allReflected = await waitFor\(/);
+  });
+});
