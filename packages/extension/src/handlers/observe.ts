@@ -711,6 +711,17 @@ async function scanOneFrame(
           // 把无关父级的展开态错配到子按钮(2026-06-02 dogfood)。
           if (el.getAttribute("aria-expanded") === "true") {
             s.expanded = true;
+          } else if (
+            // 原生 <details>/<summary> disclosure 的开合态在 details.open IDL 属性上,
+            // 不在 aria-expanded(MDN CSS 侧栏 108 个属性分组、文档站 FAQ 折叠面板均
+            // 用原生 details)。<summary> 的宿主 <details> 打开时发 [expanded],与
+            // aria-expanded 同语义、同「collapsed 不发避免噪声」策略,使原生折叠组与
+            // 展开组在 observe 中可区分(2026-06-03 MDN dogfood)。
+            el.tagName === "SUMMARY" &&
+            el.parentElement?.tagName === "DETAILS" &&
+            (el.parentElement as HTMLDetailsElement).open === true
+          ) {
+            s.expanded = true;
           }
           // 必填字段:agent 填表前需知道哪些字段必填(否则提交才报错)。
           // observe-render 早已支持 [required] 标记,但 producer 一直没接线

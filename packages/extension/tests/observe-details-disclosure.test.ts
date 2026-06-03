@@ -60,6 +60,40 @@ describe("observe native <details>/<summary> disclosure (2026-06-02 dogfood)", (
   });
 });
 
+/**
+ * AL(漏报):原生 <details>/<summary> disclosure 的「展开/折叠」态对 observe 隐身
+ * (2026-06-03 第十三轮 MDN 真实站 dogfood)。
+ *
+ * 现象:getUiState 的 expanded 判定只读 aria-expanded 属性(712 行),但原生
+ *   <details> 的开合态在 details.open IDL 属性上、无 aria-expanded。MDN CSS 侧栏
+ *   108 个属性分组、文档站 FAQ 折叠面板均用原生 details → 开着的分组与折叠的分组
+ *   在 observe 输出中完全相同(都是无标记的 [button]),agent 无法判断 disclosure
+ *   是否已展开(会重复点开 / 开着却去别处找内容)。这是 aria-expanded→[expanded]
+ *   那条(T2)的原生 disclosure 对应盲区。
+ *
+ * 修复:expanded 判定补一条——<summary> 的宿主 <details> open 时发 [expanded],
+ *   与 aria-expanded 同语义、同「collapsed 不发避免噪声」策略。
+ */
+describe("observe native <details> 展开态(AL,2026-06-03 dogfood)", () => {
+  it("AL: <summary> 宿主 <details> open 时置 expanded(读 details.open IDL 非 aria-expanded)", () => {
+    // 元素是 <summary>、其 parentElement 是 <details>、且 .open === true 时置 expanded。
+    expect(OBSERVE_SRC).toMatch(/el\.tagName === "SUMMARY"/);
+    expect(OBSERVE_SRC).toMatch(
+      /el\.parentElement\?\.tagName === "DETAILS"/,
+    );
+    expect(OBSERVE_SRC).toMatch(/\)\.open === true/);
+  });
+
+  it("AL: 原生 details 分支挂在 aria-expanded 判定之后(同一 expanded 语义、collapsed 不发)", () => {
+    // 顺序锁:aria-expanded==="true" 判定在前,原生 details 分支作 else-if 补充,
+    // 二者都只在「展开」时置 s.expanded(折叠态不发,与既有策略一致)。
+    const ariaIdx = OBSERVE_SRC.indexOf('el.getAttribute("aria-expanded") === "true"');
+    const nativeIdx = OBSERVE_SRC.indexOf('el.tagName === "SUMMARY"');
+    expect(ariaIdx).toBeGreaterThan(0);
+    expect(nativeIdx).toBeGreaterThan(ariaIdx);
+  });
+});
+
 describe("observe inert 子树排除(V,2026-06-02 dogfood)", () => {
   it("V: 用 closest(\"[inert]\") 排除 inert 子树内元素", () => {
     // inert 让子树非交互(浏览器禁止点击/聚焦),但 checkVisibility 仍 true、
