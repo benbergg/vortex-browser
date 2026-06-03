@@ -392,6 +392,49 @@ async function scanOneFrame(
           return "";
         }
 
+        // CSS 字体图标约定的前缀(Bootstrap Icons / FontAwesome / Glyphicons):
+        // 类名 `<prefix>-<icon>` 经 ::before 字形渲染,无 inner svg/img。
+        const ICON_FONT_PREFIXES = ["bi-", "fa-", "glyphicon-"];
+        // FontAwesome 样式修饰类(非图标名,与 `fa-<icon>` 同形,故白名单逐一跳过)。
+        const ICON_FONT_MODIFIERS = new Set([
+          // 样式族(solid/regular/brands…)
+          "fa-solid", "fa-regular", "fa-brands", "fa-light", "fa-thin",
+          "fa-duotone", "fa-sharp",
+          // 布局/对齐
+          "fa-fw", "fa-border", "fa-pull-left", "fa-pull-right", "fa-inverse",
+          // 尺寸(fa-2xs..fa-10x)
+          "fa-2xs", "fa-xs", "fa-sm", "fa-lg", "fa-xl", "fa-2xl",
+          "fa-1x", "fa-2x", "fa-3x", "fa-4x", "fa-5x",
+          "fa-6x", "fa-7x", "fa-8x", "fa-9x", "fa-10x",
+          // 动画族(FA6)
+          "fa-spin", "fa-spin-reverse", "fa-spin-pulse", "fa-pulse",
+          "fa-beat", "fa-fade", "fa-beat-fade", "fa-bounce", "fa-shake", "fa-flip",
+          // 旋转/翻转变换
+          "fa-rotate-90", "fa-rotate-180", "fa-rotate-270", "fa-rotate-by",
+          "fa-flip-horizontal", "fa-flip-vertical", "fa-flip-both",
+          // 图标叠放工具类
+          "fa-stack", "fa-stack-1x", "fa-stack-2x",
+        ]);
+        // 纯图标按钮的末位兜底:图标用 CSS 字体字形渲染(Bootstrap Icons `bi-gear`、
+        // FontAwesome `fa-gear`、Glyphicons `glyphicon-cog`),无 inner svg/img 故
+        // iconNameFromClass 吃不到,且无 aria-label/title/text → accessible name 真空。
+        // 仅匹配已知 icon-font 前缀时取名(strip 前缀、hyphen→空格),避免泛 className
+        // 噪声(2026-06-03 Monaco editor dogfood AP)。
+        function iconFontName(el: Element): string {
+          const cls =
+            el.className && typeof el.className === "string" ? el.className : "";
+          for (const c of cls.split(/\s+/).filter(Boolean)) {
+            const lower = c.toLowerCase();
+            if (ICON_FONT_MODIFIERS.has(lower)) continue;
+            for (const p of ICON_FONT_PREFIXES) {
+              if (lower.startsWith(p) && lower.length > p.length) {
+                return lower.slice(p.length).replace(/-/g, " ");
+              }
+            }
+          }
+          return "";
+        }
+
         // Name extraction uses textContent (not innerText) to bypass CSS
         // `text-overflow: ellipsis` truncation — innerText returns the
         // rendered visible text, which on `white-space:nowrap; overflow:hidden`
@@ -498,7 +541,12 @@ async function scanOneFrame(
           // iconNameFromClass 取个 hash 噪声名,反而又击败 `!name` 过滤(AJ)。
           if (isContainer) return "";
           // 仅 svg/img 子且无文本无 title 时，从 className 兜底（如 `_closeIcon_1ygkr_39` → `closeIcon`）
-          return iconNameFromClass(el);
+          const fromIcon = iconNameFromClass(el);
+          if (fromIcon) return fromIcon;
+          // 末位:CSS 字体图标按钮(bi-/fa-/glyphicon-,::before 字形无 inner svg/img,
+          // 如 Monaco `<button class="bi-gear">`)。isContainer 已在上方返空,此处只
+          // 给 leaf 图标按钮补名;不碰 cursor:pointer 入池门,规避 round-12 幽灵续命。
+          return iconFontName(el);
         }
 
         // Pre-index aria-label occurrences once per snapshot so buildSelector

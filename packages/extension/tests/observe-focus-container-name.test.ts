@@ -42,7 +42,7 @@ describe("observe focus-container 命名噪声抑制 (github dogfood 2026-06-02 
     expect(OBSERVE_SRC).toMatch(/if \(isContainer\) return "";/);
     // 顺序保证:isContainer 的空名返回必须在 iconNameFromClass 兜底之前。
     const containerReturnIdx = OBSERVE_SRC.indexOf('if (isContainer) return "";');
-    const iconFallbackIdx = OBSERVE_SRC.indexOf("return iconNameFromClass(el);");
+    const iconFallbackIdx = OBSERVE_SRC.indexOf("const fromIcon = iconNameFromClass(el);");
     expect(containerReturnIdx).toBeGreaterThan(0);
     expect(iconFallbackIdx).toBeGreaterThan(0);
     expect(containerReturnIdx).toBeLessThan(iconFallbackIdx);

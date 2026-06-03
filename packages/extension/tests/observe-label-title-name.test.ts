@@ -59,7 +59,7 @@ describe("observe accessible-name — nested-control aria-label + title fallback
   it("the title fallback sits after textContent and before iconNameFromClass", () => {
     const textIdx = OBSERVE_SRC.search(/const text = normName\(el\.textContent\);/);
     const titleIdx = OBSERVE_SRC.search(/const titleAttr = el\.getAttribute\("title"\);/);
-    const classIdx = OBSERVE_SRC.indexOf("return iconNameFromClass(el);");
+    const classIdx = OBSERVE_SRC.indexOf("const fromIcon = iconNameFromClass(el);");
     expect(textIdx).toBeLessThan(titleIdx);
     expect(titleIdx).toBeLessThan(classIdx);
   });
