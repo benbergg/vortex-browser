@@ -91,7 +91,10 @@ export async function captureSnapshot(opts: SnapshotOptions): Promise<SnapshotRe
     const ser = parseSerializeResult(serRaw);
 
     // 2) 当前页 observe(includeBoxes)作 delta 对照
-    const obsText = extractText(await call("vortex_observe", { frames, includeBoxes: true }));
+    // scope:"full" —— 候选检测枚举整页(含折叠线下),observe 默认 viewport 只返
+    // 视口内元素,两者比对会把折叠线下元素全误标 observe-missed(shoelace 实测 229
+    // 假漏报)。full 模式让 observe vs 候选 apples-to-apples(2026-06-03 调查)。
+    const obsText = extractText(await call("vortex_observe", { frames, scope: "full", includeBoxes: true }));
     const parsed = parseObserveSnapshot(obsText);
 
     // 3) 来源 URL(observe 头部的 URL,fallback 到 opts.url)

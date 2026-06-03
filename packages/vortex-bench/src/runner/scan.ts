@@ -68,7 +68,9 @@ export async function scanFixture(manifest: SynthManifest, opts: ScanOptions): P
     await call("vortex_wait_for", { mode: "idle", value: "dom", timeout: 5000 });
 
     // 1) observe #1 (includeBoxes) — manifest-check / INV-3 / INV-4 的数据源
-    const obs1Text = extractText(await call("vortex_observe", { frames, includeBoxes: true }));
+    // scope:"full":manifest oracle 覆盖整页(含折叠线下),observe 默认 viewport 会
+    // 漏折叠线下元素 → 假 recall-miss。full 让召回比对覆盖全页(2026-06-03 调查)。
+    const obs1Text = extractText(await call("vortex_observe", { frames, scope: "full", includeBoxes: true }));
     const parsed1 = parseObserveSnapshot(obs1Text);
 
     // 2) oracle rect 探针(仅主 frame;跨 frame entry 走 joinBy:name)
@@ -118,7 +120,7 @@ export async function scanFixture(manifest: SynthManifest, opts: ScanOptions): P
     result.invariants.inv2 = !inv2Crashed;
 
     // 4) observe #2 → INV-1 稳定性(此处才让 observe #1 的 ref 失效)
-    const parsed2 = parseObserveSnapshot(extractText(await call("vortex_observe", { frames, includeBoxes: true })));
+    const parsed2 = parseObserveSnapshot(extractText(await call("vortex_observe", { frames, scope: "full", includeBoxes: true })));
     const inv1 = checkStability(parsed1, parsed2, manifest.fixture, result.pattern);
     result.findings.push(...inv1);
     result.invariants.inv1 = inv1.length === 0;
