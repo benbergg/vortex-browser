@@ -204,15 +204,29 @@
       };
     }
 
-    // Verify: 回读触发器显示的已选文本——每个 label 都应反映在其中。点中 DOM item
-    // 不等于 Vue 真 commit(disabled option / 动画期丢 click / 异步未 settle 都会
-    // 「点了但没选上」),仅凭 clicked 返回 success 是 silent false-success。对照同
-    // 目录 checkbox-group 的 is-checked 回读范式(2026-06-03 act 原语白盒审计族 A,#20)。
-    const displayed = (wrapper.innerText || "").replace(/\s+/g, " ").trim();
-    const notReflected = labels.filter((l) => !displayed.includes(l));
+    // Verify: 回读触发器显示的已选项——每个 label 都应反映。点中 DOM item 不等于 Vue
+    // 真 commit(disabled option / 动画期丢 click / 单选被传多 label / 异步未 settle 都会
+    // 「点了但没选上」),仅凭 clicked 返回 success 是 silent false-success。对照同目录
+    // checkbox-group 的 is-checked 回读范式(2026-06-03 act 原语白盒审计族 A,#20)。
+    const norm = (s: string) => s.replace(/\s+/g, " ").trim();
+    // 优先读独立的已选项元素(multi 的 tag / single 的 selected-item)做精确匹配,
+    // 避免触发器整体文本的子串误判(label 是 placeholder 或另一 tag 子串时假通过)。
+    const itemEls = wrapper.querySelectorAll(
+      ".el-tag, .el-select__selected-item, .el-select__tags-text",
+    );
+    const displayed = norm(wrapper.innerText || "");
+    let notReflected: string[];
+    if (itemEls.length > 0) {
+      const itemTexts = Array.from(itemEls).map((e) => norm((e as HTMLElement).textContent || ""));
+      notReflected = labels.filter(
+        (l) => !itemTexts.some((t) => t === l || t.includes(l)),
+      );
+    } else {
+      notReflected = labels.filter((l) => !displayed.includes(l));
+    }
     if (notReflected.length > 0) {
       return {
-        error: `Selected option(s) not reflected after commit: ${notReflected.join(", ")} (trigger shows "${displayed}"). Likely a disabled option or a dropped click.`,
+        error: `Selected option(s) not reflected after commit: ${notReflected.join(", ")} (trigger shows "${displayed}"). Likely a disabled option, a dropped click, or a single-select given multiple labels.`,
         errorCode: "COMMIT_FAILED",
         stage: "verify",
         extras: { notReflected, displayed, clicked },

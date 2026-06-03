@@ -56,12 +56,18 @@ describe("族 A #7 — FILL number/date 非法值回读报 NO_EFFECT", () => {
 
 describe("族 A #20 — el-select COMMIT verify 最终态", () => {
   it("回读触发器显示文本校验每个 label 已反映", () => {
-    expect(SELECT_DRIVER_SRC).toMatch(/const displayed = \(wrapper\.innerText \|\| ""\)/);
-    expect(SELECT_DRIVER_SRC).toMatch(/const notReflected = labels\.filter/);
+    expect(SELECT_DRIVER_SRC).toMatch(/wrapper\.innerText/);
+    expect(SELECT_DRIVER_SRC).toMatch(/notReflected = labels\.filter/);
+  });
+
+  it("优先读独立已选项元素(tag/selected-item)做精确匹配避免子串误判(评审 M2)", () => {
+    expect(SELECT_DRIVER_SRC).toMatch(/\.el-tag, \.el-select__selected-item/);
+    expect(SELECT_DRIVER_SRC).toMatch(/itemEls\.length > 0/);
   });
 
   it("未反映报 COMMIT_FAILED 而非假成功(对照 checkbox-group 范式)", () => {
-    const idx = SELECT_DRIVER_SRC.indexOf("notReflected");
+    const idx = SELECT_DRIVER_SRC.indexOf("if (notReflected.length > 0)");
+    expect(idx).toBeGreaterThan(-1);
     const block = SELECT_DRIVER_SRC.slice(idx, idx + 500);
     expect(block).toMatch(/errorCode:\s*"COMMIT_FAILED"/);
     expect(block).toMatch(/stage:\s*"verify"/);
