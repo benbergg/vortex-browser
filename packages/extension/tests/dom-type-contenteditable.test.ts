@@ -70,10 +70,11 @@ describe("dom.type contentEditable path (@since 0.8.x Round-1 R1-A)", () => {
     expect(probeBlock).not.toBeNull();
   });
 
-  it("falls back to legacy page-side dispatch for non-contentEditable elements", () => {
-    // Bench's 50 passing cases all go through the legacy
-    // dispatchEvent path. The branch must remain byte-identical
-    // for input/textarea to keep that baseline.
+  it("falls back to page-side dispatch (with key events) for non-contentEditable elements", () => {
+    // input/textarea 仍走 page-side dispatch 路径并保留合成 key 事件(keydown/keyup,
+    // bench 50 case 依赖)。2026-06-03 族 F 修复把逐字值赋值从 `el.value += char` 换成
+    // 原生 value setter(受控同步)+ clear-before + 非 text 类型整体写入,但 key 事件与
+    // path 标识不变 —— 见 act-primitives-p1-batch3-family-f.test.ts 守护新行为。
     expect(DOM_SRC).toMatch(/page-side-dispatch/);
     expect(DOM_SRC).toMatch(/dispatchEvent\(new\s+KeyboardEvent\("keydown"/);
     expect(DOM_SRC).toMatch(/dispatchEvent\(new\s+InputEvent\("input"/);

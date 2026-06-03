@@ -405,18 +405,67 @@ export function registerDomHandlers(
             }
             const el = els[0] as HTMLInputElement;
             el.focus();
-            for (const char of txt) {
-              const eventInit = { key: char, bubbles: true, cancelable: true };
-              el.dispatchEvent(new KeyboardEvent("keydown", eventInit));
-              el.dispatchEvent(new KeyboardEvent("keypress", eventInit));
-              if (el.value !== undefined) el.value += char;
-              el.dispatchEvent(new InputEvent("input", { bubbles: true, data: char }));
-              el.dispatchEvent(new KeyboardEvent("keyup", eventInit));
-              if (delayMs > 0) {
-                await new Promise((r) => setTimeout(r, delayMs));
+            // 原生 value setter:直接对 el.value 累加赋值会绕过 React/Vue 受控组件的
+            // value tracker → onChange 读不到变化 → state 把值覆盖回去,逐字被吞(族 F #8)。
+            // 用元素类型匹配的原生 setter(同 FILL 的受控绕过),plain input 结果相同、
+            // 受控 input 才能正确同步(2026-06-03 act 原语白盒审计族 F)。
+            const proto =
+              el instanceof HTMLTextAreaElement
+                ? window.HTMLTextAreaElement.prototype
+                : el instanceof HTMLInputElement
+                  ? window.HTMLInputElement.prototype
+                  : null;
+            const nativeSet = proto
+              ? Object.getOwnPropertyDescriptor(proto, "value")?.set
+              : undefined;
+            const setValue = (v: string) => {
+              if (nativeSet) nativeSet.call(el, v);
+              else (el as HTMLInputElement).value = v;
+            };
+            // clear-before:type 语义是「把这段文本输入到字段」,不清空会得到 旧值+新值
+            // 的拼接(族 F #9)。先清空再输入。
+            setValue("");
+            el.dispatchEvent(new InputEvent("input", { bubbles: true }));
+
+            // number/date/range 等非 text 类型逐字累加会产生无效中间态(如 "1"→"1.")
+            // 被原生置空,final value≠text(族 F #10)。这类整体写入一次,不逐字模拟。
+            const inputType = el instanceof HTMLInputElement ? el.type : "textarea";
+            const charByChar =
+              el instanceof HTMLTextAreaElement ||
+              ["text", "search", "tel", "url", "email", "password", ""].includes(inputType);
+            if (!charByChar) {
+              setValue(txt);
+              el.dispatchEvent(new InputEvent("input", { bubbles: true }));
+              el.dispatchEvent(new Event("change", { bubbles: true }));
+            } else {
+              for (const char of txt) {
+                const eventInit = { key: char, bubbles: true, cancelable: true };
+                el.dispatchEvent(new KeyboardEvent("keydown", eventInit));
+                el.dispatchEvent(new KeyboardEvent("keypress", eventInit));
+                setValue(((el as HTMLInputElement).value ?? "") + char);
+                el.dispatchEvent(new InputEvent("input", { bubbles: true, data: char }));
+                el.dispatchEvent(new KeyboardEvent("keyup", eventInit));
+                if (delayMs > 0) {
+                  await new Promise((r) => setTimeout(r, delayMs));
+                }
               }
             }
-            return { result: { success: true, typed: txt.length, path: "page-side-dispatch" } };
+            // 回读校验副作用真发生(族 A 一致):非空 text 却读回空 = 被类型/格式约束拒绝。
+            if (String(txt) !== "" && (el as HTMLInputElement).value === "") {
+              return {
+                errorCode: "NO_EFFECT",
+                error: `Element ${sel} rejected typed text "${String(txt)}" (likely a format/type constraint, e.g. type=number/date); value is empty after type`,
+                extras: { attempted: String(txt), type: inputType },
+              };
+            }
+            return {
+              result: {
+                success: true,
+                typed: txt.length,
+                path: "page-side-dispatch",
+                value: (el as HTMLInputElement).value,
+              },
+            };
           } catch (err) {
             return { error: err instanceof Error ? err.message : String(err) };
           }
