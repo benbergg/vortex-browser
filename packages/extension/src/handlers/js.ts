@@ -46,7 +46,11 @@ async function cdpEvaluate(
     exceptionDetails?: { exception?: { description?: string }; text?: string };
   };
   if (res.exceptionDetails) {
-    throw new Error(
+    // 用 vtxError 包装满足 I19 no-bare-throw invariant;调用方(isUnsafeEvalBlocked
+    // 分支的 catch)按 e.message 重包成 jsExecutionError,VtxError.message 即裸消息,
+    // 行为不变。
+    throw vtxError(
+      VtxErrorCode.JS_EXECUTION_ERROR,
       res.exceptionDetails.exception?.description ??
         res.exceptionDetails.text ??
         "CDP Runtime.evaluate failed",
