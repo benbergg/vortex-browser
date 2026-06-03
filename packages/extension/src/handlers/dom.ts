@@ -767,6 +767,16 @@ export function registerDomHandlers(
                   },
                 };
               }
+              // disabled option 可被程序赋值选中(HTML 规范 disabled 只挡用户交互),
+              // 选中后回读计数相等会假成功(族 I #21)。命中禁用项直接报错而非假选中。
+              const disabledMatched = matched.filter((m) => m.disabled);
+              if (disabledMatched.length > 0) {
+                return {
+                  errorCode: "INVALID_PARAMS",
+                  error: `<select> ${sel} option(s) disabled and cannot be selected: ${disabledMatched.map((m) => norm(m.text)).join(", ")}`,
+                  extras: { disabled: disabledMatched.map((m) => m.value || m.text) },
+                };
+              }
               for (const o of opts) o.selected = false;
               for (const m of matched) m.selected = true;
               el.dispatchEvent(new Event("change", { bubbles: true }));
@@ -792,6 +802,14 @@ export function registerDomHandlers(
                 extras: {
                   available: opts.map((o) => o.value || o.text).slice(0, 30),
                 },
+              };
+            }
+            // disabled option 可被 el.value 程序赋值选中 → 假成功(族 I #21)。明确报错。
+            if (opt.disabled) {
+              return {
+                errorCode: "INVALID_PARAMS",
+                error: `<select> ${sel} option "${String(val)}" is disabled and cannot be selected`,
+                extras: { disabled: opt.value || opt.text },
               };
             }
             el.value = opt.value;

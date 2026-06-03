@@ -89,6 +89,10 @@
     // 折叠内部空白:选项 label 夹图标/换行时 textContent 带多余空白/换行,
     // 严格匹配会判 Unknown(2026-06-03 act 原语白盒审计族 I #25)。
     const norm = (s: string) => s.replace(/\s+/g, " ").trim();
+    // 共享超时预算:dropdown 打开 + 各 label 等选项渲染都从同一 deadline 扣减,
+    // 避免 per-label 各自 cap 累加远超调用方 timeoutMs(评审 R2-HIGH-2)。
+    const startTs = Date.now();
+    const remaining = () => Math.max(0, startTs + timeoutMs - Date.now());
     const isMultiple = Array.isArray(val) || root.classList.contains("is-multiple");
 
     // trigger: el-select 2.x uses .el-select__wrapper, older versions use .select-trigger
@@ -115,7 +119,7 @@
         if ((d as HTMLElement).getBoundingClientRect().width > 0) return d as HTMLElement;
       }
       return null;
-    }, timeoutMs);
+    }, remaining());
     if (!dropdown) {
       return {
         error: "Select dropdown did not open within timeout",
@@ -174,7 +178,8 @@
       // 轮询等选项渲染:remote/懒加载首帧 dropdown 为空,一次性枚举会误报 Unknown
       // (族 I #22)。每轮重算 querySelectorAll 拾取后插入的 item;只取启用项精确
       // 匹配(norm 折叠空白 #25,跳过 .is-disabled #21,点禁用项无效 verify 会失败)。
-      const optWait = Math.min(timeoutMs, 3000);
+      // optWait 从共享 deadline 扣减,多 label 总等待 ≤ timeoutMs(评审 R2-HIGH-2)。
+      const optWait = remaining();
       const hit = await waitFor(
         () =>
           (
@@ -230,7 +235,7 @@
     if (unknown.length > 0) {
       const available = Array.from(
         dropdown.querySelectorAll(".el-select-dropdown__item"),
-      ).map((i) => ((i as HTMLElement).textContent || "").trim());
+      ).map((i) => norm((i as HTMLElement).textContent || ""));
       return {
         error: `Unknown option label(s): ${unknown.join(", ")}. Available: ${available.join(", ")}`,
         errorCode: "INVALID_PARAMS",
@@ -248,14 +253,17 @@
       ".el-tag, .el-select__selected-item, .el-select__tags-text",
     );
     const displayed = norm(wrapper.innerText || "");
+    // verify 的 label 也过 norm,与匹配步(norm 折叠空白 #25)口径一致,否则
+    // 含内部空白的 label 在匹配步命中却在此假报 COMMIT_FAILED(评审 R1-MEDIUM)。
     let notReflected: string[];
     if (itemEls.length > 0) {
       const itemTexts = Array.from(itemEls).map((e) => norm((e as HTMLElement).textContent || ""));
-      notReflected = labels.filter(
-        (l) => !itemTexts.some((t) => t === l || t.includes(l)),
-      );
+      notReflected = labels.filter((l) => {
+        const w = norm(l);
+        return !itemTexts.some((t) => t === w || t.includes(w));
+      });
     } else {
-      notReflected = labels.filter((l) => !displayed.includes(l));
+      notReflected = labels.filter((l) => !displayed.includes(norm(l)));
     }
     if (notReflected.length > 0) {
       return {

@@ -26,7 +26,7 @@ const CB_SRC = readFileSync(
 
 // 原生 SELECT handler 区间
 const selectIdx = DOM_SRC.indexOf("[DomActions.SELECT]");
-const SELECT_BLOCK = DOM_SRC.slice(selectIdx, selectIdx + 7600);
+const SELECT_BLOCK = DOM_SRC.slice(selectIdx, selectIdx + 8600);
 
 describe("族 I #25 — checkbox-group label 折叠内部空白匹配", () => {
   it("不再用 (b.innerText||\"\").trim() === name 严格等值", () => {
@@ -71,5 +71,27 @@ describe("族 I #21 — el-select 跳过禁用项 + 明确 disabled 报错", () 
   });
   it("el-select 选项匹配也过 norm(同 #25 空白折叠)", () => {
     expect(SEL_SRC).toMatch(/norm\(.*textContent/);
+  });
+});
+
+describe("族 I #21(评审补全)— 原生 <select> disabled option 不假成功", () => {
+  it("单值路径命中 disabled option 报 INVALID_PARAMS", () => {
+    expect(SELECT_BLOCK).toMatch(/opt\.disabled/);
+    expect(SELECT_BLOCK).toMatch(/is disabled and cannot be selected/);
+  });
+  it("多选路径排除 disabled 命中项再报错", () => {
+    expect(SELECT_BLOCK).toMatch(/disabledMatched/);
+  });
+});
+
+describe("评审修复 — el-select 共享超时 deadline + verify 口径对齐", () => {
+  it("per-label 等待从共享 deadline 扣减(remaining)而非各自 cap", () => {
+    expect(SEL_SRC).toMatch(/const remaining = \(\) =>/);
+    expect(SEL_SRC).toMatch(/const optWait = remaining\(\)/);
+    expect(SEL_SRC).not.toMatch(/Math\.min\(timeoutMs, 3000\)/);
+  });
+  it("verify 的 label 也过 norm(R1-MEDIUM)", () => {
+    expect(SEL_SRC).toMatch(/const w = norm\(l\)/);
+    expect(SEL_SRC).toMatch(/displayed\.includes\(norm\(l\)\)/);
   });
 });
