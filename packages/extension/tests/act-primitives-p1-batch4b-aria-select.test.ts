@@ -119,6 +119,20 @@ describe("#24 live 修 — antd v6 非合规 + react-select root", () => {
   });
 });
 
+describe("#24 聚焦评审修复 — 作用域锚定 + 键盘开安全", () => {
+  it("HIGH-1 aria-controls id 来源扫 root 子树(antd 在内层 input 上)", () => {
+    expect(ARIA_SRC).toMatch(/const controlsId = \(\)/);
+    expect(ARIA_SRC).toMatch(/root\.querySelector\("\[aria-controls\]"\)/);
+  });
+  it("MEDIUM-2 ariaControlsScope 上溯到 body 即停", () => {
+    expect(ARIA_SRC).toMatch(/el !== document\.body/);
+  });
+  it("HIGH-2 键盘开 kbTarget 限定搜索式 input + 清残留过滤串", () => {
+    expect(ARIA_SRC).toMatch(/input\[role="combobox"\], input\[aria-autocomplete\]/);
+    expect(ARIA_SRC).toMatch(/searchInput && searchInput\.value/);
+  });
+});
+
 describe("#24 评审修复 — 跨库鲁棒性", () => {
   it("H4 dispatchMouseClick 补发 pointerdown/pointerup(Radix/Headless)", () => {
     expect(ARIA_SRC).toMatch(/new PointerEvent\("pointerdown"/);

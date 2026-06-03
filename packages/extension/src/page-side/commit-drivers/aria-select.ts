@@ -148,16 +148,25 @@
       o.getAttribute("aria-selected") === "true" ||
       o.classList.contains("ant-select-item-option-selected");
 
+    // 取本 select 弹层的 aria-controls/aria-owns id。**关键**:trigger(经可见性过滤后常是
+    // antd 的 .ant-select-selector / react-select control)自身往往不带该属性,真正持有的是
+    // 内层 input[role=combobox];故 id 来源必须也扫 root 子树内任意 [aria-controls](评审
+    // HIGH-1)。否则 scope 退化到文档级,多 antd select 同名选项跨组件污染。
+    const controlsId = (): string | null =>
+      trigger.getAttribute("aria-controls") ||
+      trigger.getAttribute("aria-owns") ||
+      root.getAttribute("aria-controls") ||
+      root.getAttribute("aria-owns") ||
+      root.querySelector("[aria-controls]")?.getAttribute("aria-controls") ||
+      root.querySelector("[aria-owns]")?.getAttribute("aria-owns") ||
+      null;
+
     // 找**自身可见**的 listbox(react-select/MUI/Radix 的弹层 listbox 即可见容器);多个
     // 同时可见时取几何离 trigger 最近的,避免错配别处残留弹层(评审 M1)。注意:antd v6 的
     // rc-virtual-list 把 [role=listbox] 放在 0 尺寸测量 holder 上(且 aria-controls 指向它),
     // 此函数对这类返回 null —— 由 optionPool 退到「文档级可见 [role=option]」兜住。
     const findVisibleListbox = (): HTMLElement | null => {
-      const idAttr =
-        trigger.getAttribute("aria-controls") ||
-        trigger.getAttribute("aria-owns") ||
-        root.getAttribute("aria-controls") ||
-        root.getAttribute("aria-owns");
+      const idAttr = controlsId();
       if (idAttr) {
         for (const one of idAttr.split(/\s+/)) {
           const el = document.getElementById(one);
@@ -188,14 +197,11 @@
     // dropdown 持有可见选项行)。aria-controls id 每个 select 唯一,故作用域锁定**本** select
     // 的弹层,避免页面多 select 同时渲染时的跨组件污染(评审 M1)。
     const ariaControlsScope = (): HTMLElement | null => {
-      const idAttr =
-        trigger.getAttribute("aria-controls") ||
-        trigger.getAttribute("aria-owns") ||
-        root.getAttribute("aria-controls") ||
-        root.getAttribute("aria-owns");
+      const idAttr = controlsId();
       if (!idAttr) return null;
       let el: HTMLElement | null = document.getElementById(idAttr.split(/\s+/)[0]);
-      for (let i = 0; el && i < 6; i++) {
+      // 到 body 即停:body/html 作作用域等于文档级,失去锚定意义且会命中邻居弹层(评审 M2)。
+      for (let i = 0; el && el !== document.body && i < 6; i++) {
         if (collectVisible(el).length > 0) return el;
         el = el.parentElement;
       }
@@ -242,11 +248,26 @@
       // ARIA APG combobox 的标准开弹层键(2026-06-03 react-select live 实证:合成鼠标开失败、
       // 键盘开成功,且开后合成 click 选项有效)。
       if (!opened) {
-        const kbTarget = (trigger.matches("input")
-          ? trigger
-          : (root.querySelector('input:not([type="hidden"])') as HTMLElement | null) ?? trigger) as
-          | HTMLElement
-          | null;
+        // kbTarget 限定为**搜索式** combobox input(role=combobox / aria-autocomplete)或 trigger
+        // 本身,不取 root 内任意 input——否则可能 focus 到表单里无关 input 触发别的 onFocus UI
+        // (评审 HIGH-2)。
+        const searchInput = (
+          trigger.matches('input[role="combobox"], input[aria-autocomplete]')
+            ? trigger
+            : root.querySelector('input[role="combobox"], input[aria-autocomplete]')
+        ) as HTMLInputElement | null;
+        const kbTarget = (searchInput ?? trigger) as HTMLElement | null;
+        // 清掉上一 label 的 typeahead 残留:带串 ArrowDown 会按残留串过滤把列表筛空,
+        // 多选第二个 label 走键盘开时找不到选项误报 unknown(评审 HIGH-2)。
+        if (searchInput && searchInput.value) {
+          const sv = Object.getOwnPropertyDescriptor(
+            window.HTMLInputElement.prototype,
+            "value",
+          )?.set;
+          if (sv) sv.call(searchInput, "");
+          else searchInput.value = "";
+          searchInput.dispatchEvent(new Event("input", { bubbles: true }));
+        }
         kbTarget?.focus?.();
         kbTarget?.dispatchEvent(
           new KeyboardEvent("keydown", {
