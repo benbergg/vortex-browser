@@ -32,6 +32,30 @@ export interface SnapshotResult {
   review: { observeMissed: number; observeExtra: number; agree: number };
 }
 
+/**
+ * 解析 SERIALIZE_SNAPSHOT_CODE 经 vortex_evaluate 返回的 JSON,带截断检测。
+ * MCP RESPONSE_SIZE_LIMIT 截断会在 JSON 串中间插 "[TRUNCATED: ...]",直接 JSON.parse
+ * 报含糊的 "Bad control character at position N"。这里先识别截断标记给出可操作的明确
+ * 报错(提示调高 VORTEX_RESPONSE_SIZE_LIMIT),非截断的非法 JSON 才回落原报错。
+ */
+export function parseSerializeResult(serRaw: string): SerializeResult {
+  if (serRaw.includes("[TRUNCATED:")) {
+    const m = serRaw.match(/\[TRUNCATED: response was (\d+) bytes/);
+    const size = m ? `${m[1]} 字节` : "超限";
+    throw new Error(
+      `[snapshot] 序列化结果被 MCP 截断(${size}):页面 DOM 超出响应大小上限。` +
+        `bench 已为自身 MCP 设高 VORTEX_RESPONSE_SIZE_LIMIT,若仍触发请进一步调高。`,
+    );
+  }
+  try {
+    return JSON.parse(serRaw) as SerializeResult;
+  } catch (e) {
+    throw new Error(
+      `[snapshot] 序列化结果非合法 JSON: ${e instanceof Error ? e.message : String(e)}; 头120字: ${serRaw.slice(0, 120)}`,
+    );
+  }
+}
+
 function extractText(res: unknown): string {
   const content = (res as { content?: unknown }).content;
   if (!Array.isArray(content)) return "";
@@ -46,7 +70,9 @@ export async function captureSnapshot(opts: SnapshotOptions): Promise<SnapshotRe
   const mcp = await createMcpConnection({
     command: process.execPath,
     args: [opts.mcpBin],
-    env: { ...(process.env as Record<string, string>) },
+    // 序列化整页 DOM 常 >100KB(真实站可达数 MB),远超 MCP 默认响应上限。bench 是
+    // 程序化客户端(结果 client→server→client 不进 agent 上下文),调高上限取完整结果。
+    env: { ...(process.env as Record<string, string>), VORTEX_RESPONSE_SIZE_LIMIT: "50000000" },
   });
   const call = (name: string, args: Record<string, unknown>) =>
     mcp.client.callTool({ name, arguments: args });
@@ -62,14 +88,7 @@ export async function captureSnapshot(opts: SnapshotOptions): Promise<SnapshotRe
     if (!serRaw.trim()) {
       throw new Error("[snapshot] vortex_evaluate 返回空串,页面可能未加载完或脚本被 CSP 拦截");
     }
-    let ser: SerializeResult;
-    try {
-      ser = JSON.parse(serRaw) as SerializeResult;
-    } catch (e) {
-      throw new Error(
-        `[snapshot] 序列化结果非合法 JSON: ${e instanceof Error ? e.message : String(e)}; 头120字: ${serRaw.slice(0, 120)}`,
-      );
-    }
+    const ser = parseSerializeResult(serRaw);
 
     // 2) 当前页 observe(includeBoxes)作 delta 对照
     const obsText = extractText(await call("vortex_observe", { frames, includeBoxes: true }));

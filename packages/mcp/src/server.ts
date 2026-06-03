@@ -86,7 +86,14 @@ let activeSnapshotHash: string | null = null;
 const PORT = parseInt(process.env.VORTEX_PORT ?? "6800");
 const DEFAULT_TIMEOUT = parseInt(process.env.VORTEX_TIMEOUT_MS ?? "30000");
 const LARGE_IMAGE_BYTES = 500_000;   // 超过 500KB 的图片默认切 file 模式
-const RESPONSE_SIZE_LIMIT = 100_000; // 非图片响应 100KB 截断
+// 非图片响应默认 100KB 截断,保护真 agent 上下文不被刷爆。可经 env 覆盖:
+// 程序化客户端(如 vortex-bench 的 snapshot 序列化,结果 client→server→client 不进
+// agent 上下文)需要完整大响应,设高 VORTEX_RESPONSE_SIZE_LIMIT 即可。非法值回落默认。
+const RESPONSE_SIZE_LIMIT = (() => {
+  const raw = process.env.VORTEX_RESPONSE_SIZE_LIMIT;
+  const n = raw !== undefined ? Number(raw) : NaN;
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : 100_000;
+})();
 
 /**
  * 自重启机制（@since 0.4.0）：
