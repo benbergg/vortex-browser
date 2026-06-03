@@ -463,13 +463,32 @@ async function scanOneFrame(
             const ctrlAria = ctrl?.getAttribute("aria-label");
             if (ctrlAria) return normName(ctrlAria);
           }
+          // AJ: 有交互后代的元素是**容器**,其 textContent 是子控件文本的拼接
+          // (噪声),非自身标签——不作名源。典型:focus 管理用的 `<div tabindex=0>`
+          // 包整个内容区(GitHub SharedPageLayout),无 role/aria-label,经 [tabindex]
+          // 被 INTERACTIVE_SELECTORS 捕获,旧逻辑落到 textContent 取「anthropics/...
+          // main36 Branches193 Tags...」整片拼接,且这个噪声名又击败了下游 BUG-3
+          // 噪声过滤器的 `!name` 判定使其漏网。名留空后 BUG-3(filter=interactive)
+          // 自动丢弃该幽灵容器。
+          // ARIA name-from-content 本只对特定 role 生效;vortex 对 cursor:pointer
+          // 自定义按钮 div 用 textContent 是 **leaf**(无交互后代)场景,不受影响。
+          // 判别用「有交互后代」而非 cursor:免一次 getComputedStyle,且精准:leaf
+          // 控件 querySelector 落空保留名,容器命中留空(2026-06-02 dogfood AJ)。
+          const isContainer =
+            el.querySelector(
+              "a[href],button,input,select,textarea,[tabindex],[contenteditable=true]",
+            ) != null;
           const text = normName(el.textContent);
-          if (text) return text;
+          if (text && !isContainer) return text;
           // title 属性是 accname 规范的末位兜底名源:纯图标按钮常只有 title
           // (Excalidraw "更多工具" 触发器只有 title + 一个 svg)。放在 textContent
           // 之后、className 之前——有真文本时不抢,纯图标时优于 className hash。
           const titleAttr = el.getAttribute("title");
           if (titleAttr) return normName(titleAttr);
+          // 容器(有交互后代)且无 label/title → 返空,交 BUG-3 噪声过滤器丢弃;
+          // **不**走 className icon 兜底——容器常含头像/图标 img 会误触发
+          // iconNameFromClass 取个 hash 噪声名,反而又击败 `!name` 过滤(AJ)。
+          if (isContainer) return "";
           // 仅 svg/img 子且无文本无 title 时，从 className 兜底（如 `_closeIcon_1ygkr_39` → `closeIcon`）
           return iconNameFromClass(el);
         }
