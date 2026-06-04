@@ -1,0 +1,9 @@
+<!doctype html>
+<html lang="zh"><head><meta charset="utf-8"></head><body>
+<button id="ifbtn" style="padding:8px">iframe 同源按钮</button>
+<script>
+  document.getElementById("ifbtn").addEventListener("click", function () {
+    parent.document.querySelector("[data-testid=result]").textContent = "spif-clicked";
+  });
+</script>
+</body></html>

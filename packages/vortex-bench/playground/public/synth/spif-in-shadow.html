@@ -1,0 +1,12 @@
+<!doctype html>
+<html lang="zh"><head><meta charset="utf-8"><title>SPIF in shadow</title></head>
+<body>
+<h1>同源 iframe ⊂ open shadow</h1>
+<!-- open shadow host 内放一个同源 iframe,按钮在 iframe 里。 -->
+<div id="host"></div>
+<p data-testid="result">idle</p>
+<script>
+  var sr = document.getElementById("host").attachShadow({ mode: "open" });
+  sr.innerHTML = '<iframe src="/synth/spif-in-shadow-child.html" style="width:320px;height:80px"></iframe>';
+</script>
+</body></html>

@@ -1,0 +1,13 @@
+<!doctype html>
+<html lang="zh"><head><meta charset="utf-8"><title>disabled 元素优雅失败</title></head>
+<body>
+<h1>disabled 按钮(act 应优雅报错,非假成功)</h1>
+<!-- 镜像 Stagehand nonsense/边界:disabled 元素 act 应明确 DISABLED,result 不被改。 -->
+<button id="b" disabled style="padding:8px">禁用按钮</button>
+<p data-testid="result">idle</p>
+<script>
+  document.getElementById("b").addEventListener("click", function () {
+    document.querySelector("[data-testid=result]").textContent = "disabled-clicked";
+  });
+</script>
+</body></html>

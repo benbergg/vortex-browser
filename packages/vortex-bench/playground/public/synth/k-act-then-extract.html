@@ -1,0 +1,14 @@
+<!doctype html>
+<html lang="zh"><head><meta charset="utf-8"><title>多步状态依赖</title></head>
+<body>
+<h1>act 改状态 → extract 读新状态</h1>
+<!-- 镜像 Stagehand combination(sciquest/wichita act 切换后 extract):
+     点击前 detail 隐藏,extract 取不到;点击后显示,extract 应取到 SECRET-42。 -->
+<button id="reveal" style="padding:8px">显示详情</button>
+<div id="detail" data-testid="detail" style="display:none">隐藏的详情内容 SECRET-42</div>
+<script>
+  document.getElementById("reveal").addEventListener("click", function () {
+    document.getElementById("detail").style.display = "block";
+  });
+</script>
+</body></html>

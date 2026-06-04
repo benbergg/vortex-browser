@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="zh"><head><meta charset="utf-8"><title>no-js click(需真实点击)</title></head>
+<body>
+<h1>仅响应真实(isTrusted)点击</h1>
+<!-- 镜像 Stagehand no_js_click:仅 isTrusted 事件(CDP 真实点击)置 marker;
+     合成 dispatchEvent(isTrusted=false)被识破。产品级标准=真实点击生效。 -->
+<button id="b" style="padding:8px">真实点击按钮</button>
+<p data-testid="result">idle</p>
+<script>
+  document.getElementById("b").addEventListener("click", function (e) {
+    document.querySelector("[data-testid=result]").textContent =
+      e.isTrusted ? "trusted-clicked" : "synthetic-blocked";
+  });
+</script>
+</body></html>

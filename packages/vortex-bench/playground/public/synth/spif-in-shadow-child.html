@@ -1,0 +1,9 @@
+<!doctype html>
+<html lang="zh"><head><meta charset="utf-8"></head><body>
+<button id="b" style="padding:8px">spif-in-shadow 按钮</button>
+<script>
+  document.getElementById("b").addEventListener("click", function () {
+    top.document.querySelector("[data-testid=result]").textContent = "spif-in-shadow-clicked";
+  });
+</script>
+</body></html>

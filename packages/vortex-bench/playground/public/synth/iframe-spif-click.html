@@ -1,0 +1,8 @@
+<!doctype html>
+<html lang="zh"><head><meta charset="utf-8"><title>SPIF click</title></head>
+<body>
+<h1>同源 iframe(SPIF)点击</h1>
+<!-- 同源 src iframe:observe(frames=all 或 all-permitted)应暴露内部按钮,act-via-ref 触发真 handler。 -->
+<iframe id="spif" src="/synth/iframe-spif-child.html" style="width:320px;height:80px"></iframe>
+<p data-testid="result">idle</p>
+</body></html>
