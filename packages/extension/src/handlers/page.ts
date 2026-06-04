@@ -61,6 +61,43 @@ function waitForTabLoad(
 
 export { waitForTabLoad };
 
+// 等新文档 DOMContentLoaded（DOM 解析完成、可 query 可交互），不等全部子资源
+// （load/tab 'complete'）。用 chrome.webNavigation.onDOMContentLoaded 主 frame 信号精确
+// 捕获——tab 'complete' 反映所有网络活动,DOM 秒就绪的慢站(挂起 img/长尾资源)会被
+// waitForTabLoad 拖到 ~25s 超时降级,而 caller 只要 DOM(NAV-1, 2026-06-04 审计)。
+// 监听器须由 caller 在 chrome.tabs.update 之前挂上,消除快页面 DCL 早于监听的竞态。
+// 超时优雅降级语义与 waitForTabLoad 对齐:超时探 readyState,interactive/complete →
+// { degraded: true },仍 loading 才 reject TIMEOUT（hash/同文档导航不 fire DCL,
+// 走此降级分支按 readyState 收口）。
+function waitForDomReady(
+  tabId: number,
+  timeoutMs: number = 25_000,
+): Promise<{ degraded: boolean }> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(async () => {
+      chrome.webNavigation.onDOMContentLoaded.removeListener(listener);
+      const ready = await probeReadyState(tabId);
+      if (ready === "interactive" || ready === "complete") {
+        resolve({ degraded: true });
+        return;
+      }
+      reject(vtxError(VtxErrorCode.TIMEOUT, `DOMContentLoaded timeout after ${timeoutMs}ms`));
+    }, timeoutMs);
+
+    function listener(details: { tabId: number; frameId: number }) {
+      // 只认目标 tab 的主 frame（frameId === 0）;子 frame DCL 不代表主文档就绪。
+      if (details.tabId === tabId && details.frameId === 0) {
+        clearTimeout(timer);
+        chrome.webNavigation.onDOMContentLoaded.removeListener(listener);
+        resolve({ degraded: false });
+      }
+    }
+    chrome.webNavigation.onDOMContentLoaded.addListener(listener);
+  });
+}
+
+export { waitForDomReady };
+
 // MCP 传输层（client.ts requestOnce）对每次工具调用有硬超时（VORTEX_TIMEOUT_MS，
 // 默认 30s），到点直接向 caller 抛 "no response for page.navigate"。navigate 的内部
 // load 等待若也用满 30s，传输层会以微弱差距先放弃，优雅降级（{degraded:true}）的响应
@@ -81,23 +118,37 @@ export function registerPageHandlers(router: ActionRouter, debuggerMgr: Debugger
       // 接受 networkidle 让调用方误以为生效 —— SPA 上 long-polling 永不 idle
       // 时即使等到 onload 完成，调用方仍以为 networkidle 没满足。
       // v0.8.1 之后：handler 显式读 waitUntil。
-      //   - "load" / 缺省：当前 onload 行为。
-      //   - "domcontentloaded": 等 status === "loading" 后立刻返回。
-      //   - "networkidle": 先等 onload，再额外 awaitIdle（内部 5s 上限）。
-      //     超 5s 不 throw 而是 console.warn 后 graceful 返回，避免 SPA
-      //     long-polling 把整个 navigate 拖死（P2-7, 2026-05-21）。
+      //   - "load" / 缺省：等 tab 'complete'（waitForTabLoad）。
+      //   - "domcontentloaded": 等新文档 DOMContentLoaded（waitForDomReady，主 frame
+      //     webNavigation 信号）即返回,不等子资源(NAV-1, 2026-06-04 审计修复——此前与
+      //     load 同走 waitForTabLoad,慢站 DOM 秒就绪仍阻塞 ~25s)。
+      //   - "networkidle": 先等 tab 'complete'，再额外 awaitIdle（剩余预算,NAV-3）。
+      //     超时不 throw 而是 console.warn 后 graceful 返回，避免 SPA long-polling
+      //     把整个 navigate 拖死（P2-7, 2026-05-21）。
       const waitUntil = (args.waitUntil as string | undefined) ?? "load";
       const outerTimeout = (args.timeout as number) ?? 30_000;
       // 内层总 cap:load + 可选 networkidle 合计须 < 传输超时(NAVIGATE_LOAD_TIMEOUT_MS
       // 已 < 30s)。idle 阶段从此 cap 扣减 load 已耗,而非另叠固定 5s(NAV-3)。
       const innerCap = Math.min(outerTimeout, NAVIGATE_LOAD_TIMEOUT_MS);
       const navStart = Date.now();
+      // NAV-1:domcontentloaded 的 DCL 监听器须在 tabs.update 之前挂上——DCL 事件可能在
+      // 导航提交后极快 fire,晚挂会漏掉而干等到超时。其余 waitUntil 在 update 后再等。
+      const dclPromise =
+        waitForLoad && waitUntil === "domcontentloaded"
+          ? waitForDomReady(tid, innerCap)
+          : null;
       await chrome.tabs.update(tid, { url });
       let degraded = false;
       if (waitForLoad) {
-        // load / domcontentloaded 都走 waitForTabLoad；超时时若 DOM 已就绪则优雅降级
-        // 返回（degraded: true），仅 DOM 仍 loading 才 throw。内部 load 等待 cap 在
-        // NAVIGATE_LOAD_TIMEOUT_MS（< 传输超时），确保降级响应能回到 caller。
+        if (waitUntil === "domcontentloaded") {
+          // DOM 解析完成即返回,不等子资源(NAV-1)。dclPromise 已在 update 前挂好监听。
+          ({ degraded } = await dclPromise!);
+          const tab = await chrome.tabs.get(tid);
+          return { url: tab.url, title: tab.title, status: tab.status, ...(degraded ? { degraded: true } : {}) };
+        }
+        // load / networkidle 走 waitForTabLoad（等 tab 'complete'）；超时时若 DOM 已就绪
+        // 则优雅降级返回（degraded: true），仅 DOM 仍 loading 才 throw。内部 load 等待 cap
+        // 在 NAVIGATE_LOAD_TIMEOUT_MS（< 传输超时），确保降级响应能回到 caller。
         const loadWait = innerCap;
         ({ degraded } = await waitForTabLoad(tid, loadWait));
         if (waitUntil === "networkidle") {
