@@ -14,10 +14,12 @@ import { dirname, join } from "node:path";
  */
 
 let dclListeners: Array<(d: { tabId: number; frameId: number }) => void>;
+let tabUpdatedListeners: Array<(tabId: number, ci: { status?: string }) => void>;
 let executeScriptMock: Mock;
 
 function installChrome(readyState: string) {
   dclListeners = [];
+  tabUpdatedListeners = [];
   executeScriptMock = vi.fn().mockResolvedValue([{ result: readyState }]);
   (globalThis as any).chrome = {
     scripting: { executeScript: executeScriptMock },
@@ -31,11 +33,25 @@ function installChrome(readyState: string) {
         }),
       },
     },
+    tabs: {
+      onUpdated: {
+        addListener: vi.fn((cb: (tabId: number, ci: { status?: string }) => void) => {
+          tabUpdatedListeners.push(cb);
+        }),
+        removeListener: vi.fn((cb: any) => {
+          tabUpdatedListeners = tabUpdatedListeners.filter((l) => l !== cb);
+        }),
+      },
+    },
   };
 }
 
 function fireDcl(tabId: number, frameId: number) {
   for (const l of [...dclListeners]) l({ tabId, frameId });
+}
+
+function fireTabComplete(tabId: number) {
+  for (const l of [...tabUpdatedListeners]) l(tabId, { status: "complete" });
 }
 
 async function importPage() {
@@ -57,6 +73,27 @@ describe("waitForDomReady — DCL 早返回 (NAV-1)", () => {
     const p = waitForDomReady(100, 25_000);
     fireDcl(100, 0);
     await expect(p).resolves.toEqual({ degraded: false });
+  });
+
+  it("同文档/hash 导航不 fire DCL 但 tab 'complete' → 快速 resolve(不干等超时,reflexion 回归修复)", async () => {
+    installChrome("complete");
+    const { waitForDomReady } = await importPage();
+    const p = waitForDomReady(100, 25_000);
+    fireTabComplete(100); // hash 导航:无 DCL,仅 tab complete
+    await expect(p).resolves.toEqual({ degraded: false });
+  });
+
+  it("别的 tab 的 'complete' 不算数", async () => {
+    vi.useFakeTimers();
+    installChrome("loading");
+    const { waitForDomReady } = await importPage();
+    const settled = waitForDomReady(100, 25_000).then(
+      (v) => ({ ok: true, v }),
+      () => ({ ok: false }),
+    );
+    fireTabComplete(999); // 别的 tab
+    await vi.advanceTimersByTimeAsync(25_000);
+    expect(await settled).toEqual({ ok: false }); // readyState=loading → reject
   });
 
   it("子 frame(frameId≠0)的 DCL 不算数,只认主 frame", async () => {

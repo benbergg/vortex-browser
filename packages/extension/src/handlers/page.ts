@@ -66,16 +66,19 @@ export { waitForTabLoad };
 // 捕获——tab 'complete' 反映所有网络活动,DOM 秒就绪的慢站(挂起 img/长尾资源)会被
 // waitForTabLoad 拖到 ~25s 超时降级,而 caller 只要 DOM(NAV-1, 2026-06-04 审计)。
 // 监听器须由 caller 在 chrome.tabs.update 之前挂上,消除快页面 DCL 早于监听的竞态。
-// 超时优雅降级语义与 waitForTabLoad 对齐:超时探 readyState,interactive/complete →
-// { degraded: true },仍 loading 才 reject TIMEOUT（hash/同文档导航不 fire DCL,
-// 走此降级分支按 readyState 收口）。
+//
+// 双信号竞速取先:① onDOMContentLoaded(整页导航的早返回信号,慢站子资源未就绪也返回)
+// ② tabs.onUpdated 'complete'(同文档/hash 导航**不 fire DCL**,但 tab 仍快速 complete——
+// 没有此副信号,hash+domcontentloaded 会干等到超时,比旧 waitForTabLoad 还慢,reflexion
+// 回归修复)。整页慢站:DCL 先到;hash:complete 先到;两者都覆盖。
+// 超时优雅降级:探 readyState,interactive/complete → { degraded: true },仍 loading 才 reject。
 function waitForDomReady(
   tabId: number,
   timeoutMs: number = 25_000,
 ): Promise<{ degraded: boolean }> {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(async () => {
-      chrome.webNavigation.onDOMContentLoaded.removeListener(listener);
+      cleanup();
       const ready = await probeReadyState(tabId);
       if (ready === "interactive" || ready === "complete") {
         resolve({ degraded: true });
@@ -84,15 +87,27 @@ function waitForDomReady(
       reject(vtxError(VtxErrorCode.TIMEOUT, `DOMContentLoaded timeout after ${timeoutMs}ms`));
     }, timeoutMs);
 
-    function listener(details: { tabId: number; frameId: number }) {
+    function cleanup() {
+      clearTimeout(timer);
+      chrome.webNavigation.onDOMContentLoaded.removeListener(dclListener);
+      chrome.tabs.onUpdated.removeListener(tabListener);
+    }
+    function dclListener(details: { tabId: number; frameId: number }) {
       // 只认目标 tab 的主 frame（frameId === 0）;子 frame DCL 不代表主文档就绪。
       if (details.tabId === tabId && details.frameId === 0) {
-        clearTimeout(timer);
-        chrome.webNavigation.onDOMContentLoaded.removeListener(listener);
+        cleanup();
         resolve({ degraded: false });
       }
     }
-    chrome.webNavigation.onDOMContentLoaded.addListener(listener);
+    function tabListener(updatedTabId: number, changeInfo: chrome.tabs.TabChangeInfo) {
+      // 同文档/hash 导航无 DCL,以 tab 'complete' 作副信号快速返回。
+      if (updatedTabId === tabId && changeInfo.status === "complete") {
+        cleanup();
+        resolve({ degraded: false });
+      }
+    }
+    chrome.webNavigation.onDOMContentLoaded.addListener(dclListener);
+    chrome.tabs.onUpdated.addListener(tabListener);
   });
 }
 
