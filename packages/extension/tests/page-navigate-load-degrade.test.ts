@@ -126,4 +126,28 @@ describe("navigate 内部 load 等待 < MCP 传输超时 margin (DDG dogfood 202
   it("navigate load 等待用 Math.min(outerTimeout, NAVIGATE_LOAD_TIMEOUT_MS) cap,不裸用 outerTimeout", () => {
     expect(SRC).toMatch(/Math\.min\(\s*outerTimeout\s*,\s*NAVIGATE_LOAD_TIMEOUT_MS\s*\)/);
   });
+
+  // reload/back/forward 同病:裸 waitForTabLoad(tid) 用默认 30s == 传输超时 → 慢站
+  // 降级响应到不了 caller。须同 navigate cap 在 NAVIGATE_LOAD_TIMEOUT_MS(2026-06-04 审计)。
+  it("reload/back/forward 不再裸用 waitForTabLoad(tid)(默认 30s == 传输)", () => {
+    // 不应出现裸调用(无第二个 timeout 实参)。
+    expect(SRC).not.toMatch(/waitForTabLoad\(tid\)\s*;/);
+  });
+
+  it("reload/back/forward 的 load 等待 cap 在 NAVIGATE_LOAD_TIMEOUT_MS", () => {
+    const calls = SRC.match(/waitForTabLoad\(tid,\s*NAVIGATE_LOAD_TIMEOUT_MS\)/g) ?? [];
+    // reload + back + forward 三处。
+    expect(calls.length).toBeGreaterThanOrEqual(3);
+  });
+
+  it("network_idle 默认 timeout 用 NAVIGATE_LOAD_TIMEOUT_MS 而非裸 30000(== 传输)", () => {
+    // WAIT_FOR_NETWORK_IDLE 超时是 reject(非优雅降级),默认 30s == 传输会让
+    // TIMEOUT 错误被传输层 "no response" 抢先,改用 < 传输的 margin。
+    // network_idle 默认行:timeout: (args.timeout as number) ?? NAVIGATE_LOAD_TIMEOUT_MS
+    // (XHR idle 用 ?? 10_000、navigate 用 Math.min,故此式唯一指向 network_idle)。
+    expect(SRC).toMatch(
+      /timeout:\s*\(args\.timeout as number\)\s*\?\?\s*NAVIGATE_LOAD_TIMEOUT_MS/,
+    );
+    expect(SRC).not.toMatch(/timeout:\s*\(args\.timeout as number\)\s*\?\?\s*30_000/);
+  });
 });

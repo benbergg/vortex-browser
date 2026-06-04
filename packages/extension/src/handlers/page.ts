@@ -119,25 +119,28 @@ export function registerPageHandlers(router: ActionRouter, debuggerMgr: Debugger
     [PageActions.RELOAD]: async (args, tabId) => {
       const tid = await getActiveTabId(tabId);
       await chrome.tabs.reload(tid);
-      await waitForTabLoad(tid);
+      // 内部 load 等待 cap 在 NAVIGATE_LOAD_TIMEOUT_MS(< 传输 30s):裸 waitForTabLoad
+      // (tid) 默认 30s == 传输超时,慢站降级响应到不了 caller(同 navigate 第二层
+      // 根因,2026-06-04 审计)。degraded 标记一并 surface,与 navigate 对齐。
+      const { degraded } = await waitForTabLoad(tid, NAVIGATE_LOAD_TIMEOUT_MS);
       const tab = await chrome.tabs.get(tid);
-      return { url: tab.url, title: tab.title };
+      return { url: tab.url, title: tab.title, ...(degraded ? { degraded: true } : {}) };
     },
 
     [PageActions.BACK]: async (args, tabId) => {
       const tid = await getActiveTabId(tabId);
       await chrome.tabs.goBack(tid);
-      await waitForTabLoad(tid);
+      const { degraded } = await waitForTabLoad(tid, NAVIGATE_LOAD_TIMEOUT_MS);
       const tab = await chrome.tabs.get(tid);
-      return { url: tab.url, title: tab.title };
+      return { url: tab.url, title: tab.title, ...(degraded ? { degraded: true } : {}) };
     },
 
     [PageActions.FORWARD]: async (args, tabId) => {
       const tid = await getActiveTabId(tabId);
       await chrome.tabs.goForward(tid);
-      await waitForTabLoad(tid);
+      const { degraded } = await waitForTabLoad(tid, NAVIGATE_LOAD_TIMEOUT_MS);
       const tab = await chrome.tabs.get(tid);
-      return { url: tab.url, title: tab.title };
+      return { url: tab.url, title: tab.title, ...(degraded ? { degraded: true } : {}) };
     },
 
     [PageActions.WAIT]: async (args, tabId) => {
@@ -184,7 +187,10 @@ export function registerPageHandlers(router: ActionRouter, debuggerMgr: Debugger
     [PageActions.WAIT_FOR_NETWORK_IDLE]: async (args, tabId) => {
       const tid = await getActiveTabId(tabId);
       return awaitIdle(debuggerMgr, tid, {
-        timeout: (args.timeout as number) ?? 30_000,
+        // 默认 cap 在 NAVIGATE_LOAD_TIMEOUT_MS(< 传输 30s):idle 超时是 reject(非
+        // 优雅降级),默认 30s == 传输会让 TIMEOUT 被传输层 "no response" 抢先
+        // (2026-06-04 审计)。用户显式传更长值仍尊重(须同步抬 VORTEX_TIMEOUT_MS)。
+        timeout: (args.timeout as number) ?? NAVIGATE_LOAD_TIMEOUT_MS,
         idleTime: (args.idleTime as number) ?? 500,
         urlPattern: args.urlPattern as string | undefined,
         requestTypes: args.requestTypes as string[] | undefined,
