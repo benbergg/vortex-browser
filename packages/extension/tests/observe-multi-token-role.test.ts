@@ -35,4 +35,21 @@ describe("observe 多 token role 取首 token(AM,2026-06-03 dogfood)", () => {
     // split 后取 [0] 再判真值才 return,空则继续往下走 tag-based 推导。
     expect(OBSERVE_SRC).toMatch(/const first = explicit\.trim\(\)\.split\(\/\\s\+\/\)\[0\];\s*\n\s*if \(first\) return first;/);
   });
+
+  // cursor:pointer fallback 的非交互 role 过滤也必须取首 token(2026-06-04 多 agent
+  // 审计 #7,LIVE 确认)。
+  //
+  // 现象:可点卡片把 cursor:pointer 继承给 role="text button" 文本叶子。
+  //   getRole 取首 token "text" 输出 [text],但 fallback 噪声过滤用整串
+  //   NON_INTERACTIVE_ROLES.has("text button")=false → 不跳过 → 幽灵
+  //   `[text] "2.1万 views"` 入池(youtube 观看数类假阳的多 token 变体)。
+  //
+  // 修复:fallback role 检查 .has() 前同样取首 token,与 getRole 一致。
+  it("cursor:pointer fallback 的非交互 role 过滤取首 token(非整串)", () => {
+    // fallbackRole 必须先 split 取首 token 再 .has()——否则多 token role
+    // (role=\"text button\")整串永不命中集合,幽灵文本叶子续命。
+    expect(OBSERVE_SRC).toMatch(
+      /fallbackRole\s*=\s*el\.getAttribute\("role"\)\??\.?\s*[\s\S]{0,80}\.split\(\/\\s\+\/\)\[0\]/,
+    );
+  });
 });

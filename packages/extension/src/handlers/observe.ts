@@ -999,7 +999,10 @@ async function scanOneFrame(
           if (el === docRoot || el === docBody) continue;
           // 显式 role="text"/"paragraph" 是作者的「非控件」声明,优先于继承来的
           // cursor:pointer。跳过避免可点卡片内的观看数/时间戳文本被误收。
-          const fallbackRole = el.getAttribute("role");
+          // 取首个空格分隔 token 与 getRole 一致:ARIA role 是回退列表,
+          // role="text button"+cursor:pointer 旧逻辑用整串 .has() 永不命中 →
+          // 幽灵 [text] 续命(2026-06-04 审计 #7,youtube "2.1万 views" 多 token 变体)。
+          const fallbackRole = el.getAttribute("role")?.trim().split(/\s+/)[0];
           if (fallbackRole && NON_INTERACTIVE_ROLES.has(fallbackRole)) continue;
           // Skip wrappers that already contain a real interactive child —
           // we don't want both the <li> and the <button> inside it.
