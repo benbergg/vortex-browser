@@ -1,0 +1,5 @@
+<\!doctype html><html lang="zh"><head><meta charset="utf-8"><title>oopif_in_csr</title></head>
+<body><h1>跨源 iframe 在 closed shadow 内</h1><div id="host"></div>
+<script>const sr=document.getElementById('host').attachShadow({mode:'closed'});
+const f=document.createElement('iframe');f.src='http://127.0.0.1:5173/synth/oopif-child-button.html';
+f.style.width='320px';f.style.height='90px';sr.appendChild(f);</script></body></html>

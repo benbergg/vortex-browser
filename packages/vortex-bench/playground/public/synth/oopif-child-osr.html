@@ -1,0 +1,5 @@
+<!doctype html><html lang="zh"><head><meta charset="utf-8"><title>OOPIF child OSR</title></head>
+<body><div id="host"></div>
+<script>const sr=document.getElementById('host').attachShadow({mode:'open'});
+const b=document.createElement('button');b.id='sbtn';b.textContent='shadow按钮';
+b.onclick=()=>{b.textContent='OSR-OOPIF-CLICKED';};sr.appendChild(b);</script></body></html>
