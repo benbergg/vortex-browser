@@ -46,6 +46,8 @@ export interface CaseMetrics {
   passRate?: number;
   /** v0.6 新增：case 自定义数值指标（如 P50/P90 延迟、token baseline 等） */
   customMetrics?: Record<string, number>;
+  /** 评测门 P2.1：难度档，从 CaseDefinition.tier 透传，eval 报告分档聚合用。 */
+  tier?: "easy" | "medium" | "hard";
 }
 
 export interface CaseContext {
@@ -69,8 +71,12 @@ export interface CaseContext {
 
 export interface CaseDefinition {
   name: string;
-  /** playground 路由路径，e.g. '/#/el-dropdown' */
+  /** playground 路由路径，e.g. '/#/el-dropdown'；synth 任务指向 '/synth/<snapshot>.html' */
   playgroundPath: string;
+  /** 难度档，与 SynthManifest.tier 对齐；eval 命令按此分档聚合任务通过率。缺省视为 medium。 */
+  tier?: "easy" | "medium" | "hard";
+  /** 绑定的 synth 快照名（A 层 scan 与 B 层 task 同指一份冻结快照，便于交叉分诊）。 */
+  snapshot?: string;
   run(ctx: CaseContext): Promise<void>;
 }
 

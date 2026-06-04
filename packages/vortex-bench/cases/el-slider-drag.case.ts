@@ -55,7 +55,7 @@ const def: CaseDefinition = {
     );
     const m = result.match(/val=(\d+)/);
     ctx.assert(m !== null, `result 格式未知: ${result}`);
-    const val = Number(m[1]);
+    const val = Number(m![1]);
     ctx.assert(
       val >= 76 && val <= 84,
       `val 应在 76-84 (drag 80%, ±4 jitter)，实际 ${val}`,
