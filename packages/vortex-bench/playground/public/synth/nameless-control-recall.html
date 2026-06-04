@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>nameless control recall fixture (backlog A)</title>
+  <style>
+    body { font-family: sans-serif; padding: 20px; }
+    /* 控件类:cursor:pointer + CSS ::before 字体图标,无 svg/img、无 text/aria/role */
+    .vxe-cell--checkbox, .x-cell--radio { cursor: pointer; display: inline-block; width: 17px; height: 17px; }
+    .vxe-icon-checkbox-unchecked::before { content: "\e6c8"; }
+    /* component-2:已召回(button tag)的字体图标按钮,仅缺名 */
+    button.vxe-icon-edit { cursor: pointer; width: 24px; height: 24px; }
+    button.vxe-icon-edit::before { content: "\e61e"; }
+    /* 负例:装饰 wrapper(终末 token wrapper)+ 装饰字体图标(round-12 守护) */
+    .checkbox-wrapper, i.bi-star { cursor: pointer; display: inline-block; width: 16px; height: 16px; }
+    i.bi-star::before { content: "\f586"; }
+  </style>
+</head>
+<body>
+  <h1>backlog A — 无名控件召回 fixture</h1>
+
+  <h2>1. path-1 控件(外层 control-class,内层字体图标)→ 召回 name=checkbox</h2>
+  <span class="vxe-cell--checkbox" data-vtx-oracle="ctrl-checkbox">
+    <span class="vxe-checkbox--icon vxe-icon-checkbox-unchecked"></span>
+  </span>
+
+  <h2>2. path-1 单选(leaf control-class,无内层)→ 召回 name=radio</h2>
+  <span class="x-cell--radio" data-vtx-oracle="ctrl-radio"></span>
+
+  <h2>3. component-2 命名(button tag 召回的字体图标按钮)→ name=edit</h2>
+  <button class="vxe-icon-edit" data-vtx-oracle="icon-edit"></button>
+
+  <h2>4. 负例:装饰 wrapper(终末 token wrapper)→ 不召回</h2>
+  <span class="checkbox-wrapper" data-vtx-oracle="deco-wrapper"></span>
+
+  <h2>5. 负例:装饰字体图标(round-12 守护,gate 无 iconFontName)→ 不召回</h2>
+  <i class="bi-star" data-vtx-oracle="deco-bi-star"></i>
+</body>
+</html>

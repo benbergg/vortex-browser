@@ -1,0 +1,14 @@
+{
+  "fixture": "nameless-control-recall",
+  "path": "/synth/nameless-control-recall.html",
+  "tier": "medium",
+  "frames": "main",
+  "source": "bytenew testc vxe-table 复选框漏报(backlog A,2026-06-04)",
+  "entries": [
+    { "id": "ctrl-checkbox", "interactive": true, "expectedName": "checkbox", "expectedRole": null, "pattern": "nameless-control-recall", "note": "外层 vxe-cell--checkbox 经 controlRoleFromClass 召回;内层字体图标 span 不进池:probe 整体为空(无 text/aria/svg-img,终末 token unchecked 非控件词,gate 亦无 iconFontName)" },
+    { "id": "ctrl-radio", "interactive": true, "expectedName": "radio", "expectedRole": null, "pattern": "nameless-control-recall", "note": "leaf control-class x-cell--radio 终末 token radio" },
+    { "id": "icon-edit", "interactive": true, "expectedName": "edit", "expectedRole": null, "pattern": "nameless-control-recall", "note": "component-2:button tag 召回 + iconFontName(vxe-icon-)补名" },
+    { "id": "deco-wrapper", "interactive": false, "expectedName": null, "expectedRole": null, "pattern": "nameless-control-recall", "note": "终末 token wrapper 非控件,不召回(噪声收敛)" },
+    { "id": "deco-bi-star", "interactive": false, "expectedName": null, "expectedRole": null, "pattern": "nameless-control-recall", "note": "round-12 守护:装饰字体图标 gate 不召回(iconFontName 不进门)" }
+  ]
+}
