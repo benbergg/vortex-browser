@@ -284,9 +284,24 @@ export type ActionabilityResult =
         };
       }
     }
-    const r = el.getBoundingClientRect();
-    const cx = r.x + r.width / 2;
-    const cy = r.y + r.height / 2;
+    let r = el.getBoundingClientRect();
+    let cx = r.x + r.width / 2;
+    let cy = r.y + r.height / 2;
+    // 视口外死锁防护:元素在视口外(折叠线下/右等)时中心点落在视口外,
+    // deepElementFromPoint 返回 null → receivesEvents 报 elementFromPoint=null →
+    // OBSCURED → 重试到预算耗尽抛 TIMEOUT,却**从不滚动**(已渲染只是离屏,
+    // 非 content-visibility skip,unskipIfContentVisibilityAuto 不命中)。复用其
+    // 滚动模式:中心点出视口则 scrollIntoView({block:center}) 把元素带进视口、
+    // 重算 rect/中心点,使后续 occlusion hit-test 作用于可点中的元素。
+    // (2026-06-04 多 agent 审计 P1-1 LIVE 确认)
+    const centerOffscreen =
+      cx < 0 || cy < 0 || cx > window.innerWidth || cy > window.innerHeight;
+    if (centerOffscreen && typeof (el as any).scrollIntoView === "function") {
+      (el as Element).scrollIntoView({ block: "center", inline: "center" });
+      r = el.getBoundingClientRect();
+      cx = r.x + r.width / 2;
+      cy = r.y + r.height / 2;
+    }
     const re = receivesEvents(el, cx, cy);
     if (!re.ok) return { ok: false, reason: "OBSCURED", extras: { blocker: re.blocker } };
     return { ok: true, rect: { x: r.x, y: r.y, w: r.width, h: r.height } };
