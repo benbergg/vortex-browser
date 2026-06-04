@@ -819,8 +819,17 @@ async function scanOneFrame(
           // observe-render 早已支持 [required] 标记,但 producer 一直没接线
           // (死标记)。原生 required 属性(input/select/textarea)+ ARIA
           // aria-required="true" 双覆盖(2026-06-02 dogfood)。
+          // 包裹式 <label><input required> 的 surface 元素是 label,required 在内嵌
+          // 控件上、label 自身 .required 为 undefined → 漏标。同 checked 钻入内嵌
+          // input/select/textarea 读(2026-06-04 审计)。
+          let reqProbe: Element = el;
+          if (el.tagName === "LABEL") {
+            const inner = el.querySelector("input, select, textarea");
+            if (inner) reqProbe = inner;
+          }
           if (
-            (el as HTMLInputElement).required === true ||
+            (reqProbe as HTMLInputElement).required === true ||
+            reqProbe.getAttribute("aria-required") === "true" ||
             el.getAttribute("aria-required") === "true"
           ) {
             s.required = true;

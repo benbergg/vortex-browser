@@ -85,6 +85,15 @@ describe("observe UI state extraction (@since 0.4.0 O-8)", () => {
     expect(OBSERVE_SRC).toMatch(/s\.required = true/);
   });
 
+  it("required 对包裹式 <label><input required> 钻入内嵌控件读(2026-06-04 审计)", () => {
+    // surface 元素是 label 时,required 在内嵌 input/select/textarea 上,label 自身
+    // .required 为 undefined → 漏标。同 checked 钻入内嵌控件(LABEL → querySelector
+    // input/select/textarea),否则 <label><input required> 永不显示 [required]。
+    expect(OBSERVE_SRC).toMatch(/let reqProbe[\s\S]{0,120}el\.tagName === "LABEL"/);
+    expect(OBSERVE_SRC).toMatch(/querySelector\(\s*"input, select, textarea"\s*\)/);
+    expect(OBSERVE_SRC).toMatch(/\(reqProbe as HTMLInputElement\)\.required === true/);
+  });
+
   it("derives current from aria-current 按值判定(W,2026-06-02 dogfood)", () => {
     // 任何非 "false" 的 aria-current(page/step/true...)都置 current;
     // 按值判定而非属性存在(aria-current="false" 不应误标)。
