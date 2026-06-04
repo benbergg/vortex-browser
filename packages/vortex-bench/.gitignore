@@ -8,9 +8,13 @@ dist/
 reports/*.json
 !reports/baseline.json
 !reports/boxes-budget-*.json
+!reports/eval-baseline.json
 !reports/archive/
 reports/*.md
 !reports/README.md
+
+# eval 运行产物(timestamped 报告 transient 不入;eval-baseline.json 是门地板,上面已 allowlist)
+reports/eval/
 
 # scan 运行产物(transient discovery 报告,按时间戳生成,不入库)
 reports/scan/

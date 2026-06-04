@@ -1,0 +1,8 @@
+{
+  "_note": "评测门 ratchet 地板。recall 1.0 = 确定性 synth 快照,任何召回回退即真 bug(无 margin)。task floor 留 ~1 case flake margin(2026-06-04 首次实测:easy 100/100、medium 100/98.6、hard 100/100;medium floor 0.95 容 ~1.3 case、hard floor 0.85 容 1 case)。eval --gate 比对此文件;eval --save-baseline 可提升。",
+  "tiers": [
+    { "tier": "easy", "minRecallPct": 1.0, "minTaskScore": 1.0 },
+    { "tier": "medium", "minRecallPct": 1.0, "minTaskScore": 0.95 },
+    { "tier": "hard", "minRecallPct": 1.0, "minTaskScore": 0.85 }
+  ]
+}
