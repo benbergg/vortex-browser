@@ -25,7 +25,52 @@ export class MessageRouter {
 
   setNmConnected(connected: boolean): void {
     this.nmConnected = connected;
-    if (connected) this.flushBuffer();
+    if (connected) {
+      this.flushBuffer();
+    } else {
+      // stdin 'end' = 扩展 SW 拥有的 NM 通道永久关闭(本进程 stdin 终态,之后无 data;
+      // 重启的 SW 会 spawn 新 host 进程而非复用本进程)。in-flight pending 永远等不到
+      // 响应、buffer 也无从 flush → 立即 fail-fast 为 EXTENSION_NOT_CONNECTED,避免
+      // 整整悬挂到 30s 才报 TIMEOUT(BRIDGE-2)。进程因 WS 仍 listening 不退,故必须
+      // 主动收口而非靠进程退出。
+      this.failAllPendingOnNmDisconnect();
+    }
+  }
+
+  /**
+   * NM 断开:所有 pending(WS async + HTTP sync)都不可能再拿到响应,统一 fail-fast。
+   * sync 走 resolve(解阻 CLI),async 走 sendToClient(WS 上的 MCP client 仍在,需解阻)。
+   */
+  private failAllPendingOnNmDisconnect(): void {
+    for (const [, pending] of this.pending) {
+      clearTimeout(pending.timeout);
+      const vtxResp: VtxResponse = {
+        action: pending.vtxRequest.action,
+        id: pending.vtxRequest.id,
+        error: {
+          code: VtxErrorCode.EXTENSION_NOT_CONNECTED,
+          message: "Extension disconnected (service worker closed)",
+        },
+      };
+      if (pending.resolve) pending.resolve(vtxResp);
+      else this.sendToClient(vtxResp);
+    }
+    this.pending.clear();
+    this.requestBuffer = [];
+  }
+
+  /**
+   * WS client 被驱逐/断开(由 ws-server 在 client 变更时调用):发起这些 async 请求的
+   * client 已不在,其响应投给继任者是错投(继任者 id 不匹配虽会丢弃,但 pending 会泄漏,
+   * 且若是事件型响应会污染继任者)。清掉 async(无 resolve)pending;HTTP sync(有 resolve)
+   * 请求与 WS 会话无关,保留不动(BRIDGE-3a)。
+   */
+  failPendingAsyncOnClientChange(): void {
+    for (const [requestId, pending] of this.pending) {
+      if (pending.resolve) continue; // HTTP sync caller,独立于 WS 会话
+      clearTimeout(pending.timeout);
+      this.pending.delete(requestId);
+    }
   }
 
   /**
