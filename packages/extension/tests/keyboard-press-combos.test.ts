@@ -3,6 +3,7 @@ import { ActionRouter } from "../src/lib/router.js";
 import {
   registerKeyboardHandlers,
   parseKeyExpression,
+  keyToCode,
 } from "../src/handlers/keyboard.js";
 
 /**
@@ -62,6 +63,52 @@ describe("keyboard parseKeyExpression", () => {
   it("empty expression throws", () => {
     expect(() => parseKeyExpression("")).toThrow(/empty/);
     expect(() => parseKeyExpression("+")).toThrow(/empty/);
+  });
+
+  // 常见修饰键别名(2026-06-04 审计):LLM/Mac/Win 用户惯写 Cmd/Command/Win/Option,
+  // 旧逻辑只认 Alt/Control/Ctrl/Meta/Shift → "Cmd+S" throw INVALID_PARAMS。别名归一到
+  // 规范 DOM key 名(Cmd/Command/Win/Super→Meta、Option/Opt→Alt),使 key/code/vk 正确。
+  it("Cmd+S 别名归一到 Meta(不再 throw)", () => {
+    const r = parseKeyExpression("Cmd+S");
+    expect(r.key).toBe("S");
+    expect(r.modifierKeys).toEqual(["Meta"]); // 规范名,非 "Cmd"
+    expect(r.modifiers).toBe(4); // Meta
+  });
+
+  it("Command / Win / Super 都归一到 Meta", () => {
+    expect(parseKeyExpression("Command+a").modifierKeys).toEqual(["Meta"]);
+    expect(parseKeyExpression("Win+d").modifierKeys).toEqual(["Meta"]);
+    expect(parseKeyExpression("Super+l").modifierKeys).toEqual(["Meta"]);
+  });
+
+  it("Option / Opt 归一到 Alt", () => {
+    const r = parseKeyExpression("Option+ArrowLeft");
+    expect(r.modifierKeys).toEqual(["Alt"]);
+    expect(r.modifiers).toBe(1); // Alt
+  });
+
+  it("既有规范名 Ctrl 仍保留原样(不破坏既有契约)", () => {
+    expect(parseKeyExpression("Ctrl+S").modifierKeys).toEqual(["Ctrl"]);
+  });
+});
+
+// keyToCode 标点物理码(2026-06-04 审计):标点 fallback 返裸字符非合法
+// KeyboardEvent.code("." 应 "Period"),依赖 event.code 的快捷键库收不到 → 误判。
+describe("keyToCode 标点 → 合法物理码", () => {
+  it(". , / 等标点映射到 Period/Comma/Slash 而非裸字符", () => {
+    expect(keyToCode(".")).toBe("Period");
+    expect(keyToCode(",")).toBe("Comma");
+    expect(keyToCode("/")).toBe("Slash");
+    expect(keyToCode(";")).toBe("Semicolon");
+    expect(keyToCode("-")).toBe("Minus");
+    expect(keyToCode("=")).toBe("Equal");
+  });
+
+  it("字母/数字/修饰键映射不回归", () => {
+    expect(keyToCode("a")).toBe("KeyA");
+    expect(keyToCode("1")).toBe("Digit1");
+    expect(keyToCode("Meta")).toBe("MetaLeft");
+    expect(keyToCode("Enter")).toBe("Enter");
   });
 });
 

@@ -35,6 +35,22 @@ const MODIFIER_CODES: Record<string, string> = {
   Shift: "ShiftLeft", Alt: "AltLeft", Meta: "MetaLeft",
 };
 
+// 标点/符号 key → KeyboardEvent.code 物理码。CDP code 字段要合法物理码,标点裸字符
+// (".")不是合法 code,依赖 event.code 的快捷键库收不到 → 误判(2026-06-04 审计)。
+const PUNCT_CODES: Record<string, string> = {
+  ".": "Period", ",": "Comma", "/": "Slash", ";": "Semicolon",
+  "'": "Quote", "[": "BracketLeft", "]": "BracketRight", "\\": "Backslash",
+  "-": "Minus", "=": "Equal", "`": "Backquote",
+};
+
+// 修饰键别名 → 规范 DOM key 名(2026-06-04 审计)。LLM/Mac/Win 用户惯写 Cmd/Command/
+// Win/Option 等,旧逻辑只认 Alt/Control/Ctrl/Meta/Shift → throw。归一到规范名,使
+// 下游 key/code/vk 正确(既有 Ctrl/Control/Alt/Meta/Shift 不在此表,保留原名不破坏契约)。
+const MODIFIER_CANON: Record<string, string> = {
+  Cmd: "Meta", Command: "Meta", Win: "Meta", Windows: "Meta", Super: "Meta",
+  Option: "Alt", Opt: "Alt",
+};
+
 /**
  * DOM key 值 → KeyboardEvent.code 物理码。
  *
@@ -49,7 +65,7 @@ const MODIFIER_CODES: Record<string, string> = {
 export function keyToCode(key: string): string {
   if (/^[a-zA-Z]$/.test(key)) return "Key" + key.toUpperCase();
   if (/^[0-9]$/.test(key)) return "Digit" + key;
-  return MODIFIER_CODES[key] ?? key;
+  return MODIFIER_CODES[key] ?? PUNCT_CODES[key] ?? key;
 }
 
 /** DOM key → windowsVirtualKeyCode。单字符按大写 ASCII 取值,多字符未知名取 0(不再错码)。 */
@@ -57,9 +73,10 @@ function keyToVk(key: string): number {
   return KEY_CODES[key] ?? (key.length === 1 ? key.toUpperCase().charCodeAt(0) : 0);
 }
 
-// 修饰键名 → CDP modifiers 标志位
+// 修饰键名 → CDP modifiers 标志位(含常见别名 Cmd/Command/Win/Super→Meta、Option→Alt)。
 const MODIFIERS: Record<string, number> = {
   Alt: 1, Control: 2, Ctrl: 2, Meta: 4, Shift: 8,
+  Cmd: 4, Command: 4, Win: 4, Windows: 4, Super: 4, Option: 1, Opt: 1,
 };
 
 async function getActiveTabId(tabId?: number): Promise<number> {
@@ -138,7 +155,9 @@ export function parseKeyExpression(
         `Unknown modifier "${m}" in key expression "${expr}". Known: ${Object.keys(MODIFIERS).join(", ")}`,
       );
     }
-    modifierKeys.push(m);
+    // 归一别名到规范 DOM key 名(Cmd→Meta 等),使下游 key/code/vk 正确;
+    // 既有规范名(Ctrl/Control/Alt/Meta/Shift)不在 CANON 表,保留原样不破坏契约。
+    modifierKeys.push(MODIFIER_CANON[m] ?? m);
     modifiers |= MODIFIERS[m];
   }
   return { key: parts[parts.length - 1], modifiers, modifierKeys };
@@ -238,7 +257,8 @@ export function registerKeyboardHandlers(
       for (const k of keys) {
         if (k in MODIFIERS) {
           modifiers |= MODIFIERS[k];
-          modifierKeys.push(k);
+          // 归一别名(Cmd→Meta 等),使 keyToCode/keyToVk 取到正确物理码/VK。
+          modifierKeys.push(MODIFIER_CANON[k] ?? k);
         } else {
           nonModifierKeys.push(k);
         }
