@@ -14,6 +14,10 @@ async function dispatchMouse(
   y: number,
   button: "left" | "right" | "middle" = "left",
   clickCount: number = 1,
+  // CDP 按下按钮位掩码(1=左 2=右 4=中)。drag 期间的 mouseMoved 必须带 buttons:1,
+  // 否则被当 hover 而非 drag-move → HTML5 DnD / 鼠标拖拽库的 dragstart/dragover/drop
+  // 永不 engage(2026-06-04 审计 #3)。click/move 等 hover 场景保持默认 0。
+  buttons: number = 0,
 ): Promise<void> {
   await debuggerMgr.sendCommand(tabId, "Input.dispatchMouseEvent", {
     type,
@@ -21,6 +25,7 @@ async function dispatchMouse(
     y,
     button,
     clickCount,
+    buttons,
   });
 }
 
@@ -142,18 +147,20 @@ export function registerMouseHandlers(
       const to = await toViewportCoords(tid, x2In, y2In, frameId, coordSpace);
 
       await debuggerMgr.attach(tid);
-      // 1. move 到起点 2. press 3. 分 steps 次 move 到终点 4. release
+      // 1. hover 到起点(buttons=0) 2. press(左键按下,buttons=1)
+      // 3. 分 steps 次 drag-move 到终点(按住,buttons=1) 4. release(松开,buttons=0)。
+      // drag-move 的 buttons:1 是 HTML5 DnD / 拖拽库识别为拖拽(而非 hover)的关键。
       await dispatchMouse(debuggerMgr, tid, "mouseMoved", from.x, from.y);
-      await dispatchMouse(debuggerMgr, tid, "mousePressed", from.x, from.y, "left", 1);
+      await dispatchMouse(debuggerMgr, tid, "mousePressed", from.x, from.y, "left", 1, 1);
       const stepDelay = 10;
       for (let i = 1; i <= steps; i++) {
         const t = i / steps;
         const xi = from.x + (to.x - from.x) * t;
         const yi = from.y + (to.y - from.y) * t;
-        await dispatchMouse(debuggerMgr, tid, "mouseMoved", xi, yi);
+        await dispatchMouse(debuggerMgr, tid, "mouseMoved", xi, yi, "left", 1, 1);
         if (stepDelay > 0) await new Promise((r) => setTimeout(r, stepDelay));
       }
-      await dispatchMouse(debuggerMgr, tid, "mouseReleased", to.x, to.y, "left", 1);
+      await dispatchMouse(debuggerMgr, tid, "mouseReleased", to.x, to.y, "left", 1, 0);
 
       return {
         success: true,

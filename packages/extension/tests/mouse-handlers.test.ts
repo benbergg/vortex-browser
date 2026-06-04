@@ -182,6 +182,35 @@ describe("mouse handlers", () => {
     ]);
   });
 
+  it("DRAG 中间 mouseMoved 携带 buttons:1(否则 HTML5 DnD/拖拽库不 engage)", async () => {
+    // 现象:CDP dispatchMouseEvent 的 mouseMoved 不带 buttons 掩码,被当 hover
+    // 而非 drag-move → dragstart/dragover/drop 永不触发,success:true 却什么也没拖
+    // (2026-06-04 多 agent 审计 #3,LIVE 确认 drop/dragstart=0/0)。
+    const resp = await router.dispatch(
+      mkReq(
+        "mouse.drag",
+        { fromX: 0, fromY: 0, toX: 100, toY: 0, steps: 4 },
+        42,
+      ),
+    );
+    expect(resp.error).toBeUndefined();
+
+    const moves = sent.filter((e) => e.params.type === "mouseMoved");
+    const press = sent.find((e) => e.params.type === "mousePressed");
+    const release = sent.find((e) => e.params.type === "mouseReleased");
+
+    // 起点 hover move(buttons=0)+ steps 次 drag-move(buttons=1)。
+    // 第一条是 press 前的 hover-to-start,其余 move 都在按住状态。
+    const dragMoves = moves.slice(1);
+    expect(dragMoves.length).toBe(4);
+    for (const m of dragMoves) {
+      expect(m.params.buttons).toBe(1);
+    }
+    // press 时左键已按下(buttons=1),release 时已松开(buttons=0)。
+    expect(press?.params.buttons).toBe(1);
+    expect(release?.params.buttons).toBe(0);
+  });
+
   it("MOVE applies offset and dispatches a single mouseMoved", async () => {
     vi.stubGlobal("chrome", {
       tabs: { query: vi.fn().mockResolvedValue([{ id: 42 }]) },
