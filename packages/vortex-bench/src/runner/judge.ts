@@ -8,6 +8,7 @@ import { parseObserveSnapshot } from "./observe-parser.js";
 import { buildJudgePrompt } from "./judge-prompt.js";
 import { parseJudgeResponse } from "./judge-parse.js";
 import { intersectPasses } from "./judge-consistency.js";
+import { reconcileByBbox } from "./judge-match.js";
 import { ablateRows, computeCalibration } from "./judge-calibrate.js";
 import { callJudge, type JudgeImage } from "./judge-llm.js";
 import type { ScreenshotProfile } from "./judge-screenshot-profile.js";
@@ -169,7 +170,13 @@ export async function judgePage(
 
     // FP run:原样列表 2 轮自一致取交集
     const confirmed = await judgeTwice(parsed, image, opts.model, promptHint || undefined);
-    const findings: Finding[] = confirmed.map((m) => ({
+    // live 路径加 bbox 兜底过滤判官假阳(候选左上角落在某 observe ref bbox 内 → observe
+    // 已覆盖,丢弃;京东 banner "手机直降" vs observe "大促" 假阳修复,2026-06-04)。
+    // synth 校准路径仍用原始 confirmed(下方 computeCalibration 的 FP 口径不变)。
+    const liveMisses = target.synthPath
+      ? confirmed
+      : reconcileByBbox(confirmed, parsed.rows.filter((r) => r.frameId === 0));
+    const findings: Finding[] = liveMisses.map((m) => ({
       severity: "P0",
       kind: "recall-miss",
       fixture: target.page,
@@ -180,7 +187,7 @@ export async function judgePage(
     const result: JudgePageResult = {
       page: target.page,
       totalObserveRows: parsed.rows.filter((r) => r.frameId === 0).length,
-      confirmedMisses: confirmed,
+      confirmedMisses: liveMisses,
       findings,
       ...(profile
         ? {

@@ -38,3 +38,15 @@ describe("buildJudgePrompt", () => {
     expect(p).toContain('[button] "搜索" bbox=[10,20,30,40]');
   });
 });
+
+// 2026-06-04 京东 live 评测:LLM 把非交互营销文字("组合购7折"slogan div,无 pointer/
+// link/role)幻觉成可点 → 第二类假阳(bbox 兜底无法 catch,因 observe 本就正确排除)。
+// prompt 加保守约束:营销文字无可点 affordance 不报。
+import { buildJudgePrompt as _bjp } from "../src/runner/judge-prompt.js";
+describe("judge prompt 保守性约束(2026-06-04 京东 FP-2)", () => {
+  it("含'营销文字无 affordance 不报'规则", () => {
+    const p = _bjp({ rows: [], header: {} as any } as any);
+    expect(p).toContain("Decorative or marketing TEXT");
+    expect(p.toLowerCase()).toContain("not a clickable element");
+  });
+});
