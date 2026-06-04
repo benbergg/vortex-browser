@@ -10,6 +10,7 @@ const FILE_NAME = "vortex-bench.txt";
 const def: CaseDefinition = {
   name: "el-upload",
   playgroundPath: "/#/el-upload",
+  tier: "medium",
   async run(ctx) {
     await ctx.call("vortex_file_upload", {
       selector: "[data-testid=\"target-upload\"] input[type=\"file\"]",

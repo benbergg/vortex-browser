@@ -7,6 +7,7 @@ import { assertResultContains, extractText } from "./_helpers.js";
 const def: CaseDefinition = {
   name: "el-select-multiple",
   playgroundPath: "/#/el-select-multiple",
+  tier: "medium",
   async run(ctx) {
     // 直接使用 vortex_fill with kind=select
     await ctx.call("vortex_fill", {

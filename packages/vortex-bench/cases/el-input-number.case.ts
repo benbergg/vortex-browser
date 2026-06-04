@@ -6,6 +6,7 @@ import { assertResultContains } from "./_helpers.js";
 const def: CaseDefinition = {
   name: "el-input-number",
   playgroundPath: "/#/el-input-number",
+  tier: "medium",
   async run(ctx) {
     // 先 click 拿 focus（el-input-number 默认空，type 前需要 focus）
     await ctx.call("vortex_act", {

@@ -28,6 +28,7 @@ import { extractEvalJson, readResult } from "./_helpers.js";
 const def: CaseDefinition = {
   name: "contenteditable-rich-text",
   playgroundPath: "/contenteditable-prosemirror-like.html",
+  tier: "hard",
   async run(ctx) {
     // 1. Click into the ProseMirror-like editor to give it focus.
     await ctx.call("vortex_act", {

@@ -12,6 +12,7 @@ import { extractText } from "./_helpers.js";
 const def: CaseDefinition = {
   name: "jd-review-rm-01-open",
   playgroundPath: "/jd-review-modal.html",
+  tier: "medium",
   async run(ctx) {
     // 初始 observe — 应抓到 .all-btn（cursor:pointer 自定义可点）
     const snap1 = extractText(await ctx.call("vortex_observe", {}));

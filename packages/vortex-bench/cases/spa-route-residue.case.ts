@@ -31,6 +31,7 @@ const def: CaseDefinition = {
   name: "spa-route-residue",
   // Runner navigates here first; the case body navigates away and back.
   playgroundPath: "/#/el-radio-group",
+  tier: "medium",
   async run(ctx) {
     // 1. Set state on route A by clicking radio "选项 B".
     const snapA0 = extractText(await ctx.call("vortex_observe", {}));

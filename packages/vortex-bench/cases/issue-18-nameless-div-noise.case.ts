@@ -34,6 +34,7 @@ import { extractText } from "./_helpers.js";
 const def: CaseDefinition = {
   name: "issue-18-nameless-div-noise",
   playgroundPath: "/nameless-tabindex-noise.html",
+  tier: "medium",
   async run(ctx) {
     // Explicit frames=main: defeats the v0.7.4 auto-fallback heuristic
     // (which would not trigger here anyway since the page has no iframes,

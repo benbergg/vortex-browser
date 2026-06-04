@@ -6,6 +6,7 @@ import { assertResultContains } from "./_helpers.js";
 const def: CaseDefinition = {
   name: "el-select-v2",
   playgroundPath: "/#/el-select-v2",
+  tier: "hard",
   async run(ctx) {
     // 直接使用 vortex_fill with kind=select
     await ctx.call("vortex_fill", {

@@ -19,6 +19,7 @@ import { assertResultContains } from "./_helpers.js";
 const def: CaseDefinition = {
   name: "tap-gesture-md-select",
   playgroundPath: "/tap-gesture-md-select.html",
+  tier: "medium",
   async run(ctx) {
     await ctx.call("vortex_act", {
       action: "click",

@@ -10,6 +10,7 @@ const END = "2024-01-31 23:59:59";
 const def: CaseDefinition = {
   name: "el-date-picker-datetimerange",
   playgroundPath: "/#/el-date-picker-datetimerange",
+  tier: "medium",
   async run(ctx) {
     let fillOk = false;
     let fillText = "";

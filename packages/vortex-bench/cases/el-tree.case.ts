@@ -47,6 +47,7 @@ async function clickTreeNode(ctx: Parameters<typeof run>[0], label: string): Pro
 const def: CaseDefinition = {
   name: "el-tree",
   playgroundPath: "/#/el-tree",
+  tier: "medium",
   run,
 };
 

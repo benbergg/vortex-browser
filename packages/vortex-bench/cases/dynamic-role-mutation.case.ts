@@ -41,6 +41,7 @@ function findLineWithName(snapshot: string, name: string): string | null {
 const def: CaseDefinition = {
   name: "dynamic-role-mutation",
   playgroundPath: "/toggle-aria-pressed.html",
+  tier: "medium",
   async run(ctx) {
     // 1. Initial observe — the button has aria-pressed="false", so
     //    state.active must be undefined / false and the compact line

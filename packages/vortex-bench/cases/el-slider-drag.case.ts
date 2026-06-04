@@ -6,6 +6,7 @@ import { assertResultContains, extractEvalJson } from "./_helpers.js";
 const def: CaseDefinition = {
   name: "el-slider-drag",
   playgroundPath: "/#/el-slider",
+  tier: "medium",
   async run(ctx) {
     // 1. 取 runner + rail bbox
     const geom = extractEvalJson<{

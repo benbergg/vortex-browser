@@ -7,6 +7,7 @@ const TIME = "14:30:45";
 const def: CaseDefinition = {
   name: "el-time-picker",
   playgroundPath: "/#/el-time-picker",
+  tier: "medium",
   async run(ctx) {
     await ctx.call("vortex_act", {
       action: "fill",

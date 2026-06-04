@@ -15,6 +15,7 @@ function findRef(snapshot: string, name: string): string | null {
 const def: CaseDefinition = {
   name: "el-pagination",
   playgroundPath: "/#/el-pagination",
+  tier: "medium",
   async run(ctx) {
     // Element Plus pagination li 有 aria-label="page N"，优先用它命中
     const snap = extractText(await ctx.call("vortex_observe", {}));

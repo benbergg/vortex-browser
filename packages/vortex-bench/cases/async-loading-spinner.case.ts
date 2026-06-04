@@ -26,6 +26,7 @@ function findRef(snapshot: string, name: string): string | null {
 const def: CaseDefinition = {
   name: "async-loading-spinner",
   playgroundPath: "/async-load.html",
+  tier: "easy",
   async run(ctx) {
     // 1. Initial observe — should surface the "Load data" button by its
     //    accessible name. No need to extract a hash, findRef accepts both

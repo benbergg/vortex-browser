@@ -7,6 +7,7 @@ import { assertResultContains, extractText } from "./_helpers.js";
 const def: CaseDefinition = {
   name: "el-form-composite",
   playgroundPath: "/#/el-form-composite",
+  tier: "medium",
   async run(ctx) {
     // 1. name 输入
     //   注意：vortex_fill plain 对 Vue el-input 不 dispatch 'input' 事件 → v-model 不响应。

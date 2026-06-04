@@ -16,6 +16,7 @@ function findRef(snapshot: string, name: string): string | null {
 const def: CaseDefinition = {
   name: "el-message-box",
   playgroundPath: "/#/el-message-box",
+  tier: "medium",
   async run(ctx) {
     // 1. 点触发按钮
     await ctx.call("vortex_act", {

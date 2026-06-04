@@ -5,6 +5,7 @@ import { assertResultContains } from "./_helpers.js";
 const def: CaseDefinition = {
   name: "el-drawer",
   playgroundPath: "/#/el-drawer",
+  tier: "medium",
   async run(ctx) {
     // 1. 点触发按钮
     await ctx.call("vortex_act", {

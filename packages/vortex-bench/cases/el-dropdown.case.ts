@@ -19,6 +19,7 @@ function findRef(snapshot: string, name: string): string | null {
 const def: CaseDefinition = {
   name: "el-dropdown",
   playgroundPath: "/#/el-dropdown",
+  tier: "medium",
   async run(ctx) {
     // 1. observe 必须能看到触发按钮"打开菜单"并给出可用 ref
     const snap1 = extractText(await ctx.call("vortex_observe", {}));

@@ -15,6 +15,7 @@ import { extractText } from "./_helpers.js";
 const def: CaseDefinition = {
   name: "iframe-nested-with-content",
   playgroundPath: "/iframe-nested-top.html",
+  tier: "hard",
   async run(ctx) {
     // 3 层 iframe 静态 HTML 应该 < 1s 全 ready，给 1s buffer 即可
     await new Promise((r) => setTimeout(r, 1000));

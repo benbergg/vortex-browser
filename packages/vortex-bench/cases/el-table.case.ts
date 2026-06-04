@@ -6,6 +6,7 @@ import { assertResultContains } from "./_helpers.js";
 const def: CaseDefinition = {
   name: "el-table",
   playgroundPath: "/#/el-table",
+  tier: "medium",
   async run(ctx) {
     // 1. 勾选第 2 行（Bob）的 selection checkbox
     // el-table 的选择框在 tr 的第一列 .el-checkbox，body 行 selector：

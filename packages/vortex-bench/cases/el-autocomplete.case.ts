@@ -15,6 +15,7 @@ function findRef(snapshot: string, name: string): string | null {
 const def: CaseDefinition = {
   name: "el-autocomplete",
   playgroundPath: "/#/el-autocomplete",
+  tier: "medium",
   async run(ctx) {
     // 先 focus input 再 type
     await ctx.call("vortex_act", {

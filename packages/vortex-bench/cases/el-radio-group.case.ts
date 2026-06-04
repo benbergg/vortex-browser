@@ -15,6 +15,7 @@ function findRef(snapshot: string, name: string): string | null {
 const def: CaseDefinition = {
   name: "el-radio-group",
   playgroundPath: "/#/el-radio-group",
+  tier: "medium",
   async run(ctx) {
     const snap = extractText(await ctx.call("vortex_observe", {}));
     // observe 应给出 radio 的 ref（Element Plus el-radio 渲染含 [role=radio] 输入）

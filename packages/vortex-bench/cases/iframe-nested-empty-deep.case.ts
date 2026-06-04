@@ -12,6 +12,7 @@ import { extractText } from "./_helpers.js";
 const def: CaseDefinition = {
   name: "iframe-nested-empty-deep",
   playgroundPath: "/iframe-nested-top-empty.html",
+  tier: "hard",
   async run(ctx) {
     await new Promise((r) => setTimeout(r, 1000));
 

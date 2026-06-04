@@ -5,6 +5,7 @@ import { assertResultContains } from "./_helpers.js";
 const def: CaseDefinition = {
   name: "el-slider",
   playgroundPath: "/#/el-slider",
+  tier: "medium",
   async run(ctx) {
     // 直接使用 vortex_fill 设置 input-number 的值。
     // target 必须指向内部 <input>：dom.fill 的 actionability 检查只接受

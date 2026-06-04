@@ -15,6 +15,7 @@ function findRef(snapshot: string, name: string): string | null {
 const def: CaseDefinition = {
   name: "el-tree-select",
   playgroundPath: "/#/el-tree-select",
+  tier: "medium",
   async run(ctx) {
     // 1. click trigger 打开 panel（tree-select 基于 el-select，trigger 走 .click() 应 OK）
     await ctx.call("vortex_act", {

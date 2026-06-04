@@ -8,6 +8,7 @@ const PATH = ["华东", "上海", "浦东"];
 const def: CaseDefinition = {
   name: "el-cascader",
   playgroundPath: "/#/el-cascader",
+  tier: "medium",
   async run(ctx) {
     let fillOk = false;
     let fillText = "";

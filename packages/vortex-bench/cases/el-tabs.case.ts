@@ -15,6 +15,7 @@ function findRef(snapshot: string, name: string): string | null {
 const def: CaseDefinition = {
   name: "el-tabs",
   playgroundPath: "/#/el-tabs",
+  tier: "medium",
   async run(ctx) {
     // 找 "Tab 2" tab ref（role=tab 已在 observe INTERACTIVE_SELECTORS）
     const snap = extractText(await ctx.call("vortex_observe", {}));

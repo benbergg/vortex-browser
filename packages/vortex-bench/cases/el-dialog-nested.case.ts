@@ -16,6 +16,7 @@ function findRef(snapshot: string, name: string): string | null {
 const def: CaseDefinition = {
   name: "el-dialog-nested",
   playgroundPath: "/#/el-dialog-nested",
+  tier: "medium",
   async run(ctx) {
     // 1. observe 定位触发按钮 → 打开 dialog
     const snap1 = extractText(await ctx.call("vortex_observe", {}));

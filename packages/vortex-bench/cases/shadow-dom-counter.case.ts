@@ -34,6 +34,7 @@ function findRef(snapshot: string, name: string): string | null {
 const def: CaseDefinition = {
   name: "shadow-dom-counter",
   playgroundPath: "/shadow-dom-counter.html",
+  tier: "hard",
   async run(ctx) {
     // custom element 同步注册，runner harness wait_for(idle, dom) 触发时
     // shadow 内元素已在 snapshot 中，无需额外 warm-up。

@@ -7,6 +7,7 @@ const HEX = "#409EFF";
 const def: CaseDefinition = {
   name: "el-color-picker",
   playgroundPath: "/#/el-color-picker",
+  tier: "medium",
   async run(ctx) {
     // click color picker trigger 打开 panel
     await ctx.call("vortex_act", {

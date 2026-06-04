@@ -20,6 +20,7 @@ import { extractText } from "./_helpers.js";
 const def: CaseDefinition = {
   name: "observe-srcdoc-same-origin",
   playgroundPath: "/srcdoc-same-origin.html",
+  tier: "hard",
   async run(ctx) {
     const snap = extractText(
       await ctx.call("vortex_observe", { frames: "all-same-origin" }),

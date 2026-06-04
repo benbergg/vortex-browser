@@ -12,6 +12,7 @@ import { extractText } from "./_helpers.js";
 const def: CaseDefinition = {
   name: "jd-review-rm-02-switch-tab",
   playgroundPath: "/jd-review-modal.html",
+  tier: "medium",
   async run(ctx) {
     // open modal
     const s0 = extractText(await ctx.call("vortex_observe", {}));

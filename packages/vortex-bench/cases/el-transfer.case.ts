@@ -15,6 +15,7 @@ function findRef(snapshot: string, name: string): string | null {
 const def: CaseDefinition = {
   name: "el-transfer",
   playgroundPath: "/#/el-transfer",
+  tier: "medium",
   async run(ctx) {
     // observe 抓 Item 1 / Item 2 checkbox ref（label:has(input[type=checkbox]) 已收）
     const snap1 = extractText(await ctx.call("vortex_observe", {}));

@@ -9,6 +9,7 @@ import { extractText } from "./_helpers.js";
 const def: CaseDefinition = {
   name: "icon-name-priority",
   playgroundPath: "/icon-name-priority.html",
+  tier: "medium",
   async run(ctx) {
     await new Promise((r) => setTimeout(r, 300));
     const snap = extractText(await ctx.call("vortex_observe", {}));

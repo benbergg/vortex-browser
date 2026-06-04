@@ -20,6 +20,7 @@ import { assertResultContains } from "./_helpers.js";
 const def: CaseDefinition = {
   name: "el-select-v2-virtual",
   playgroundPath: "/#/el-select-v2",
+  tier: "hard",
   async run(ctx) {
     await ctx.call("vortex_fill", {
       target: "[data-testid=\"target-select-v2\"]",

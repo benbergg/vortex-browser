@@ -27,6 +27,7 @@ import { extractText } from "./_helpers.js";
 const def: CaseDefinition = {
   name: "visibility-hidden-megamenu",
   playgroundPath: "/visibility-hidden-megamenu.html",
+  tier: "easy",
   async run(ctx) {
     await new Promise((r) => setTimeout(r, 200));
     const snap = extractText(await ctx.call("vortex_observe", {}));
