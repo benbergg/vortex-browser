@@ -508,9 +508,21 @@ export function registerDomHandlers(
     [DomActions.FILL]: async (args, tabId) => {
       const __t = resolveTarget(args);
       const selector = __t.selector;
-      const value = args.value as string;
       const fallbackToNative = args.fallbackToNative === true;
-      if (value == null) throw vtxError(VtxErrorCode.INVALID_PARAMS, "Missing required param: value");
+      const rawValue = args.value;
+      if (rawValue == null) throw vtxError(VtxErrorCode.INVALID_PARAMS, "Missing required param: value");
+      // 非标量 value 拒绝:schema 允许任意 JSON,但对象/数组传到原生 value setter
+      // 会被 String 化成 "[object Object]"/"1,2" readback 非空 → 静默写入垃圾报
+      // success(2026-06-04 审计 #nv,LIVE 确认)。响亮报错指引;number/boolean 等
+      // 标量经 String() 强转为正常字符串下传(原生 setter 本就如此,显式化保证
+      // value 永远是 string)。
+      if (typeof rawValue === "object") {
+        throw vtxError(
+          VtxErrorCode.INVALID_PARAMS,
+          `fill value must be a string (or scalar), got ${Array.isArray(rawValue) ? "array" : "object"}`,
+        );
+      }
+      const value = String(rawValue);
       const tid = await getActiveTabId(__t.boundTabId ?? (args.tabId as number | undefined) ?? tabId);
       const frameId = __t.boundFrameId ?? (args.frameId as number | undefined);
       if (frameId != null) await ensureFrameAttached(tid, frameId);
