@@ -88,16 +88,24 @@ export function registerPageHandlers(router: ActionRouter, debuggerMgr: Debugger
       //     long-polling 把整个 navigate 拖死（P2-7, 2026-05-21）。
       const waitUntil = (args.waitUntil as string | undefined) ?? "load";
       const outerTimeout = (args.timeout as number) ?? 30_000;
+      // 内层总 cap:load + 可选 networkidle 合计须 < 传输超时(NAVIGATE_LOAD_TIMEOUT_MS
+      // 已 < 30s)。idle 阶段从此 cap 扣减 load 已耗,而非另叠固定 5s(NAV-3)。
+      const innerCap = Math.min(outerTimeout, NAVIGATE_LOAD_TIMEOUT_MS);
+      const navStart = Date.now();
       await chrome.tabs.update(tid, { url });
       let degraded = false;
       if (waitForLoad) {
         // load / domcontentloaded 都走 waitForTabLoad；超时时若 DOM 已就绪则优雅降级
         // 返回（degraded: true），仅 DOM 仍 loading 才 throw。内部 load 等待 cap 在
         // NAVIGATE_LOAD_TIMEOUT_MS（< 传输超时），确保降级响应能回到 caller。
-        const loadWait = Math.min(outerTimeout, NAVIGATE_LOAD_TIMEOUT_MS);
+        const loadWait = innerCap;
         ({ degraded } = await waitForTabLoad(tid, loadWait));
         if (waitUntil === "networkidle") {
-          const idleTimeout = 5_000;
+          // NAV-3:idle 超时用剩余预算(innerCap - load 已耗),而非硬编码 5000 叠加在
+          // load 之上 → load 慢站(~25s)+ idle 5s ≈ 30s 吃光传输 margin(flaky)。
+          // floor 1s 保证即便 load 用满预算 idle 仍有片刻探测窗口(1s << buffer,不破 margin)。
+          const elapsed = Date.now() - navStart;
+          const idleTimeout = Math.max(1_000, innerCap - elapsed);
           try {
             await awaitIdle(debuggerMgr, tid, { timeout: idleTimeout, idleTime: 500 });
           } catch (err) {

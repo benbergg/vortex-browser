@@ -150,4 +150,22 @@ describe("navigate 内部 load 等待 < MCP 传输超时 margin (DDG dogfood 202
     );
     expect(SRC).not.toMatch(/timeout:\s*\(args\.timeout as number\)\s*\?\?\s*30_000/);
   });
+
+  // NAV-3(批次3 族 O):navigate waitUntil=networkidle 的 awaitIdle 原硬编码 5000,
+  // 叠加 load 已耗的 ~25s ≈ 30s 吃光传输 margin(flaky)。改用剩余预算:idle 超时 =
+  // 内层 cap - load 已耗,保证 load+idle 合计仍 < 传输超时。
+  it("networkidle 的 idle 超时不再硬编码 5_000", () => {
+    expect(SRC).not.toMatch(/const idleTimeout = 5_000/);
+  });
+
+  it("networkidle 用剩余预算算 idle 超时(扣减 load 已耗时间)", () => {
+    // 须出现「起点时间戳 - now」式的剩余预算计算,而非固定常量。
+    expect(SRC).toMatch(/Date\.now\(\)\s*-\s*navStart/);
+    expect(SRC).toMatch(/idleTimeout\s*=\s*Math\.max\(/);
+  });
+
+  it("idle 预算基于内层 cap 而非裸传输超时(load+idle 合计 < 传输)", () => {
+    // 剩余预算 = innerCap - elapsed(innerCap = Math.min(outerTimeout, NAVIGATE_LOAD_TIMEOUT_MS))。
+    expect(SRC).toMatch(/innerCap\s*-\s*elapsed/);
+  });
 });

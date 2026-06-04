@@ -15,6 +15,7 @@ import {
 import { sendRequest } from "./client.js";
 import { getToolDefs, getToolDef } from "./tools/registry.js";
 import { dispatchNewTool } from "./tools/dispatch.js";
+import { computeTransportTimeout } from "./lib/timeout.js";
 export { dispatchNewTool };
 
 // Read package.json via createRequire so the bundle works under both ts-node
@@ -403,7 +404,13 @@ export async function handleCallTool(
 
   try {
     const { tabId, returnMode, timeout, ...rest } = params;
-    const effectiveTimeout = (timeout as number) ?? DEFAULT_TIMEOUT;
+    // WAIT-TIMEOUT-MARGIN(族 O):调用方 timeout 既要作 handler 内层 poll 预算,又决定
+    // 外层传输超时。原先只设传输(= caller),内层被 destructure 摘走拿不到 → handler 用
+    // 自身 default,且传输与内层同 deadline 竞race。修复:(1) 把 timeout 塞回 rest 让
+    // dispatchNewTool 透传给 handler 作内层预算;(2) 传输 = 内层 + buffer 留 margin,
+    // 确保 handler 干净结果(condition-not-met)先于传输 "no response" 到达调用方。
+    if (timeout !== undefined) rest.timeout = timeout;
+    const effectiveTimeout = computeTransportTimeout(timeout as number | undefined, DEFAULT_TIMEOUT);
 
     // dispatch 映射：新工具名 → 正确 action + 参数 reshape
     const mapped = dispatchNewTool(toolDef.name, rest);
