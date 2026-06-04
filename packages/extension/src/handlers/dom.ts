@@ -329,7 +329,7 @@ export function registerDomHandlers(
       } | undefined>(
         tid,
         frameId,
-        (sel: string) => {
+        (sel: string, selectAll: boolean) => {
           const els = (window as any).__vortexDomResolve.queryAllDeep(sel) as Element[];
           if (els.length === 0) {
             return { errorCode: "ELEMENT_NOT_FOUND", error: `Element not found: ${sel}` };
@@ -368,9 +368,24 @@ export function registerDomHandlers(
           // event chain has a focused element to land on. focus()
           // is idempotent if the element is already active.
           el.focus();
+          // contentEditable clear-before:CDP Input.insertText 在选区/光标处插入,
+          // 空选区时残留旧内容拼接(live 实测 type 一段文本得到 "NEWexisting")。
+          // type 语义是「把这段文本写入字段」,故先全选已有内容,让 insertText 替换
+          // 选区(产生合规 beforeinput,ProseMirror/Slate/Lexical 接受)——等价人手
+          // Ctrl+A 后输入。仅对 contentEditable 且有文本要写时全选,type("") 保持
+          // no-op,对齐 input/textarea 分支契约(2026-06-04 多 agent 审计 #4)。
+          if (selectAll && el.isContentEditable) {
+            const editSel = window.getSelection();
+            if (editSel) {
+              const range = document.createRange();
+              range.selectNodeContents(el);
+              editSel.removeAllRanges();
+              editSel.addRange(range);
+            }
+          }
           return { ok: true, isContentEditable: el.isContentEditable === true };
         },
-        [selector],
+        [selector, text !== ""],
       );
       if (probe?.error) {
         mapPageError(probe, selector);

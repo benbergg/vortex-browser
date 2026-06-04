@@ -84,4 +84,26 @@ describe("dom.type contentEditable path (@since 0.8.x Round-1 R1-A)", () => {
     expect(DOM_SRC).toMatch(/path:\s*"cdp-insertText"/);
     expect(DOM_SRC).toMatch(/path:\s*"page-side-dispatch"/);
   });
+
+  // clear-before 回归锁(多 agent 审计 #4,2026-06-04 LIVE 确认)。
+  //
+  // 现象:type 一段文本到已有内容的 contentEditable,结果是 "NEW"+旧内容拼接
+  //   ("NEWexisting")。CDP Input.insertText 在选区/光标处插入,空选区时不清空
+  //   已有内容 → 拼接。与 input/textarea 路径(clear-before)契约不一致。
+  //
+  // 修复:probe 在 el.focus() 后,对 contentEditable 全选节点内容(Selection +
+  //   range.selectNodeContents),使后续 insertText 替换选区。仅在有文本要写时
+  //   全选(text !== ""),type("") 保持 no-op。
+  it("contentEditable 路径 clear-before:probe 全选已有内容让 insertText 替换", () => {
+    // 用 Selection API 全选节点内容(range.selectNodeContents)。
+    expect(DOM_SRC).toMatch(/selectNodeContents/);
+    // 全选受「是否有文本要写」门控,且仅对 contentEditable(避免误清 input/textarea
+    // ——它们走另一分支自带 clear-before)。
+    expect(DOM_SRC).toMatch(/selectAll\s*&&\s*el\.isContentEditable/);
+  });
+
+  it("contentEditable clear-before 仅在 text 非空时触发(type(\"\") 保持 no-op)", () => {
+    // probe 的 selectAll 实参由 `text !== ""` 传入,空串不全选不清空。
+    expect(DOM_SRC).toMatch(/\[selector,\s*text\s*!==\s*""\]/);
+  });
 });
