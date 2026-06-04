@@ -4,6 +4,14 @@ import { VtxErrorCode } from "@bytenew/vortex-shared";
 import { ActionRouter } from "../src/lib/router.js";
 import { registerCaptureHandlers } from "../src/handlers/capture.js";
 import { setSnapshot } from "../src/lib/snapshot-store.js";
+import { _resetPageSideLoader } from "../src/adapter/page-side-loader.js";
+
+// capture.element 现先 loadPageSideModule("dom-resolve")(经 executeScript({files})注入),
+// 再 executeScript({func})取 rect。取 rect 查询调用须按 .func 定位,不能假定为 calls[0]。
+function rectCall(): any {
+  const calls = (chrome.scripting.executeScript as any).mock.calls;
+  return calls.map((c: any[]) => c[0]).find((a: any) => typeof a.func === "function");
+}
 
 function mkReq(action: string, args: Record<string, unknown>): NmRequest {
   return { type: "tool_request", tool: action, args, requestId: "r-1", tabId: 42 };
@@ -19,6 +27,7 @@ describe("capture 批次1: ref 解析 + fullPage 截断标志 + 零尺寸", () =
   let layoutContentHeight: number;
 
   beforeEach(() => {
+    _resetPageSideLoader();
     layoutContentHeight = 3000;
     vi.stubGlobal("chrome", {
       tabs: { query: vi.fn().mockResolvedValue([{ id: 42 }]) },
@@ -49,7 +58,7 @@ describe("capture 批次1: ref 解析 + fullPage 截断标志 + 零尺寸", () =
     expect(resp.error).toBeUndefined();
     expect((resp.result as any).selector).toBe("#target");
     // 注入函数收到的是反查出的 selector
-    const call = (chrome.scripting.executeScript as any).mock.calls[0][0];
+    const call = rectCall();
     expect(call.args).toEqual(["#target"]);
   });
 

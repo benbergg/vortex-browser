@@ -146,6 +146,16 @@ export function registerContentHandlers(router: ActionRouter): void {
                 const ci = extractControl(el, root);
                 if (ci) out.push(ci);
                 if (d < maxDepth) {
+                  // open shadow root 内的表单控件:root 经 queryDeep 已穿 shadow 解析,
+                  // 但子树遍历只走 light-DOM el.children 会漏掉 shadow 内 input/select
+                  // (OBS-3 silent-false-success)。同 querySelectorAllDeep 语义,下钻
+                  // 时也枚举 open shadowRoot 子节点(closed shadowRoot 为 null,符合 CE spec)。
+                  const sr = (el as HTMLElement).shadowRoot;
+                  if (sr) {
+                    for (const child of Array.from(sr.children)) {
+                      stack.push({ el: child, d: d + 1 });
+                    }
+                  }
                   for (const child of Array.from(el.children)) {
                     stack.push({ el: child, d: d + 1 });
                   }

@@ -6,6 +6,7 @@ import type { DebuggerManager } from "../lib/debugger-manager.js";
 import { getActiveTabId, buildExecuteTarget, ensureFrameAttached } from "../lib/tab-utils.js";
 import { getIframeOffset } from "../lib/iframe-offset.js";
 import { resolveTarget } from "../lib/resolve-target.js";
+import { loadPageSideModule } from "../adapter/page-side-loader.js";
 
 // GIF 录制状态
 interface GifSession {
@@ -167,11 +168,16 @@ export function registerCaptureHandlers(
       const format = (args.format as "png" | "jpeg") ?? "png";
       const quality = args.quality as number | undefined;
 
+      // 加载 dom-resolve,使 inline func 经 queryDeep 穿 open shadow 解析 selector——
+      // 否则 document.querySelector 不穿 shadow,shadow 内元素的 @ref 截图 ELEMENT_NOT_FOUND
+      // (族 K 读路径 shadow 穿透,与 content.ts/dom.ts 一致)。
+      await loadPageSideModule(tid, frameId, "dom-resolve");
+
       // 1. 在目标 frame 内取元素 rect
       const rectResults = await chrome.scripting.executeScript({
         target: buildExecuteTarget(tid, frameId),
         func: (sel: string) => {
-          const el = document.querySelector(sel);
+          const el = (window as any).__vortexDomResolve.queryDeep(sel);
           if (!el) return { error: `Element not found: ${sel}` };
           const r = el.getBoundingClientRect();
           return {
