@@ -446,11 +446,24 @@ async function scanOneFrame(
 
         function getAccessibleName(el: HTMLElement): string {
           const aria = el.getAttribute("aria-label");
-          if (aria) return aria;
+          if (aria) return normName(aria);
           const labelledBy = el.getAttribute("aria-labelledby");
           if (labelledBy) {
-            const label = document.getElementById(labelledBy);
-            if (label) return normName(label.textContent);
+            // aria-labelledby 是空格分隔 IDREF 列表(非单 ID);在元素所在 root 内
+            // 逐个解析(ShadowRoot/Document 都有 getElementById,支持 shadow 内 label)
+            // 再拼接。旧逻辑整串 document.getElementById 仅命中单 id 且仅主文档,多
+            // IDREF / shadow 内全漏(2026-06-04 审计)。
+            const root = el.getRootNode() as Document | ShadowRoot;
+            const parts: string[] = [];
+            for (const id of labelledBy.split(/\s+/)) {
+              if (!id) continue;
+              const label =
+                typeof (root as Document).getElementById === "function"
+                  ? (root as Document).getElementById(id)
+                  : document.getElementById(id);
+              if (label) parts.push(label.textContent ?? "");
+            }
+            if (parts.length) return normName(parts.join(" "));
           }
           if (
             el.tagName === "INPUT" ||
