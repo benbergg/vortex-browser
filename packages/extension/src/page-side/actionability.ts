@@ -254,6 +254,7 @@ export type ActionabilityResult =
   async function probe(
     selector: string,
     needsEditable: boolean,
+    force = false,
   ): Promise<ActionabilityResult> {
     // querySelector throws SyntaxError on invalid CSS (e.g. raw v0.5-style
     // snapshot ref slipped past mcp ref-parser). Swallow it as not-attached
@@ -272,16 +273,21 @@ export type ActionabilityResult =
     }
     if (!isAttached(el)) return { ok: false, reason: "NOT_ATTACHED" };
     unskipIfContentVisibilityAuto(el); // cv-auto skip 死锁防护(R2):先滚动 un-skip
-    if (!isVisible(el)) return { ok: false, reason: "NOT_VISIBLE" };
-    if (!isEnabled(el)) return { ok: false, reason: "DISABLED" };
-    if (needsEditable) {
-      const ed = isEditable(el);
-      if (!ed.ok) {
-        return {
-          ok: false,
-          reason: "NOT_EDITABLE",
-          extras: { tagName: ed.tagName, hasReadOnly: ed.hasReadOnly },
-        };
+    // force:true → 跳过质量门(visible/enabled/editable/obscured),仍要求 attached(上面已查)、
+    // 仍 scrollIntoView + 取 rect 供 CDP/合成派发用。对齐 Playwright force 语义,让公开 schema
+    // options.force 诚实(2026-06-04 H 族补实现:此前 force 是 no-op)。
+    if (!force) {
+      if (!isVisible(el)) return { ok: false, reason: "NOT_VISIBLE" };
+      if (!isEnabled(el)) return { ok: false, reason: "DISABLED" };
+      if (needsEditable) {
+        const ed = isEditable(el);
+        if (!ed.ok) {
+          return {
+            ok: false,
+            reason: "NOT_EDITABLE",
+            extras: { tagName: ed.tagName, hasReadOnly: ed.hasReadOnly },
+          };
+        }
       }
     }
     let r = el.getBoundingClientRect();
@@ -302,8 +308,10 @@ export type ActionabilityResult =
       cx = r.x + r.width / 2;
       cy = r.y + r.height / 2;
     }
-    const re = receivesEvents(el, cx, cy);
-    if (!re.ok) return { ok: false, reason: "OBSCURED", extras: { blocker: re.blocker } };
+    if (!force) {
+      const re = receivesEvents(el, cx, cy);
+      if (!re.ok) return { ok: false, reason: "OBSCURED", extras: { blocker: re.blocker } };
+    }
     return { ok: true, rect: { x: r.x, y: r.y, w: r.width, h: r.height } };
   }
 

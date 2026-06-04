@@ -1,0 +1,10 @@
+<!doctype html>
+<html lang="zh"><head><meta charset="utf-8"><title>H 边界(heal / nonsense)</title></head>
+<body>
+<h1>H 边界:heal(错 selector)/ nonsense(填不可编辑元素)</h1>
+<!-- nonsense:对纯文本 <p> 发 fill 应优雅 NOT_EDITABLE,不静默假成功。 -->
+<p id="static" data-testid="static">我是纯文本,不可编辑</p>
+<!-- heal:错 selector 时 vortex 不应自愈误点这个真实按钮(点了 result 会变)。 -->
+<button id="real" data-testid="real" onclick="document.querySelector('[data-testid=&quot;result&quot;]').textContent='REAL-CLICKED'">真实按钮</button>
+<p data-testid="result">idle</p>
+</body></html>

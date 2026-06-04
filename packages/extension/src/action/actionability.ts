@@ -28,6 +28,11 @@ export interface CheckOptions {
   needsEditable?: boolean;
   /** Skip the Stable re-check (when auto-wait already does stable check in retry loop). Default false. */
   skipStable?: boolean;
+  /**
+   * Force mode (Playwright 语义):跳过质量门(visible/enabled/editable/obscured)+ stable 复查,
+   * 仅要求元素 attached。供 act options.force 绕过 actionability(2026-06-04 H 族)。
+   */
+  force?: boolean;
 }
 
 /**
@@ -55,15 +60,15 @@ export async function checkActionability(
   let result: ActionabilityResult;
   try {
     result = await probe<ActionabilityResult>(
-      (sel: string, needsEditable: boolean) => {
+      (sel: string, needsEditable: boolean, force: boolean) => {
         const A = (window as any).__vortexActionability;
         if (!A?.probe) {
           // Bundle not loaded: treat as element-not-found (caller will retry via auto-wait).
           return { ok: false, reason: "NOT_ATTACHED" } as const;
         }
-        return A.probe(sel, needsEditable);
+        return A.probe(sel, needsEditable, force);
       },
-      [selector, options.needsEditable ?? false],
+      [selector, options.needsEditable ?? false, options.force ?? false],
     );
   } catch (err) {
     // 只把「探针 executeScript 永不 settle 超时」映射为可重试 NOT_ATTACHED;
@@ -75,7 +80,8 @@ export async function checkActionability(
   }
 
   if (!result.ok) return result;
-  if (options.skipStable) return result;
+  // force:跳过 stable 复查(质量门已整体跳过,稳定性同属质量门)。
+  if (options.skipStable || options.force) return result;
 
   // Stable re-check (two-step async)。同样加界:超时映射 NOT_STABLE(可重试)。
   let stable: { ok: boolean };

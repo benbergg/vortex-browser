@@ -107,7 +107,7 @@ export function registerDomHandlers(
       const useRealMouse = args.useRealMouse as boolean | undefined;
 
       // L2 integration: actionability + auto-wait pre-check
-      await waitActionable(tid, frameId, selector, { timeout: (args.timeout as number | undefined) ?? 5000 });
+      await waitActionable(tid, frameId, selector, { timeout: (args.timeout as number | undefined) ?? 5000, force: args.force as boolean | undefined });
 
       if (useRealMouse) {
         // 预加载 dom-resolve,使 cdpClickElement 的 page-side 探测能经
@@ -305,7 +305,7 @@ export function registerDomHandlers(
       if (frameId != null) await ensureFrameAttached(tid, frameId);
 
       // L2 integration: actionability + auto-wait pre-check (editable required)
-      await waitActionable(tid, frameId, selector, { timeout: (args.timeout as number | undefined) ?? 5000, needsEditable: true });
+      await waitActionable(tid, frameId, selector, { timeout: (args.timeout as number | undefined) ?? 5000, needsEditable: true, force: args.force as boolean | undefined });
 
       // Probe target: shared validation + contentEditable detection.
       // The page-side handler below runs the legacy
@@ -528,7 +528,7 @@ export function registerDomHandlers(
       if (frameId != null) await ensureFrameAttached(tid, frameId);
 
       // L2 integration: actionability + auto-wait pre-check (editable required)
-      await waitActionable(tid, frameId, selector, { timeout: (args.timeout as number | undefined) ?? 5000, needsEditable: true });
+      await waitActionable(tid, frameId, selector, { timeout: (args.timeout as number | undefined) ?? 5000, needsEditable: true, force: args.force as boolean | undefined });
 
       // === framework-aware rejection via page-side bundle (@since 0.4.0, migrated T2.7a) ===
       if (!fallbackToNative) {
@@ -684,7 +684,7 @@ export function registerDomHandlers(
       if (frameId != null) await ensureFrameAttached(tid, frameId);
 
       // L2 integration: actionability + auto-wait pre-check
-      await waitActionable(tid, frameId, selector, { timeout: (args.timeout as number | undefined) ?? 5000 });
+      await waitActionable(tid, frameId, selector, { timeout: (args.timeout as number | undefined) ?? 5000, force: args.force as boolean | undefined });
 
       // 加载 dom-resolve 模块，使 inline func 能通过 shadow 穿透解析 selector
       await loadPageSideModule(tid, frameId, "dom-resolve");
