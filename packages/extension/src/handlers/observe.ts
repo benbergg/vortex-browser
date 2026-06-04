@@ -394,7 +394,12 @@ async function scanOneFrame(
 
         // CSS 字体图标约定的前缀(Bootstrap Icons / FontAwesome / Glyphicons):
         // 类名 `<prefix>-<icon>` 经 ::before 字形渲染,无 inner svg/img。
-        const ICON_FONT_PREFIXES = ["bi-", "fa-", "glyphicon-"];
+        // bi-/fa-/glyphicon- = 三大图标字体;vxe-icon-(vxe-table)/van-icon-(Vant)=
+        // 组件库 CSS 字体图标(::before 字形,无 inner svg/img)。仅显示路径(getAccessibleName
+        // 末位 iconFontName)给已召回图标按钮补名,**不进 gate**(round-12 幽灵续命约束)。
+        const ICON_FONT_PREFIXES = [
+          "bi-", "fa-", "glyphicon-", "vxe-icon-", "van-icon-",
+        ];
         // FontAwesome 样式修饰类(非图标名,与 `fa-<icon>` 同形,故白名单逐一跳过)。
         const ICON_FONT_MODIFIERS = new Set([
           // 样式族(solid/regular/brands…)

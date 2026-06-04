@@ -58,4 +58,9 @@ describe("observe CSS 字体图标按钮命名(AP,2026-06-03 dogfood)", () => {
     expect(probeLine?.[1]).toContain("iconNameFromClass");
     expect(probeLine?.[1]).not.toContain("iconFontName");
   });
+
+  it("ICON_FONT_PREFIXES 含组件库字体图标前缀 vxe-icon- / van-icon-(component-2)", () => {
+    expect(OBSERVE_SRC).toMatch(/"vxe-icon-"/);
+    expect(OBSERVE_SRC).toMatch(/"van-icon-"/);
+  });
 });
