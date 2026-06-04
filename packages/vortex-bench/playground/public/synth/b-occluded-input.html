@@ -1,0 +1,10 @@
+<!doctype html>
+<html lang="zh"><head><meta charset="utf-8"><title>occluded input</title></head>
+<body>
+<h1>遮挡输入(半透明层覆盖 input 上)</h1>
+<!-- 镜像 Stagehand dropdown(被下拉遮挡的 input 仍可 fill)。 -->
+<div style="position:relative;width:260px">
+  <input id="inp" type="text" aria-label="被遮挡输入框" style="width:240px;padding:8px">
+  <div style="position:absolute;inset:0;background:rgba(0,0,0,0.08);z-index:10"></div>
+</div>
+</body></html>
