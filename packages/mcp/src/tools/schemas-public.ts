@@ -42,6 +42,7 @@ export const PUBLIC_TOOLS: ToolDef[] = [
         target: TargetRequired,
         action: { enum: ["click", "fill", "type", "select", "scroll", "hover"] },
         value: {},
+        useRealMouse: { type: "boolean" },
         options: {
           type: "object",
           properties: {
@@ -196,7 +197,7 @@ export const PUBLIC_TOOLS: ToolDef[] = [
   {
     name: "vortex_evaluate",
     action: "js.evaluate",
-    description: "Execute JavaScript in page context. async:true for await.",
+    description: "Execute JS in page. async:true for await.",
     schema: {
       type: "object",
       properties: {
@@ -212,7 +213,7 @@ export const PUBLIC_TOOLS: ToolDef[] = [
   {
     name: "vortex_mouse_drag",
     action: "mouse.drag",
-    description: "CDP drag from (fromX,fromY) to (toX,toY). steps default 10.",
+    description: "CDP drag (fromX,fromY)→(toX,toY). steps default 10.",
     schema: {
       type: "object",
       properties: {
@@ -230,7 +231,7 @@ export const PUBLIC_TOOLS: ToolDef[] = [
   {
     name: "vortex_file_upload",
     action: "file.upload",
-    description: "Upload file to input[type=file]. fileContent is base64.",
+    description: "Upload to input[type=file]. fileContent base64.",
     schema: {
       type: "object",
       properties: {
