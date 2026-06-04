@@ -514,7 +514,7 @@ export async function handleCallTool(
       friendly =
         `vortex-server is not running at localhost:${PORT}.\n` +
         `To start: cd /path/to/vortex && pnpm --filter @bytenew/vortex-server start\n\n` +
-        `Run the 'vortex_ping' tool to re-check connectivity.\n\n` +
+        `Once it's running, retry your last tool call.\n\n` +
         `Original error: ${msg}`;
     } else if (msg.includes("Timeout")) {
       friendly =
