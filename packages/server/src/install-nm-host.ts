@@ -2,6 +2,7 @@ import { writeFileSync, mkdirSync } from "fs";
 import { join, resolve, dirname } from "path";
 import { homedir, platform } from "os";
 import { fileURLToPath } from "url";
+import { vtxError, VtxErrorCode } from "@vortex-browser/shared";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -24,16 +25,18 @@ export interface InstallResult {
  *
  * 路径计算：编译后此文件位于 dist/src/install-nm-host.js，
  * native-host.sh 位于包根 packages/server/native-host.sh，
- * 即 __dirname/../native-host.sh。
+ * 即 __dirname/../../native-host.sh。
  *
  * @param extensionId 32 位小写字母的 Chrome 扩展 ID
- * @throws 若 extensionId 为空或格式非法
+ * @throws VtxError(INVALID_PARAMS) 若 extensionId 为空或格式非法
  */
 export function installNmHost(extensionId: string): InstallResult {
   if (!extensionId || !EXTENSION_ID_RE.test(extensionId)) {
-    throw new Error(
+    throw vtxError(
+      VtxErrorCode.INVALID_PARAMS,
       `Invalid extension ID: "${extensionId}". ` +
-        "Expected 32 lowercase letters (a-z), e.g. abcdefghijklmnopabcdefghijklmnop"
+        "Expected 32 lowercase letters (a-z), e.g. abcdefghijklmnopabcdefghijklmnop",
+      { extras: { extensionId } },
     );
   }
 
