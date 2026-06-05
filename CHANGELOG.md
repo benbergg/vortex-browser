@@ -47,6 +47,22 @@ _新工作进入此段；ship 时改为版本号 + 日期。_
 
 ---
 
+## [1.0.1] - 2026-06-05
+
+仅 `@vortex-browser/server` 发布 1.0.1;`@vortex-browser/{shared,mcp,cli}` 维持 1.0.0(未变动)。
+
+### ✨ Added
+
+- **`vortex-server install [extension-id]` 子命令**(`packages/server/bin/vortex-server.ts`、`src/install-nm-host.ts`):一行注册 Chrome Native Messaging 宿主(`com.vortexbrowser.host`),取代手挖 `node_modules/.../install-nm-host.js`。
+- **扩展 ID 钉死(方案 B)**:`packages/extension/manifest.json` 加 `key` 字段,扩展 ID 固定为 `fbonhjdohmkcejfgmaicnkknpfafihnd`(load unpacked / 自签 .crx 同一 ID)。`vortex-server install` **不带参**时自动用此默认 ID,免去复制粘贴;`install <id>` 仍可覆盖(商店分发等)。
+- **中英双语文档**:`README.md`/`README.zh-CN.md`、`docs/INSTALL.md`/`INSTALL.zh-CN.md`,含"How it works"心智模型(装 2 个、第 3 个自启)与多平台 MCP 接入(Claude Code / Cursor / Claude Desktop / 通用 MCP stdio)。
+
+### 🔧 Fixed
+
+- `installNmHost` 改用 `vtxError(INVALID_PARAMS)` 结构化错误(满足 I19.no-bare-throw 不变量)。
+
+---
+
 ## [1.0.0] - 2026-06-05
 
 ### 💥 Breaking changes
