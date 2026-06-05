@@ -137,6 +137,42 @@ export function registerCaptureHandlers(
       const deviceScaleFactor = args.deviceScaleFactor as 1 | 2 | undefined;
       const frameId = args.frameId as number | undefined;
 
+      // Native 快路径:viewport 截图(非 fullPage/clip/单 frame/DPR override)走
+      // chrome.tabs.captureVisibleTab(~10-50ms),绕开 CDP debugger.attach 的 ~3s
+      // 开销 + "调试中" 黄条(baseline nativeP50=5ms vs cdpP50=3289ms)。
+      // captureVisibleTab 只能截「窗口当前活跃 tab 的可见区」,故须确认目标 tab 活跃;
+      // 非活跃 tab / fullPage / clip / 单 frame / DPR override 仍走 CDP。任何 native
+      // 失败(受限页、瞬时态)经 try/catch 回退 CDP——native 仅作优化,绝不引入回归。
+      // DPR 等价:被替换的旧 CDP 默认路径(无 clip → 无 `clip.scale:1`)本就按物理
+      // device-pixel 出图(scale:1 仅 fullPage/clip 分支强制),captureVisibleTab 同样
+      // 按物理 DPR 出图——故 Retina(DPR=2)上两路径均 2x,默认 viewport 截图无尺寸差。
+      const wantsNative =
+        !fullPage &&
+        !clip &&
+        (frameId == null || frameId === 0) &&
+        (deviceScaleFactor == null || deviceScaleFactor === 1);
+      if (wantsNative) {
+        try {
+          const tab = await chrome.tabs.get(tid);
+          // windowId 必须有效:WINDOW_ID_NONE(-1)/undefined(detached/minimized 边缘态)
+          // 下 captureVisibleTab 会 reject,虽被 catch 兜回 CDP 但白跑一轮——直接跳过。
+          if (tab.active && tab.windowId != null && tab.windowId >= 0) {
+            const opts: chrome.tabs.CaptureVisibleTabOptions = { format };
+            if (format === "jpeg" && quality != null) opts.quality = quality;
+            const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, opts);
+            return {
+              dataUrl,
+              format,
+              ...(format === "jpeg" && quality != null ? { quality } : {}),
+              fullPage: false,
+              timestamp: Date.now(),
+            };
+          }
+        } catch {
+          // native 失败 → 落到下方 CDP 路径(proven path)
+        }
+      }
+
       let effectiveClip = clip;
       if (frameId != null && frameId !== 0 && !clip) {
         effectiveClip = await computeFrameClip(tid, frameId);
