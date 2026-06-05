@@ -74,7 +74,7 @@ claude mcp list
 #   vortex: npx -y @vortex-browser/mcp - ✓ Connected
 ```
 
-Or type `/mcp` inside a Claude Code session to check connection status, then ask Claude to call `mcp__vortex__vortex_tab_list`.
+Or type `/mcp` inside a Claude Code session to check connection status, then ask Claude to call `mcp__vortex__vortex_observe` on the current page.
 
 ---
 
@@ -99,16 +99,14 @@ Or type `/mcp` inside a Claude Code session to check connection status, then ask
 
 ---
 
-## Tool surface (11 tools)
+## Tool surface (15 tools)
 
-| Type | Tool |
-|------|------|
-| Write | `vortex_act` (click / fill / type / select / scroll / hover — unified) |
-| Read structure | `vortex_extract` (HTML / text / ref references, etc.) |
-| Inspect | `vortex_observe` (candidate elements + assigned refs) |
-| Navigate | `vortex_navigate` / `vortex_tab_create` / `vortex_tab_close` |
-| Screenshot / Wait | `vortex_screenshot` / `vortex_wait_for` |
-| Input / Debug / Storage | `vortex_press` / `vortex_debug_read` / `vortex_storage` |
+| Category | Tools |
+|----------|-------|
+| Interact | `vortex_act` (click / type / select / scroll / hover) · `vortex_fill` (form fields) · `vortex_press` (keyboard) · `vortex_mouse_drag` |
+| Inspect | `vortex_observe` (candidate elements + refs) · `vortex_extract` (HTML / text / refs) · `vortex_screenshot` |
+| Navigate | `vortex_navigate` · `vortex_tab_create` · `vortex_tab_close` · `vortex_wait_for` |
+| Advanced | `vortex_evaluate` (run JS) · `vortex_file_upload` · `vortex_storage` · `vortex_debug_read` |
 
 ---
 
