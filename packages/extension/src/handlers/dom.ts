@@ -105,11 +105,15 @@ export function registerDomHandlers(
       const frameId = __t.boundFrameId ?? (args.frameId as number | undefined);
       if (frameId != null) await ensureFrameAttached(tid, frameId);
       const useRealMouse = args.useRealMouse as boolean | undefined;
+      // flag-自适应:server 在 trusted Chrome(带 --silent-debugger-extension-api)下注入
+      // trustedMode=true。此时 click 默认走 CDP trusted(无黄条、广覆盖 isTrusted-gated),
+      // 等价于隐式 useRealMouse。非 trusted 时落到下方合成 + submit-intent 路径(不变)。
+      const trustedMode = args.trustedMode === true;
 
       // L2 integration: actionability + auto-wait pre-check
       await waitActionable(tid, frameId, selector, { timeout: (args.timeout as number | undefined) ?? 5000, force: args.force as boolean | undefined });
 
-      if (useRealMouse) {
+      if (useRealMouse || trustedMode) {
         // 预加载 dom-resolve,使 cdpClickElement 的 page-side 探测能经
         // __vortexDomResolve 穿 open shadow + 走门同款 isEnabled——与同步路径一致,
         // 堵 shadow-internal ref 假阴 ELEMENT_NOT_FOUND(#14)。
