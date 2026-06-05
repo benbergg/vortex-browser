@@ -1,7 +1,21 @@
 import { Router, json } from "express";
+import type { Request, Response } from "express";
 import type { VtxRequest } from "@vortex-browser/shared";
 import { VtxErrorCode } from "@vortex-browser/shared";
 import type { MessageRouter } from "./message-router.js";
+import { detectTrustedMode } from "./trusted-mode.js";
+import { relaunchTrusted } from "./relauncher.js";
+
+/** GET /trusted-mode:回当前 Chrome 是否带 flag(trusted)。popup 状态指示用。 */
+export function trustedModeHandler(_req: Request, res: Response): void {
+  res.json({ trustedMode: detectTrustedMode() });
+}
+
+/** POST /relaunch-trusted:触发带 flag 重启 Chrome(detached helper,立即返回)。 */
+export function relaunchHandler(_req: Request, res: Response): void {
+  relaunchTrusted();
+  res.json({ ok: true });
+}
 
 export function createHttpRoutes(router: MessageRouter): Router {
   const app = Router();
@@ -43,6 +57,9 @@ export function createHttpRoutes(router: MessageRouter): Router {
     const statusCode = resp.error ? 500 : 200;
     res.status(statusCode).json(resp);
   });
+
+  app.get("/trusted-mode", trustedModeHandler);
+  app.post("/relaunch-trusted", relaunchHandler);
 
   return app;
 }
