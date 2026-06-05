@@ -120,9 +120,12 @@ export function registerDomHandlers(
       // 普通 element.click() 路径（含失败探测）
       // 加载 dom-resolve 模块，使 inline func 能通过 shadow 穿透解析 selector
       await loadPageSideModule(tid, frameId, "dom-resolve");
+      // 方案 A:可重跑闭包。cdpAvailable=true 时页内 func 对 submit-intent 元素返回
+      // deferToCdp(不合成点击)→ handler 改走 CDP trusted;CDP 失败时用 false 重跑合成。
+      const runSyntheticClick = async (cdpAvailable: boolean) => {
       const results = await chrome.scripting.executeScript({
         target: buildExecuteTarget(tid, frameId),
-        func: (sel: string) => {
+        func: (sel: string, cdpAvailable: boolean) => {
           try {
             // 探测阶段：逐项检查失败原因，细化错误码
             const els = (window as any).__vortexDomResolve.queryAllDeep(sel) as Element[];
@@ -218,6 +221,32 @@ export function registerDomHandlers(
                 extras: { blocker: desc },
               };
             }
+            // 方案 A:表单提交意图元素(button[type=submit] / input[type=submit] /
+            // <form> 内无显式 type 的 <button>——HTML 默认 type=submit)。合成 click 的
+            // isTrusted=false,React 拦截 submit 的站点(淘宝搜索)会丢弃且常清空输入框;
+            // 扩展里唯一能发 trusted 的是 CDP。故跳过合成、交给 cdpClickElement 真鼠标。
+            // cdpAvailable=false(CDP 探测失败回退)时不 defer,照常合成。
+            const __tagLc = el.tagName.toLowerCase();
+            const __typeAttr = (el.getAttribute("type") || "").toLowerCase();
+            const __isSubmitIntent =
+              (__tagLc === "button" || __tagLc === "input") &&
+              (__typeAttr === "submit" ||
+                (__tagLc === "button" &&
+                  __typeAttr !== "button" &&
+                  __typeAttr !== "reset" &&
+                  !!el.closest("form")));
+            if (__isSubmitIntent && cdpAvailable) {
+              return {
+                result: {
+                  deferToCdp: true,
+                  element: {
+                    tag: __tagLc,
+                    id: el.id || undefined,
+                    text: (el as HTMLElement).innerText?.slice(0, 200),
+                  },
+                },
+              };
+            }
             // 通过所有检查，执行 click；对可 focus 元素（input/textarea/button/select）
             // 先 focus 再 click，保证后续 vortex_press 键盘事件能落在 active element 上
             // （JS .click() 不像真实鼠标那样顺带 focus，修掉这个行为差异）
@@ -273,23 +302,40 @@ export function registerDomHandlers(
             return { error: err instanceof Error ? err.message : String(err) };
           }
         },
-        args: [selector],
+        args: [selector, cdpAvailable],
         world: "MAIN",
       });
-      const res = results[0]?.result as {
-        result?: unknown;
+      return results[0]?.result as {
+        result?: { deferToCdp?: boolean } | unknown;
         error?: string;
         errorCode?: string;
         extras?: Record<string, unknown>;
       };
-      if (res?.error) {
-        const code: VtxErrorCode =
-          res.errorCode && res.errorCode in VtxErrorCode
-            ? (res.errorCode as VtxErrorCode)
-            : res.error.startsWith("Element not found:")
-              ? VtxErrorCode.ELEMENT_NOT_FOUND
-              : VtxErrorCode.JS_EXECUTION_ERROR;
-        throw vtxError(code, res.error, { selector, extras: res.extras });
+      };
+      const throwIfClickError = (r: { error?: string; errorCode?: string; extras?: Record<string, unknown> } | undefined) => {
+        if (r?.error) {
+          const code: VtxErrorCode =
+            r.errorCode && r.errorCode in VtxErrorCode
+              ? (r.errorCode as VtxErrorCode)
+              : r.error.startsWith("Element not found:")
+                ? VtxErrorCode.ELEMENT_NOT_FOUND
+                : VtxErrorCode.JS_EXECUTION_ERROR;
+          throw vtxError(code, r.error, { selector, extras: r.extras });
+        }
+      };
+      // 首跑:cdpAvailable=!!debuggerMgr。submit-intent 会返回 deferToCdp(未点击)。
+      let res = await runSyntheticClick(!!debuggerMgr);
+      throwIfClickError(res);
+      const inner = res?.result as { deferToCdp?: boolean } | undefined;
+      if (inner?.deferToCdp) {
+        try {
+          return await cdpClickElement(debuggerMgr, tid, frameId, selector);
+        } catch {
+          // CDP 探测/attach 失败 → 回退合成(cdpAvailable=false 强制不再 defer,本次真点击)。
+          res = await runSyntheticClick(false);
+          throwIfClickError(res);
+          return res?.result;
+        }
       }
       return res?.result;
     },
