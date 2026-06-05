@@ -28,7 +28,8 @@
       "16": "icons/icon-16.png",
       "32": "icons/icon-32.png"
     },
-    "default_title": "Vortex"
+    "default_title": "Vortex",
+    "default_popup": "src/popup.html"
   },
   "background": {
     "service_worker": "src/background.ts",

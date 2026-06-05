@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="zh">
+  <head>
+    <meta charset="utf-8" />
+    <title>Vortex</title>
+    <style>
+      body { width: 260px; font: 13px/1.5 system-ui, sans-serif; padding: 12px; }
+      #status { margin-bottom: 8px; color: #333; }
+      #relaunch { width: 100%; padding: 6px; cursor: pointer; }
+      #relaunch:disabled { opacity: 0.5; cursor: default; }
+      #confirm { margin-top: 8px; color: #b35900; font-size: 12px; }
+    </style>
+  </head>
+  <body>
+    <div id="status">检测中…</div>
+    <button id="relaunch">重启进入 trusted 模式</button>
+    <div id="confirm"></div>
+    <script type="module" src="./popup.ts"></script>
+  </body>
+</html>
