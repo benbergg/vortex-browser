@@ -1,7 +1,7 @@
 import { appendFileSync } from "fs";
 import { Command } from "commander";
 import { startServer } from "../src/index.js";
-import { installNmHost } from "../src/install-nm-host.js";
+import { installNmHost, DEFAULT_EXTENSION_ID } from "../src/install-nm-host.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // install 子命令：手动 argv 检测，不用 commander subcommand。
@@ -10,14 +10,14 @@ import { installNmHost } from "../src/install-nm-host.js";
 // 手动检测可精确匹配 "install" 字符串，chrome-extension:// 开头的参数自然跳过。
 // ─────────────────────────────────────────────────────────────────────────────
 if (process.argv[2] === "install") {
-  const extId = process.argv[3];
-  if (!extId) {
-    console.error("Usage: vortex-server install <chrome-extension-id>");
-    process.exit(1);
-  }
+  // 不带 ID 时用 manifest 钉死 key 对应的默认扩展 ID(方案 B),无需用户复制粘贴。
+  // 仅当加载的扩展 ID 不同(如商店分发改了 key)才需显式 `install <id>` 覆盖。
+  const extId = process.argv[3] || DEFAULT_EXTENSION_ID;
+  const usingDefault = !process.argv[3];
   try {
     const r = installNmHost(extId);
     console.log(`✓ Native messaging host registered: ${r.hostName}`);
+    console.log(`  extension id: ${extId}${usingDefault ? " (default, pinned)" : ""}`);
     console.log(`  manifest: ${r.manifestPath}`);
     console.log(`  host script: ${r.nativeHostPath}`);
     console.log(`\nReload the Vortex extension in chrome://extensions to connect.`);

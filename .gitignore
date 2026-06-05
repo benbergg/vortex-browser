@@ -24,3 +24,6 @@ packages/mcp/.playwright-mcp/
 .playwright-mcp/
 packages/*/package/
 *.tgz
+
+# 扩展签名私钥(方案 B 固定扩展 ID),务必本地备份,切勿提交
+packages/extension/.keys/

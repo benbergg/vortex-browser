@@ -8,6 +8,14 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const NM_HOST_NAME = "com.vortexbrowser.host";
 
+/**
+ * 默认扩展 ID(方案 B:manifest.json 钉死 `key` 字段固定的 ID)。
+ * 因为扩展用固定公钥,load unpacked / 自签 .crx 都得到同一个 ID,
+ * 所以 `vortex-server install` 不带参时用此默认值即可,无需用户复制粘贴 ID。
+ * 商店分发若 ID 不同,可 `vortex-server install <id>` 覆盖。
+ */
+export const DEFAULT_EXTENSION_ID = "fbonhjdohmkcejfgmaicnkknpfafihnd";
+
 /** 有效的 Chrome 扩展 ID：32 位小写字母 */
 const EXTENSION_ID_RE = /^[a-z]{32}$/;
 
