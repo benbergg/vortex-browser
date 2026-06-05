@@ -19,3 +19,8 @@ docs/plans/
 # opencode 插件 + playwright-mcp 缓存
 packages/mcp/opencode.json
 packages/mcp/.playwright-mcp/
+
+# 临时打包/抓取产物(发布卫生)
+.playwright-mcp/
+packages/*/package/
+*.tgz

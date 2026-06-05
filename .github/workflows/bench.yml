@@ -17,8 +17,8 @@ jobs:
           cat <<'EOT'
           ⚠️  vortex-bench v0.6 需要真实 Chrome + extension + vortex-server。
           本地运行：
-            pnpm -F @bytenew/vortex-bench playground    # 独立终端
-            pnpm -F @bytenew/vortex-bench bench run --all
+            pnpm -F @vortex-browser/bench playground    # 独立终端
+            pnpm -F @vortex-browser/bench bench run --all
           见 packages/vortex-bench/README.md。
           EOT
           exit 78  # neutral
