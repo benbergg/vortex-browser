@@ -27,6 +27,7 @@ step()    { echo -e "\n${BOLD}=== $* ===${NC}"; }
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 SERVER_PKG="$REPO_ROOT/packages/server"
+VORTEX_SERVER_BIN="$SERVER_PKG/dist/bin/vortex-server.js"
 INSTALL_NM_HOST="$SERVER_PKG/dist/scripts/install-nm-host.js"
 EXTENSION_DIST="$REPO_ROOT/packages/extension/dist"
 
@@ -120,14 +121,24 @@ else
 
   # ─────────────────────────────────────────────
   # 5. 注册 Native Messaging host manifest
+  # 优先使用 `vortex-server install`（bin/vortex-server.js），
+  # 回退到旧版 dist/scripts/install-nm-host.js（向后兼容）。
   # ─────────────────────────────────────────────
   step "注册 Native Messaging host"
-  info "调用 install-nm-host.js (ID: $EXTENSION_ID) ..."
 
-  node "$INSTALL_NM_HOST" "$EXTENSION_ID" || {
-    NM_EXIT=$?
-    die "NM host 注册失败（退出码 $NM_EXIT）。\n  请检查是否有写入权限: $NM_HOST_DIR"
-  }
+  if [[ -f "$VORTEX_SERVER_BIN" ]]; then
+    info "调用 vortex-server install (ID: $EXTENSION_ID) ..."
+    node "$VORTEX_SERVER_BIN" install "$EXTENSION_ID" || {
+      NM_EXIT=$?
+      die "NM host 注册失败（退出码 $NM_EXIT）。\n  请检查是否有写入权限: $NM_HOST_DIR"
+    }
+  else
+    info "调用 install-nm-host.js (ID: $EXTENSION_ID) ..."
+    node "$INSTALL_NM_HOST" "$EXTENSION_ID" || {
+      NM_EXIT=$?
+      die "NM host 注册失败（退出码 $NM_EXIT）。\n  请检查是否有写入权限: $NM_HOST_DIR"
+    }
+  fi
 
   MANIFEST_PATH="$NM_HOST_DIR/com.vortexbrowser.host.json"
   if [[ -f "$MANIFEST_PATH" ]]; then

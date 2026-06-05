@@ -1,6 +1,32 @@
 import { appendFileSync } from "fs";
 import { Command } from "commander";
 import { startServer } from "../src/index.js";
+import { installNmHost } from "../src/install-nm-host.js";
+
+// ─────────────────────────────────────────────────────────────────────────────
+// install 子命令：手动 argv 检测，不用 commander subcommand。
+// 原因：Chrome Native Messaging 启动时会把 chrome-extension://<id>/ 作为位置参数
+// 追加进 argv，若用 commander .command('install') 可能把未知位置参数当未知命令报错。
+// 手动检测可精确匹配 "install" 字符串，chrome-extension:// 开头的参数自然跳过。
+// ─────────────────────────────────────────────────────────────────────────────
+if (process.argv[2] === "install") {
+  const extId = process.argv[3];
+  if (!extId) {
+    console.error("Usage: vortex-server install <chrome-extension-id>");
+    process.exit(1);
+  }
+  try {
+    const r = installNmHost(extId);
+    console.log(`✓ Native messaging host registered: ${r.hostName}`);
+    console.log(`  manifest: ${r.manifestPath}`);
+    console.log(`  host script: ${r.nativeHostPath}`);
+    console.log(`\nReload the Vortex extension in chrome://extensions to connect.`);
+    process.exit(0);
+  } catch (e: any) {
+    console.error(`install failed: ${e.message}`);
+    process.exit(1);
+  }
+}
 
 const LOG = "/tmp/vortex-server.log";
 const log = (msg: string) => appendFileSync(LOG, `${new Date().toISOString()} ${msg}\n`);
@@ -19,8 +45,10 @@ process.on("unhandledRejection", (err) => {
 const program = new Command();
 program
   .option("--port <port>", "local HTTP/WS port", String(process.env.VORTEX_PORT ?? "6800"))
-  // Chrome Native Messaging 启动时会追加未知参数（--parent-window 等），放行
+  // Chrome Native Messaging 启动时会追加未知参数（--parent-window 等）以及
+  // chrome-extension://<id>/ 等位置参数，全部放行
   .allowUnknownOption(true)
+  .allowExcessArguments(true)
   .parse(process.argv);
 
 const opts = program.opts();
