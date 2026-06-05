@@ -49,17 +49,34 @@ Chrome 扩展（MV3）           ← 装在你的 Chrome 里
 
 完整步骤：**[docs/INSTALL.zh-CN.md](docs/INSTALL.zh-CN.md)**
 
+**1. 安装 server**
 ```bash
-# 第 1 步——全局安装 server
 npm i -g @vortex-browser/server
+```
 
-# 第 2 步——构建并在 Chrome 加载扩展（详见 INSTALL.zh-CN.md）
-#           扩展 ID 已钉死，无需复制
+**2. 构建扩展**
+```bash
+git clone https://github.com/benbergg/vortex-browser
+cd vortex-browser && pnpm install && pnpm -r build
+```
 
-# 第 3 步——注册原生宿主（无需参数）
+**3. 在 Chrome 加载扩展**
+- 打开 `chrome://extensions`
+- 打开右上角的 **开发者模式** 开关
+- 点 **加载已解压的扩展程序** → 选择 `packages/extension/dist/` 文件夹
+
+> 扩展 ID 已钉死，无需复制。
+
+**4. 注册原生宿主**
+```bash
 vortex-server install
+```
 
-# 第 4 步——接入 AI 客户端（以 Claude Code 为例）
+**5. 重新加载扩展**，让它连上原生宿主
+- 回到 `chrome://extensions`，点 Vortex 卡片上的 **↻ 重新加载** 图标
+
+**6. 接入 AI 客户端**（以 Claude Code 为例）
+```bash
 claude mcp add vortex --scope user -- npx -y @vortex-browser/mcp
 ```
 

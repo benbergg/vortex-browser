@@ -49,17 +49,34 @@ Your real, logged-in Chrome page
 
 Full step-by-step guide: **[docs/INSTALL.md](docs/INSTALL.md)**
 
+**1. Install the server**
 ```bash
-# Step 1 — install the server globally
 npm i -g @vortex-browser/server
+```
 
-# Step 2 — build & load the extension in Chrome (see INSTALL.md)
-#           extension ID is pinned — no need to copy it
+**2. Build the extension**
+```bash
+git clone https://github.com/benbergg/vortex-browser
+cd vortex-browser && pnpm install && pnpm -r build
+```
 
-# Step 3 — register the native host (no argument needed)
+**3. Load the extension in Chrome**
+- Open `chrome://extensions`
+- Turn on **Developer mode** (top-right toggle)
+- Click **Load unpacked** → select the `packages/extension/dist/` folder
+
+> The extension ID is pinned, so you never need to copy it.
+
+**4. Register the native messaging host**
+```bash
 vortex-server install
+```
 
-# Step 4 — add to your AI client (Claude Code example)
+**5. Reload the extension** so it picks up the native host
+- Back on `chrome://extensions`, click the **↻ reload** icon on the Vortex card
+
+**6. Connect your AI client** (Claude Code example)
+```bash
 claude mcp add vortex --scope user -- npx -y @vortex-browser/mcp
 ```
 
