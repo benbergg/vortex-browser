@@ -30,29 +30,33 @@ export function registerContentHandlers(router: ActionRouter): void {
         target: buildExecuteTarget(tid, frameId),
         func: async (sel: string | null, opts: { wantValue: boolean; wantAttrs: boolean; maxDepth: number; scroll: boolean }) => {
           try {
-            // P1 scroll-until-settled：提取前分步滚到底触发懒加载。停止条件：
-            // scrollHeight 连续 2 次不增长（懒加载耗尽）。硬上限 15 步（每步 350ms，
-            // 正常约 5s 封顶，无限滚动信息流优雅降级）；10s deadline 为单步卡顿
-            // （reflow / scrollTo 阻塞）时的墙钟兜底，正常路径下 15 步先触顶。
-            // 提取后恢复原 scrollY 不扰用户视图。
-            // innerText 读全 DOM 与滚动位置无关，懒加载内容一旦 append 即持久，
-            // 故"恢复后再提取"对追加式懒加载无损（虚拟列表 DOM 回收为非目标）。
+            // P1 scroll-to-load：提取前分步滚到底触发懒加载。每步滚到底后在
+            // grace 窗口内**轮询等待 scrollHeight 增长**——一旦增长立即进下一步
+            // （快站不浪费），grace（1500ms）内无增长即判定懒加载耗尽。
+            // 关键：不能用"scrollHeight 短期不变"判停——AJAX 请求在途时 DOM 尚未
+            // append，scrollHeight 暂不变，会把"加载中"误判为"已 settle"提前终止、
+            // 提取到陈旧快照（live 验证 quotes.toscrape 实证：旧逻辑停在 10 条 +
+            // Loading，批次在提取后才落地）。grace 轮询容忍 AJAX 延迟。
+            // 硬上限 15 步 + 15s deadline 为无限滚动信息流封顶（优雅降级）。
+            // 提取后恢复原 scrollY 不扰用户视图；innerText 读全 DOM 与滚动位置无关，
+            // 懒加载内容一旦 append 即持久（虚拟列表 DOM 回收为非目标）。
             if (opts.scroll) {
               const MAX_SCROLL_STEPS = 15;
               const __origScrollY = window.scrollY;
-              const __deadline = Date.now() + 10000;
-              let __last = document.documentElement.scrollHeight;
-              let __stable = 0;
+              const __deadline = Date.now() + 15000;
               for (let __s = 0; __s < MAX_SCROLL_STEPS && Date.now() < __deadline; __s++) {
-                window.scrollTo(0, document.documentElement.scrollHeight);
-                await new Promise((r) => setTimeout(r, 350));
-                const __h = document.documentElement.scrollHeight;
-                if (__h === __last) {
-                  if (++__stable >= 2) break;
-                } else {
-                  __stable = 0;
-                  __last = __h;
+                const __before = document.documentElement.scrollHeight;
+                window.scrollTo(0, __before);
+                let __grew = false;
+                const __graceEnd = Date.now() + 1500;
+                while (Date.now() < __graceEnd) {
+                  await new Promise((r) => setTimeout(r, 200));
+                  if (document.documentElement.scrollHeight > __before) {
+                    __grew = true;
+                    break;
+                  }
                 }
+                if (!__grew) break;
               }
               window.scrollTo(0, __origScrollY);
             }

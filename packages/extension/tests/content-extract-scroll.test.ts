@@ -33,20 +33,27 @@ describe("content.getText scroll (P1) — 源码契约", () => {
     expect(SRC).toMatch(/opts\.scroll/);
   });
 
-  it("scroll-until-settled:scrollHeight 稳定判停 + 连续 2 次(>=2 阈值 load-bearing)", () => {
+  it("grow-or-stop:每步等 scrollHeight 增长(> __before),增长则继续", () => {
     expect(SRC).toMatch(/scrollHeight/);
-    expect(SRC).toMatch(/stable/i);
-    // 锁定"连续 2 次"语义:防 refactor 悄悄改成 stop-after-1(振荡页会提前误停)
-    expect(SRC).toMatch(/\+\+__stable\s*>=\s*2/);
+    // 锁定 grow-or-stop 语义:轮询比较 scrollHeight > 起始值,而非"短期不变即停"
+    // (后者会把 AJAX 在途误判为 settle 提前终止 —— live 验证 quotes.toscrape 实证)
+    expect(SRC).toMatch(/scrollHeight\s*>\s*__before/);
+    expect(SRC).toMatch(/__grew/);
+    expect(SRC).toMatch(/if\s*\(!__grew\)\s*break/);
+  });
+
+  it("grace 窗口容忍 AJAX 延迟(1500ms)", () => {
+    expect(SRC).toMatch(/__graceEnd/);
+    expect(SRC).toMatch(/1500/);
   });
 
   it("硬上限防无限滚动(15 步)", () => {
     expect(SRC).toMatch(/MAX_SCROLL_STEPS\s*=\s*15/);
   });
 
-  it("时间预算兜底(10s)", () => {
+  it("整体时间预算兜底(15s deadline)", () => {
     expect(SRC).toMatch(/Date\.now\(\)/);
-    expect(SRC).toMatch(/10000|10_000/);
+    expect(SRC).toMatch(/15000|15_000/);
   });
 
   it("提取后恢复原 scrollY(不扰用户视图)", () => {
