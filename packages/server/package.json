@@ -29,5 +29,23 @@
     "typescript": "^5.7.0",
     "vitest": "^2.1.0"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "description": "Local bridge server for Vortex (Native Messaging ↔ HTTP/WS).",
+  "keywords": [
+    "browser-automation",
+    "ai-agents",
+    "mcp",
+    "chrome-extension",
+    "llm",
+    "puppeteer-alternative",
+    "playwright-alternative"
+  ],
+  "homepage": "https://github.com/benbergg/vortex-browser",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/benbergg/vortex-browser.git"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
 }

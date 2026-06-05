@@ -22,5 +22,23 @@
     "@types/ws": "^8.5.0",
     "typescript": "^5.7.0"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "description": "CLI for Vortex — drive your real, logged-in Chrome from the terminal.",
+  "keywords": [
+    "browser-automation",
+    "ai-agents",
+    "mcp",
+    "chrome-extension",
+    "llm",
+    "puppeteer-alternative",
+    "playwright-alternative"
+  ],
+  "homepage": "https://github.com/benbergg/vortex-browser",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/benbergg/vortex-browser.git"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
 }
