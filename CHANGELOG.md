@@ -47,6 +47,16 @@ _新工作进入此段；ship 时改为版本号 + 日期。_
 
 ---
 
+## [1.0.2] - 2026-06-05
+
+仅 `@vortex-browser/server` 发布 1.0.2。
+
+### 🔧 Fixed
+
+- **全局 `vortex-server` 命令无法直接执行**:bin 入口 `dist/bin/vortex-server.js` 缺 shebang(`#!/usr/bin/env node`),`npm i -g` 后直接运行 `vortex-server install` 报 `import: command not found`(被 shell 而非 node 解释)。已在 `packages/server/bin/vortex-server.ts` 补 shebang(tsc 保留至产物)。此前经 `native-host.sh`/`node xxx.js` 显式调用不受影响,故 v1.0.1 dogfood 全局安装时才暴露。
+
+---
+
 ## [1.0.1] - 2026-06-05
 
 仅 `@vortex-browser/server` 发布 1.0.1;`@vortex-browser/{shared,mcp,cli}` 维持 1.0.0(未变动)。

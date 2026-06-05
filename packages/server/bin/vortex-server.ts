@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 import { appendFileSync } from "fs";
 import { Command } from "commander";
 import { startServer } from "../src/index.js";
