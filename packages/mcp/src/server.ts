@@ -362,7 +362,13 @@ export async function handleCallTool(
       return withEvents([{ type: "text" as const, text }]);
     }
     // detail=full：原 JSON pretty（与 v0.4 行为一致）
-    const resultText = JSON.stringify(resp.result ?? resp, null, 2);
+    // result 为 undefined(副作用型 eval:scrollTo/click/forEach/setItem… 极常见,
+    // 或 async eval 漏写 return)时,旧 `resp.result ?? resp` 会回退成整个 VtxResponse,
+    // JSON 丢掉 undefined 字段 → 吐出晦涩的 `{action,id}`(像空响应/错误,泄漏内部协议
+    // 字段)。改用 `JSON.stringify(resp.result, null, 2) ?? "undefined"`:利用
+    // JSON.stringify(undefined) 返回 JS undefined(非字符串)的特性,精确把 undefined
+    // 渲染成 "undefined"、null 渲染成 "null";falsy 值(0/false/"")不受影响。见已关闭 #35。
+    const resultText = JSON.stringify(resp.result, null, 2) ?? "undefined";
     return withEvents([{ type: "text" as const, text: resultText }]);
   }
 
@@ -506,7 +512,13 @@ export async function handleCallTool(
     }
 
     // 普通响应 + 超大截断
-    const resultText = JSON.stringify(resp.result ?? resp, null, 2);
+    // result 为 undefined(副作用型 eval:scrollTo/click/forEach/setItem… 极常见,
+    // 或 async eval 漏写 return)时,旧 `resp.result ?? resp` 会回退成整个 VtxResponse,
+    // JSON 丢掉 undefined 字段 → 吐出晦涩的 `{action,id}`(像空响应/错误,泄漏内部协议
+    // 字段)。改用 `JSON.stringify(resp.result, null, 2) ?? "undefined"`:利用
+    // JSON.stringify(undefined) 返回 JS undefined(非字符串)的特性,精确把 undefined
+    // 渲染成 "undefined"、null 渲染成 "null";falsy 值(0/false/"")不受影响。见已关闭 #35。
+    const resultText = JSON.stringify(resp.result, null, 2) ?? "undefined";
     if (resultText.length > RESPONSE_SIZE_LIMIT) {
       const truncated = resultText.slice(0, RESPONSE_SIZE_LIMIT);
       return withEvents([{
