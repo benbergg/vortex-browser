@@ -89,63 +89,64 @@ else
 fi
 
 # ─────────────────────────────────────────────
-# 4. 获取 Chrome 扩展 ID
+# 4. 确定 Chrome 扩展 ID
 # ─────────────────────────────────────────────
-step "获取 Chrome 扩展 ID"
+step "确定 Chrome 扩展 ID"
 
-# 允许通过环境变量或命令行参数传入扩展 ID
+# 优先使用命令行参数或环境变量；未提供则使用钉死的默认 ID
 EXTENSION_ID="${1:-${VORTEX_EXTENSION_ID:-}}"
 
-if [[ -z "$EXTENSION_ID" ]]; then
-  echo ""
-  info "需要 Chrome 扩展 ID 才能注册 Native Messaging host。"
-  info "获取方式:"
-  info "  1. 打开 Chrome，访问 chrome://extensions/"
-  info "  2. 开启右上角「开发者模式」"
-  info "  3. 点击「加载已解压的扩展程序」，选择目录:"
-  info "     $EXTENSION_DIST"
-  info "  4. 加载后复制显示的扩展 ID（32 位字母，例如 abcdefghijklmnopabcdefghijklmnop）"
-  echo ""
-  read -r -p "请输入扩展 ID（留空跳过 NM host 注册）: " EXTENSION_ID
-fi
+DEFAULT_EXTENSION_ID="fbonhjdohmkcejfgmaicnkknpfafihnd"
 
 if [[ -z "$EXTENSION_ID" ]]; then
-  warn "跳过 NM host 注册。"
-  warn "之后可随时重新运行此脚本并输入扩展 ID 完成注册，或手动运行:"
-  warn "  node $INSTALL_NM_HOST <扩展ID>"
+  info "扩展 ID 已钉死，使用默认值: $DEFAULT_EXTENSION_ID"
+  info "（如需覆盖，可传参: $0 <扩展ID>，或设置 VORTEX_EXTENSION_ID 环境变量）"
 else
   # 简单格式校验：Chrome 扩展 ID 为 32 位小写字母
   if [[ ! "$EXTENSION_ID" =~ ^[a-z]{32}$ ]]; then
     die "扩展 ID 格式不正确: \"$EXTENSION_ID\"\n  应为 32 位小写字母，例如: abcdefghijklmnopabcdefghijklmnop"
   fi
+  info "使用指定扩展 ID: $EXTENSION_ID"
+fi
 
-  # ─────────────────────────────────────────────
-  # 5. 注册 Native Messaging host manifest
-  # 优先使用 `vortex-server install`（bin/vortex-server.js），
-  # 回退到旧版 dist/scripts/install-nm-host.js（向后兼容）。
-  # ─────────────────────────────────────────────
-  step "注册 Native Messaging host"
+# ─────────────────────────────────────────────
+# 5. 注册 Native Messaging host manifest
+# 优先使用 `vortex-server install`（bin/vortex-server.js），
+# 回退到旧版 dist/scripts/install-nm-host.js（向后兼容）。
+# 未提供 EXTENSION_ID 时不传参（让 vortex-server 使用默认钉死 ID）；
+# 提供了则显式传入。
+# ─────────────────────────────────────────────
+step "注册 Native Messaging host"
 
-  if [[ -f "$VORTEX_SERVER_BIN" ]]; then
+if [[ -f "$VORTEX_SERVER_BIN" ]]; then
+  if [[ -n "$EXTENSION_ID" ]]; then
     info "调用 vortex-server install (ID: $EXTENSION_ID) ..."
     node "$VORTEX_SERVER_BIN" install "$EXTENSION_ID" || {
       NM_EXIT=$?
       die "NM host 注册失败（退出码 $NM_EXIT）。\n  请检查是否有写入权限: $NM_HOST_DIR"
     }
   else
-    info "调用 install-nm-host.js (ID: $EXTENSION_ID) ..."
-    node "$INSTALL_NM_HOST" "$EXTENSION_ID" || {
+    info "调用 vortex-server install（使用默认钉死 ID）..."
+    node "$VORTEX_SERVER_BIN" install || {
       NM_EXIT=$?
       die "NM host 注册失败（退出码 $NM_EXIT）。\n  请检查是否有写入权限: $NM_HOST_DIR"
     }
   fi
+else
+  # 回退：install-nm-host.js 需要显式 ID
+  EFFECTIVE_ID="${EXTENSION_ID:-$DEFAULT_EXTENSION_ID}"
+  info "调用 install-nm-host.js (ID: $EFFECTIVE_ID) ..."
+  node "$INSTALL_NM_HOST" "$EFFECTIVE_ID" || {
+    NM_EXIT=$?
+    die "NM host 注册失败（退出码 $NM_EXIT）。\n  请检查是否有写入权限: $NM_HOST_DIR"
+  }
+fi
 
-  MANIFEST_PATH="$NM_HOST_DIR/com.vortexbrowser.host.json"
-  if [[ -f "$MANIFEST_PATH" ]]; then
-    ok "NM host manifest 写入成功: $MANIFEST_PATH"
-  else
-    die "NM host manifest 未找到（注册脚本成功退出但文件不存在）: $MANIFEST_PATH"
-  fi
+MANIFEST_PATH="$NM_HOST_DIR/com.vortexbrowser.host.json"
+if [[ -f "$MANIFEST_PATH" ]]; then
+  ok "NM host manifest 写入成功: $MANIFEST_PATH"
+else
+  die "NM host manifest 未找到（注册脚本成功退出但文件不存在）: $MANIFEST_PATH"
 fi
 
 # ─────────────────────────────────────────────
@@ -159,7 +160,8 @@ echo "  1. 打开 Chrome，访问 chrome://extensions/"
 echo "  2. 开启右上角「开发者模式」"
 echo "  3. 点击「加载已解压的扩展程序」，选择目录:"
 echo -e "     ${BOLD}$EXTENSION_DIST${NC}"
-echo "  4. 记下扩展 ID（如果还未注册 NM host，再次运行此脚本并输入 ID）"
+echo "  4. 扩展 ID 已钉死（$DEFAULT_EXTENSION_ID），无需复制"
+echo "  5. 点击 Vortex 扩展的「重新加载」按钮，使 NM host 注册生效"
 echo ""
 
 # ─────────────────────────────────────────────

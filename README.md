@@ -43,7 +43,7 @@ Your real, logged-in Chrome page
 - **You only install 2 things:** the Chrome extension + `@vortex-browser/server`.
 - **`@vortex-browser/mcp` installs itself** — your AI client runs `npx -y @vortex-browser/mcp` automatically; nothing to install.
 - **The server starts itself** — when the extension activates, Chrome launches it via Native Messaging. You never run `vortex-server` manually.
-- **Installation order matters:** load the extension first to get its ID, then register the native host with that ID.
+- **Load the extension first:** `vortex-server install` uses the pinned extension ID automatically — no need to copy anything.
 
 ## Quick start
 
@@ -54,10 +54,10 @@ Full step-by-step guide: **[docs/INSTALL.md](docs/INSTALL.md)**
 npm i -g @vortex-browser/server
 
 # Step 2 — build & load the extension in Chrome (see INSTALL.md)
-#           copy the extension ID shown in chrome://extensions/
+#           extension ID is pinned — no need to copy it
 
-# Step 3 — register the native host
-vortex-server install <your-extension-id>
+# Step 3 — register the native host (no argument needed)
+vortex-server install
 
 # Step 4 — add to your AI client (Claude Code example)
 claude mcp add vortex --scope user -- npx -y @vortex-browser/mcp

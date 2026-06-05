@@ -43,7 +43,7 @@ Chrome 扩展（MV3）           ← 装在你的 Chrome 里
 - **你只装 2 个东西：** Chrome 扩展 + `@vortex-browser/server`。
 - **`@vortex-browser/mcp` 自动安装：** AI 客户端会执行 `npx -y @vortex-browser/mcp` 自动拉起，无需手动安装。
 - **服务端自动启动：** 扩展激活时，Chrome 通过 Native Messaging 自动启动 server，你永远不需要手动运行 `vortex-server`。
-- **安装有先后顺序：** 必须先加载扩展拿到扩展 ID，再用该 ID 注册原生宿主。
+- **先加载扩展：** `vortex-server install` 已内置钉死的扩展 ID，无需手动复制。
 
 ## 快速开始
 
@@ -54,10 +54,10 @@ Chrome 扩展（MV3）           ← 装在你的 Chrome 里
 npm i -g @vortex-browser/server
 
 # 第 2 步——构建并在 Chrome 加载扩展（详见 INSTALL.zh-CN.md）
-#           从 chrome://extensions/ 复制扩展 ID
+#           扩展 ID 已钉死，无需复制
 
-# 第 3 步——注册原生宿主
-vortex-server install <你的扩展ID>
+# 第 3 步——注册原生宿主（无需参数）
+vortex-server install
 
 # 第 4 步——接入 AI 客户端（以 Claude Code 为例）
 claude mcp add vortex --scope user -- npx -y @vortex-browser/mcp

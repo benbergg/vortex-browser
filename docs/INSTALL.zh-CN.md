@@ -33,7 +33,7 @@ Chrome 扩展（MV3）           ← 你来安装（加载已解压的扩展）
 你真实的、已登录的 Chrome 页面
 ```
 
-**为什么安装有先后顺序：** Chrome 的 Native Messaging 需要在宿主清单中列出扩展 ID。扩展 ID 只有在扩展加载到 Chrome 之后才能获取。因此必须*先*加载扩展、复制 ID，再用该 ID 注册原生宿主。
+**为什么先加载扩展：** Chrome 的 Native Messaging 需要在宿主清单中列出扩展 ID。由于扩展 ID 已通过 `manifest.json` 钉死，`vortex-server install` 已内置默认 ID，无需手动复制。
 
 ---
 
@@ -68,18 +68,19 @@ pnpm -r build
 2. 开启右上角的**开发者模式**
 3. 点击**加载已解压的扩展程序**
 4. 选择 `packages/extension/dist/` 文件夹
-5. 扩展加载后会显示一个 32 位字符的 ID（例如 `abcdefghijklmnopabcdefghijklmnop`）
-6. **复制该 ID**——下一步需要用到
+5. 扩展加载完成——扩展 ID 已钉死为 `fbonhjdohmkcejfgmaicnkknpfafihnd`，无需复制
 
 ---
 
 ## 第 3 步 — 注册原生宿主
 
 ```bash
-vortex-server install <扩展ID>
+vortex-server install
 ```
 
-将 `<扩展ID>` 替换为第 2 步复制的 ID。
+扩展 ID 已通过 `manifest.json` 钉死（`fbonhjdohmkcejfgmaicnkknpfafihnd`），命令无需参数，自动使用默认 ID。
+
+> **ID 不同的构建？** 如果你加载的是 ID 不同的版本（例如 Chrome Web Store 版），请显式传入 ID：`vortex-server install <你的扩展ID>`
 
 此命令会将 Native Messaging 宿主清单（`com.vortexbrowser.host`）写入对应的系统路径：
 
@@ -191,13 +192,15 @@ cat "$HOME/.config/google-chrome/NativeMessagingHosts/com.vortexbrowser.host.jso
 
 ### 扩展 ID 变了
 
-如果你删除并重新添加了扩展，Chrome 会分配一个新的 ID。重新执行：
+由于扩展 ID 通过 `manifest.json` 钉死，删除并重新添加扩展后 ID 不变（仍为 `fbonhjdohmkcejfgmaicnkknpfafihnd`）。直接重新执行注册命令，无需参数：
 
 ```bash
-vortex-server install <新扩展ID>
+vortex-server install
 ```
 
 然后在 `chrome://extensions/` 中重新加载扩展。该命令可安全重复执行——它会覆盖之前的清单文件。
+
+> 如果你加载的是 ID 确实不同的构建（例如 Chrome Web Store 版），请显式传入 ID：`vortex-server install <你的扩展ID>`
 
 ### 修改清单后需完全重启 Chrome
 

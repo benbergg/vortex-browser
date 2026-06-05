@@ -33,7 +33,7 @@ Chrome extension (MV3)       ← you install this (load unpacked)
 Your real, logged-in Chrome page
 ```
 
-**Why installation order matters:** Chrome's Native Messaging requires the extension ID to be listed in the host manifest. The extension ID is only known after the extension is loaded in Chrome. So you must load the extension *first*, copy its ID, then register the native host with that ID.
+**Why the extension loads first:** Chrome's Native Messaging requires the extension ID to be listed in the host manifest. Because the extension ID is now pinned in `manifest.json`, `vortex-server install` already knows the correct ID — no need to copy anything.
 
 ---
 
@@ -68,18 +68,19 @@ The built extension will be at `packages/extension/dist/`.
 2. Enable **Developer mode** (toggle in the top-right corner)
 3. Click **Load unpacked**
 4. Select the `packages/extension/dist/` folder
-5. The extension appears with a 32-character ID (e.g. `abcdefghijklmnopabcdefghijklmnop`)
-6. **Copy this ID** — you need it in the next step
+5. The extension loads — the extension ID is pinned to `fbonhjdohmkcejfgmaicnkknpfafihnd`, no need to copy it
 
 ---
 
 ## Step 3 — Register the native host
 
 ```bash
-vortex-server install <extension-id>
+vortex-server install
 ```
 
-Replace `<extension-id>` with the ID you copied in Step 2.
+The extension ID is pinned in `manifest.json` (`fbonhjdohmkcejfgmaicnkknpfafihnd`), so the command works without arguments — it uses the default ID automatically.
+
+> **Different build?** If you're loading a build with a different ID (e.g. a Chrome Web Store version), pass the ID explicitly: `vortex-server install <your-extension-id>`
 
 This command writes the Native Messaging host manifest (`com.vortexbrowser.host`) to the correct system path:
 
@@ -191,13 +192,15 @@ The `allowed_origins` field must contain your exact extension ID:
 
 ### Extension ID changed
 
-If you removed and re-added the extension, Chrome assigns a new ID. Re-run:
+Because the extension ID is pinned via `manifest.json`, removing and re-adding the extension keeps the same ID (`fbonhjdohmkcejfgmaicnkknpfafihnd`). Simply re-run the registration without any argument:
 
 ```bash
-vortex-server install <new-extension-id>
+vortex-server install
 ```
 
 Then reload the extension in `chrome://extensions/`. The command is safe to re-run — it overwrites the previous manifest.
+
+> If you're loading a build with a genuinely different ID (e.g. Chrome Web Store), pass the ID explicitly: `vortex-server install <your-extension-id>`
 
 ### After any manifest change
 
