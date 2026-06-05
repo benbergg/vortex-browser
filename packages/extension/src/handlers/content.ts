@@ -18,6 +18,9 @@ export function registerContentHandlers(router: ActionRouter): void {
       const wantAttrs = includeRaw != null && includeRaw.includes("attrs");
       const wantsStructured = wantValue || wantAttrs;
       const maxDepth = typeof args.maxDepth === "number" && args.maxDepth >= 0 ? args.maxDepth : 20;
+      // P1: scroll=true 时提取前分步滚动触发懒加载(window 级)。懒加载内容不滚动
+      // 不进 DOM,裸 extract 会返回内容但缺目标数据(正确性失败)。详见 0023 设计文档。
+      const scroll = args.scroll === true;
       const tid = await getActiveTabId(__t?.boundTabId ?? (args.tabId as number | undefined) ?? tabId);
       const frameId = __t?.boundFrameId ?? (args.frameId as number | undefined);
       if (frameId != null) await ensureFrameAttached(tid, frameId);
@@ -25,8 +28,35 @@ export function registerContentHandlers(router: ActionRouter): void {
       await loadPageSideModule(tid, frameId, "dom-resolve");
       const results = await chrome.scripting.executeScript({
         target: buildExecuteTarget(tid, frameId),
-        func: (sel: string | null, opts: { wantValue: boolean; wantAttrs: boolean; maxDepth: number }) => {
+        func: async (sel: string | null, opts: { wantValue: boolean; wantAttrs: boolean; maxDepth: number; scroll: boolean }) => {
           try {
+            // P1 scroll-until-settled：提取前分步滚到底触发懒加载。停止条件：
+            // scrollHeight 连续 2 次不增长（懒加载耗尽）。硬上限 15 步（每步 350ms，
+            // 正常约 5s 封顶，无限滚动信息流优雅降级）；10s deadline 为单步卡顿
+            // （reflow / scrollTo 阻塞）时的墙钟兜底，正常路径下 15 步先触顶。
+            // 提取后恢复原 scrollY 不扰用户视图。
+            // innerText 读全 DOM 与滚动位置无关，懒加载内容一旦 append 即持久，
+            // 故"恢复后再提取"对追加式懒加载无损（虚拟列表 DOM 回收为非目标）。
+            if (opts.scroll) {
+              const MAX_SCROLL_STEPS = 15;
+              const __origScrollY = window.scrollY;
+              const __deadline = Date.now() + 10000;
+              let __last = document.documentElement.scrollHeight;
+              let __stable = 0;
+              for (let __s = 0; __s < MAX_SCROLL_STEPS && Date.now() < __deadline; __s++) {
+                window.scrollTo(0, document.documentElement.scrollHeight);
+                await new Promise((r) => setTimeout(r, 350));
+                const __h = document.documentElement.scrollHeight;
+                if (__h === __last) {
+                  if (++__stable >= 2) break;
+                } else {
+                  __stable = 0;
+                  __last = __h;
+                }
+              }
+              window.scrollTo(0, __origScrollY);
+            }
+
             // Hidden 检查：display:none / visibility:hidden / [hidden] 自身或祖先
             // —— Chrome 的 el.innerText 在 display:none 元素上仍返回 textContent，
             // 违反 schema 描述 "Extract visible text"。这里显式过滤。
@@ -181,7 +211,7 @@ export function registerContentHandlers(router: ActionRouter): void {
             return { error: err instanceof Error ? err.message : String(err) };
           }
         },
-        args: [selector ?? null, { wantValue, wantAttrs, maxDepth }],
+        args: [selector ?? null, { wantValue, wantAttrs, maxDepth, scroll }],
         world: "MAIN",
       });
       const res = results[0]?.result as { result?: unknown; error?: string };

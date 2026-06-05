@@ -196,6 +196,8 @@ export function dispatchNewTool(
       // handler 通过 resolveTargetOptional 反查 snapshot store 拿 selector，
       // 不再依赖 a11y subtree —— @ref 与 CSS selector 走同一条 page-side 路径
       // （P0-6, 2026-05-21 用户报告）。
+      // P1: scroll(boolean)随 ...rest 透传到 content.getText（同 selector/tabId/
+      // frameId）；handler 读 args.scroll 决定提取前是否 scroll-until-settled。
       const { target: _target, depth, include, ...rest } = params;
       const next: Record<string, unknown> = { ...rest };
       if (depth !== undefined) next.maxDepth = depth;

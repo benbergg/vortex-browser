@@ -9,6 +9,11 @@
 // v0.8.x: 4600 → 4700 B。vortex_screenshot 增加 format/quality 字段
 // 提升 token 节省能力（caller 可 opt-in jpeg quality，实测体积可降 ~40%），
 // description 也要点出此能力以引导 LLM 使用。同样优先 cap 微调而非压缩字符。
+//
+// v0.8.x P1: 4700 → 4800 B。vortex_extract 增加 scroll(boolean) 公开能力
+// （提取前 scroll-until-settled 触发懒加载，解决"懒加载内容对裸 extract
+// 不可见"的正确性缺口），新增 schema 字段 ~27B + description 点出能力。
+// scroll 是真新增公开能力，cap 微调（+100，与前两次同步长）而非压缩字符。
 
 import { describe, it, expect } from "vitest";
 import { COMMIT_KINDS } from "@vortex-browser/shared";
@@ -20,8 +25,8 @@ describe("I15: tools/list budget + count + internalized grep", () => {
     defs.map(d => ({ name: d.name, description: d.description, inputSchema: d.schema })),
   );
 
-  it("tools/list 字节 ≤ 4700 B", () => {
-    expect(toolsListPayload.length).toBeLessThanOrEqual(4700);
+  it("tools/list 字节 ≤ 4800 B", () => {
+    expect(toolsListPayload.length).toBeLessThanOrEqual(4800);
   });
 
   it("公开工具数量 = 15", () => {

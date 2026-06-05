@@ -337,6 +337,19 @@ describe("dispatchNewTool", () => {
     expect(params.value).toBe("[1,2]");
   });
 
+  // P1: vortex_extract scroll(boolean)随 ...rest 透传到 content.getText,
+  // handler 据此在提取前 scroll-until-settled 触发懒加载。
+  it("vortex_extract(scroll:true) → content.getText 透传 scroll", () => {
+    const { action, params } = dispatchNewTool("vortex_extract", { scroll: true })!;
+    expect(action).toBe("content.getText");
+    expect(params.scroll).toBe(true);
+  });
+
+  it("vortex_extract 不传 scroll → params 无 scroll（向后兼容）", () => {
+    const { params } = dispatchNewTool("vortex_extract", { selector: "#x" })!;
+    expect(params.scroll).toBeUndefined();
+  });
+
   it("未知工具名返回 null（走 toolDef.action 默认路径）", () => {
     const result = dispatchNewTool("vortex_click", {});
     expect(result).toBeNull();
