@@ -157,7 +157,7 @@ export const PUBLIC_TOOLS: ToolDef[] = [
   {
     name: "vortex_wait_for",
     action: "L4.wait_for",
-    description: "Wait element/idle/info/custom(value=JS expr truthy).",
+    description: "Wait. mode=element|CSS, custom|JS, idle=net/xhr/dom, info.",
     schema: {
       type: "object",
       properties: {
