@@ -254,6 +254,7 @@ export const PUBLIC_TOOLS: ToolDef[] = [
       properties: {
         code: { type: "string" },
         async: { type: "boolean" },
+        timeout: { type: "number", default: 5000 },  // BUG-003: ms, max 60000
         ...tabFields,
       },
       required: ["code"],

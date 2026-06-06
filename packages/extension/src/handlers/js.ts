@@ -4,6 +4,43 @@ import type { DebuggerManager } from "../lib/debugger-manager.js";
 import { getActiveTabId, buildExecuteTarget, ensureFrameAttached } from "../lib/tab-utils.js";
 
 /**
+ * BUG-003: race a promise against a timeout. Only cancels the client-side wait —
+ * cannot abort a running page-side func (Chrome MV3 limitation). For true kill,
+ * use CDP Runtime.evaluate (cdpEvaluate) which has native timeout.
+ *
+ * @param promise  The async work to bound
+ * @param ms       Timeout in milliseconds
+ * @param action   Tool name for error context
+ */
+async function withTimeout<T>(promise: Promise<T>, ms: number, action: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () => reject(vtxError(VtxErrorCode.TIMEOUT,
+        `${action} timed out after ${ms}ms (page-side func may still be running; set shorter timeout, simplify code, or use vortex_navigate to clear the tab)`)),
+      ms,
+    );
+  });
+  try {
+    return await Promise.race([promise, timeoutPromise]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+/** Detect CDP "Script execution timed out" error (Chrome 99+). */
+function isTimeoutError(msg: string): boolean {
+  return /Script execution timed out|Timeout/i.test(msg) && /script|evaluate/i.test(msg);
+}
+
+function jsTimeoutError(timeoutMs: number): ReturnType<typeof vtxError> {
+  return vtxError(VtxErrorCode.TIMEOUT,
+    `Script execution timed out after ${timeoutMs}ms (CDP Runtime.evaluate killed page-side)`,
+    undefined,
+    { hint: "Avoid infinite loops or long-running operations. Set shorter timeout, simplify code, or split into multiple calls." });
+}
+
+/**
  * 页面 CSP 禁 `unsafe-eval`(GitHub / Twitter / Shopify / 多数银行 SaaS 普遍)时,
  * 注入 func 内的 eval/new Function 被**直接拒绝**——这与 Trusted Types
  * (require-trusted-types-for)是两套独立机制,命名 policy 救不了(eval 本身不允许)。
@@ -49,11 +86,17 @@ export function buildAsyncSrc(c: string): string {
  * 也为空,并发交错时会把对方在途的 CDP 会话误 detach(评审 HIGH 回归);保持 attach
  * 零竞态、零新横幅成本。returnByValue 与 executeScript 序列化语义一致;awaitPromise
  * 兼容同步值与 Promise。抛 Error(由调用方包成 vtxError)。
+ *
+ * v3.4 BUG-003:加 `timeoutMs` 参数(默认 5000),Chrome 走 `Runtime.evaluate { timeout:true,
+ * timeoutMs }` 原生 abort page-side 死循环。这是 CDP 层的真 kill(不像 page-side 路径
+ * 只能 race Promise)。handler 收到的错(error 包含 "Script execution timed out")由调用
+ * 方按 isTimeoutError 识别后包装为 TIMEOUT 错。
  */
 async function cdpEvaluate(
   debuggerMgr: DebuggerManager,
   tabId: number,
   expression: string,
+  timeoutMs: number = 5000,
 ): Promise<unknown> {
   await debuggerMgr.attach(tabId);
   const res = (await debuggerMgr.sendCommand(tabId, "Runtime.evaluate", {
@@ -61,6 +104,8 @@ async function cdpEvaluate(
     returnByValue: true,
     awaitPromise: true,
     userGesture: false,
+    timeout: true,             // BUG-003: enable CDP timeout
+    timeoutMs,                // BUG-003: 实际超时毫秒
   })) as {
     result?: { value?: unknown };
     exceptionDetails?: { exception?: { description?: string }; text?: string };
@@ -107,10 +152,20 @@ export function registerJsHandlers(
     [JsActions.EVALUATE]: async (args, tabId) => {
       const code = args.code as string;
       if (!code) throw vtxError(VtxErrorCode.INVALID_PARAMS, "Missing required param: code");
+      // BUG-003: validate timeout param
+      const timeout = (args.timeout as number | undefined) ?? 5000;
+      if (!Number.isInteger(timeout) || timeout < 1 || timeout > 60000) {
+        throw vtxError(VtxErrorCode.INVALID_PARAMS,
+          `timeout must be an integer in [1, 60000]; got ${timeout}`);
+      }
       const tid = await getActiveTabId((args.tabId as number | undefined) ?? tabId);
       const frameId = args.frameId as number | undefined;
       if (frameId != null) await ensureFrameAttached(tid, frameId);
-      const results = await chrome.scripting.executeScript({
+      // BUG-003: wrap executeScript in race-against-timeout
+      // Note: this only cancels the client-side wait, NOT the page-side func execution
+      // (Chrome MV3 has no way to abort a running executeScript func). For true kill,
+      // use CDP Runtime.evaluate (cdpEvaluate path below).
+      const execPromise = chrome.scripting.executeScript({
         target: buildExecuteTarget(tid, frameId),
         // Auto-IIFE: top-level `return` is illegal in script context. When eval()
         // throws "Illegal return statement", retry through `new Function(code)`
@@ -176,6 +231,8 @@ export function registerJsHandlers(
         args: [code],
         world: "MAIN",
       });
+      // BUG-003: race executeScript against timeout
+      const results = await withTimeout(execPromise, timeout, "js.evaluate");
       const res = results[0]?.result as { result?: unknown; error?: string; autoIIFE?: boolean };
       if (res?.error) {
         // CSP 禁 unsafe-eval 时回退 CDP Runtime.evaluate(仅主 frame——子 frame 需
@@ -183,11 +240,14 @@ export function registerJsHandlers(
         // 非法 → 镜像 page-side 的 auto-IIFE,包成 (function(){...})() 重试。
         if (debuggerMgr && frameId == null && isUnsafeEvalBlocked(res.error)) {
           try {
-            return await cdpEvaluate(debuggerMgr, tid, code);
+            return await cdpEvaluate(debuggerMgr, tid, code, timeout);
           } catch (e) {
             const m = e instanceof Error ? e.message : String(e);
             if (/Illegal return/.test(m)) {
-              return await cdpEvaluate(debuggerMgr, tid, `(function(){${code}})()`);
+              return await cdpEvaluate(debuggerMgr, tid, `(function(){${code}})()`, timeout);
+            }
+            if (isTimeoutError(m)) {
+              throw jsTimeoutError(timeout);
             }
             throw jsExecutionError(m);
           }
@@ -200,10 +260,17 @@ export function registerJsHandlers(
     [JsActions.EVALUATE_ASYNC]: async (args, tabId) => {
       const code = args.code as string;
       if (!code) throw vtxError(VtxErrorCode.INVALID_PARAMS, "Missing required param: code");
+      // BUG-003: validate timeout param
+      const timeout = (args.timeout as number | undefined) ?? 5000;
+      if (!Number.isInteger(timeout) || timeout < 1 || timeout > 60000) {
+        throw vtxError(VtxErrorCode.INVALID_PARAMS,
+          `timeout must be an integer in [1, 60000]; got ${timeout}`);
+      }
       const tid = await getActiveTabId((args.tabId as number | undefined) ?? tabId);
       const frameId = args.frameId as number | undefined;
       if (frameId != null) await ensureFrameAttached(tid, frameId);
-      const results = await chrome.scripting.executeScript({
+      // BUG-003: race executeScript against timeout
+      const execPromise = chrome.scripting.executeScript({
         target: buildExecuteTarget(tid, frameId),
         func: async (c: string) => {
           // 见 js.evaluate 注释:Trusted Types 站点上 `new Function(string)` 同被拒,
@@ -252,6 +319,8 @@ export function registerJsHandlers(
         args: [code],
         world: "MAIN",
       });
+      // BUG-003: race executeScript against timeout
+      const results = await withTimeout(execPromise, timeout, "js.evaluateAsync");
       const res = results[0]?.result as { result?: unknown; error?: string };
       if (res?.error) {
         // CSP 禁 unsafe-eval 时回退 CDP Runtime.evaluate(仅主 frame)。异步代码包成
@@ -261,15 +330,18 @@ export function registerJsHandlers(
           // Runtime.evaluate 求值 expression:先试表达式形式(支持纯表达式 code,B3-4),
           // 语法错误(语句/含 return)→ 回退函数体 IIFE 形式。镜像 page-side form-selection。
           try {
-            return await cdpEvaluate(debuggerMgr, tid, `(async () => (${code}))()`);
+            return await cdpEvaluate(debuggerMgr, tid, `(async () => (${code}))()`, timeout);
           } catch (e) {
             const m = e instanceof Error ? e.message : String(e);
             if (/SyntaxError|Unexpected|Illegal return/i.test(m)) {
               try {
-                return await cdpEvaluate(debuggerMgr, tid, `(async () => { ${code} })()`);
+                return await cdpEvaluate(debuggerMgr, tid, `(async () => { ${code} })()`, timeout);
               } catch (e2) {
                 throw jsExecutionError(e2 instanceof Error ? e2.message : String(e2));
               }
+            }
+            if (isTimeoutError(m)) {
+              throw jsTimeoutError(timeout);
             }
             throw jsExecutionError(m);
           }
