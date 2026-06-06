@@ -19,6 +19,46 @@ async function getTabUrl(tabId: number): Promise<string> {
   return tab.url;
 }
 
+/**
+ * B3-2 v3.3 (V2): 摘要化 Storage 内容(纯函数,可在 vitest 喂 stub Storage 真测)。
+ * 用于 `vortex_storage { op: "list-keys" }` 和 `op: "list-all"`,避免 `op: "get"`
+ * 不传 key 返 100KB+ 截断的全量 Record<string,string>。
+ *
+ * 模式:
+ *   - "keys" → 轻量摘要:keys + valueLengths(token 友好,典型 < 5KB)
+ *   - "all"  → 全量摘要:keys + values(显式 opt-in)
+ *
+ * ⚠️ 只能在 service worker / node(单测)调用。page-side func 内禁止调用本函数
+ *    (chrome.scripting.executeScript 序列化 toString 注入页面,丢模块作用域)。
+ *    func 内联同一逻辑(必须同步)。详见 V2 文档 §3.2 + claude-code 审核意见 §0。
+ *
+ * 旧契约(op:"get" 不传 key)仍返 Record<string,string> 全量,不走本函数,100% 向后兼容。
+ */
+export function summarizeStorage(
+  store: Storage,
+  mode: "keys" | "all",
+): {
+  keys: string[];
+  totalKeys: number;
+  valueLengths?: Record<string, number>;
+  values?: Record<string, string>;
+} {
+  const keys: string[] = [];
+  for (let i = 0; i < store.length; i++) {
+    const k = store.key(i);
+    if (k) keys.push(k);
+  }
+  if (mode === "keys") {
+    const valueLengths: Record<string, number> = {};
+    for (const k of keys) valueLengths[k] = (store.getItem(k) ?? "").length;
+    return { keys, totalKeys: keys.length, valueLengths };
+  }
+  // mode === "all"
+  const values: Record<string, string> = {};
+  for (const k of keys) values[k] = store.getItem(k) ?? "";
+  return { keys, totalKeys: keys.length, values };
+}
+
 export function registerStorageHandlers(router: ActionRouter): void {
   router.registerAll({
     // ===== Cookies（使用 chrome.cookies API）=====
@@ -79,26 +119,42 @@ export function registerStorageHandlers(router: ActionRouter): void {
 
     [StorageActions.GET_LOCAL_STORAGE]: async (args, tabId) => {
       const key = args.key as string | undefined;
+      const mode = (args.mode as "keys" | "all" | undefined) ?? null;
       const tid = await getActiveTabId((args.tabId as number | undefined) ?? tabId);
       const results = await chrome.scripting.executeScript({
         target: { tabId: tid },
-        func: (k: string | null) => {
+        func: (k: string | null, m: "keys" | "all" | null) => {
           try {
-            if (k) {
-              return { result: localStorage.getItem(k) };
+            if (k) return { result: localStorage.getItem(k) };
+            // B3-2 v3.3 (V2): m 不为空走摘要(内联,不能调模块级 summarizeStorage——
+            // 序列化丢作用域)。逻辑须与模块级 summarizeStorage 同步。
+            if (m) {
+              const keys: string[] = [];
+              for (let i = 0; i < localStorage.length; i++) {
+                const kk = localStorage.key(i);
+                if (kk) keys.push(kk);
+              }
+              if (m === "keys") {
+                const valueLengths: Record<string, number> = {};
+                for (const kk of keys) valueLengths[kk] = (localStorage.getItem(kk) ?? "").length;
+                return { result: { keys, totalKeys: keys.length, valueLengths } };
+              }
+              const values: Record<string, string> = {};
+              for (const kk of keys) values[kk] = localStorage.getItem(kk) ?? "";
+              return { result: { keys, totalKeys: keys.length, values } };
             }
-            // 返回所有 key-value
+            // 旧契约:不传 key + 不传 mode → 仍返 Record<string,string> 全量(不破)
             const all: Record<string, string> = {};
             for (let i = 0; i < localStorage.length; i++) {
-              const key = localStorage.key(i);
-              if (key) all[key] = localStorage.getItem(key) ?? "";
+              const kk = localStorage.key(i);
+              if (kk) all[kk] = localStorage.getItem(kk) ?? "";
             }
             return { result: all };
           } catch (err) {
             return { error: err instanceof Error ? err.message : String(err) };
           }
         },
-        args: [key ?? null],
+        args: [key ?? null, mode],
         world: "MAIN",
       });
       const res = results[0]?.result as { result?: unknown; error?: string };

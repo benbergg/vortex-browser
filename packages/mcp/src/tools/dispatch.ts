@@ -297,10 +297,16 @@ export function dispatchNewTool(
           return { action: "storage.setSessionStorage", params: next };
         case "cookies-get":
           return { action: "storage.getCookies", params: next };
+        // B3-2 v3.3 (V2):list-keys / list-all 走 storage.getLocalStorage 并带 mode,
+        // handler page-side func 内联摘要逻辑(不传 values 体积;list-all 显式 opt-in)。
+        case "list-keys":
+          return { action: "storage.getLocalStorage", params: { mode: "keys" } };
+        case "list-all":
+          return { action: "storage.getLocalStorage", params: { mode: "all" } };
         default:
           throw vtxError(
             VtxErrorCode.INVALID_PARAMS,
-            `storage: op must be one of get|set|session-get|session-set|cookies-get, got ${String(op)}`,
+            `storage: op must be one of get|set|session-get|session-set|cookies-get|list-keys|list-all, got ${String(op)}`,
           );
       }
     }

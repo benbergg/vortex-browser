@@ -220,13 +220,15 @@ export const PUBLIC_TOOLS: ToolDef[] = [
     // v2.1 PR-A (P1-14): 描述文档化。v2.2 实测确认 vortex_storage op:get
     // 不传 key 实测返回所有 key-value 完整对象(handler storage.ts:80-107),
     // 真正的"能力缺口"是 LLM 不知道 omit key = list all。
+    // v3.3 B3-2 (V2):新增 list-keys / list-all op,避免返 100KB+ 截断的全量。
+    // list-keys 仅返 keys + valueLengths(< 5KB),list-all 显式 opt-in 返全量。
     name: "vortex_storage",
     action: "L4.storage",
-    description: "local/session/cookies CRUD. omit key = list all.",
+    description: "local/session/cookies CRUD; list-keys/-all for ls summary.",
     schema: {
       type: "object",
       properties: {
-        op: { enum: ["get", "set", "session-get", "session-set", "cookies-get"] },
+        op: { enum: ["get", "set", "session-get", "session-set", "cookies-get", "list-keys", "list-all"] },
         key: { type: "string" },
         value: {},
         ...tabFields,
