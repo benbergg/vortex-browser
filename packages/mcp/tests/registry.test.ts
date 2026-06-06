@@ -15,7 +15,10 @@ describe("getToolDefs", () => {
     expect(a).toEqual(b);
   });
 
-  it("returns v0.8 public 15 tools (v0.6 11 + 4 v0.7.x backlog promotions)", () => {
+  it("returns v2.1 public 17 tools (v0.8 15 + 2 v2.1 PR-A promotions: tab_list, history)", () => {
+    // v2.1 PR-A: 把 v0.5 内部化的 vortex_tab_list + vortex_history
+    // promote 回 public（spec 12-Projects/0000-vortex优化/v2.1-实施方案.md §2 §3）。
+    // 后端 handler 早就 ready,只是 schemas-public.ts 没复制 schema 块。
     const names = getToolDefs().map((d) => d.name);
     expect(names.sort()).toEqual([
       "vortex_act",
@@ -24,6 +27,7 @@ describe("getToolDefs", () => {
       "vortex_extract",
       "vortex_file_upload",
       "vortex_fill",
+      "vortex_history",
       "vortex_mouse_drag",
       "vortex_navigate",
       "vortex_observe",
@@ -32,6 +36,7 @@ describe("getToolDefs", () => {
       "vortex_storage",
       "vortex_tab_close",
       "vortex_tab_create",
+      "vortex_tab_list",
       "vortex_wait_for",
     ]);
   });
@@ -39,15 +44,15 @@ describe("getToolDefs", () => {
   it("v0.5 internalized tools are accessible via getInternalToolDef but not getToolDef", () => {
     // v0.5 36 个 atom 中 25 个内部化（保留实现供 L4 dispatch 调）。
     // v0.8 把 fill / evaluate / mouse_drag / file_upload 4 个 promote 回公开，
-    // 其余仍内部化。
+    // v2.1 PR-A 又把 tab_list / history promote 回公开,共 17 public + 23 internal。
     const internalized = [
       "vortex_click", "vortex_type", "vortex_select", "vortex_hover", "vortex_batch",
       "vortex_get_text", "vortex_get_html",
       "vortex_mouse_click", "vortex_mouse_move",
       "vortex_console", "vortex_network", "vortex_network_response_body",
       "vortex_storage_get", "vortex_storage_set", "vortex_storage_session",
-      "vortex_tab_list", "vortex_frames_list", "vortex_wait", "vortex_wait_idle",
-      "vortex_page_info", "vortex_history",
+      "vortex_frames_list", "vortex_wait", "vortex_wait_idle",
+      "vortex_page_info",
       "vortex_file_download", "vortex_file_list_downloads",
       "vortex_events", "vortex_ping",
     ];
@@ -90,8 +95,10 @@ describe("getToolDefs", () => {
     expect(navigate?.returnsImage).toBeUndefined();
   });
 
-  it("has exactly 15 public tools (v0.8 L4 surface)", () => {
-    expect(getToolDefs().length).toBe(15);
+  it("has exactly 17 public tools (v2.1 PR-A: v0.8 15 + tab_list + history)", () => {
+    // v2.1 PR-A 工作量 ≤ 0.3 人天:schemas-public.ts 复制 2 个 schema 块 +
+    // 2 段 description 改写,后端零代码改动。
+    expect(getToolDefs().length).toBe(17);
   });
 });
 

@@ -1,5 +1,5 @@
 // I15: tools/list 字节硬断言 + 数量 + 内部化 grep。
-// spec: vortex重构-L4-spec.md §0.2.1 (4700B budget v0.8.x) + §3.3
+// spec: vortex重构-L4-spec.md §0.2.1 (4800B budget v2.1) + §3.3
 //
 // v0.8 cap: 4500 → 4600 B。v0.7.x backlog 重新暴露 4 个工具
 // (vortex_fill / vortex_evaluate / vortex_mouse_drag / vortex_file_upload)，
@@ -14,6 +14,11 @@
 // （提取前 scroll-until-settled 触发懒加载，解决"懒加载内容对裸 extract
 // 不可见"的正确性缺口），新增 schema 字段 ~27B + description 点出能力。
 // scroll 是真新增公开能力，cap 微调（+100，与前两次同步长）而非压缩字符。
+//
+// v2.1 PR-A: 4800 → 5200 B。promote vortex_tab_list + vortex_history 两
+// 个 schema 块回公开,2 段 description 重写(evaluate / storage)。后端
+// 零代码改动,只 +2 schema 块 + description 改写。两个工具 schema 实测
+// 共 +~407B,新 payload 实测 5137B,cap +400 至 5200 留 63B 余量。
 
 import { describe, it, expect } from "vitest";
 import { COMMIT_KINDS } from "@vortex-browser/shared";
@@ -25,15 +30,15 @@ describe("I15: tools/list budget + count + internalized grep", () => {
     defs.map(d => ({ name: d.name, description: d.description, inputSchema: d.schema })),
   );
 
-  it("tools/list 字节 ≤ 4800 B", () => {
-    expect(toolsListPayload.length).toBeLessThanOrEqual(4800);
+  it("tools/list 字节 ≤ 5200 B", () => {
+    expect(toolsListPayload.length).toBeLessThanOrEqual(5200);
   });
 
-  it("公开工具数量 = 15", () => {
-    expect(defs.length).toBe(15);
+  it("公开工具数量 = 17（v2.1 PR-A: v0.8 15 + tab_list + history）", () => {
+    expect(defs.length).toBe(17);
   });
 
-  it("15 个公开工具名匹配 spec L4 §1.1+§1.2 (v0.8)", () => {
+  it("17 个公开工具名匹配 spec L4 §1.1+§1.2 + v2.1 PR-A (v2.1)", () => {
     const names = defs.map(d => d.name).sort();
     expect(names).toEqual([
       "vortex_act",
@@ -42,6 +47,7 @@ describe("I15: tools/list budget + count + internalized grep", () => {
       "vortex_extract",
       "vortex_file_upload",
       "vortex_fill",
+      "vortex_history",
       "vortex_mouse_drag",
       "vortex_navigate",
       "vortex_observe",
@@ -50,6 +56,7 @@ describe("I15: tools/list budget + count + internalized grep", () => {
       "vortex_storage",
       "vortex_tab_close",
       "vortex_tab_create",
+      "vortex_tab_list",
       "vortex_wait_for",
     ]);
   });
@@ -58,15 +65,16 @@ describe("I15: tools/list budget + count + internalized grep", () => {
     const names = new Set(defs.map(d => d.name));
     // v0.8: vortex_fill / vortex_evaluate / vortex_mouse_drag / vortex_file_upload
     // 已从内部化回到公开（v0.7.x backlog promotion）。
+    // v2.1 PR-A: vortex_tab_list / vortex_history 也从内部化回到公开。
     const internalized = [
       // 写操作 → act
       "vortex_click", "vortex_type", "vortex_select",
       "vortex_scroll", "vortex_hover", "vortex_drag",
       // 读 → extract / observe
       "vortex_get_text", "vortex_get_html",
-      "vortex_frames_list", "vortex_tab_list",
+      "vortex_frames_list",
       // 等待 → wait_for
-      "vortex_wait", "vortex_wait_idle", "vortex_page_info", "vortex_history",
+      "vortex_wait", "vortex_wait_idle", "vortex_page_info",
       // 调试 → debug_read
       "vortex_console", "vortex_network", "vortex_network_response_body", "vortex_events",
       // 存储 → storage

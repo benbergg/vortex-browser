@@ -1,7 +1,7 @@
-// L4 public tool registry (11 tools).
+// L4 public tool registry (v2.1: 17 tools)。
 // spec: vortex重构-L4-spec.md §0.2.1 (compact schema rules)
 //
-// Compression rules (enforced by I15 ≤ 4500 B):
+// Compression rules (enforced by I15 ≤ 5200 B v2.1):
 // - description: imperative, ≤ 60 chars
 // - properties: NO description field
 // - shared inline $defs not possible across tools (MCP serializes each)
@@ -16,6 +16,13 @@
 // `@eN` / `@fNeM` legacy refs remain accepted but deprecated in v0.9. The
 // public description strings stay terse (≤ 60 char per I15) so ref-syntax
 // guidance is carried by the internal `schemas.ts` tool descriptions.
+//
+// v2.1 PR-A: 从 v0.5 内部化回公开 2 个工具 + 2 段 description 文档化。
+// 详见 tests/v2-shortboards.test.ts 端到端回归。
+// 1. vortex_tab_list (P0-12) — handler 就绪,只差 schema 复制
+// 2. vortex_history   (P1-13) — handler 就绪,只差 schema 复制
+// 3. vortex_storage description (P1-14) — 文档化"omit key = list all"
+// 4. vortex_evaluate description (P0-11) — 文档化"async=true 时 code 是 fn body"
 
 import { COMMIT_KINDS } from "@vortex-browser/shared";
 import type { ToolDef } from "./schemas.js";
@@ -122,6 +129,16 @@ export const PUBLIC_TOOLS: ToolDef[] = [
     },
   },
   {
+    // v2.1 PR-A (P0-12): 后端 tab.list handler 100% 就绪
+    // (packages/extension/src/handlers/tab.ts:6-37),只差 schemas-public.ts 复制。
+    // LLM agent 创建 tab 后用此工具拿到所有 tabId(active flag 必看),
+    // 然后显式传 tabId 给 observe/act/evaluate 等操作非 active tab。
+    name: "vortex_tab_list",
+    action: "tab.list",
+    description: "List open tabs with id, url, title, active flag.",
+    schema: { type: "object", properties: {}, required: [] },
+  },
+  {
     name: "vortex_screenshot",
     action: "capture.screenshot",
     description: "Screenshot page/element. jpeg+quality saves tokens.",
@@ -181,9 +198,30 @@ export const PUBLIC_TOOLS: ToolDef[] = [
     },
   },
   {
+    // v2.1 PR-A (P1-13): 后端 page.back / page.forward handler 100% 就绪
+    // (packages/extension/src/handlers/page.ts:212-226),dispatcher 也已
+    // 写好方向路由(dispatch.ts:44-47),只差 schemas-public.ts 复制。
+    // LLM agent 走 A→B→back 比重发 navigate 省一次完整网络请求。
+    // action 写 page.back 是占位:dispatcher 在 case "vortex_history" 中
+    // 按 direction 重新路由到 page.back 或 page.forward。
+    name: "vortex_history",
+    action: "page.back",
+    description: "Browser back/forward. direction=back (default)|forward.",
+    schema: {
+      type: "object",
+      properties: {
+        direction: { enum: ["back", "forward"] },
+        ...tabFields,
+      },
+    },
+  },
+  {
+    // v2.1 PR-A (P1-14): 描述文档化。v2.2 实测确认 vortex_storage op:get
+    // 不传 key 实测返回所有 key-value 完整对象(handler storage.ts:80-107),
+    // 真正的"能力缺口"是 LLM 不知道 omit key = list all。
     name: "vortex_storage",
     action: "L4.storage",
-    description: "localStorage / sessionStorage / cookies CRUD.",
+    description: "local/session/cookies CRUD. omit key = list all.",
     schema: {
       type: "object",
       properties: {
@@ -196,9 +234,15 @@ export const PUBLIC_TOOLS: ToolDef[] = [
     },
   },
   {
+    // v2.1 PR-A (P0-11): 描述文档化。v2.2 实测确认:
+    //   - sync 模式 code 是表达式,直接返回求值结果
+    //   - async=true 时 code 是 async 函数体,必须含 return
+    //   - 未调用的箭头/function 表达式和 async IIFE 形式均会返回 undefined
+    //     (handler 序列化函数/NodeList 为 undefined)
+    // LLM 写"返回 JSON"写法时需用 JSON.stringify() / 直接 return 兜底。
     name: "vortex_evaluate",
     action: "js.evaluate",
-    description: "Execute JS in page. async:true for await.",
+    description: "Execute JS. async=true: code is fn body, return obj.",
     schema: {
       type: "object",
       properties: {
