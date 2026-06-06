@@ -21,6 +21,26 @@ function isUnsafeEvalBlocked(msg: string): boolean {
 }
 
 /**
+ * B3-4 v3.3 (V2 修正):为 vortex_evaluate { async: true } 选择包装形式。
+ *  - 表达式 c → `return (async () => (${c}))()`(直接求值;handler 已 await fn(),无需内层 await)
+ *  - 语句/含 return → exprSrc 构造期 SyntaxError → 回退 `return (async () => { ${c} })()`(旧契约)
+ *
+ * ⚠️ 只能在 service worker / node(单测)调用。page-side func 内禁止调用本函数
+ *    (chrome.scripting.executeScript 序列化 toString 注入页面,丢模块作用域)。
+ *    func 内联同一逻辑(必须同步)。详见 V2 文档 §0.7 + claude-code 审核意见 §0。
+ */
+export function buildAsyncSrc(c: string): string {
+  const stmtSrc = `return (async () => { ${c} })()`;
+  const exprSrc = `return (async () => (${c}))()`;
+  try {
+    new Function(exprSrc);
+    return exprSrc;
+  } catch {
+    return stmtSrc;
+  }
+}
+
+/**
  * CDP Runtime.evaluate 回退:经 chrome.debugger 求值,**不受页面 CSP 约束**
  * (debugger 级求值绕过 unsafe-eval),与 Playwright 同路。只 attach 不 enable
  * domain(Runtime.evaluate 无需 Runtime.enable)。**求值后不主动 detach**——与
@@ -210,7 +230,13 @@ export function registerJsHandlers(
             } catch { g.__vortexTTPolicy = null; }
             return g.__vortexTTPolicy;
           };
-          const src = `return (async () => { ${c} })()`;
+          // B3-4 v3.3 (V2): 表达式 c(无 return)走直接求值形式,语句/含 return 回退函数体形式。
+          // 此处不能调用模块级 buildAsyncSrc(序列化丢作用域),内联同一逻辑——须与之同步。
+          // 任何 new Function 抛错(SyntaxError / TT / CSP)都保守回退 stmtSrc = 旧行为。
+          const stmtSrc = `return (async () => { ${c} })()`;
+          const exprSrc = `return (async () => (${c}))()`;
+          let src = stmtSrc;
+          try { new Function(exprSrc); src = exprSrc; } catch { /* keep stmtSrc */ }
           try {
             let fn: () => unknown;
             try { fn = new Function(src) as () => unknown; }
@@ -231,10 +257,21 @@ export function registerJsHandlers(
         // CSP 禁 unsafe-eval 时回退 CDP Runtime.evaluate(仅主 frame)。异步代码包成
         // (async()=>{...})() + awaitPromise,与 page-side 包装一致。
         if (debuggerMgr && frameId == null && isUnsafeEvalBlocked(res.error)) {
+          // B3-4 v3.3 (V2 修正):CSP 禁 unsafe-eval 时回退 CDP Runtime.evaluate。
+          // Runtime.evaluate 求值 expression:先试表达式形式(支持纯表达式 code,B3-4),
+          // 语法错误(语句/含 return)→ 回退函数体 IIFE 形式。镜像 page-side form-selection。
           try {
-            return await cdpEvaluate(debuggerMgr, tid, `(async () => { ${code} })()`);
+            return await cdpEvaluate(debuggerMgr, tid, `(async () => (${code}))()`);
           } catch (e) {
-            throw jsExecutionError(e instanceof Error ? e.message : String(e));
+            const m = e instanceof Error ? e.message : String(e);
+            if (/SyntaxError|Unexpected|Illegal return/i.test(m)) {
+              try {
+                return await cdpEvaluate(debuggerMgr, tid, `(async () => { ${code} })()`);
+              } catch (e2) {
+                throw jsExecutionError(e2 instanceof Error ? e2.message : String(e2));
+              }
+            }
+            throw jsExecutionError(m);
           }
         }
         throw jsExecutionError(res.error);

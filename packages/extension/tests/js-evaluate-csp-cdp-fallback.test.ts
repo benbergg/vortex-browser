@@ -128,13 +128,34 @@ describe("js.evaluate CSP unsafe-eval → CDP Runtime.evaluate 回退 (github do
     expect(dbg.attach).not.toHaveBeenCalled();
   });
 
-  it("js.evaluateAsync 报 unsafe-eval 时,回退 CDP 用 async 包装 + awaitPromise", async () => {
+  it("js.evaluateAsync 报 unsafe-eval + 表达式 code 时,回退 CDP 用 expr-first 包装 + awaitPromise", async () => {
+    // B3-4 v3.3 (V2):CDP 回退改 expr-first,表达式 code 直接走 expr 形式。
     executeScript.mockResolvedValue([{ result: { error: UNSAFE_EVAL_MSG } }]);
     dbg.sendCommand.mockResolvedValue({ result: { value: 99 } });
 
-    const out = (await router.dispatch(mkReq("js.evaluateAsync", { code: "return 99" }))) as Resp;
+    const out = (await router.dispatch(mkReq("js.evaluateAsync", { code: "Promise.resolve(99)" }))) as Resp;
     expect(out.result).toBe(99);
     expect(dbg.sendCommand.mock.calls[0][2]).toMatchObject({
+      expression: "(async () => (Promise.resolve(99)))()",
+      awaitPromise: true,
+    });
+  });
+
+  it("js.evaluateAsync 报 unsafe-eval + 语句 code 时,CDP expr-first 失败回退到函数体 IIFE", async () => {
+    // B3-4 v3.3 (V2):语句型 code 的 CDP 回退:expr-first 失败 → 第二次重试函数体 IIFE。
+    executeScript.mockResolvedValue([{ result: { error: UNSAFE_EVAL_MSG } }]);
+    dbg.sendCommand
+      .mockRejectedValueOnce(new Error("SyntaxError: Unexpected token 'return'"))
+      .mockResolvedValueOnce({ result: { value: 99 } });
+
+    const out = (await router.dispatch(mkReq("js.evaluateAsync", { code: "return 99" }))) as Resp;
+    expect(out.result).toBe(99);
+    // 第一次 sendCommand 用 expr-first(失败);第二次用函数体 IIFE(成功)
+    expect(dbg.sendCommand.mock.calls[0][2]).toMatchObject({
+      expression: "(async () => (return 99))()",
+      awaitPromise: true,
+    });
+    expect(dbg.sendCommand.mock.calls[1][2]).toMatchObject({
       expression: "(async () => { return 99 })()",
       awaitPromise: true,
     });
