@@ -353,9 +353,14 @@ export function registerPageHandlers(router: ActionRouter, debuggerMgr: Debugger
             (resolve) => {
               const start = Date.now();
               let lastError: string | undefined;
+              // BUG-004: detect IIFE forms and auto-invoke. Without this,
+              // `() => false` is `eval`-ed to an arrow function (truthy!) and
+              // `if (v)` immediately resolves, defeating "wait until X" semantics.
+              const isIIFE = /^\s*(?:async\s+)?(?:\([^)]*\)|[A-Za-z_$][\w$]*)\s*=>/.test(expr)
+                || /^\s*(?:async\s+)?function\s*[*(]/.test(expr);
               const tryOnce = () => {
                 try {
-                  const v = eval(expr);
+                  const v = isIIFE ? eval('(' + expr + ')()') : eval(expr);
                   if (v) {
                     resolve({ ok: true, value: v as unknown, waitedMs: Date.now() - start });
                     return true;
