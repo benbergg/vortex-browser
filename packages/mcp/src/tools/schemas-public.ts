@@ -242,7 +242,7 @@ export const PUBLIC_TOOLS: ToolDef[] = [
     // LLM 写"返回 JSON"写法时需用 JSON.stringify() / 直接 return 兜底。
     name: "vortex_evaluate",
     action: "js.evaluate",
-    description: "Execute JS. async=true: code is fn body, return obj.",
+    description: "Eval JS. MAIN world. async=fn body. No cross-origin iframe.",
     schema: {
       type: "object",
       properties: {
