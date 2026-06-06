@@ -275,6 +275,7 @@ export const PUBLIC_TOOLS: ToolDef[] = [
         toX: { type: "number" },
         toY: { type: "number" },
         steps: { type: "number" },
+        stepDelay: { type: "number", default: 0 },  // BUG-007: ms, 0 = no inter-step delay
         coordSpace: { enum: ["frame", "viewport"] },
         ...tabFields,
       },

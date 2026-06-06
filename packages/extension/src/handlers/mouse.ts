@@ -152,7 +152,10 @@ export function registerMouseHandlers(
       // drag-move 的 buttons:1 是 HTML5 DnD / 拖拽库识别为拖拽(而非 hover)的关键。
       await dispatchMouse(debuggerMgr, tid, "mouseMoved", from.x, from.y);
       await dispatchMouse(debuggerMgr, tid, "mousePressed", from.x, from.y, "left", 1, 1);
-      const stepDelay = 10;
+      // BUG-007: 允许 caller 显式 opt-in 慢速 path(DnD 库兼容),默认 0(快速 path,
+      // 避免 22 个 CDP 命令 round-trip 在大 step 数时累计 > 30s mcp timeout)。
+      // 0ms: dispatcher 内部 setTimeout 仍会 fire,但立即 resolve。
+      const stepDelay = (args.stepDelay as number | undefined) ?? 0;
       for (let i = 1; i <= steps; i++) {
         const t = i / steps;
         const xi = from.x + (to.x - from.x) * t;
