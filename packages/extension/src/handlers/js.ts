@@ -144,6 +144,133 @@ function jsExecutionError(message: string): ReturnType<typeof vtxError> {
   return vtxError(VtxErrorCode.JS_EXECUTION_ERROR, message);
 }
 
+/**
+ * v3.4 BUG-001 + BUG-005:对 chrome.scripting.executeScript structured clone 丢字段
+ * 的 host object 做后处理,转 plain object,LLM 拿得到真实字段。
+ *
+ * 根因:structured clone 对 DOMRect / CSSStyleDeclaration / Date / Map / Set / TypedArray /
+ * NodeList / Attr 等只 copy enumerable own properties,而这些类型的属性多在 prototype 上
+ * 的 getter(如 DOMRect.x 是 DOMRect.prototype 上的 accessor),clone 后 fallback 返 `{}`。
+ *
+ * 修复:
+ *   - Date → .toJSON() (ISO string)
+ *   - Error → {name, message, stack} plain object
+ *   - Map / Set / TypedArray / NodeList → Array.from() (own 索引元素)
+ *   - DOMRect / CSSStyleDeclaration / DOMStringMap → for...in 展开(枚举 own + inherited)
+ *   - 普通 object/array 递归展开(深度上限 5 防环)
+ *
+ * ⚠️ handler 侧只走 fallback(主路径 page-side func 内联同一展开,func.toString() 守卫防假绿)。
+ * 本函数纯函数可单测,handler 侧调它处理 CDP 回退的 result。
+ */
+export function normalizeEvaluateResult(value: unknown, depth = 0): unknown {
+  const MAX_DEPTH = 5;
+  if (depth > MAX_DEPTH) return null;
+  if (value === null || value === undefined) return value;
+  const t = typeof value;
+  if (t === "string" || t === "number" || t === "boolean" || t === "bigint") return value;
+  if (t === "function" || t === "symbol") return undefined;
+
+  // Array
+  if (Array.isArray(value)) return value.map((v) => normalizeEvaluateResult(v, depth + 1));
+
+  // Object — 走 ctor-name 路由
+  if (t === "object") {
+    const ctorName = (value as { constructor?: { name?: string } }).constructor?.name ?? "";
+
+    // BUG-005: Date → ISO string
+    if (ctorName === "Date") {
+      const d = value as Date;
+      return d.toJSON();
+    }
+
+    // BUG-005: Error → plain object
+    if (ctorName === "Error" || (value as { name?: string }).name?.endsWith("Error")) {
+      const e = value as Error;
+      const out: Record<string, unknown> = { name: e.name, message: e.message };
+      if (e.stack) out.stack = e.stack;
+      return out;
+    }
+
+    // BUG-005: Map / Set / TypedArray / NodeList → Array
+    if (ctorName === "Map" || ctorName === "Set" || ctorName === "NodeList") {
+      return Array.from(value as Iterable<unknown>).map((v) => normalizeEvaluateResult(v, depth + 1));
+    }
+    if (ctorName === "Uint8Array" || ctorName === "Uint8ClampedArray" ||
+        ctorName === "Int8Array" || ctorName === "Uint16Array" ||
+        ctorName === "Uint32Array" || ctorName === "Int16Array" ||
+        ctorName === "Int32Array" || ctorName === "Float32Array" ||
+        ctorName === "Float64Array" || ctorName === "BigInt64Array" ||
+        ctorName === "BigUint64Array") {
+      return Array.from(value as Iterable<number>).map((v) => normalizeEvaluateResult(v, depth + 1));
+    }
+
+    // BUG-001: DOMRect / CSSStyleDeclaration / DOMStringMap → for...in 展开
+    // 普通 plain object 也走这条路径(own properties)
+    const out: Record<string, unknown> = {};
+    for (const k in value as object) {
+      // 跳过 Object.prototype 上的字段 (constructor, hasOwnProperty, ...)
+      if (Object.prototype.hasOwnProperty.call(Object.prototype, k)) continue;
+      try {
+        // @ts-expect-error indexed access
+        const v = (value as Record<string, unknown>)[k];
+        if (typeof v === "function" || typeof v === "symbol") continue;
+        out[k] = normalizeEvaluateResult(v, depth + 1);
+      } catch {
+        // skip inaccessible
+      }
+    }
+    return out;
+  }
+  return value;
+}
+
+/**
+ * Page-side 内联版本(V2 风格)。在 func 内部 inline 调用,与 module-level
+ * `normalizeEvaluateResult` 行为一致。必须保持同步 — 任何变化两边一起改。
+ *
+ * 注:page-side func.toString() 守卫要求源码中**不**包含 "normalizeEvaluateResult"
+ * 字符串,所以这里用单独的 `expandHost` 名字。test 校验此独立性。
+ */
+const expandHost = (v: unknown, d = 0): unknown => {
+  const MAX = 5;
+  if (d > MAX) return null;
+  if (v === null || v === undefined) return v;
+  const t = typeof v;
+  if (t === "string" || t === "number" || t === "boolean" || t === "bigint") return v;
+  if (t === "function" || t === "symbol") return undefined;
+  if (Array.isArray(v)) return v.map((x: unknown) => expandHost(x, d + 1));
+  if (t === "object") {
+    const cn = (v as { constructor?: { name?: string } }).constructor?.name ?? "";
+    if (cn === "Date") return (v as Date).toJSON();
+    if (cn === "Error" || (v as { name?: string }).name?.endsWith("Error")) {
+      const e = v as Error;
+      const o: Record<string, unknown> = { name: e.name, message: e.message };
+      if (e.stack) o.stack = e.stack;
+      return o;
+    }
+    if (cn === "Map" || cn === "Set" || cn === "NodeList") {
+      return Array.from(v as Iterable<unknown>).map((x: unknown) => expandHost(x, d + 1));
+    }
+    if (cn === "Uint8Array" || cn === "Uint8ClampedArray" || cn === "Int8Array" ||
+        cn === "Uint16Array" || cn === "Uint32Array" || cn === "Int16Array" ||
+        cn === "Int32Array" || cn === "Float32Array" || cn === "Float64Array" ||
+        cn === "BigInt64Array" || cn === "BigUint64Array") {
+      return Array.from(v as Iterable<number>).map((x: unknown) => expandHost(x, d + 1));
+    }
+    const o: Record<string, unknown> = {};
+    for (const k in v as object) {
+      if (Object.prototype.hasOwnProperty.call(Object.prototype, k)) continue;
+      try {
+        const vv = (v as Record<string, unknown>)[k];
+        if (typeof vv === "function" || typeof vv === "symbol") continue;
+        o[k] = expandHost(vv, d + 1);
+      } catch { /* skip */ }
+    }
+    return o;
+  }
+  return v;
+};
+
 export function registerJsHandlers(
   router: ActionRouter,
   debuggerMgr?: DebuggerManager,
@@ -199,11 +326,11 @@ export function registerJsHandlers(
             return g.__vortexTTPolicy;
           };
           try {
-            try { return { result: eval(c) }; }
+            try { return { result: expandHost(eval(c)) }; }
             catch (err) {
               const m = err instanceof Error ? err.message : String(err);
               const p = isTT(m) ? getPolicy() : null;
-              if (p) return { result: eval(p.createScript(c) as unknown as string) };
+              if (p) return { result: expandHost(eval(p.createScript(c) as unknown as string)) };
               throw err;
             }
           }
@@ -213,13 +340,13 @@ export function registerJsHandlers(
               try {
                 try {
                   const fn = new Function(c);
-                  return { result: fn(), autoIIFE: true };
+                  return { result: expandHost(fn()), autoIIFE: true };
                 } catch (e2) {
                   const m2 = e2 instanceof Error ? e2.message : String(e2);
                   const p = isTT(m2) ? getPolicy() : null;
                   if (!p) throw e2;
                   const fn = new Function(p.createScript(c) as unknown as string);
-                  return { result: fn(), autoIIFE: true };
+                  return { result: expandHost(fn()), autoIIFE: true };
                 }
               } catch (err2) {
                 return { error: err2 instanceof Error ? err2.message : String(err2) };
