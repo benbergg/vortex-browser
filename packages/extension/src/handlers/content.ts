@@ -221,16 +221,21 @@ export function registerContentHandlers(router: ActionRouter): void {
       const res = results[0]?.result as { result?: unknown; error?: string };
       if (res?.error) throw vtxError(res.error.startsWith("Element not found:") ? VtxErrorCode.ELEMENT_NOT_FOUND : VtxErrorCode.JS_EXECUTION_ERROR, res.error, selector ? { selector } : undefined);
       const raw = res?.result;
-      const maxBytes = typeof args.maxBytes === "number" ? args.maxBytes : 131072;
+      // B3-7: maxLength (char count, 默认 10KB = 10240 chars) 优先于 maxBytes (byte count, 默认 128KB).
+      // maxLength 是 v3.1 新加的更紧默认; maxBytes 保留作向后兼容.
+      const maxLength = (args.maxLength as number | undefined) ?? 10240;
+      const maxBytes = (args.maxBytes as number | undefined) ?? 131072;
       if (!Number.isInteger(maxBytes) || maxBytes < 4096 || maxBytes > 5242880) {
         throw vtxError(VtxErrorCode.INVALID_PARAMS, `maxBytes must be an integer in [4096, 5242880]; got ${maxBytes}`);
       }
+      // 优先 maxLength (更紧), 缺省走 maxBytes
+      const effectiveLimit = (args.maxLength as number | undefined) ?? maxBytes;
       if (typeof raw === "string") {
-        return truncateWithTextTrailer(raw, maxBytes);
+        return truncateWithTextTrailer(raw, effectiveLimit);
       }
       if (raw && typeof raw === "object" && "text" in (raw as Record<string, unknown>)) {
         const obj = raw as { text: string; controls?: unknown };
-        const truncated = truncateWithTextTrailer(obj.text, Math.max(4096, Math.floor(maxBytes / 2)));
+        const truncated = truncateWithTextTrailer(obj.text, effectiveLimit);
         return { text: truncated, controls: obj.controls };
       }
       return raw;

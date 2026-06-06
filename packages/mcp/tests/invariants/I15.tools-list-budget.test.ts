@@ -19,6 +19,12 @@
 // 个 schema 块回公开,2 段 description 重写(evaluate / storage)。后端
 // 零代码改动,只 +2 schema 块 + description 改写。两个工具 schema 实测
 // 共 +~407B,新 payload 实测 5137B,cap +400 至 5200 留 63B 余量。
+//
+// v3.1 PR-E-scope-reduced: 5200 → 5300 B。vortex_extract 加 maxLength(number,
+// 默认 10KB = 10240 chars) 公开能力 (B3-7 落点修对到 handler + 真测
+// truncateWithTextTrailer),新增 schema 字段 ~30B + description 改写
+// 提及"maxLength 10KB"。maxLength 是真新增公开能力,cap 微调 (+100,
+// 跟历次同步长) 而非压缩字符。新 payload 实测 5225B,留 75B 余量。
 
 import { describe, it, expect } from "vitest";
 import { COMMIT_KINDS } from "@vortex-browser/shared";
@@ -30,8 +36,8 @@ describe("I15: tools/list budget + count + internalized grep", () => {
     defs.map(d => ({ name: d.name, description: d.description, inputSchema: d.schema })),
   );
 
-  it("tools/list 字节 ≤ 5200 B", () => {
-    expect(toolsListPayload.length).toBeLessThanOrEqual(5200);
+  it("tools/list 字节 ≤ 5300 B", () => {
+    expect(toolsListPayload.length).toBeLessThanOrEqual(5300);
   });
 
   it("公开工具数量 = 17（v2.1 PR-A: v0.8 15 + tab_list + history）", () => {

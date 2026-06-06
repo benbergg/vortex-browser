@@ -80,13 +80,14 @@ export const PUBLIC_TOOLS: ToolDef[] = [
   {
     name: "vortex_extract",
     action: "L4.extract",
-    description: "Extract visible text. scroll=load lazy content first.",
+    description: "Extract visible text. maxLength 10KB. scroll=load lazy.",
     schema: {
       type: "object",
       properties: {
         target: TargetOptional,
         depth: { type: "number" },
         include: { type: "array", items: { enum: ["text", "value", "attrs"] } },
+        maxLength: { type: "number", default: 10240 },
         scroll: { type: "boolean" },
         ...tabFields,
       },
