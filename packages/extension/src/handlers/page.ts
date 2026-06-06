@@ -167,6 +167,18 @@ export function registerPageHandlers(router: ActionRouter, debuggerMgr: Debugger
     [PageActions.NAVIGATE]: async (args, tabId) => {
       const url = args.url as string;
       if (!url) throw vtxError(VtxErrorCode.INVALID_PARAMS, "Missing required param: url");
+      // BUG-006: URL 预校验 — 防御性白名单,避免无 scheme 误跳 chrome-extension://
+      // 内部页,以及 javascript:/data: 等 XSS 风险。file:// 留给本地文件工作流。
+      const ALLOWED_URL_SCHEMES = ["http:", "https:", "file:"];
+      let parsed: URL;
+      try { parsed = new URL(url); } catch {
+        throw vtxError(VtxErrorCode.INVALID_PARAMS,
+          `Invalid URL: ${url} (must start with http:// or https://)`);
+      }
+      if (!ALLOWED_URL_SCHEMES.includes(parsed.protocol)) {
+        throw vtxError(VtxErrorCode.INVALID_PARAMS,
+          `URL scheme not allowed: ${parsed.protocol} (must be one of ${ALLOWED_URL_SCHEMES.join(", ")})`);
+      }
       const tid = await getActiveTabId(tabId);
       const waitForLoad = (args.waitForLoad as boolean) ?? true;
       // Public schema 暴露 waitUntil: load / domcontentloaded / networkidle。
