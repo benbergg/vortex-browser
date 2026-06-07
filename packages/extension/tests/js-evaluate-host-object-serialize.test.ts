@@ -133,3 +133,84 @@ describe("EVALUATE page-side func — host object 展开 (BUG-001 + BUG-005)", (
     expect(out.result).toEqual({ a: { b: { c: { d: { e: 42 } } } } });
   });
 });
+
+/**
+ * BUG-001/003/005 回归守卫(V2 风格真验):chrome.scripting.executeScript 经
+ * func.toString() 把 func 注入页面 MAIN world,**丢模块作用域**。若 func body 引用
+ * 模块级 `expandHost`(而非内联),注入后 `expandHost is not defined`,evaluate 全坏。
+ *
+ * 直接在 Node 模块作用域调 captureEvaluateFunc() 返回的 fn 是**假绿**:闭包链能解析
+ * 到同模块的 expandHost,跑得通。这里用 `new Function` 把 func 源码从模块作用域**剥离**
+ * 后重建再调,精确复刻 executeScript 的注入语义——这才能抓到真 bug。
+ */
+describe("EVALUATE func 序列化自包含 — 真注入复刻 (BUG-001/003/005 回归守卫)", () => {
+  let router: ActionRouter;
+  let executeScript: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    vi.unstubAllGlobals();
+    router = new ActionRouter();
+    executeScript = vi.fn();
+    vi.stubGlobal("chrome", {
+      tabs: { query: vi.fn().mockResolvedValue([{ id: 42 }]) },
+      webNavigation: {
+        getAllFrames: vi.fn().mockResolvedValue([
+          { frameId: 0, parentFrameId: -1, url: "https://x/" },
+        ]),
+      },
+      scripting: { executeScript },
+      runtime: { getManifest: vi.fn().mockReturnValue({ host_permissions: ["<all_urls>"] }) },
+    });
+    registerJsHandlers(router);
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  // 捕获 func 源码并从模块作用域剥离重建(模拟 executeScript 注入页面)
+  async function detachedEvaluateFunc(): Promise<(c: string) => { result?: unknown; error?: string }> {
+    executeScript.mockResolvedValue([{ result: { result: null } }]);
+    await router.dispatch(mkReq("js.evaluate", { code: "null" }, 42));
+    const src = (executeScript.mock.calls[0][0].func as (c: string) => unknown).toString();
+    executeScript.mockClear();
+    // new Function 在全局作用域重建,看不到模块级 expandHost——与页面 MAIN world 等价
+    return new Function(`return (${src});`)() as (c: string) => { result?: unknown; error?: string };
+  }
+
+  it("剥离作用域后简单表达式可跑(1+1)", async () => {
+    const fn = await detachedEvaluateFunc();
+    const out = fn("1+1");
+    expect(out.result).toBe(2);
+  });
+
+  it("剥离作用域后 plain object 展开", async () => {
+    const fn = await detachedEvaluateFunc();
+    const out = fn("({x:1, y:2})");
+    expect(out.result).toEqual({ x: 1, y: 2 });
+  });
+
+  it("剥离作用域后真注入 Date → ISO string (BUG-005)", async () => {
+    const fn = await detachedEvaluateFunc();
+    const out = fn("new Date(0)");
+    expect(out.result).toBe("1970-01-01T00:00:00.000Z");
+  });
+
+  it("剥离作用域后真注入 Map → array of pairs (BUG-005)", async () => {
+    const fn = await detachedEvaluateFunc();
+    const out = fn("new Map([[1,'a'],[2,'b']])");
+    expect(out.result).toEqual([[1, "a"], [2, "b"]]);
+  });
+
+  it("剥离作用域后真注入 host object(prototype getter)→ 展开字段 (BUG-001)", async () => {
+    const fn = await detachedEvaluateFunc();
+    // 模拟 DOMRect:字段在 prototype getter 上(structured clone 会丢,展开能取回)
+    const out = fn("(()=>{const p={};Object.defineProperties(p,{x:{get:()=>10,enumerable:true},w:{get:()=>100,enumerable:true}});return Object.create(p);})()");
+    expect(out.result).toEqual({ x: 10, w: 100 });
+  });
+
+  it("守卫:func 源码内**定义** expandHost(不只引用)", async () => {
+    executeScript.mockResolvedValue([{ result: { result: null } }]);
+    await router.dispatch(mkReq("js.evaluate", { code: "null" }, 42));
+    const src = (executeScript.mock.calls[0][0].func as (c: string) => unknown).toString();
+    // 必须在 func body 内定义 expandHost 标识符,而非引用模块级
+    expect(src).toMatch(/(?:const|let|var|function)\s+expandHost|expandHost\s*=/);
+  });
+});

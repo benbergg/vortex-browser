@@ -224,53 +224,6 @@ export function normalizeEvaluateResult(value: unknown, depth = 0): unknown {
   return value;
 }
 
-/**
- * Page-side 内联版本(V2 风格)。在 func 内部 inline 调用,与 module-level
- * `normalizeEvaluateResult` 行为一致。必须保持同步 — 任何变化两边一起改。
- *
- * 注:page-side func.toString() 守卫要求源码中**不**包含 "normalizeEvaluateResult"
- * 字符串,所以这里用单独的 `expandHost` 名字。test 校验此独立性。
- */
-const expandHost = (v: unknown, d = 0): unknown => {
-  const MAX = 5;
-  if (d > MAX) return null;
-  if (v === null || v === undefined) return v;
-  const t = typeof v;
-  if (t === "string" || t === "number" || t === "boolean" || t === "bigint") return v;
-  if (t === "function" || t === "symbol") return undefined;
-  if (Array.isArray(v)) return v.map((x: unknown) => expandHost(x, d + 1));
-  if (t === "object") {
-    const cn = (v as { constructor?: { name?: string } }).constructor?.name ?? "";
-    if (cn === "Date") return (v as Date).toJSON();
-    if (cn === "Error" || (v as { name?: string }).name?.endsWith("Error")) {
-      const e = v as Error;
-      const o: Record<string, unknown> = { name: e.name, message: e.message };
-      if (e.stack) o.stack = e.stack;
-      return o;
-    }
-    if (cn === "Map" || cn === "Set" || cn === "NodeList") {
-      return Array.from(v as Iterable<unknown>).map((x: unknown) => expandHost(x, d + 1));
-    }
-    if (cn === "Uint8Array" || cn === "Uint8ClampedArray" || cn === "Int8Array" ||
-        cn === "Uint16Array" || cn === "Uint32Array" || cn === "Int16Array" ||
-        cn === "Int32Array" || cn === "Float32Array" || cn === "Float64Array" ||
-        cn === "BigInt64Array" || cn === "BigUint64Array") {
-      return Array.from(v as Iterable<number>).map((x: unknown) => expandHost(x, d + 1));
-    }
-    const o: Record<string, unknown> = {};
-    for (const k in v as object) {
-      if (Object.prototype.hasOwnProperty.call(Object.prototype, k)) continue;
-      try {
-        const vv = (v as Record<string, unknown>)[k];
-        if (typeof vv === "function" || typeof vv === "symbol") continue;
-        o[k] = expandHost(vv, d + 1);
-      } catch { /* skip */ }
-    }
-    return o;
-  }
-  return v;
-};
-
 export function registerJsHandlers(
   router: ActionRouter,
   debuggerMgr?: DebuggerManager,
@@ -303,6 +256,50 @@ export function registerJsHandlers(
         // 包成 TrustedScript 再求值即可绕过(策略创建受页面 trusted-types 指令约束,
         // 失败则优雅回退抛原错——不比现状更糟)。
         func: (c: string) => {
+          // BUG-001/005:host object 序列化展开。**必须内联在 func 内部** ——
+          // chrome.scripting.executeScript 经 func.toString() 注入页面 MAIN world 时
+          // 丢模块作用域,引用模块级 expandHost 会 `expandHost is not defined`(v3.4 回归)。
+          // 与 module-level normalizeEvaluateResult 行为一致,须同步改两边;守卫要求源码
+          // 不含 "normalizeEvaluateResult" 字符串故这里用独立名 expandHost。
+          const expandHost = (v: unknown, d = 0): unknown => {
+            const MAX = 5;
+            if (d > MAX) return null;
+            if (v === null || v === undefined) return v;
+            const t = typeof v;
+            if (t === "string" || t === "number" || t === "boolean" || t === "bigint") return v;
+            if (t === "function" || t === "symbol") return undefined;
+            if (Array.isArray(v)) return v.map((x: unknown) => expandHost(x, d + 1));
+            if (t === "object") {
+              const cn = (v as { constructor?: { name?: string } }).constructor?.name ?? "";
+              if (cn === "Date") return (v as Date).toJSON();
+              if (cn === "Error" || (v as { name?: string }).name?.endsWith("Error")) {
+                const e = v as Error;
+                const o: Record<string, unknown> = { name: e.name, message: e.message };
+                if (e.stack) o.stack = e.stack;
+                return o;
+              }
+              if (cn === "Map" || cn === "Set" || cn === "NodeList") {
+                return Array.from(v as Iterable<unknown>).map((x: unknown) => expandHost(x, d + 1));
+              }
+              if (cn === "Uint8Array" || cn === "Uint8ClampedArray" || cn === "Int8Array" ||
+                  cn === "Uint16Array" || cn === "Uint32Array" || cn === "Int16Array" ||
+                  cn === "Int32Array" || cn === "Float32Array" || cn === "Float64Array" ||
+                  cn === "BigInt64Array" || cn === "BigUint64Array") {
+                return Array.from(v as Iterable<number>).map((x: unknown) => expandHost(x, d + 1));
+              }
+              const o: Record<string, unknown> = {};
+              for (const k in v as object) {
+                if (Object.prototype.hasOwnProperty.call(Object.prototype, k)) continue;
+                try {
+                  const vv = (v as Record<string, unknown>)[k];
+                  if (typeof vv === "function" || typeof vv === "symbol") continue;
+                  o[k] = expandHost(vv, d + 1);
+                } catch { /* skip inaccessible */ }
+              }
+              return o;
+            }
+            return v;
+          };
           const g = globalThis as unknown as {
             trustedTypes?: { createPolicy?: (n: string, r: { createScript: (s: string) => string }) => { createScript: (s: string) => string } };
             __vortexTTPolicy?: { createScript: (s: string) => string } | null;
