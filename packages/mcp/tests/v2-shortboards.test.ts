@@ -140,6 +140,24 @@ describe("TC-11: vortex_evaluate async 模式语义文档化（P0-11）", () => 
     const def = getToolDef("vortex_evaluate");
     expect(def!.description.length).toBeLessThanOrEqual(60);
   });
+
+  // ============================================================
+  // P2 (vortex-bench 2026-06-07 淘宝评测 V3 §5.1 P2):
+  // vortex_evaluate 文档加 IIFE 提示。
+  //
+  // 实测踩坑(V1/V2/V3 报告 P2):
+  //   `() => 42`     → eval 返回函数定义, 经 expandHost 转 undefined
+  //   `async () => obj` → 同样返回函数, undefined
+  //   必须 IIFE 包裹: `(function(){return 42;})()` 或 `(async function(){...})()`
+  //
+  // 验收:description 1 句话让 LLM 知道箭头/function 必须 IIFE 调用,避免
+  // 不必要的「return undefined → 以为踩坑」调试循环。
+  // ============================================================
+
+  it("vortex_evaluate description 提示 IIFE 包裹 (V3 §5.1 P2 文档化)", () => {
+    const def = getToolDef("vortex_evaluate");
+    expect(def!.description).toMatch(/IIFE|wrap.*\(|立即调用|invoke/i);
+  });
 });
 
 describe("PR-A 整体回归：公开工具数从 15 → 17", () => {

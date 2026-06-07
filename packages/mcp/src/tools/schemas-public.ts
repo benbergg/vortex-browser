@@ -247,9 +247,15 @@ export const PUBLIC_TOOLS: ToolDef[] = [
     //   - 未调用的箭头/function 表达式和 async IIFE 形式均会返回 undefined
     //     (handler 序列化函数/NodeList 为 undefined)
     // LLM 写"返回 JSON"写法时需用 JSON.stringify() / 直接 return 兜底。
+    //
+    // v2.2 P2 (vortex-bench 2026-06-07 淘宝评测 V3 §5.1 P2):
+    // 实测踩坑:`() => 42` / `async () => obj` 在 eval 后返回**函数定义**
+    // (经 expandHost 转 undefined),LLM 误以为"evaluate 坏了"开始调试循环。
+    // 必须 IIFE 包裹:`(function(){return 42;})()` / `(async function(){...})()`。
+    // description 须 1 句话让 LLM 知道箭头/function 必须 IIFE 调用。
     name: "vortex_evaluate",
     action: "js.evaluate",
-    description: "Eval JS. MAIN world. async=fn body. No cross-origin iframe.",
+    description: "MAIN world. async=fn body, IIFE. No cross-origin iframe.",
     schema: {
       type: "object",
       properties: {
