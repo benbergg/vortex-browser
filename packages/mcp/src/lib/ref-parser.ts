@@ -101,6 +101,8 @@ export function resolveTargetParam(
   target: string,
   activeSnapshotId: string | null,
   activeSnapshotHash: string | null,
+  activeTabId?: number | null,
+  currentTabId?: number | null,
 ): ResolvedTargetParam {
   const r = parseRef(target);
   if (r.kind === "selector") return { selector: r.selector };
@@ -109,6 +111,25 @@ export function resolveTargetParam(
     throw vtxError(
       VtxErrorCode.STALE_SNAPSHOT,
       "no active snapshot — call vortex_observe first",
+    );
+  }
+  // 缺陷⑤ (2026-06-07 v4 淘宝评测): tabId 维度校验, 防止 bare ref 跨
+  // 导航/跨 tab 绕过 v0.8 hash 严判。评审 #1+#3 组合, 适配 MCP 跑在 Node
+  // 无 chrome.webNavigation 限制: 不依赖 onCommitted, 只在调用入口比对
+  // activeTabId (observe 时记录的) vs currentTabId (本次调用 args.tabId)。
+  // 当 currentTabId 已传 + activeTabId 有值 + 不一致 → throw STALE_SNAPSHOT。
+  // 即便 ref 自身带 hash (r.hash === activeSnapshotHash), tab 切换后
+  // snapshot 仍可能已失效 (淘宝案例: 旧 "@3f5f:e121" 跨导航点中同 index 元素)。
+  if (
+    currentTabId !== undefined &&
+    currentTabId !== null &&
+    activeTabId !== undefined &&
+    activeTabId !== null &&
+    currentTabId !== activeTabId
+  ) {
+    throw vtxError(
+      VtxErrorCode.STALE_SNAPSHOT,
+      `Ref bound to snapshot from tab ${activeTabId}, but current tab is ${currentTabId} (tab changed since observe; re-call vortex_observe)`,
     );
   }
   // v0.8 strict check: only when the ref *itself* carries a hash prefix.

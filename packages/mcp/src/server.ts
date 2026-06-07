@@ -84,6 +84,10 @@ export function computeSnapshotHash(id: string | null): string | null {
 
 let activeSnapshotId: string | null = null;
 let activeSnapshotHash: string | null = null;
+// 缺陷⑤ (2026-06-07 v4 淘宝评测): 同时记 active snapshot 的 tabId,
+// 在 resolveTargetParam 入口与本次调用 args.tabId 比对, 防止 bare ref
+// 跨导航/跨 tab 绕过 v0.8 hash 严判。null = 尚未 observe 过 (等同无 snapshot)。
+let activeSnapshotTabId: number | null = null;
 
 const PORT = parseInt(process.env.VORTEX_PORT ?? "6800");
 const DEFAULT_TIMEOUT = parseInt(process.env.VORTEX_TIMEOUT_MS ?? "30000");
@@ -350,6 +354,12 @@ export async function handleCallTool(
     if (snapshotResult?.snapshotId) {
       activeSnapshotId = snapshotResult.snapshotId;
       activeSnapshotHash = computeSnapshotHash(snapshotResult.snapshotId);
+      // 缺陷⑤ (2026-06-07 v4 淘宝评测): 同步记 activeSnapshotTabId 用于
+      // tab 维度校验, 防止 bare ref 跨导航绕过 v0.8 hash 严判。tabId 在
+      // observe 调用 args 中, 上方 const { scope, filter, tabId, timeout, ...rest }
+      // 已解构。若未传 tabId, 保持 null, resolveTargetParam 不强制校验。
+      activeSnapshotTabId =
+        typeof tabId === "number" ? tabId : null;
     }
     if (detail === "compact") {
       const { renderObserveCompact } = await import("./lib/observe-render.js");
@@ -377,7 +387,17 @@ export async function handleCallTool(
   if (target) {
     try {
       const { resolveTargetParam } = await import("./lib/ref-parser.js");
-      const resolved = resolveTargetParam(target, activeSnapshotId, activeSnapshotHash);
+      // 缺陷⑤ (2026-06-07 v4 淘宝评测): 传 activeTabId + currentTabId
+      // 给 resolveTargetParam, 跨 tab/导航 throw STALE_SNAPSHOT。
+      const currentTabId =
+        typeof params.tabId === "number" ? params.tabId : null;
+      const resolved = resolveTargetParam(
+        target,
+        activeSnapshotId,
+        activeSnapshotHash,
+        activeSnapshotTabId,
+        currentTabId,
+      );
       delete params.target;
       if (resolved.selector) params.selector = resolved.selector;
       if (resolved.index != null) {
