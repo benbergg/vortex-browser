@@ -86,9 +86,16 @@ export async function waitActionable(
   }
 
   // Timeout exhausted
+  // V4 评测 P1-2 修复路径重做: 当 lastReason === 'NOT_STABLE' 时抛 NOT_STABLE
+  // 错误码(非 TIMEOUT),让 errors.hints.ts NOT_STABLE hint (含 sticky/fixed +
+  // transition + force=true 兜底建议) 生效。否则 LLM 收不到 force=true 提示,
+  // 永远卡重试循环。518d500 修了 hint 文本但未改错误码,修复路径错(V4 报告 §7.3.2)。
+  const lastReasonIsStability = lastReason === "NOT_STABLE";
   throw vtxError(
-    VtxErrorCode.TIMEOUT,
-    `Actionability timeout after ${timeout}ms; last reason: ${lastReason ?? "unknown"}`,
+    lastReasonIsStability ? VtxErrorCode.NOT_STABLE : VtxErrorCode.TIMEOUT,
+    lastReasonIsStability
+      ? `Element not stable after ${timeout}ms (last reason: NOT_STABLE)`
+      : `Actionability timeout after ${timeout}ms; last reason: ${lastReason ?? "unknown"}`,
     {
       selector,
       extras: { lastReason, ...(lastExtras ?? {}) },
