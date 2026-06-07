@@ -570,12 +570,13 @@ async function scanOneFrame(
               // 返空 → BUG-3 噪声过滤器丢弃 → 整控件在 observe 中隐形。
               // 通用化兜底: 用 input.type + input.value + bbox 位置生成可定位
               // 名, agent 仍能定位并操作 (不写淘宝特定字典, 不依赖 className
-              // 拼写是否正确, 不依赖 aria-label 注入)。位置用 bbox 强保证
-              // 唯一性, 即便同 form 多个未命名 radio 也不冲突。
+              // 拼写是否正确, 不依赖 aria-label 注入)。位置用 el (label 自
+              // 身) 的 bbox 而非 input 的 bbox, 保证与 observe 报告的 bbox
+              // 字段一致, agent 拿名即可定位。
               const inp = wrapsCheckRadio as HTMLInputElement;
               const role = inp.type === "checkbox" ? "checkbox" : "radio";
               const val = inp.value || "?";
-              const rect = inp.getBoundingClientRect();
+              const rect = el.getBoundingClientRect();
               return `${role}=${val} @x=${Math.round(rect.left)},y=${Math.round(rect.top)}`;
             }
           }
@@ -1709,6 +1710,9 @@ export function registerObserveHandlers(router: ActionRouter): void {
               name: e.name,
               ...(e.state ? { state: e.state } : {}),
               ...(e.valueNow !== undefined ? { valueNow: e.valueNow } : {}),
+              // 缺陷② (2026-06-07 v4 淘宝评测): compact 模式也透传
+              // offScreenActionable 标记, agent 用 compact 也能识别离屏可交互。
+              offScreenActionable: e.offScreenActionable,
               frameId: s.frameId,
               ...(bboxTuple ? { bbox: bboxTuple } : {}),
             });
@@ -1727,6 +1731,10 @@ export function registerObserveHandlers(router: ActionRouter): void {
               visible: e.visible,
               inViewport: e.inViewport,
               occludedBy: e.occludedBy,
+              // 缺陷② (2026-06-07 v4 淘宝评测): 透传 offScreenActionable
+              // 标记, agent 可区分 on-screen / off-screen-but-actionable
+              // 两类。page-side 已生成 (observe.ts:1443), 此处补 push。
+              offScreenActionable: e.offScreenActionable,
               attrs: e.attrs,
               ...(e.state ? { state: e.state } : {}),
               ...(e.valueNow !== undefined ? { valueNow: e.valueNow } : {}),

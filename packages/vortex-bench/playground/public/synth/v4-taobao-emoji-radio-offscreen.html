@@ -21,30 +21,42 @@
   /* 缺陷③ sub-pixel 漂动: 模拟淘宝买家页持续 reflow,
      元素本身 y 坐标 1px 量级抖动, 修复前 (严格 ===) 永远 NOT_STABLE。
      修复后 (0.5px 容差) 元素在 RAF 间漂动 ≤ 0.5px 判稳定。
-     这里用 CSS animation 制造 0.3px 持续漂动, 验证点击不 NOT_STABLE。 */
+     这里用 CSS animation 制造 0.3px 持续漂动, 验证点击不 NOT_STABLE。
+     周期 4s (慢速), 漂动幅度 ≤ 0.3px, 保证相邻 rAF (16ms) 间跳变 < 0.5px 容差。 */
   @keyframes subpixelJitter {
     0%   { transform: translateY(0); }
-    25%  { transform: translateY(0.3px); }
+    25%  { transform: translateY(0.2px); }
     50%  { transform: translateY(0.1px); }
-    75%  { transform: translateY(0.4px); }
-    100% { transform: translateY(0.2px); }
+    75%  { transform: translateY(0.3px); }
+    100% { transform: translateY(0.15px); }
   }
   .subpixel-jitter {
-    animation: subpixelJitter 0.8s infinite;
+    animation: subpixelJitter 4s infinite linear;
   }
 </style>
 </head>
 <body>
 <h1>v4 淘宝修复 E2E 综合验证 playground</h1>
 
-<!-- 缺陷①: <label> 包 radio 但内无文本 (淘宝 emoji 评分场景) -->
+<!-- 缺陷①: <label> 包 radio 但内无文本 (淘宝 emoji 评分场景)
+     关键: "好评/中评/差评" 文本节点必须放在 label **外**, 模拟淘宝纯 CSS
+     雪碧图模式 (label 内只有 <input>, 视觉表现由 CSS background-image + :checked
+     切换, 没有任何文本或 aria 标识 "好评/中评/差评")。原写法
+     `<label><input>好评</label>` 会让 label.textContent 包含 "好评", 走 labelText
+     优先分支, 触发不到兑底名逻辑。 -->
 <h2>场景 1: 缺陷① &lt;label&gt; 包 radio 但无文本</h2>
-<p>期望 observe 暴露 3 个 label, 每个含兜底名 <code>radio=N @x=...,y=...</code> (基于 input.value + bbox 位置)。</p>
+<p>期望 observe 暴露 3 个 label, 每个含兑底名 <code>radio=N @x=...,y=...</code> (基于 input.value + bbox 位置)。视觉上的"好评/中评/差评"由下面兄弟 div 的 CSS 背景图模拟 (类似淘宝纯 CSS 雪碧图)。</p>
 <form id="emoji-form">
-  <label><input type="radio" name="emoji" value="1" class="good-rate">好评</label>
-  <label><input type="radio" name="emoji" value="0" class="noraml-rate">中评</label>
-  <label><input type="radio" name="emoji" value="-1" class="bad-rate">差评</label>
+  <label><input type="radio" name="emoji" value="1" class="good-rate"></label>
+  <label><input type="radio" name="emoji" value="0" class="noraml-rate"></label>
+  <label><input type="radio" name="emoji" value="-1" class="bad-rate"></label>
 </form>
+<!-- 视觉标识 (仅供人眼参考, 不在 label 内, 不参与 observe 名源) -->
+<div class="emoji-visual">
+  <span class="emoji-label">好评</span>
+  <span class="emoji-label">中评</span>
+  <span class="emoji-label">差评</span>
+</div>
 
 <!-- 缺陷②: left:-9999px 但 clickable radio (淘宝 15 个细颗粒度评分场景) -->
 <h2>场景 2: 缺陷② 离屏可交互 (CSS a11y-hidden)</h2>
