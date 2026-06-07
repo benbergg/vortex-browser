@@ -1,0 +1,88 @@
+<!doctype html>
+<!--
+  Author: 青蛙
+  Description: v4 淘宝评测 4 个修复 E2E 验证 playground。
+    综合 4 个场景:
+    1. 缺陷① <label> 包 radio 但内无文本 (淘宝 emoji 评分场景)
+    2. 缺陷② left:-9999px 但 clickable radio (淘宝 15 个细颗粒度评分场景)
+    3. 缺陷③ 0.5px 子像素漂动 (淘宝买家页 reflow 场景, 实际由 mock 模拟)
+    4. 缺陷⑤ cross-observe-ref-stale (跨 observe 的 ref 失效, 由 ctx case 模拟)
+    4 个 fix 1 个 HTML, bench case v4-淘宝-emoji-radio-offscreen.case.ts 统一验证。
+-->
+<html lang="zh"><head><meta charset="utf-8"><title>v4 淘宝修复 E2E playground</title>
+<style>
+  /* 缺陷② 离屏可交互豁免: CSS a11y-hidden 模式 */
+  .visually-hidden-actionable {
+    position: absolute;
+    left: -9999px;
+    width: 50px;
+    height: 30px;
+  }
+  /* 缺陷③ sub-pixel 漂动: 模拟淘宝买家页持续 reflow,
+     元素本身 y 坐标 1px 量级抖动, 修复前 (严格 ===) 永远 NOT_STABLE。
+     修复后 (0.5px 容差) 元素在 RAF 间漂动 ≤ 0.5px 判稳定。
+     这里用 CSS animation 制造 0.3px 持续漂动, 验证点击不 NOT_STABLE。 */
+  @keyframes subpixelJitter {
+    0%   { transform: translateY(0); }
+    25%  { transform: translateY(0.3px); }
+    50%  { transform: translateY(0.1px); }
+    75%  { transform: translateY(0.4px); }
+    100% { transform: translateY(0.2px); }
+  }
+  .subpixel-jitter {
+    animation: subpixelJitter 0.8s infinite;
+  }
+</style>
+</head>
+<body>
+<h1>v4 淘宝修复 E2E 综合验证 playground</h1>
+
+<!-- 缺陷①: <label> 包 radio 但内无文本 (淘宝 emoji 评分场景) -->
+<h2>场景 1: 缺陷① &lt;label&gt; 包 radio 但无文本</h2>
+<p>期望 observe 暴露 3 个 label, 每个含兜底名 <code>radio=N @x=...,y=...</code> (基于 input.value + bbox 位置)。</p>
+<form id="emoji-form">
+  <label><input type="radio" name="emoji" value="1" class="good-rate">好评</label>
+  <label><input type="radio" name="emoji" value="0" class="noraml-rate">中评</label>
+  <label><input type="radio" name="emoji" value="-1" class="bad-rate">差评</label>
+</form>
+
+<!-- 缺陷②: left:-9999px 但 clickable radio (淘宝 15 个细颗粒度评分场景) -->
+<h2>场景 2: 缺陷② 离屏可交互 (CSS a11y-hidden)</h2>
+<p>期望默认 scope=viewport 仍保留这些 label, 标记 <code>offScreenActionable: true</code>。</p>
+<form id="rate-stars-form">
+  <!-- 描述 5 星 -->
+  <label class="visually-hidden-actionable">
+    <input type="radio" name="description" value="1">一星
+  </label>
+  <label class="visually-hidden-actionable">
+    <input type="radio" name="description" value="2">二星
+  </label>
+  <label class="visually-hidden-actionable">
+    <input type="radio" name="description" value="3">三星
+  </label>
+  <label class="visually-hidden-actionable">
+    <input type="radio" name="description" value="4">四星
+  </label>
+  <label class="visually-hidden-actionable">
+    <input type="radio" name="description" value="5">五星
+  </label>
+</form>
+
+<!-- 缺陷③: 0.5px 子像素容差 (淘宝买家页 reflow 场景) -->
+<h2>场景 3: 缺陷③ 0.5px 子像素漂动 click 不 NOT_STABLE</h2>
+<p>期望 click 抖动按钮 <strong>不</strong> 触发 NOT_STABLE, 修复后 0.5px 容差生效。</p>
+<button id="jitter-btn" class="subpixel-jitter">抖动按钮 (0.3px 持续漂动)</button>
+
+<!-- 公开/匿名 radio (对照组, 不属于 4 个修复场景) -->
+<h2>对照组: 公开/匿名 radio (修复不应破坏)</h2>
+<form id="public-form">
+  <label><input type="radio" name="public" value="1" checked>公开</label>
+  <label><input type="radio" name="public" value="0">匿名</label>
+</form>
+
+<!-- 评价文本框 (对照组) -->
+<h2>对照组: 评价文本框</h2>
+<textarea id="rate-text" rows="3" cols="40" placeholder="请输入评价..."></textarea>
+<button id="submit-btn">发表评论</button>
+</body>
+</html>
