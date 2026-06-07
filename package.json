@@ -8,7 +8,8 @@
     "clean": "pnpm -r clean",
     "lint:errors": "node scripts/check-throw-discipline.mjs",
     "prebuild": "node scripts/check-throw-discipline.mjs",
-    "ship:preflight": "node scripts/ship-preflight.mjs"
+    "ship:preflight": "node scripts/ship-preflight.mjs",
+    "dev:all": "node scripts/dev-all.mjs"
   },
   "engines": {
     "node": ">=18"

@@ -17,13 +17,16 @@ Requires Node 20+ and pnpm. The monorepo has five packages (`shared`, `extension
 For most work you iterate on the **extension** (browser action handlers) and the **mcp** layer (tool schemas).
 
 ```bash
-# Extension — Vite serve + @crxjs HMR + page-side watch
-pnpm --filter @vortex-browser/extension dev
+# One command — orchestrates all watchers + registers this worktree's NM host
+pnpm dev:all          # add --smoke to run a bench case once ready
 
-# MCP / server — tsc --watch
-pnpm --filter @vortex-browser/mcp dev
-pnpm --filter @vortex-browser/server dev
+# …or per-package:
+pnpm --filter @vortex-browser/extension dev   # Vite serve + @crxjs HMR + page-side watch
+pnpm --filter @vortex-browser/mcp dev         # tsc --watch
+pnpm --filter @vortex-browser/server dev      # tsc --watch
 ```
+
+**Loading the extension is a one-time step.** Chrome 137+ removed `--load-extension` (verified dead on Chrome 148 stable; Chrome for Testing loads it but the MV3 service worker stays dormant on `about:blank`), so there is no reliable headless auto-load. Load `packages/extension/dist` once via `chrome://extensions` → Developer mode → Load unpacked. The ID is pinned, so the load persists; from then on `@crxjs` HMR auto-reloads on every code change — no manual reload, and the MCP↔server WebSocket auto-reconnects so you don't need `/mcp reconnect` either (only mcp-code changes need that). Fixed ID + single port 6800 means only one Chrome instance can run the extension at a time.
 
 **Reload semantics** (full table in [`packages/extension/README.md`](packages/extension/README.md#dev-loop-hmr)):
 
