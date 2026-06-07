@@ -109,6 +109,28 @@ describe("DEFAULT_ERROR_META coverage", () => {
     expect(DEFAULT_ERROR_META.ELEMENT_OCCLUDED.recoverable).toBe(true);
     expect(DEFAULT_ERROR_META.STALE_SNAPSHOT.recoverable).toBe(true);
   });
+
+  // ============================================================
+  // P1-2 残留修复(vortex-bench 2026-06-07 淘宝评测 V3 §3.3):
+  // NOT_STABLE 在 sticky/fixed 容器 + CSS transition 场景频繁误报(0.5px 容差
+  // 仍不够,如天猫"加入购物车"按钮 `transition: bottom 0.15s`)。
+  // 不修代码(项目 c8928c0 已判定时序不可控),改 hint 显式建议 `force=true` 兜底。
+  // 验收:NOT_STABLE hint 让 LLM 一次看明白如何降级。
+  // ============================================================
+
+  it("NOT_STABLE hint 提及 sticky/fixed/transition 容器场景 (vortex-bench 2026-06-07 P1-2 残留)", () => {
+    const hint = DEFAULT_ERROR_META.NOT_STABLE.hint;
+    // 命中任一关键词即视为覆盖 sticky/fixed 容器场景
+    const coversContainer = /sticky|fixed|position:\s*(sticky|fixed)|ancestor/i.test(hint);
+    const coversTransition = /transition|animation|CSS/i.test(hint);
+    expect(coversContainer).toBe(true);
+    expect(coversTransition).toBe(true);
+  });
+
+  it("NOT_STABLE hint 显式建议 force=true 兜底 (优雅降级,避免 LLM 重试循环)", () => {
+    const hint = DEFAULT_ERROR_META.NOT_STABLE.hint;
+    expect(hint).toMatch(/force\s*[:=]\s*true|force=true/);
+  });
 });
 
 describe("vtxError factory", () => {

@@ -149,7 +149,12 @@ export const DEFAULT_ERROR_META: Record<VtxErrorCode, VtxErrorMeta> = {
     recoverable: true,
   },
   NOT_STABLE: {
-    hint: "Element position is unstable (animating). Call vortex_wait_for with mode='idle' to let the animation settle, then retry vortex_act.",
+    // vortex-bench 2026-06-07 淘宝评测 V3 §3.3 P1-2 残留降级:
+    // sticky/fixed 容器 + CSS transition 场景(如天猫"加入购物车"按钮
+    // `transition: bottom 0.15s`)下 0.5px 容差仍不够。修法不是改代码
+    // (项目 c8928c0 已判定时序不可控),而是让 hint 让 LLM 一次看明白
+    // 降级路径:force=true 走 CDP realMouse 跳过 stability check。
+    hint: "Element position is unstable. If it sits inside a sticky/fixed ancestor with a CSS transition (e.g. `transition: bottom 0.15s`), retry vortex_act with options: { force: true } to bypass the stability check (CDP realMouse). Otherwise call vortex_wait_for mode='idle' to let the animation settle.",
     recoverable: true,
   },
   OBSCURED: {
