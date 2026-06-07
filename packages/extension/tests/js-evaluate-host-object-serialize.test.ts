@@ -77,6 +77,24 @@ describe("normalizeEvaluateResult — host object 展开 (BUG-001 + BUG-005)", (
       expect(normalizeEvaluateResult(input)).toEqual(expected);
     });
   }
+
+  // BUG-005 robust:页面可 wrap/minify 重命名内置构造器(实测百度 Date.constructor.name="e"),
+  // constructor.name 路由被击穿。须改用 Object.prototype.toString 品牌检查(不可被重命名)。
+  it("Date 构造器被页面重命名(minify)仍 → ISO string", () => {
+    class Renamed extends Date {}
+    Object.defineProperty(Renamed, "name", { value: "e" });
+    const d = new Renamed(0);
+    expect(d.constructor.name).toBe("e");  // 复刻百度环境
+    expect(normalizeEvaluateResult(d)).toBe("1970-01-01T00:00:00.000Z");
+  });
+
+  it("Map 构造器被重命名仍 → array of pairs", () => {
+    class RenamedMap extends Map {}
+    Object.defineProperty(RenamedMap, "name", { value: "t" });
+    const m = new RenamedMap([[1, "a"]]);
+    expect(m.constructor.name).toBe("t");
+    expect(normalizeEvaluateResult(m)).toEqual([[1, "a"]]);
+  });
 });
 
 describe("EVALUATE page-side func — host object 展开 (BUG-001 + BUG-005)", () => {

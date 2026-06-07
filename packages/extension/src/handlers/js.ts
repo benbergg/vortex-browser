@@ -173,18 +173,20 @@ export function normalizeEvaluateResult(value: unknown, depth = 0): unknown {
   // Array
   if (Array.isArray(value)) return value.map((v) => normalizeEvaluateResult(v, depth + 1));
 
-  // Object — 走 ctor-name 路由
+  // Object — 走品牌(brand)路由。**不用 constructor.name**:页面可 wrap/minify 重命名
+  // 内置构造器(实测百度 Date.constructor.name="e"),constructor.name 被击穿。
+  // Object.prototype.toString 的 [[Class]]/Symbol.toStringTag 品牌不可被重命名,跨 realm 亦稳。
   if (t === "object") {
-    const ctorName = (value as { constructor?: { name?: string } }).constructor?.name ?? "";
+    const tag = Object.prototype.toString.call(value).slice(8, -1);  // "Date" / "Map" / "Error" / ...
 
     // BUG-005: Date → ISO string
-    if (ctorName === "Date") {
+    if (tag === "Date") {
       const d = value as Date;
       return d.toJSON();
     }
 
-    // BUG-005: Error → plain object
-    if (ctorName === "Error" || (value as { name?: string }).name?.endsWith("Error")) {
+    // BUG-005: Error → plain object (TypeError 等原生子类品牌同为 "Error")
+    if (tag === "Error" || (value as { name?: string }).name?.endsWith("Error")) {
       const e = value as Error;
       const out: Record<string, unknown> = { name: e.name, message: e.message };
       if (e.stack) out.stack = e.stack;
@@ -192,15 +194,15 @@ export function normalizeEvaluateResult(value: unknown, depth = 0): unknown {
     }
 
     // BUG-005: Map / Set / TypedArray / NodeList → Array
-    if (ctorName === "Map" || ctorName === "Set" || ctorName === "NodeList") {
+    if (tag === "Map" || tag === "Set" || tag === "NodeList") {
       return Array.from(value as Iterable<unknown>).map((v) => normalizeEvaluateResult(v, depth + 1));
     }
-    if (ctorName === "Uint8Array" || ctorName === "Uint8ClampedArray" ||
-        ctorName === "Int8Array" || ctorName === "Uint16Array" ||
-        ctorName === "Uint32Array" || ctorName === "Int16Array" ||
-        ctorName === "Int32Array" || ctorName === "Float32Array" ||
-        ctorName === "Float64Array" || ctorName === "BigInt64Array" ||
-        ctorName === "BigUint64Array") {
+    if (tag === "Uint8Array" || tag === "Uint8ClampedArray" ||
+        tag === "Int8Array" || tag === "Uint16Array" ||
+        tag === "Uint32Array" || tag === "Int16Array" ||
+        tag === "Int32Array" || tag === "Float32Array" ||
+        tag === "Float64Array" || tag === "BigInt64Array" ||
+        tag === "BigUint64Array") {
       return Array.from(value as Iterable<number>).map((v) => normalizeEvaluateResult(v, depth + 1));
     }
 
@@ -270,21 +272,22 @@ export function registerJsHandlers(
             if (t === "function" || t === "symbol") return undefined;
             if (Array.isArray(v)) return v.map((x: unknown) => expandHost(x, d + 1));
             if (t === "object") {
-              const cn = (v as { constructor?: { name?: string } }).constructor?.name ?? "";
-              if (cn === "Date") return (v as Date).toJSON();
-              if (cn === "Error" || (v as { name?: string }).name?.endsWith("Error")) {
+              // 品牌路由,不用 constructor.name(页面可重命名,实测百度 Date→"e")。
+              const tag = Object.prototype.toString.call(v).slice(8, -1);
+              if (tag === "Date") return (v as Date).toJSON();
+              if (tag === "Error" || (v as { name?: string }).name?.endsWith("Error")) {
                 const e = v as Error;
                 const o: Record<string, unknown> = { name: e.name, message: e.message };
                 if (e.stack) o.stack = e.stack;
                 return o;
               }
-              if (cn === "Map" || cn === "Set" || cn === "NodeList") {
+              if (tag === "Map" || tag === "Set" || tag === "NodeList") {
                 return Array.from(v as Iterable<unknown>).map((x: unknown) => expandHost(x, d + 1));
               }
-              if (cn === "Uint8Array" || cn === "Uint8ClampedArray" || cn === "Int8Array" ||
-                  cn === "Uint16Array" || cn === "Uint32Array" || cn === "Int16Array" ||
-                  cn === "Int32Array" || cn === "Float32Array" || cn === "Float64Array" ||
-                  cn === "BigInt64Array" || cn === "BigUint64Array") {
+              if (tag === "Uint8Array" || tag === "Uint8ClampedArray" || tag === "Int8Array" ||
+                  tag === "Uint16Array" || tag === "Uint32Array" || tag === "Int16Array" ||
+                  tag === "Int32Array" || tag === "Float32Array" || tag === "Float64Array" ||
+                  tag === "BigInt64Array" || tag === "BigUint64Array") {
                 return Array.from(v as Iterable<number>).map((x: unknown) => expandHost(x, d + 1));
               }
               const o: Record<string, unknown> = {};
