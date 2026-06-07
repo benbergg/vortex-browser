@@ -26,6 +26,10 @@ const entries = [
   { name: "dom-resolve", entry: "src/page-side/dom-resolve.ts" },
 ];
 
+// --watch:dev loop 用。vite build.watch 返回 RollupWatcher，源文件变化自动重建
+// 单个 IIFE 到 dist/page-side/<name>.js（executeScript 下次调用即取新，无需扩展 reload）。
+const watch = process.argv.includes("--watch");
+
 for (const { name, entry } of entries) {
   console.log(`[page-side] building ${name}...`);
   await build({
@@ -34,6 +38,7 @@ for (const { name, entry } of entries) {
     root: pkgRoot,
     logLevel: "warn",
     build: {
+      watch: watch ? {} : null,
       lib: {
         entry: resolve(pkgRoot, entry),
         formats: ["iife"],
@@ -52,7 +57,9 @@ for (const { name, entry } of entries) {
       },
     },
   });
-  console.log(`[page-side] built dist/page-side/${name}.js`);
+  console.log(`[page-side] ${watch ? "watching" : "built"} dist/page-side/${name}.js`);
 }
 
-console.log("[page-side] all bundles built successfully.");
+console.log(watch
+  ? "[page-side] all bundles built; watching for changes."
+  : "[page-side] all bundles built successfully.");
