@@ -220,21 +220,30 @@ export type ActionabilityResult =
     return { ok: false, blocker: desc };
   }
 
-  // Stable check: sample bounding rect across 1 RAF cycle, strict === comparison
-  // (per L2-spec §7.2 "fixed 1 RAF cycle" + §1.3 "consecutive 2 RAF samples").
-  // r1 captured synchronously, r2 after 1 rAF callback — the gap between the
-  // two samples is exactly one animation frame. No tolerance: any sub-pixel
-  // movement counts as not-stable (spec drops the original "< 1px" tolerance).
+  // Stable check: sample bounding rect across 1 RAF cycle, 0.5px sub-pixel
+  // tolerance (per L2-spec §7.2 "stable 1 RAF cycle with 0.5px tolerance" +
+  // §1.3 "consecutive 2 RAF samples" unchanged). r1 captured synchronously,
+  // r2 after 1 rAF callback — the gap between the two samples is exactly
+  // one animation frame. 0.5px tolerance accommodates sub-pixel reflow noise
+  // inherent to modern SPAs (lazy-load, sticky header, animation, theme
+  // transitions) and aligns with Playwright's actionability check.
+  //
+  // 缺陷③ (2026-06-07 v4 淘宝评测): 原 spec (v0.4.x) 砍掉了 <1px 容差, 改
+  // 严格 ===, 在淘宝买家页子像素 reflow 场景 (cart 数字 87→88、猜你喜欢
+  // lazy-load) 下所有 click 永远 NOT_STABLE, 唯一出口 options={force:true,
+  // timeout:10000} 破坏"无需人工调优"承诺。L2-spec 决策 A (2026-06-07 KB):
+  // 恢复 0.5px 容差, 与 Playwright 对齐, 修正 spec 漂移。
   function isStable(el: Element): Promise<boolean> {
     return new Promise((resolve) => {
       const r1 = el.getBoundingClientRect();
       requestAnimationFrame(() => {
         const r2 = el.getBoundingClientRect();
+        const TOL = 0.5; // px, L2-spec §7.2
         const stable =
-          r1.x === r2.x &&
-          r1.y === r2.y &&
-          r1.width === r2.width &&
-          r1.height === r2.height;
+          Math.abs(r1.x - r2.x) <= TOL &&
+          Math.abs(r1.y - r2.y) <= TOL &&
+          Math.abs(r1.width - r2.width) <= TOL &&
+          Math.abs(r1.height - r2.height) <= TOL;
         resolve(stable);
       });
     });
