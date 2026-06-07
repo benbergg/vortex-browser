@@ -1309,7 +1309,33 @@ async function scanOneFrame(
             rect.bottom > 0 &&
             rect.left < window.innerWidth &&
             rect.right > 0;
-          if (mode === "visible" && !inViewport) continue;
+          // 缺陷② (2026-06-07 v4 淘宝评测): visually-hidden actionable 豁免。
+          // CSS a11y-hidden 模式 (position:absolute|fixed + left/right 巨大值)
+          // 不应被默认 viewport 过滤静默丢弃 — 这是 GitHub/MDN/Ant Design/淘宝
+          // 等"用 CSS 离屏但保留可交互"站点的族级问题 (淘宝 15 个细颗粒度
+          // 评分 label 案例)。元素保留, 加 offScreenActionable 标记, agent 可
+          // 区分 on-screen / off-screen-but-actionable。评审校正: 放弃
+          // checkVisibility 替代方案 — checkVisibility 不判位置, 对
+          // left:-9999px 返 true (源码 1300-1305 checkVisibility 门专挡
+          // content-visibility:hidden, 不判位置)。
+          const cs = getComputedStyle(htmlEl);
+          const pos = cs.position;
+          const csLeft = parseFloat(cs.left);
+          const csRight = parseFloat(cs.right);
+          const farNeg = -1000;
+          const farPos = window.innerWidth + 1000;
+          const visuallyHiddenActionable =
+            (pos === "absolute" || pos === "fixed") &&
+            ((Number.isFinite(csLeft) && csLeft < farNeg) ||
+              (Number.isFinite(csRight) && csRight < farNeg) ||
+              (Number.isFinite(csLeft) && csLeft > farPos) ||
+              (Number.isFinite(csRight) && csRight > farPos));
+          if (
+            mode === "visible" &&
+            !inViewport &&
+            !visuallyHiddenActionable
+          )
+            continue;
 
           let visible = true;
           let occludedBy: string | undefined;
@@ -1413,6 +1439,7 @@ async function scanOneFrame(
             visible,
             inViewport,
             occludedBy,
+            offScreenActionable: !inViewport && visuallyHiddenActionable,
             attrs,
             ...(state ? { state } : {}),
             ...(valueNow !== undefined ? { valueNow } : {}),
