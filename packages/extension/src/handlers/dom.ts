@@ -617,7 +617,30 @@ export function registerDomHandlers(
       if (frameId != null) await ensureFrameAttached(tid, frameId);
 
       // L2 integration: actionability + auto-wait pre-check (editable required)
-      await waitActionable(tid, frameId, selector, { timeout: (args.timeout as number | undefined) ?? 5000, needsEditable: true, force: args.force as boolean | undefined });
+      // BUG-011 N0060 京东评测 B 方案: NOT_STABLE 时默认自动 force=true 重试
+      // 一次, 消除京东 sticky 搜索栏 100% 触发 NOT_STABLE 需手动 force=true
+      // 兜底的痛点。仅:
+      //   1. 用户未显式 force (args.force=undefined) 才触发自动重试
+      //   2. 重试用 force=true (skip 稳定性检查) — sticky/transition 容器
+      //   3. 二次仍 NOT_STABLE → 抛 NOT_STABLE (原错误码),非 TIMEOUT
+      //   4. 非 NOT_STABLE 错误 (NOT_ATTACHED/NOT_EDITABLE 等) 不重试 — 语义错误
+      //      force 也救不了, 立刻抛出指引用户修 selector
+      const userForce = args.force as boolean | undefined;
+      const waitOpts = {
+        timeout: (args.timeout as number | undefined) ?? 5000,
+        needsEditable: true,
+        force: userForce,
+      };
+      try {
+        await waitActionable(tid, frameId, selector, waitOpts);
+      } catch (err) {
+        const errCode = (err as { code?: string })?.code;
+        if (errCode === VtxErrorCode.NOT_STABLE && userForce === undefined) {
+          await waitActionable(tid, frameId, selector, { ...waitOpts, force: true });
+        } else {
+          throw err;
+        }
+      }
 
       // === framework-aware rejection via page-side bundle (@since 0.4.0, migrated T2.7a) ===
       if (!fallbackToNative) {
