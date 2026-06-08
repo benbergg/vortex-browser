@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<!--
+  Author: qingwa
+  Description: R1 Runbook Fixture (N0060 京东选品评测 V1) — BUG-011
+    模拟京东首页 sticky 搜索栏: position:sticky + transition:all 动画,
+    vortex_fill 在 transition 中触发 NOT_STABLE, 默认 NOT_STABLE 自动
+    force=true 重试一次 (方案 B 修复)。
+
+    关键测点:
+    1. 搜索栏是 sticky 容器, transition: all
+    2. NOT_STABLE → vortex_fill 内部 catch NOT_STABLE → 自动 force=true 重试
+    3. 显式 force=false → 禁用自动重试, NOT_STABLE 立刻抛 NOT_STABLE
+    4. 显式 force=true → 跳过稳定性检查, 一次成功
+-->
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>京东首页 sticky 搜索栏 fixture (R1 BUG-011)</title>
+  <style>
+    body { font-family: -apple-system, "PingFang SC", sans-serif; margin: 0; padding: 0; }
+    .page { min-height: 200vh; }
+
+    /* 关键: sticky 搜索栏 + transition 动画 */
+    .search-header {
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      background: #fff;
+      padding: 16px 24px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+      /* 关键: transition: all 触发 NOT_STABLE 风险 */
+      transition: top 0.3s ease, transform 0.3s ease;
+    }
+    .search-header.scrolling {
+      transform: translateY(-2px);
+    }
+    .search-input {
+      width: 480px; height: 36px; padding: 0 16px;
+      border: 2px solid #e1251b; border-radius: 4px;
+      font-size: 14px;
+    }
+    .search-button {
+      display: inline-block; margin-left: 8px; padding: 8px 24px;
+      background: #e1251b; color: #fff; border: none; border-radius: 4px;
+      cursor: pointer; font-size: 14px;
+    }
+    .content { padding: 24px; }
+    .result-box {
+      margin-top: 24px; padding: 16px; background: #f5f5f5; border-radius: 4px;
+      min-height: 60px; font-size: 14px;
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <div class="search-header" id="search-header">
+      <input class="search-input" id="search-input" type="text" data-testid="search-input" placeholder="搜索京东商品"/>
+      <button class="search-button" id="search-button" data-testid="search-button">搜索</button>
+    </div>
+    <div class="content">
+      <h2>京东首页 sticky 搜索栏 fixture</h2>
+      <p>关键测点: 搜索栏是 sticky + transition: all, 滚动时 vortex_fill 触发 NOT_STABLE。
+         BUG-011 方案 B: 默认 NOT_STABLE → 自动 force=true 重试一次, 二次成功不报错。</p>
+      <p>向下滚动触发 sticky transition, 然后 fill 搜索框验证自动 force 重试生效。</p>
+      <div class="result-box" id="result-box" data-testid="result-box">
+        (未 fill)
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // 模拟滚动触发 sticky 动画 (scroll listener 模拟京东 SPA transition)
+    let scrollTimeout = null;
+    window.addEventListener('scroll', () => {
+      document.getElementById('search-header').classList.add('scrolling');
+      if (scrollTimeout) clearTimeout(scrollTimeout);
+      scrollTimeout = setTimeout(() => {
+        document.getElementById('search-header').classList.remove('scrolling');
+      }, 200);
+    });
+  </script>
+</body>
+</html>

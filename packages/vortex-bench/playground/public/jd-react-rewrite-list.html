@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<!--
+  Author: qingwa
+  Description: R1 Runbook Fixture (N0060 京东选品评测 V1)
+    模拟京东搜索结果页 React 重写后的 DOM 结构, 一 fixture 覆盖 3 修复点:
+
+    1. BUG-010: 京东商品卡无 <a> 详情链接, 整张卡是 <div> + React onClick 桩 +
+       cursor:pointer。vortex 修复: observe 标 data-vortex-react-clickable,
+       click 自动走 CDP 真实 mouse (isTrusted=true)。
+
+    2. REQ-009: 京东 30 个客服图标 (≤32px 无文本 <a class="_newIcon_*">)
+       + 1 个京东 logo (190x58)。vortex 修复: 兜底名 'icon-link @x=N,y=N'。
+
+    3. REQ-NNN: 京东自营 / 明日达 / 百亿补贴等角标是 <img alt="...">。
+       vortex 修复: extract 默认追加 img[alt] 中未在 innerText 出现的 alt 文字。
+
+    用途: vortex-bench case 回归锁, 避免后续修改破坏这 3 修复点。
+    - BUG-010 case: 验证 reactClickable 标 + click success
+    - REQ-009 case: 验证 icon-link 兜底名
+    - REQ-NNN case: 验证 extract 输出含 "自营" "明日达" 等 alt
+-->
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>京东搜索结果页 React 重写 fixture (R1 BUG-010 + REQ-009 + REQ-NNN)</title>
+  <style>
+    body { font-family: -apple-system, "PingFang SC", sans-serif; margin: 0; padding: 0; background: #f5f5f5; }
+    /* 京东 logo: 1 个空名 <a> 190x58 (装饰性 link, 不计入商品卡空名率) */
+    .jd-logo {
+      display: inline-block; width: 190px; height: 58px;
+      background: #e1251b; vertical-align: middle;
+    }
+    .header { padding: 12px 20px; background: #fff; border-bottom: 1px solid #eee; }
+    .search-bar { margin-top: 12px; }
+    .search-input { width: 480px; height: 32px; padding: 0 12px; border: 1px solid #ddd; }
+
+    /* 商品卡容器 (京东 SPA hash class) */
+    ._container_65r2s_2 { display: flex; flex-wrap: wrap; gap: 12px; padding: 12px; }
+    ._wrapper_1fqso_3 { width: 240px; }
+    /* 商品卡本体: div + React onClick 桩 + cursor:pointer (无 <a> 详情链接) */
+    ._card_1fqso_83 {
+      background: #fff; padding: 12px; border: 1px solid #eee; border-radius: 4px;
+      cursor: pointer; user-select: none;
+    }
+    ._card_1fqso_83:hover { border-color: #e1251b; }
+    ._card_1fqso_83 .title { font-size: 13px; line-height: 1.4; min-height: 36px; }
+    ._card_1fqso_83 .price { color: #e1251b; font-size: 16px; font-weight: 600; margin-top: 8px; }
+    /* 角标: 京东自营 / 明日达 / 百亿补贴 — 用 <img alt="..."> 渲染, 关键测点 */
+    ._card_1fqso_83 .badges { display: flex; gap: 4px; margin: 6px 0; flex-wrap: wrap; }
+    ._card_1fqso_83 .badges img {
+      height: 16px; width: auto; display: inline-block;
+      /* 京东角标图片 CSS hash class, vortex 也会把它当 _imgTag_ 翻译 */
+    }
+    /* 客服图标: 16x16, href=chat.jd.com, 关键测点 (REQ-009 5 条件全命中) */
+    ._newIcon_zclqt_32._customer_service_icon_zclqt_60 {
+      display: inline-block; width: 16px; height: 16px;
+      background: #999; border-radius: 50%;
+    }
+  </style>
+</head>
+<body>
+  <!-- 京东 logo: 1 个空名 <a> 190x58 (装饰性 link, 排除自商品卡空名率) -->
+  <div class="header">
+    <a class="jd-logo" href="https://www.jd.com/" id="jd-logo"></a>
+    <div class="search-bar">
+      <input class="search-input" id="search-input" placeholder="搜索" type="text"/>
+    </div>
+  </div>
+
+  <!-- 京东商品卡列表: 6 张卡模拟 (V2 复跑用 30 张, fixture 简化为 6 张足够覆盖契约) -->
+  <div class="_container_65r2s_2" id="card-container">
+    <div class="_wrapper_1fqso_3">
+      <div class="_card_1fqso_83" data-sku="1000001" data-testid="jd-card-1">
+        <div class="title">Apple iPhone 16 Pro 256GB 白色钛金属</div>
+        <div class="badges">
+          <img alt="自营" src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciLz4=">
+          <img alt="明日达" src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciLz4=">
+          <img alt="百亿补贴" src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciLz4=">
+        </div>
+        <div class="price">¥8999.00</div>
+        <a class="_newIcon_zclqt_32 _customer_service_icon_zclqt_60"
+           href="https://chat.jd.com/index.action?skuId=1000001"
+           data-testid="jd-chat-1"></a>
+      </div>
+    </div>
+    <div class="_wrapper_1fqso_3">
+      <div class="_card_1fqso_83" data-sku="1000002" data-testid="jd-card-2">
+        <div class="title">Apple iPhone 16 128GB 黑色</div>
+        <div class="badges">
+          <img alt="自营" src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciLz4=">
+          <img alt="国家补贴" src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciLz4=">
+        </div>
+        <div class="price">¥5999.00</div>
+        <a class="_newIcon_zclqt_32 _customer_service_icon_zclqt_60"
+           href="https://chat.jd.com/index.action?skuId=1000002"
+           data-testid="jd-chat-2"></a>
+      </div>
+    </div>
+    <div class="_wrapper_1fqso_3">
+      <div class="_card_1fqso_83" data-sku="1000003" data-testid="jd-card-3">
+        <div class="title">Apple iPhone 16 Pro Max 512GB 原色钛金属</div>
+        <div class="badges">
+          <img alt="自营" src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciLz4=">
+          <img alt="明日达" src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciLz4=">
+        </div>
+        <div class="price">¥11999.00</div>
+        <a class="_newIcon_zclqt_32 _customer_service_icon_zclqt_60"
+           href="https://chat.jd.com/index.action?skuId=1000003"
+           data-testid="jd-chat-3"></a>
+      </div>
+    </div>
+    <div class="_wrapper_1fqso_3">
+      <div class="_card_1fqso_83" data-sku="1000004" data-testid="jd-card-4">
+        <div class="title">Apple iPhone 15 Pro 256GB 蓝色钛金属</div>
+        <div class="badges">
+          <img alt="自营" src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciLz4=">
+          <img alt="7天无理由" src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciLz4=">
+        </div>
+        <div class="price">¥7999.00</div>
+        <a class="_newIcon_zclqt_32 _customer_service_icon_zclqt_60"
+           href="https://chat.jd.com/index.action?skuId=1000004"
+           data-testid="jd-chat-4"></a>
+      </div>
+    </div>
+    <div class="_wrapper_1fqso_3">
+      <div class="_card_1fqso_83" data-sku="1000005" data-testid="jd-card-5">
+        <div class="title">Apple iPhone 16 Plus 256GB 白色</div>
+        <div class="badges">
+          <img alt="自营" src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciLz4=">
+          <img alt="送货上门" src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciLz4=">
+        </div>
+        <div class="price">¥6999.00</div>
+        <a class="_newIcon_zclqt_32 _customer_service_icon_zclqt_60"
+           href="https://chat.jd.com/index.action?skuId=1000005"
+           data-testid="jd-chat-5"></a>
+      </div>
+    </div>
+    <div class="_wrapper_1fqso_3">
+      <div class="_card_1fqso_83" data-sku="1000006" data-testid="jd-card-6">
+        <div class="title">Apple iPhone 16 Pro 1TB 黑色钛金属</div>
+        <div class="badges">
+          <img alt="自营" src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciLz4=">
+          <img alt="重磅新品" src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciLz4=">
+        </div>
+        <div class="price">¥12999.00</div>
+        <a class="_newIcon_zclqt_32 _customer_service_icon_zclqt_60"
+           href="https://chat.jd.com/index.action?skuId=1000006"
+           data-testid="jd-chat-6"></a>
+      </div>
+    </div>
+  </div>
+
+  <div id="click-result" data-testid="click-result" style="margin-top: 20px; padding: 12px; background: #fff; border: 1px solid #ddd; min-height: 30px;">
+    (未点击)
+  </div>
+
+  <script>
+    // 模拟 React onClick 桩: 拦截 click 事件, 显示被点击的 SKU
+    // (京东 React 18 root delegation 拦截 isTrusted=false click, 但本 fixture 用 vanilla
+    //  事件 listener 接受合成 click 以验证 BUG-010 修复在 fixture 上可观测)
+    document.querySelectorAll("._card_1fqso_83").forEach((card) => {
+      const sku = card.getAttribute("data-sku");
+      const title = card.querySelector(".title")?.textContent;
+      card.addEventListener("click", () => {
+        document.getElementById("click-result").textContent =
+          `已点击商品: ${title} (sku=${sku})`;
+      });
+    });
+  </script>
+</body>
+</html>
