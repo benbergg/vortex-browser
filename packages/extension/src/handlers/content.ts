@@ -17,6 +17,13 @@ export function registerContentHandlers(router: ActionRouter): void {
       const wantValue = includeRaw != null && includeRaw.includes("value");
       const wantAttrs = includeRaw != null && includeRaw.includes("attrs");
       const wantsStructured = wantValue || wantAttrs;
+      // REQ-NNN N0060 京东评测: vortex_extract 支持 img alt 提取 — 京东自营
+      // `<img alt="自营">` 角标 + 淘宝/天猫 `<img alt="天猫积分">` 角标能从 extract
+      // 召回内容中读到 alt 文字。innerText/textContent 都不读 attribute (alt 是
+      // attribute 不是 text node), 需在 page-side 显式遍历 img[alt] 追加。
+      // 默认开 (includeAlt=true), 显式 false 关闭 → 行为与现有 innerText 一致
+      // (向后兼容, 老脚本/测试不破)。
+      const includeAlt = args.includeAlt !== false;
       const maxDepth = typeof args.maxDepth === "number" && args.maxDepth >= 0 ? args.maxDepth : 20;
       // P1: scroll=true 时提取前分步滚动触发懒加载(window 级)。懒加载内容不滚动
       // 不进 DOM,裸 extract 会返回内容但缺目标数据(正确性失败)。详见 0023 设计文档。
@@ -28,7 +35,7 @@ export function registerContentHandlers(router: ActionRouter): void {
       await loadPageSideModule(tid, frameId, "dom-resolve");
       const results = await chrome.scripting.executeScript({
         target: buildExecuteTarget(tid, frameId),
-        func: async (sel: string | null, opts: { wantValue: boolean; wantAttrs: boolean; maxDepth: number; scroll: boolean }) => {
+        func: async (sel: string | null, opts: { wantValue: boolean; wantAttrs: boolean; maxDepth: number; scroll: boolean; includeAlt: boolean }) => {
           try {
             // P1 scroll-to-load：提取前分步滚到底触发懒加载。每步滚到底后在
             // grace 窗口内**轮询等待 scrollHeight 增长**——一旦增长立即进下一步
@@ -204,7 +211,24 @@ export function registerContentHandlers(router: ActionRouter): void {
             if (sel && !root) return { error: `Element not found: ${sel}` };
             if (!root) return { result: "" };
             const hidden = isHiddenChain(root);
-            const text = hidden ? "" : (root as HTMLElement).innerText ?? "";
+            const inner = (root as HTMLElement).innerText ?? "";
+            // REQ-NNN N0060 京东评测: innerText 不读 img alt attribute, 京东
+            // 自营/淘宝/天猫角标 `<img alt="...">` 是 attribute 不是 text node。
+            // walkWithAlt 追加未在 innerText 中出现的 alt 文字 (dedup via
+            // includes, 简单有效)。 includeAlt=false 显式关闭 → 行为与
+            // 原 innerText 完全一致 (向后兼容)。
+            const walkWithAlt = (rootEl: Element, base: string): string => {
+              if (!opts.includeAlt) return base;
+              let result = base;
+              rootEl.querySelectorAll("img[alt]").forEach((img) => {
+                const alt = img.getAttribute("alt")?.trim();
+                if (alt && !result.includes(alt)) {
+                  result = result.length > 0 ? `${result} ${alt}` : alt;
+                }
+              });
+              return result;
+            };
+            const text = hidden ? "" : walkWithAlt(root, inner);
 
             if (!opts.wantValue && !opts.wantAttrs) {
               return { result: text };
@@ -215,7 +239,7 @@ export function registerContentHandlers(router: ActionRouter): void {
             return { error: err instanceof Error ? err.message : String(err) };
           }
         },
-        args: [selector ?? null, { wantValue, wantAttrs, maxDepth, scroll }],
+        args: [selector ?? null, { wantValue, wantAttrs, maxDepth, scroll, includeAlt }],
         world: "MAIN",
       });
       const res = results[0]?.result as { result?: unknown; error?: string };

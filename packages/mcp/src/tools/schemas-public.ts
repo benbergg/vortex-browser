@@ -89,6 +89,10 @@ export const PUBLIC_TOOLS: ToolDef[] = [
         include: { type: "array", items: { enum: ["text", "value", "attrs"] } },
         maxLength: { type: "number", default: 10240 },
         scroll: { type: "boolean" },
+        // REQ-NNN N0060 京东评测: include alt text from <img alt> elements
+        // (京东自营 / 淘宝天猫角标). default true (向后兼容: false 时行为与
+        // 原 innerText 一致). I15 invariant: properties 无 description.
+        includeAlt: { type: "boolean" },
         ...tabFields,
       },
     },
