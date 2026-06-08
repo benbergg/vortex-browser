@@ -354,6 +354,21 @@ export function registerPageHandlers(router: ActionRouter, debuggerMgr: Debugger
       const frameId = args.frameId as number | undefined;
       if (frameId != null) await ensureFrameAttached(tid, frameId);
 
+      // BUG-013 N0060 京东评测 A 方案: fuzzy selector detector — 检测
+      // [class*=] / [class^=] / [class$=] / [id*=] / [id^=] / [id$=] 等
+      // attribute 模糊匹配, BEM 命名空间冲突高风险 (京东 SPA className
+      // hash 化, "toast" 子串易与 toaster / notification-toast 共存)。
+      // 0 行为变更 — 只打 console.warn 提示, 不改 eval 逻辑。评测者读到
+      // warning 可改用精确 selector (.toast-box / [data-toast] / #jd-toast)。
+      const fuzzyMatches = expression.match(/\[(?:class|id)\s*([*^$])=\s*["']?[^"'\]]+["']?\]/g);
+      if (fuzzyMatches && fuzzyMatches.length > 0) {
+        console.warn(
+          `[vortex.wait_for] fuzzy selector detected: ${fuzzyMatches.join(", ")}. ` +
+          `BEM namespace conflicts may cause false positives. ` +
+          `Consider precise selector like '.toast-box' or '[data-toast]' instead.`,
+        );
+      }
+
       const results = await chrome.scripting.executeScript({
         target: buildExecuteTarget(tid, frameId),
         // page-side polling: requestAnimationFrame for the visible-update phase,
