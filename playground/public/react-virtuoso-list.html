@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<!--
+  Author: qingwa
+  Description: BUG-012 N0060 京东选品评测 V1
+    模拟 react-virtuoso 虚拟列表 + 动画覆盖层的 DOM 结构。
+    京东家电/服饰评价区使用 react-virtuoso 渲染评价项, 容器与 viewport 间
+    有"动画覆盖层" (opacity/transform 动画 + aria-hidden), 命中
+    elementFromPoint(cx, cy) → vortex click 报 ELEMENT_OCCLUDED。
+
+    本 fixture 提供:
+    1. .virtuoso-item: 5 个评价商品 div, 含 onClick + cursor:pointer (京东 React 桩)
+    2. .virtuoso-overlay: 瞬态覆盖层 (opacity:0.7 动画, pointer-events:none)
+       覆盖在 .virtuoso-list 上, elementFromPoint 命中该 overlay
+    3. #mask: 真实遮挡遮罩 (opacity:1, transform:none, pointer-events:auto)
+       用于验证真遮挡场景仍报 ELEMENT_OCCLUDED
+
+    用途: 手动测试 + 端到端验证
+    - transient overlay: vortex click 评价 ref → 成功
+    - 真实遮挡: vortex click 被遮罩遮挡的 ref → ELEMENT_OCCLUDED
+-->
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>react-virtuoso 虚拟列表 fixture (BUG-012 N0060 京东)</title>
+  <style>
+    body { font-family: -apple-system, "PingFang SC", sans-serif; margin: 20px; }
+    h1 { font-size: 18px; }
+    .virtuoso-list {
+      position: relative;
+      height: 400px;
+      overflow: auto;
+      border: 1px solid #ddd;
+    }
+    .virtuoso-item {
+      padding: 16px;
+      border-bottom: 1px solid #eee;
+      cursor: pointer;
+    }
+    .virtuoso-item:hover { background: #f5f5f5; }
+    .virtuoso-overlay {
+      position: absolute;
+      top: 50%;
+      left: 0;
+      right: 0;
+      height: 60px;
+      background: rgba(0, 0, 0, 0.5);
+      pointer-events: none;
+      animation: fadeIn 0.3s ease-out;
+      opacity: 0.7;
+    }
+    @keyframes fadeIn {
+      from { opacity: 0; }
+      to { opacity: 0.7; }
+    }
+    /* 真实遮挡: 京东物流弹层遮罩 (透明度由 background 颜色承担, 非 opacity) */
+    .real-mask {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0, 0, 0, 0.6);
+      z-index: 9999;
+      display: none;
+    }
+    .real-mask.show { display: block; }
+    .real-mask .panel {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      background: #fff;
+      padding: 30px;
+      border-radius: 8px;
+    }
+    button.toggle-mask {
+      margin: 10px 0;
+      padding: 6px 12px;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+  <h1>react-virtuoso 虚拟列表 fixture</h1>
+  <p>说明: .virtuoso-item 是评价 ref, .virtuoso-overlay 是 react-virtuoso
+    动画覆盖层 (opacity:0.7, pointer-events:none), #mask 是真实弹层遮罩。</p>
+
+  <button class="toggle-mask" onclick="document.getElementById('mask').classList.toggle('show')">
+    切换真实弹层遮罩
+  </button>
+
+  <div class="virtuoso-list" id="virtuoso-list">
+    <div class="virtuoso-item" data-sku="001">商品 1 ¥100 — 评价 1</div>
+    <div class="virtuoso-item" data-sku="002">商品 2 ¥200 — 评价 2</div>
+    <div class="virtuoso-item" data-sku="003">商品 3 ¥300 — 评价 3</div>
+    <div class="virtuoso-item" data-sku="004">商品 4 ¥400 — 评价 4</div>
+    <div class="virtuoso-item" data-sku="005">商品 5 ¥500 — 评价 5</div>
+  </div>
+  <div class="virtuoso-overlay" id="virtuoso-overlay"></div>
+
+  <div class="real-mask" id="mask">
+    <div class="panel">
+      京东物流配送时间弹层
+      <br><br>
+      <button onclick="document.getElementById('mask').classList.remove('show')">关闭</button>
+    </div>
+  </div>
+
+  <script>
+    // 模拟 react-virtuoso 滚动时 unmount/remount: overlay 在 100ms 后从 opacity 0
+    // 渐入到 0.7 (与真实行为一致, 评价项淡入动画)
+    setTimeout(() => {
+      const overlay = document.getElementById('virtuoso-overlay');
+      if (overlay) overlay.style.opacity = '0.7';
+    }, 100);
+  </script>
+</body>
+</html>
