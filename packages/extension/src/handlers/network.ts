@@ -302,7 +302,9 @@ export function registerNetworkHandlers(
       );
       await ensureSubscribed(debuggerMgr, tid);
       const includeResources = args.includeResources as boolean | undefined;
-      const urlPattern = args.url as string | undefined;
+      // V2 P0 修复 D16: 字段名统一为 `pattern` (顶层 + filter 子字段一致)
+      // 向后兼容: 旧字段名 `url` (line 305 原写法) 仍生效
+      const urlPattern = (args.pattern ?? args.url) as string | undefined;
       const methodFilter = args.method as string | undefined;
       const statusMin = args.statusMin as number | undefined;
       const statusMax = args.statusMax as number | undefined;
