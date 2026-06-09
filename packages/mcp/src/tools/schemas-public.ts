@@ -193,12 +193,18 @@ export const PUBLIC_TOOLS: ToolDef[] = [
   {
     name: "vortex_debug_read",
     action: "L4.debug_read",
-    description: "Read console (no pattern) or network (pattern REQUIRED).",
+    description: "Network pattern REQUIRED. filter={level|pattern}",
     schema: {
       type: "object",
       properties: {
         source: { enum: ["console", "network"] },
-        filter: { type: "object" },
+        // V2 P0 修复 D16: filter 子字段文档化 (handler 已实现, LLM 此前不知可用)
+        // console: { level: 'error'|'warn'|'all' }
+        // network: { pattern: '<substr>', statusMin, statusMax }
+        filter: {
+          type: "object",
+          description: "console:{level}; network:{pattern,statusMin/Max}",
+        },
         tail: { type: "number" },
         ...tabFields,
       },

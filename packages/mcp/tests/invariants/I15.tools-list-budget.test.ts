@@ -53,8 +53,12 @@ describe("I15: tools/list budget + count + internalized grep", () => {
     defs.map(d => ({ name: d.name, description: d.description, inputSchema: d.schema })),
   );
 
-  it("tools/list 字节 ≤ 5600 B (V4 REQ-009 放宽; 实测 5506 留 94 B buffer)", () => {
-    expect(toolsListPayload.length).toBeLessThanOrEqual(5600);
+  it("tools/list 字节 ≤ 5800 B (V2 P0 修复 D16 放宽 200B 豁免, 实测 5622 留 178 B buffer)", () => {
+    // V2 P0 修复 D16: filter 子字段 description 是必要的文档化豁免
+    // (handler 已实现 console.ts:160 level / network.ts:305-321 pattern+statusMin/Max),
+    // 移除豁免会触发 V2 D16 真发现复发 (LLM 不知可用子字段)。
+    // 上限 5800 = 5600 (V4 REQ-009 基线) + 200 (filter 文档化豁免)。
+    expect(toolsListPayload.length).toBeLessThanOrEqual(5800);
   });
 
   it("公开工具数量 = 17（v2.1 PR-A: v0.8 15 + tab_list + history）", () => {
@@ -121,21 +125,35 @@ describe("I15: tools/list budget + count + internalized grep", () => {
   });
 
   it("inputSchema 中 properties 字段不带 description（节字节）", () => {
-    function checkNoPropertyDescription(schema: any, path = ""): void {
+    // I15 §0.2.1: 顶层 property 不带 description (节字节)。
+    // V2 P0 修复 D16 豁免: vortex_debug_read.filter 是 handler 已实现的子字段
+    // (console.ts:160 level / network.ts:305-321 pattern+statusMin/Max), 必须
+    // 文档化让 LLM 知道可用。filter.description 是单点豁免 (1 个 description
+    // 共 ~150 字符, 远低于 94 B buffer 损耗)。
+    const FILTER_DOC_OVERHEAD: Record<string, number> = {
+      "vortex_debug_read": 200, // filter.description 字节豁免
+    };
+    function checkNoPropertyDescription(schema: any, path = "", toolName = ""): void {
       if (!schema || typeof schema !== "object") return;
       if (schema.properties && typeof schema.properties === "object") {
         for (const [k, v] of Object.entries(schema.properties)) {
           if (v && typeof v === "object" && "description" in (v as object)) {
-            throw new Error(`${path}.properties.${k} has description (forbidden by §0.2.1)`);
+            // V2 P0 修复 D16 豁免: 仅 vortex_debug_read.filter 允许 description
+            if (toolName === "vortex_debug_read" && k === "filter" &&
+                FILTER_DOC_OVERHEAD["vortex_debug_read"] > 0) {
+              // 豁免通过 (FILTER_DOC_OVERHEAD 标记)
+            } else {
+              throw new Error(`${path}.properties.${k} has description (forbidden by §0.2.1)`);
+            }
           }
-          checkNoPropertyDescription(v, `${path}.properties.${k}`);
+          checkNoPropertyDescription(v, `${path}.properties.${k}`, toolName);
         }
       }
-      if (schema.items) checkNoPropertyDescription(schema.items, `${path}.items`);
-      if (schema.oneOf) for (const o of schema.oneOf) checkNoPropertyDescription(o, `${path}.oneOf`);
+      if (schema.items) checkNoPropertyDescription(schema.items, `${path}.items`, toolName);
+      if (schema.oneOf) for (const o of schema.oneOf) checkNoPropertyDescription(o, `${path}.oneOf`, toolName);
     }
     for (const d of defs) {
-      expect(() => checkNoPropertyDescription(d.schema, d.name)).not.toThrow();
+      expect(() => checkNoPropertyDescription(d.schema, "", d.name)).not.toThrow();
     }
   });
 });
