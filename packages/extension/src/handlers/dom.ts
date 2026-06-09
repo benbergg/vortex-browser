@@ -19,6 +19,7 @@ import {
   type CommitKind,
 } from "../patterns/index.js";
 import { waitActionable } from "../action/auto-wait.js";
+import { waitActionableAutoForce } from "../action/wait-actionable-auto-force.js";
 
 /**
  * 判断元素是否为"瞬态覆盖层"(react-virtuoso 动画层 / popper 浮层 / 滚动视口
@@ -141,7 +142,18 @@ export function registerDomHandlers(
       const trustedMode = args.trustedMode === true;
 
       // L2 integration: actionability + auto-wait pre-check
-      await waitActionable(tid, frameId, selector, { timeout: (args.timeout as number | undefined) ?? 5000, force: args.force as boolean | undefined });
+      // NOT_STABLE 自动 force 重试(对齐 FILL BUG-011):京东 sticky 搜索按钮在
+      // CSS-transition 容器内 100% 触发 NOT_STABLE,无此重试则自旋满 timeout 后
+      // 直接抛错,用户需手动 force=true / useRealMouse=true 兜底。
+      await waitActionableAutoForce(
+        tid,
+        frameId,
+        selector,
+        // 不覆盖默认:未传 timeout 时透传 undefined,由 waitActionable 落到
+        // DEFAULT_TIMEOUT_MS(2000)。历史 `?? 5000` 覆盖让 perf 修复成死代码。
+        { timeout: args.timeout as number | undefined },
+        args.force as boolean | undefined,
+      );
 
       if (useRealMouse || trustedMode) {
         // 预加载 dom-resolve,使 cdpClickElement 的 page-side 探测能经
@@ -413,7 +425,16 @@ export function registerDomHandlers(
       if (frameId != null) await ensureFrameAttached(tid, frameId);
 
       // L2 integration: actionability + auto-wait pre-check (editable required)
-      await waitActionable(tid, frameId, selector, { timeout: (args.timeout as number | undefined) ?? 5000, needsEditable: true, force: args.force as boolean | undefined });
+      // NOT_STABLE 自动 force 重试(对齐 FILL BUG-011 / CLICK):sticky/transition
+      // 容器内的可编辑字段(京东搜索框)100% 触发 NOT_STABLE,无此重试则自旋满
+      // timeout 后直接抛错。
+      await waitActionableAutoForce(
+        tid,
+        frameId,
+        selector,
+        { timeout: args.timeout as number | undefined, needsEditable: true },
+        args.force as boolean | undefined,
+      );
 
       // Probe target: shared validation + contentEditable detection.
       // The page-side handler below runs the legacy
@@ -636,30 +657,16 @@ export function registerDomHandlers(
       if (frameId != null) await ensureFrameAttached(tid, frameId);
 
       // L2 integration: actionability + auto-wait pre-check (editable required)
-      // BUG-011 N0060 京东评测 B 方案: NOT_STABLE 时默认自动 force=true 重试
-      // 一次, 消除京东 sticky 搜索栏 100% 触发 NOT_STABLE 需手动 force=true
-      // 兜底的痛点。仅:
-      //   1. 用户未显式 force (args.force=undefined) 才触发自动重试
-      //   2. 重试用 force=true (skip 稳定性检查) — sticky/transition 容器
-      //   3. 二次仍 NOT_STABLE → 抛 NOT_STABLE (原错误码),非 TIMEOUT
-      //   4. 非 NOT_STABLE 错误 (NOT_ATTACHED/NOT_EDITABLE 等) 不重试 — 语义错误
-      //      force 也救不了, 立刻抛出指引用户修 selector
-      const userForce = args.force as boolean | undefined;
-      const waitOpts = {
-        timeout: (args.timeout as number | undefined) ?? 5000,
-        needsEditable: true,
-        force: userForce,
-      };
-      try {
-        await waitActionable(tid, frameId, selector, waitOpts);
-      } catch (err) {
-        const errCode = (err as { code?: string })?.code;
-        if (errCode === VtxErrorCode.NOT_STABLE && userForce === undefined) {
-          await waitActionable(tid, frameId, selector, { ...waitOpts, force: true });
-        } else {
-          throw err;
-        }
-      }
+      // BUG-011 N0060 京东评测 B 方案: NOT_STABLE 时默认自动 force=true 重试一次,
+      // 消除京东 sticky 搜索栏 100% 触发 NOT_STABLE 需手动 force=true 兜底的痛点。
+      // 重试语义抽到 waitActionableAutoForce 共享(CLICK/TYPE/FILL 一致),详见该模块。
+      await waitActionableAutoForce(
+        tid,
+        frameId,
+        selector,
+        { timeout: args.timeout as number | undefined, needsEditable: true },
+        args.force as boolean | undefined,
+      );
 
       // === framework-aware rejection via page-side bundle (@since 0.4.0, migrated T2.7a) ===
       if (!fallbackToNative) {
@@ -815,7 +822,7 @@ export function registerDomHandlers(
       if (frameId != null) await ensureFrameAttached(tid, frameId);
 
       // L2 integration: actionability + auto-wait pre-check
-      await waitActionable(tid, frameId, selector, { timeout: (args.timeout as number | undefined) ?? 5000, force: args.force as boolean | undefined });
+      await waitActionable(tid, frameId, selector, { timeout: args.timeout as number | undefined, force: args.force as boolean | undefined });
 
       // 加载 dom-resolve 模块，使 inline func 能通过 shadow 穿透解析 selector
       await loadPageSideModule(tid, frameId, "dom-resolve");
