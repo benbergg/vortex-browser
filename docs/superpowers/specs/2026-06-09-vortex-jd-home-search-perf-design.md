@@ -1,5 +1,22 @@
 # Vortex JD Home Search 性能优化 设计文档
 
+> ## ⚠️ 订正 (2026-06-09 post-implementation 白盒复测)
+>
+> **本文核心诊断"通信固定开销 ~23s"已被证伪。** 用 raw WebSocket 直连 vortex-server(绕开 Claude/MCP-stdio harness)实测:`observe.snapshot` 真实往返 **58-144ms**、`tab.list` 3-5ms,vortex 全栈 **<150ms**。本文测得的 23-35s 是 **Claude agent harness 自身延迟**(reasoning LLM 单次工具调用 ~20-30s wall-clock),不是 vortex。这解释了为何 maxElements 200→80 省 0s、fill"反而变慢"纯属噪声。
+>
+> **真正根因(代码级 + live 实测确认):Chrome 对后台(hidden)标签的节流**——前台标签操作根本不慢。
+> - **rAF 暂停**:`page-side/actionability.ts` 的 `isStable` 用 `await requestAnimationFrame` 采样,后台 rAF 不触发(实测单次 rAF 后台 5000ms 内从未回调、前台 8ms),稳定性检查卡到探测超时 → 后台 fill/click 慢 ~2s,前台 fill ~50ms。
+> - **渲染器输入节流**:CDP `Input.dispatchMouseEvent` 等待被节流的后台渲染器处理 → 后台 click 5.2s,前台 ~500ms。
+>
+> **真修复(已 ship)**:
+> - `b6f772b` — P0-A click/type 的 NOT_STABLE 自动 force 重试(原仅 fill 有) + P0-C 复活 auto-wait 2000 默认(本文"改动 1"被 dom.ts 各 handler 硬编码 `?? 5000` **覆盖成死代码**,从未生效)。
+> - `cabe4e0` — `isStable` 在 `visibilityState==='hidden'` 跳过被节流的 rAF → 后台 fill **2.7s→12ms**。
+> - `a0968bc` — `DebuggerManager.attach` 发 CDP `Emulation.setFocusEmulationEnabled` → 后台 click **5.2s→67ms**。
+>
+> **作废方向**:下文"设计方案/数据流/后续"里的「通信优化 / batch RPC / bbox omit / maxElements 进一步减」全部针对**不存在的通信开销**,**无效,不要做**。"改动 2"(maxElements 200→80, `c739fb6`)对 observe(恒 ~100ms)无加速,保留但非性能收益。
+>
+> 详见 memory `vortex_jd_search_perf_real_root_cause`。以下原文保留作历史记录,其性能归因已被本订正取代。
+
 ## Author
 - qingwa
 

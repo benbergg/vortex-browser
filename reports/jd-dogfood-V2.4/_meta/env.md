@@ -1,5 +1,9 @@
 # V2.4 京东首页搜索 性能重测 - 环境与配置
 
+> ## ⚠️ 订正 (2026-06-09)
+>
+> **本文"通信固定开销 23-25s"风险项已被证伪**(详见 D9 报告 / 整合汇总顶部订正块 + memory `vortex_jd_search_perf_real_root_cause`)。真因 = Chrome 后台标签节流(rAF + 渲染器输入),非通信。**关键测量缺陷:V2.4 全程未控制标签前/后台态**——Chrome 窗口在终端后面 → 所有标签 hidden → rAF/输入被节流,测的是 Chrome 节流不是 vortex。复测须固定标签可见性 + raw WS 绕开 harness。以下原文保留作历史记录。
+
 ## Author
 - qingwa
 
