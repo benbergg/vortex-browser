@@ -17,7 +17,6 @@ export type ActionPath =
   | "dispatchEvent"
   | "cdp"
   | "value-setter"
-  | "execCommand"
   | "insertText";
 
 export interface FallbackContext {
@@ -84,7 +83,7 @@ async function tryDispatchEvent(
 }
 
 /**
- * Fill fallback chain: focus + select-all + execCommand → value setter + dispatch input → CDP insertText.
+ * Fill fallback chain: value setter + dispatch input → CDP insertText.
  */
 export async function fillWithFallback(
   ctx: FallbackContext,
@@ -92,22 +91,16 @@ export async function fillWithFallback(
 ): Promise<{ path: ActionPath }> {
   const attempted: ActionPath[] = [];
 
-  // 1) focus + select-all + execCommand("insertText") — closest to real input
-  attempted.push("execCommand");
-  const r1 = await tryFillExecCommand(ctx, value);
-  if (r1.ok) return { path: "execCommand" };
-
-  // 2) value setter + dispatch input
+  // 1) value setter + dispatch input (React/Vue controlled + plain input)
   attempted.push("value-setter");
-  const r2 = await tryFillValueSetter(ctx, value);
-  if (r2.ok) return { path: "value-setter" };
+  const r1 = await tryFillValueSetter(ctx, value);
+  if (r1.ok) return { path: "value-setter" };
 
-  // 3) CDP Input.insertText
+  // 2) CDP Input.insertText (trusted event for ProseMirror/Slate/Lexical)
   if (await capabilityDetector.canUseCDP(ctx.tabId)) {
     attempted.push("insertText");
     try {
       await ctx.debuggerMgr.attach(ctx.tabId);
-      // focus first
       await nativePageQuery(
         ctx.tabId,
         ctx.frameId,
@@ -127,25 +120,6 @@ export async function fillWithFallback(
     VtxErrorCode.ACTION_FAILED_ALL_PATHS,
     `Fill failed all paths`,
     { selector: ctx.selector, extras: { attemptedPaths: attempted } },
-  );
-}
-
-async function tryFillExecCommand(
-  ctx: FallbackContext,
-  value: string,
-): Promise<{ ok: boolean }> {
-  return await nativePageQuery<{ ok: boolean }>(
-    ctx.tabId,
-    ctx.frameId,
-    (sel: string, val: string) => {
-      const el = document.querySelector(sel) as HTMLInputElement | null;
-      if (!el) return { ok: false };
-      el.focus();
-      el.select();
-      const ok = document.execCommand("insertText", false, val);
-      return { ok: ok && el.value === val };
-    },
-    [ctx.selector, value],
   );
 }
 
