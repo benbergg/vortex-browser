@@ -45,6 +45,7 @@ export async function cdpClickElement(
   tabId: number,
   frameId: number | undefined,
   selector: string,
+  // force=true skips occlusion check (ELEMENT_OCCLUDED only); disabled/detached/not_found/ambiguous still apply
   options: { force?: boolean } = {},
 ): Promise<{
   success: true;
@@ -53,6 +54,7 @@ export async function cdpClickElement(
   y: number;
   mode: "realMouse";
 }> {
+  const { force = false } = options;
   // page-side 探测（与原 dom.ts useRealMouse 分支 L106-169 完全一致，逐行复制 func 字面量）
   const rectRes = await nativePageQuery<{
     result?: { x: number; y: number; tag: string; text?: string };
@@ -171,7 +173,7 @@ export async function cdpClickElement(
         return { error: err instanceof Error ? err.message : String(err) };
       }
     },
-    [selector, options.force ?? false],
+    [selector, force],
   );
 
   if (rectRes?.error) mapPageError(rectRes, selector);

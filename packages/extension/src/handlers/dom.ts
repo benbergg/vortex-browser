@@ -148,7 +148,7 @@ export function registerDomHandlers(
         // __vortexDomResolve 穿 open shadow + 走门同款 isEnabled——与同步路径一致,
         // 堵 shadow-internal ref 假阴 ELEMENT_NOT_FOUND(#14)。
         await loadPageSideModule(tid, frameId, "dom-resolve");
-        return await cdpClickElement(debuggerMgr, tid, frameId, selector);
+        return await cdpClickElement(debuggerMgr, tid, frameId, selector, { force: args.force as boolean | undefined });
       }
 
       // 普通 element.click() 路径（含失败探测）
@@ -391,7 +391,7 @@ export function registerDomHandlers(
       const inner = res?.result as { deferToCdp?: boolean } | undefined;
       if (inner?.deferToCdp) {
         try {
-          return await cdpClickElement(debuggerMgr, tid, frameId, selector);
+          return await cdpClickElement(debuggerMgr, tid, frameId, selector, { force: args.force as boolean | undefined });
         } catch {
           // CDP 探测/attach 失败 → 回退合成(cdpAvailable=false 强制不再 defer,本次真点击)。
           res = await runSyntheticClick(false);
