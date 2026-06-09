@@ -1,7 +1,8 @@
 // L2 Action - Auto-wait (RAF polling + reason-aware retry).
 // Reference: design doc §5.3 + docs/spec-l2-action.md §2.
 //
-// Default timeout 5000ms; each reason has its own retry interval (per spec §2 table).
+// Default timeout 2000ms (was 5000ms; tightened in 2026-06-09 JD home-search perf optimization).
+// Each reason has its own retry interval (per spec §2 table).
 // On timeout exhaustion, throws vtxError(TIMEOUT) with extras.lastReason carrying the last failure code.
 
 import { VtxErrorCode, vtxError } from "@vortex-browser/shared";
@@ -12,7 +13,7 @@ import {
   type CheckOptions,
 } from "./actionability.js";
 
-const DEFAULT_TIMEOUT_MS = 5000;
+const DEFAULT_TIMEOUT_MS = 2000;
 
 // 内层 actionability 等待必须严格小于 MCP 传输层硬超时(client.ts requestOnce,
 // 默认 VORTEX_TIMEOUT_MS=30000ms)。调用方可经 act options.timeout 传任意大值且
@@ -33,7 +34,7 @@ const RETRY_INTERVAL_MS: Record<ActionabilityFailure, number> = {
 };
 
 export interface WaitOptions extends CheckOptions {
-  /** Default 5000ms. */
+  /** Default 2000ms. */
   timeout?: number;
 }
 
