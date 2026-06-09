@@ -76,6 +76,14 @@ export class DebuggerManager {
     if (!this.attachedTabs.has(tabId)) {
       await chrome.debugger.attach({ tabId }, "1.3");
       this.attachedTabs.set(tabId, { domains: new Set() });
+      // SPIKE(2026-06-09 京东后台 click 5s):让后台标签的渲染器/输入处理不被
+      // Chrome 节流。Playwright 用启动参数,vortex 连用户现有 Chrome 只能运行时
+      // CDP。候选:focus 模拟。best-effort,失败不影响 attach。
+      try {
+        await chrome.debugger.sendCommand({ tabId }, "Emulation.setFocusEmulationEnabled", { enabled: true });
+      } catch {
+        // 某些 Chrome/页面不支持,忽略
+      }
     }
   }
 
