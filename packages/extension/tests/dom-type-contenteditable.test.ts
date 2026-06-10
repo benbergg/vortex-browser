@@ -34,10 +34,10 @@ describe("dom.type contentEditable path (@since 0.8.x Round-1 R1-A)", () => {
   it("attaches debugger before sending CDP command", () => {
     // The probe → debugger.attach → Input.insertText ordering must
     // be preserved so the debugger session exists when insertText
-    // fires. Snapshot the canonical block: a probe.isContentEditable
-    // guard followed by debuggerMgr.attach.
+    // fires. CDP-first 转正后 input/textarea 也默认走 CDP,故 guard 变为
+    // `probe?.isContentEditable || cdpTypeEligible`;contentEditable 仍在其内。
     const block = DOM_SRC.match(
-      /if\s*\(\s*probe\?\.isContentEditable\s*\)\s*\{[\s\S]*?debuggerMgr\.attach\(tid\)/,
+      /if\s*\(\s*probe\?\.isContentEditable[\s\S]*?debuggerMgr\.attach\(tid\)/,
     );
     expect(block).not.toBeNull();
   });
@@ -97,9 +97,9 @@ describe("dom.type contentEditable path (@since 0.8.x Round-1 R1-A)", () => {
   it("contentEditable 路径 clear-before:probe 全选已有内容让 insertText 替换", () => {
     // 用 Selection API 全选节点内容(range.selectNodeContents)。
     expect(DOM_SRC).toMatch(/selectNodeContents/);
-    // 全选受「是否有文本要写」门控,且仅对 contentEditable(避免误清 input/textarea
-    // ——它们走另一分支自带 clear-before)。
-    expect(DOM_SRC).toMatch(/selectAll\s*&&\s*el\.isContentEditable/);
+    // 全选受「是否有文本要写」门控。CDP-first 转正后 select-all 提到统一 probe:
+    // input/textarea 走 el.select()、contentEditable 走 range(嵌套在 if(selectAll) 内)。
+    expect(DOM_SRC).toMatch(/if\s*\(\s*selectAll\s*\)\s*\{\s*if\s*\(\s*el\.isContentEditable/);
   });
 
   it("contentEditable clear-before 仅在 text 非空时触发(type(\"\") 保持 no-op)", () => {

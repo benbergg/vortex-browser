@@ -522,19 +522,24 @@ export function registerDomHandlers(
           // event chain has a focused element to land on. focus()
           // is idempotent if the element is already active.
           el.focus();
-          // contentEditable clear-before:CDP Input.insertText 在选区/光标处插入,
-          // 空选区时残留旧内容拼接(live 实测 type 一段文本得到 "NEWexisting")。
-          // type 语义是「把这段文本写入字段」,故先全选已有内容,让 insertText 替换
-          // 选区(产生合规 beforeinput,ProseMirror/Slate/Lexical 接受)——等价人手
-          // Ctrl+A 后输入。仅对 contentEditable 且有文本要写时全选,type("") 保持
-          // no-op,对齐 input/textarea 分支契约(2026-06-04 多 agent 审计 #4)。
-          if (selectAll && el.isContentEditable) {
-            const editSel = window.getSelection();
-            if (editSel) {
-              const range = document.createRange();
-              range.selectNodeContents(el);
-              editSel.removeAllRanges();
-              editSel.addRange(range);
+          // clear-before:CDP Input.insertText 在选区/光标处插入,空选区时残留旧内容
+          // 拼接(live 实测 type 一段文本得到 "NEWexisting")。type 语义是「把这段文本
+          // 写入字段」,故先全选已有内容让 insertText 替换选区——等价人手 Ctrl+A 后输入。
+          // 仅有文本要写时全选,type("") 保持 no-op。input/textarea 走 el.select(),
+          // contentEditable 走 range 选区(产生合规 beforeinput,ProseMirror/Slate/
+          // Lexical 接受)。CDP-first 转正后 input/textarea 默认也走 insertText,故选区
+          // 准备从 cdpType 实验分支提到统一 probe(2026-06-04 #4 / 2026-06-11 转正)。
+          if (selectAll) {
+            if (el.isContentEditable) {
+              const editSel = window.getSelection();
+              if (editSel) {
+                const range = document.createRange();
+                range.selectNodeContents(el);
+                editSel.removeAllRanges();
+                editSel.addRange(range);
+              }
+            } else if (typeof (el as HTMLInputElement).select === "function") {
+              (el as HTMLInputElement).select();
             }
           }
           return { ok: true, isContentEditable: el.isContentEditable === true };
@@ -545,77 +550,65 @@ export function registerDomHandlers(
         mapPageError(probe, selector);
       }
 
-      if (probe?.isContentEditable) {
-        // contentEditable path — Input.insertText is the only way to
-        // produce a trusted beforeinput event that ProseMirror /
-        // Slate / Lexical / Notion / Confluence will accept.
-        // Delay is honored by chunking per character; default 0
-        // sends the whole text in one IPC roundtrip.
-        await debuggerMgr.attach(tid);
-        if (delay > 0) {
-          for (const ch of text) {
-            await debuggerMgr.sendCommand(tid, "Input.insertText", { text: ch });
-            await new Promise((r) => setTimeout(r, delay));
-          }
-        } else {
-          await debuggerMgr.sendCommand(tid, "Input.insertText", { text });
+      // CDP-first(2026-06-11 转正,spike 报告 reports/spike-cdp/):type 默认走 CDP
+      // Input.insertText(isTrusted=true),对齐 playwright-mcp/chrome-devtools-mcp/
+      // Stagehand。contentEditable 本就只能走 CDP(富文本编辑器拒合成事件);input/
+      // textarea 转正后也默认 CDP。仅 forceSynthetic / 无 debuggerMgr / CDP 基础设施
+      // attach 失败时降级 page-side dispatch(下方,族 F 逐字/受控绕过修复保留作降级)。
+      const forceSynthetic = args.forceSynthetic === true;
+      const cdpTypeEligible = !forceSynthetic && !!debuggerMgr;
+      if (probe?.isContentEditable || cdpTypeEligible) {
+        // probe 已 focus + 全选(替换语义);此处直接 insertText。delay>0 逐字符 chunk,
+        // 默认 0 整串一次 IPC。
+        let cdpAttached = false;
+        try {
+          await debuggerMgr.attach(tid);
+          cdpAttached = true;
+        } catch (err) {
+          // CDP 基础设施失败(DevTools 独占/策略禁用)。contentEditable 无合成降级
+          // (富文本拒合成事件) → 抛;input/textarea 落到下方 page-side dispatch 降级。
+          if (probe?.isContentEditable) throw err;
         }
-        return { success: true, typed: text.length, path: "cdp-insertText" };
-      }
-
-      // === spike(cdp-first 阶段0): input/textarea 的 CDP insertText 实验分支 ===
-      // cdpType=true 时 input/textarea 也走 CDP 真实输入(对齐上方 contentEditable
-      // 路径),供 compare-cdp 双模式对比;默认仍走下方 page-side dispatch 不变。
-      if (args.cdpType === true) {
-        // 替换语义:全选已有内容(等价人手 Ctrl+A);type("") 保持 no-op,
-        // 对齐 input/textarea 默认分支的 clear-before 契约。
-        if (text !== "") {
-          await nativePageQuery(
+        if (cdpAttached) {
+          if (delay > 0) {
+            for (const ch of text) {
+              await debuggerMgr.sendCommand(tid, "Input.insertText", { text: ch });
+              await new Promise((r) => setTimeout(r, delay));
+            }
+          } else {
+            await debuggerMgr.sendCommand(tid, "Input.insertText", { text });
+          }
+          // readback 校验副作用真发生(族 A):非空 text 读回空 = 被类型/格式约束拒绝
+          // → NO_EFFECT(直抛,不降级——降级 dispatch 对 number/date 同样被拒)。
+          // contentEditable 无 .value,跳过该校验。
+          const rb = await nativePageQuery<{ value?: string } | undefined>(
             tid,
             frameId,
             (sel: string) => {
               const els = (window as any).__vortexDomResolve.queryAllDeep(sel) as Element[];
               const el = els[0] as HTMLInputElement | undefined;
-              if (el && typeof el.select === "function") el.select();
+              return { value: el && typeof el.value === "string" ? el.value : "" };
             },
             [selector],
           );
-        }
-        await debuggerMgr.attach(tid);
-        if (delay > 0) {
-          for (const ch of text) {
-            await debuggerMgr.sendCommand(tid, "Input.insertText", { text: ch });
-            await new Promise((r) => setTimeout(r, delay));
+          if (text !== "" && !probe?.isContentEditable && (rb?.value ?? "") === "") {
+            mapPageError(
+              {
+                errorCode: "NO_EFFECT",
+                error: `Element ${selector} rejected typed text "${text}" via CDP insertText; value is empty after type`,
+                extras: { attempted: text },
+              },
+              selector,
+            );
           }
-        } else {
-          await debuggerMgr.sendCommand(tid, "Input.insertText", { text });
+          return { success: true, typed: text.length, path: "cdp-insertText", value: rb?.value };
         }
-        // readback 校验副作用真发生(族 A 一致):非空 text 读回空 = 被约束拒绝。
-        const rb = await nativePageQuery<{ value?: string } | undefined>(
-          tid,
-          frameId,
-          (sel: string) => {
-            const els = (window as any).__vortexDomResolve.queryAllDeep(sel) as Element[];
-            const el = els[0] as HTMLInputElement | undefined;
-            return { value: el && typeof el.value === "string" ? el.value : "" };
-          },
-          [selector],
-        );
-        if (text !== "" && (rb?.value ?? "") === "") {
-          mapPageError(
-            {
-              errorCode: "NO_EFFECT",
-              error: `Element ${selector} rejected typed text "${text}" via CDP insertText; value is empty after type`,
-              extras: { attempted: text },
-            },
-            selector,
-          );
-        }
-        return { success: true, typed: text.length, path: "cdp-type-insertText", value: rb?.value };
+        // input/textarea 且 CDP attach 失败 → fall through 到 page-side dispatch 降级。
       }
 
-      // input / textarea path — legacy synthetic dispatch (kept
-      // byte-identical to v0.8 for every passing case in bench).
+      // input / textarea path — page-side synthetic dispatch.
+      // CDP-first 转正后此路径为降级(forceSynthetic / CDP attach 失败),
+      // 族 F 逐字模拟/受控 setter 绕过/number 整写/clear-before 修复保留作降级保真。
       const res = await nativePageQuery<{
         result?: unknown;
         error?: string;
@@ -744,70 +737,9 @@ export function registerDomHandlers(
         args.force as boolean | undefined,
       );
 
-      // === spike(cdp-first 阶段0): CDP Input.insertText 实验分支 ===
-      // cdpFill=true 走「真实输入」:focus+全选(替换语义)→ CDP Input.insertText
-      // (isTrusted=true)→ readback 校验(族 A 处方)。刻意跳过 fill-reject 探测
-      // ——验证启发式在真实输入下是否仍必要,是 compare-cdp 双模式的实验变量。
-      // 不改默认路径;实验数据落 reports/spike-cdp/。
-      if (args.cdpFill === true) {
-        await loadPageSideModule(tid, frameId, "dom-resolve");
-        const probe = await nativePageQuery<{
-          ok?: true;
-          errorCode?: string;
-          error?: string;
-          extras?: Record<string, unknown>;
-        } | undefined>(
-          tid,
-          frameId,
-          (sel: string, hasText: boolean) => {
-            const els = (window as any).__vortexDomResolve.queryAllDeep(sel) as Element[];
-            if (els.length === 0) {
-              return { errorCode: "ELEMENT_NOT_FOUND", error: `Element not found: ${sel}` };
-            }
-            if (els.length > 1) {
-              return {
-                errorCode: "SELECTOR_AMBIGUOUS",
-                error: `Selector "${sel}" matched ${els.length} elements`,
-                extras: { matchCount: els.length },
-              };
-            }
-            const el = els[0] as HTMLInputElement;
-            el.focus();
-            // 替换语义:全选已有内容让 insertText 覆盖(等价人手 Ctrl+A 后输入);
-            // 空值不全选保持 no-op,对齐默认路径契约。
-            if (hasText && typeof el.select === "function") el.select();
-            return { ok: true };
-          },
-          [selector, value !== ""],
-        );
-        if (probe?.error) mapPageError(probe, selector);
-        await debuggerMgr.attach(tid);
-        await debuggerMgr.sendCommand(tid, "Input.insertText", { text: value });
-        // readback 校验副作用真发生:非空 value 读回空 = 被类型/格式约束拒绝。
-        const rb = await nativePageQuery<{ value?: string } | undefined>(
-          tid,
-          frameId,
-          (sel: string) => {
-            const els = (window as any).__vortexDomResolve.queryAllDeep(sel) as Element[];
-            const el = els[0] as HTMLInputElement | undefined;
-            return { value: el && typeof el.value === "string" ? el.value : "" };
-          },
-          [selector],
-        );
-        if (value !== "" && (rb?.value ?? "") === "") {
-          mapPageError(
-            {
-              errorCode: "NO_EFFECT",
-              error: `Element ${selector} rejected value "${value}" via CDP insertText; value is empty after fill`,
-              extras: { attempted: value },
-            },
-            selector,
-          );
-        }
-        return { success: true, path: "cdp-fill-insertText", value: rb?.value };
-      }
-
       // === framework-aware rejection via page-side bundle (@since 0.4.0, migrated T2.7a) ===
+      // CDP-first 转正后仍前置(分流启发式照旧,spike 报告决策):框架级 readonly/
+      // disabled 伪装在写值前拦截,对 CDP 与降级两条写入路径都生效。
       if (!fallbackToNative) {
         await loadPageSideModule(tid, frameId, "fill-reject");
         const rejectResult = await nativePageQuery<
@@ -829,123 +761,187 @@ export function registerDomHandlers(
 
       // 加载 dom-resolve 模块，使 inline func 能通过 shadow 穿透解析 selector
       await loadPageSideModule(tid, frameId, "dom-resolve");
+
+      // CDP-first(2026-06-11 转正,spike 报告 reports/spike-cdp/):fill 默认走 CDP
+      // Input.insertText(isTrusted=true),对齐 playwright-mcp/chrome-devtools-mcp/
+      // Stagehand。厚探测(族 B 类型分流)+ focus + 全选由单一 inline func 完成
+      // (单一真源,不各处补 if):prepareOnly=true 探测完不写值,交 CDP insertText;
+      // prepareOnly=false 走 value-setter 写值(族 F 受控绕过 + 族 A NO_EFFECT 保留)。
+      // forceSynthetic / 无 debuggerMgr / CDP attach 失败 → value-setter 降级。
+      // ⚠️ 此 inline func 经 executeScript 序列化注入,不可引用模块级 helper(本 spike
+      // P0 教训 isTransient);仅用全局对象 + 参数 sel/val/prepareOnly。
+      const forceSynthetic = args.forceSynthetic === true;
+      const fillProbeOrWrite = (sel: string, val: string, prepareOnly: boolean): {
+        result?: unknown;
+        error?: string;
+        errorCode?: string;
+        extras?: Record<string, unknown>;
+      } => {
+        try {
+          // === element probes (in sync with CLICK) ===
+          const els = (window as any).__vortexDomResolve.queryAllDeep(sel) as Element[];
+          if (els.length === 0) {
+            return { errorCode: "ELEMENT_NOT_FOUND", error: `Element not found: ${sel}` };
+          }
+          if (els.length > 1) {
+            return {
+              errorCode: "SELECTOR_AMBIGUOUS",
+              error: `Selector "${sel}" matched ${els.length} elements`,
+              extras: { matchCount: els.length },
+            };
+          }
+          const el = els[0] as HTMLInputElement;
+          // 探测 disabled 走门同款 isEnabled(含 aria-disabled),与 CLICK/TYPE 一致(#26)。
+          if (!(window as any).__vortexDomResolve.isEnabled(el)) {
+            return { errorCode: "ELEMENT_DISABLED", error: `Element ${sel} is disabled` };
+          }
+          const rect = el.getBoundingClientRect();
+          if (rect.width === 0 || rect.height === 0) {
+            return {
+              errorCode: "ELEMENT_DETACHED",
+              error: `Element ${sel} has zero dimensions (detached or hidden)`,
+            };
+          }
+          const inView =
+            rect.top < window.innerHeight &&
+            rect.bottom > 0 &&
+            rect.left < window.innerWidth &&
+            rect.right > 0;
+          if (!inView) {
+            return {
+              errorCode: "ELEMENT_OFFSCREEN",
+              error: `Element ${sel} is outside the viewport`,
+            };
+          }
+          // 元素类型分流:isEditable 门放行的类型(input/textarea/select/
+          // contenteditable)比 fill 写值逻辑能正确处理的多。对非 text-like 的元素,
+          // 回退 `el.value = val` 要么被原生静默忽略、要么写错属性,伪装成
+          // success:true 实则页面无变化(silent false-success)。逐类响亮报错指引正确 action。
+          // (2026-06-03 act 原语白盒审计族 B)。CDP-first 后此分流对两条写入路径都生效。
+          //
+          // contenteditable → type(走 CDP Input.insertText 正确驱动)。
+          if (el.isContentEditable) {
+            return {
+              errorCode: "INVALID_TARGET",
+              error: `Element ${sel} is contentEditable; use action "type" instead of "fill"`,
+            };
+          }
+          // 原生 <select> → select(fill 设 el.value 仅按 option value 匹配,传可见
+          // 文本会被静默忽略并清空选中;SELECT handler 有 value→文本→label 回退)。
+          if (el instanceof HTMLSelectElement) {
+            return {
+              errorCode: "INVALID_TARGET",
+              error: `Element ${sel} is a <select>; use action "select" instead of "fill"`,
+            };
+          }
+          // checkbox/radio → click(fill 的原生 value setter 写的是 value 属性即
+          // 提交值,不是 checked 状态;勾选/取消勾选要靠 click 切换)。
+          if (
+            el instanceof HTMLInputElement &&
+            (el.type === "checkbox" || el.type === "radio")
+          ) {
+            return {
+              errorCode: "INVALID_TARGET",
+              error: `Element ${sel} is a ${el.type}; use action "click" to toggle it instead of "fill"`,
+            };
+          }
+          // CDP-first prepareOnly:类型分流已过,focus + 全选(替换语义,等价人手 Ctrl+A)
+          // 让随后的 CDP Input.insertText 覆盖写入;空值不全选保持 no-op。不写值,返回。
+          if (prepareOnly) {
+            el.focus();
+            if (String(val) !== "" && typeof el.select === "function") el.select();
+            return { result: { prepared: true } };
+          }
+          // === fill operation ===
+          // 降级路径(forceSynthetic / CDP attach 失败):走原生 value setter 绕过 React
+          // 受控组件覆盖的 setter,但必须按元素实际类型取:textarea 用 HTMLTextAreaElement、
+          // input 用 HTMLInputElement。用错类型(如对 <textarea> 调用 HTMLInputElement 的
+          // setter)会触发浏览器对原生访问器的品牌检查抛 "Illegal invocation"——Bing/Google
+          // 搜索框、评论框等都是 textarea,误用 input setter 会让 fill 对整类失效。
+          const valueProto =
+            el instanceof HTMLTextAreaElement
+              ? window.HTMLTextAreaElement.prototype
+              : el instanceof HTMLInputElement
+                ? window.HTMLInputElement.prototype
+                : null;
+          const nativeValueSetter = valueProto
+            ? Object.getOwnPropertyDescriptor(valueProto, "value")?.set
+            : undefined;
+          if (nativeValueSetter) {
+            nativeValueSetter.call(el, val);
+          } else {
+            el.value = val;
+          }
+          el.dispatchEvent(new Event("input", { bubbles: true }));
+          el.dispatchEvent(new Event("change", { bubbles: true }));
+          // 回读校验副作用真发生:type=number/date/email 等对非法格式的值,原生 setter
+          // 静默置空(el.value="")。传了非空值却读回空 = 输入被拒,报 NO_EFFECT 而非
+          // 假成功(2026-06-03 act 原语白盒审计族 A,#7)。仅判「非空→空」的明确拒绝,
+          // 不误伤值规范化(如 number "007"→"7")。
+          if (String(val) !== "" && (el as HTMLInputElement).value === "") {
+            return {
+              errorCode: "NO_EFFECT",
+              error: `Element ${sel} rejected value "${String(val)}" (likely a format/type constraint, e.g. type=number/date); value is empty after fill`,
+              extras: { attempted: String(val), type: (el as HTMLInputElement).type },
+            };
+          }
+          return { result: { success: true } };
+        } catch (err) {
+          return { error: err instanceof Error ? err.message : String(err) };
+        }
+      };
+
+      if (!forceSynthetic && debuggerMgr) {
+        // CDP-first:先 prepareOnly 探测(族 B 类型分流直抛 INVALID_TARGET)+ focus + 全选,
+        // 再 CDP Input.insertText 覆盖写入,readback 校验(族 A NO_EFFECT)。
+        const probe = await nativePageQuery<{
+          result?: unknown;
+          error?: string;
+          errorCode?: string;
+          extras?: Record<string, unknown>;
+        } | undefined>(tid, frameId, fillProbeOrWrite, [selector, value, true]);
+        if (probe?.error) mapPageError(probe, selector);
+        let cdpAttached = false;
+        try {
+          await debuggerMgr.attach(tid);
+          cdpAttached = true;
+        } catch {
+          // CDP 基础设施失败(DevTools 独占/策略禁用)→ fall through 降级 value-setter。
+        }
+        if (cdpAttached) {
+          await debuggerMgr.sendCommand(tid, "Input.insertText", { text: value });
+          const rb = await nativePageQuery<{ value?: string } | undefined>(
+            tid,
+            frameId,
+            (sel: string) => {
+              const els = (window as any).__vortexDomResolve.queryAllDeep(sel) as Element[];
+              const el = els[0] as HTMLInputElement | undefined;
+              return { value: el && typeof el.value === "string" ? el.value : "" };
+            },
+            [selector],
+          );
+          if (value !== "" && (rb?.value ?? "") === "") {
+            mapPageError(
+              {
+                errorCode: "NO_EFFECT",
+                error: `Element ${selector} rejected value "${value}" via CDP insertText; value is empty after fill`,
+                extras: { attempted: value },
+              },
+              selector,
+            );
+          }
+          return { success: true, path: "cdp-insertText", value: rb?.value };
+        }
+        // attach 失败 → fall through 到 value-setter 降级。
+      }
+
+      // 降级 / forceSynthetic:value-setter 写值(prepareOnly=false)。
       const res = await nativePageQuery<{
         result?: unknown;
         error?: string;
         errorCode?: string;
         extras?: Record<string, unknown>;
-      } | undefined>(
-        tid,
-        frameId,
-        (sel: string, val: string) => {
-          try {
-            // === element probes (in sync with CLICK) ===
-            const els = (window as any).__vortexDomResolve.queryAllDeep(sel) as Element[];
-            if (els.length === 0) {
-              return { errorCode: "ELEMENT_NOT_FOUND", error: `Element not found: ${sel}` };
-            }
-            if (els.length > 1) {
-              return {
-                errorCode: "SELECTOR_AMBIGUOUS",
-                error: `Selector "${sel}" matched ${els.length} elements`,
-                extras: { matchCount: els.length },
-              };
-            }
-            const el = els[0] as HTMLInputElement;
-            // 探测 disabled 走门同款 isEnabled(含 aria-disabled),与 CLICK/TYPE 一致(#26)。
-            if (!(window as any).__vortexDomResolve.isEnabled(el)) {
-              return { errorCode: "ELEMENT_DISABLED", error: `Element ${sel} is disabled` };
-            }
-            const rect = el.getBoundingClientRect();
-            if (rect.width === 0 || rect.height === 0) {
-              return {
-                errorCode: "ELEMENT_DETACHED",
-                error: `Element ${sel} has zero dimensions (detached or hidden)`,
-              };
-            }
-            const inView =
-              rect.top < window.innerHeight &&
-              rect.bottom > 0 &&
-              rect.left < window.innerWidth &&
-              rect.right > 0;
-            if (!inView) {
-              return {
-                errorCode: "ELEMENT_OFFSCREEN",
-                error: `Element ${sel} is outside the viewport`,
-              };
-            }
-            // 元素类型分流:isEditable 门放行的类型(input/textarea/select/
-            // contenteditable)比 fill 写值逻辑能正确处理的多。对非 text-like 的元素,
-            // 回退 `el.value = val` 要么被原生静默忽略、要么写错属性,伪装成
-            // success:true 实则页面无变化(silent false-success)。逐类响亮报错指引正确 action。
-            // (2026-06-03 act 原语白盒审计族 B)
-            //
-            // contenteditable → type(走 CDP Input.insertText 正确驱动)。
-            if (el.isContentEditable) {
-              return {
-                errorCode: "INVALID_TARGET",
-                error: `Element ${sel} is contentEditable; use action "type" instead of "fill"`,
-              };
-            }
-            // 原生 <select> → select(fill 设 el.value 仅按 option value 匹配,传可见
-            // 文本会被静默忽略并清空选中;SELECT handler 有 value→文本→label 回退)。
-            if (el instanceof HTMLSelectElement) {
-              return {
-                errorCode: "INVALID_TARGET",
-                error: `Element ${sel} is a <select>; use action "select" instead of "fill"`,
-              };
-            }
-            // checkbox/radio → click(fill 的原生 value setter 写的是 value 属性即
-            // 提交值,不是 checked 状态;勾选/取消勾选要靠 click 切换)。
-            if (
-              el instanceof HTMLInputElement &&
-              (el.type === "checkbox" || el.type === "radio")
-            ) {
-              return {
-                errorCode: "INVALID_TARGET",
-                error: `Element ${sel} is a ${el.type}; use action "click" to toggle it instead of "fill"`,
-              };
-            }
-            // === fill operation ===
-            // 走原生 value setter 是为绕过 React 受控组件覆盖的 setter,但必须按元素
-            // 实际类型取:textarea 用 HTMLTextAreaElement、input 用 HTMLInputElement。
-            // 用错类型(如对 <textarea> 调用 HTMLInputElement 的 setter)会触发浏览器
-            // 对原生访问器的品牌检查抛 "Illegal invocation"——Bing/Google 搜索框、评论框
-            // 等都是 textarea,误用 input setter 会让 fill 对整类失效。
-            const valueProto =
-              el instanceof HTMLTextAreaElement
-                ? window.HTMLTextAreaElement.prototype
-                : el instanceof HTMLInputElement
-                  ? window.HTMLInputElement.prototype
-                  : null;
-            const nativeValueSetter = valueProto
-              ? Object.getOwnPropertyDescriptor(valueProto, "value")?.set
-              : undefined;
-            if (nativeValueSetter) {
-              nativeValueSetter.call(el, val);
-            } else {
-              el.value = val;
-            }
-            el.dispatchEvent(new Event("input", { bubbles: true }));
-            el.dispatchEvent(new Event("change", { bubbles: true }));
-            // 回读校验副作用真发生:type=number/date/email 等对非法格式的值,原生 setter
-            // 静默置空(el.value="")。传了非空值却读回空 = 输入被拒,报 NO_EFFECT 而非
-            // 假成功(2026-06-03 act 原语白盒审计族 A,#7)。仅判「非空→空」的明确拒绝,
-            // 不误伤值规范化(如 number "007"→"7")。
-            if (String(val) !== "" && (el as HTMLInputElement).value === "") {
-              return {
-                errorCode: "NO_EFFECT",
-                error: `Element ${sel} rejected value "${String(val)}" (likely a format/type constraint, e.g. type=number/date); value is empty after fill`,
-                extras: { attempted: String(val), type: (el as HTMLInputElement).type },
-              };
-            }
-            return { result: { success: true } };
-          } catch (err) {
-            return { error: err instanceof Error ? err.message : String(err) };
-          }
-        },
-        [selector, value],
-      );
+      } | undefined>(tid, frameId, fillProbeOrWrite, [selector, value, false]);
       if (res?.error) mapPageError(res, selector);
       return res?.result;
     },
