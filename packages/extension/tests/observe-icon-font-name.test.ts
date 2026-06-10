@@ -63,4 +63,40 @@ describe("observe CSS 字体图标按钮命名(AP,2026-06-03 dogfood)", () => {
     expect(OBSERVE_SRC).toMatch(/"vxe-icon-"/);
     expect(OBSERVE_SRC).toMatch(/"van-icon-"/);
   });
+
+  it("班牛 wicon 分支源码锁:仅 wicon 签名基类同在时取 icon- 名", () => {
+    expect(OBSERVE_SRC).toMatch(/tokens\.includes\("wicon"\)/);
+  });
+});
+
+// 行为测试:班牛 web-icon `wicon`+`icon-<name>` 命名(testc dogfood 2026-06-10)。
+// 与 observe.ts iconFontName 的 wicon 分支字面一致(真源+测试副本,改一处须同步)。
+// `icon-` 前缀须 wicon 锚定——单独 `icon-*` 不取名,避免泛误名装饰图标。
+const WICON_BRANCH = `
+  const cls = el.className && typeof el.className === "string" ? el.className : "";
+  const tokens = cls.split(/\\s+/).filter(Boolean);
+  if (tokens.includes("wicon")) {
+    for (const c of tokens) {
+      const lower = c.toLowerCase();
+      if (lower.startsWith("icon-") && lower.length > 5) return lower.slice(5).replace(/-/g, " ");
+    }
+  }
+  return "";
+`;
+const wiconName = (className: string): string =>
+  new Function("el", WICON_BRANCH)({ className });
+
+describe("iconFontName 班牛 wicon 分支(行为)", () => {
+  it("wicon + icon-add-1 → 'add 1'", () => {
+    expect(wiconName("wicon icon-add-1 w-font-more w-margin-right6")).toBe("add 1");
+  });
+  it("wicon + icon-more → 'more'", () => {
+    expect(wiconName("wicon icon-more w-font-more")).toBe("more");
+  });
+  it("无 wicon 锚的裸 icon-add-1 → '' (避免泛 icon- 误名装饰图标)", () => {
+    expect(wiconName("icon-add-1 some-decorative")).toBe("");
+  });
+  it("有 wicon 但无 icon- 类 → ''", () => {
+    expect(wiconName("wicon w-font-more")).toBe("");
+  });
 });

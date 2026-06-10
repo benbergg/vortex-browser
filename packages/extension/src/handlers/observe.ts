@@ -514,12 +514,25 @@ async function scanOneFrame(
         function iconFontName(el: Element): string {
           const cls =
             el.className && typeof el.className === "string" ? el.className : "";
-          for (const c of cls.split(/\s+/).filter(Boolean)) {
+          const tokens = cls.split(/\s+/).filter(Boolean);
+          for (const c of tokens) {
             const lower = c.toLowerCase();
             if (ICON_FONT_MODIFIERS.has(lower)) continue;
             for (const p of ICON_FONT_PREFIXES) {
               if (lower.startsWith(p) && lower.length > p.length) {
                 return lower.slice(p.length).replace(/-/g, " ");
+              }
+            }
+          }
+          // 班牛(Bangniu/testc)web-icon:基类 `wicon` + `icon-<name>`(icon-add-1 /
+          // icon-more),CSS ::before 字形,无 inner svg/img、无 aria/text。`icon-` 前缀
+          // 本身太泛(易误名装饰图标),**仅在 `wicon` 签名基类同在时**取名,把命名锚定
+          // 到班牛体系(2026-06-10 testc dogfood:hover 出的 +/··· 图标按钮无名被丢)。
+          if (tokens.includes("wicon")) {
+            for (const c of tokens) {
+              const lower = c.toLowerCase();
+              if (lower.startsWith("icon-") && lower.length > 5) {
+                return lower.slice(5).replace(/-/g, " ");
               }
             }
           }
