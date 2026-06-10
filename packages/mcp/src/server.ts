@@ -362,13 +362,10 @@ export async function handleCallTool(
         typeof tabId === "number" ? tabId : null;
     }
     if (detail === "compact") {
-      const { renderObserveCompact } = await import("./lib/observe-render.js");
-      // Issue #21 — thread caller's includeBoxes through to the renderer.
-      // The flag is also already inside `next` (spread `...rest`) so the
-      // extension handler sees it on its own; render needs the bool too
-      // to decide whether to emit `bbox=` segments and frame offset lines.
+      const { renderObserveTree } = await import("./lib/observe-render.js");
+      // a11y-tree: compact 输出升级为嵌套树（设计 20260610）。includeBoxes 透传。
       const includeBoxes = params.includeBoxes === true;
-      const text = renderObserveCompact(resp.result as any, activeSnapshotHash, includeBoxes);
+      const text = renderObserveTree(resp.result as any, activeSnapshotHash, includeBoxes);
       return withEvents([{ type: "text" as const, text }]);
     }
     // detail=full：原 JSON pretty（与 v0.4 行为一致）
