@@ -1941,6 +1941,8 @@ export function registerObserveHandlers(router: ActionRouter): void {
         frameId: number;
         // Issue #21 — populated only when input.includeBoxes && e.inViewport (T4).
         bbox?: [number, number, number, number];
+        parentIndex?: number;
+        href?: string;
       };
       type FullElementOut = Omit<ScannedElement, "_sel"> & {
         frameId: number;
@@ -1978,8 +1980,13 @@ export function registerObserveHandlers(router: ActionRouter): void {
         }
         totalCandidates += s.page.candidateCount;
         anyTruncated = anyTruncated || s.page.truncated;
+        // a11y-tree: 该 frame 首元素的全局 index，用于把 frame-local parentIndex 重映射成全局 index。
+        const frameBase = cursor;
         for (const e of s.page.elements) {
           const globalIdx = cursor++;
+          // a11y-tree: frame-local parentIndex → global parentIndex（globalParent = frameBase + localParent）。
+          const globalParentIndex =
+            e.parentIndex !== undefined ? frameBase + e.parentIndex : undefined;
           const centerX = e.bbox.x + Math.round(e.bbox.w / 2);
           const centerY = e.bbox.y + Math.round(e.bbox.h / 2);
           if (format === "compact") {
@@ -2017,6 +2024,9 @@ export function registerObserveHandlers(router: ActionRouter): void {
               ...(e.reactClickable
                 ? { reactClickable: true as const, clickHint: e.clickHint! }
                 : {}),
+              // a11y-tree: 全局重映射后的父指针 + href（link 元素）。
+              ...(globalParentIndex !== undefined ? { parentIndex: globalParentIndex } : {}),
+              ...(e.href ? { href: e.href } : {}),
               frameId: s.frameId,
               ...(bboxTuple ? { bbox: bboxTuple } : {}),
             });
@@ -2047,6 +2057,9 @@ export function registerObserveHandlers(router: ActionRouter): void {
               ...(e.reactClickable
                 ? { reactClickable: true as const, clickHint: e.clickHint! }
                 : {}),
+              // a11y-tree: 全局重映射后的父指针 + href（link 元素）。
+              ...(globalParentIndex !== undefined ? { parentIndex: globalParentIndex } : {}),
+              ...(e.href ? { href: e.href } : {}),
               frameId: s.frameId,
               ref,
               suggestedUsage: {
