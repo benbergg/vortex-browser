@@ -65,7 +65,7 @@ export const PUBLIC_TOOLS: ToolDef[] = [
   {
     name: "vortex_observe",
     action: "L4.observe",
-    description: "List interactive elements; iframes: frames=all-permitted.",
+    description: "Nested a11y tree (ref=@..). iframes: frames=all-permitted.",
     schema: {
       type: "object",
       properties: {
