@@ -170,7 +170,7 @@ export function renderObserveTree(
   const roots: CompactElement[] = [];
   for (const e of els) {
     const p = e.parentIndex;
-    if (p === undefined || !byIndex.has(p)) {
+    if (p === undefined || p === e.index || !byIndex.has(p)) {
       roots.push(e);
     } else {
       const arr = childrenOf.get(p);
@@ -181,7 +181,8 @@ export function renderObserveTree(
 
   const visited = new Set<number>();
   const emit = (e: CompactElement, depth: number): void => {
-    if (visited.has(e.index)) return; // 防环兜底（parentIndex<index 已保证 DAG）
+    if (visited.has(e.index)) return; // 防环兜底：forward parent-reference 形成的环由 visited 截断；
+    // self-loop(parentIndex===index) 已在建树阶段提升为根。严格 parentIndex<index 由收集侧保证。
     visited.add(e.index);
     const indent = "  ".repeat(depth);
     const name = e.name ? ` "${escapeName(e.name)}"` : "";

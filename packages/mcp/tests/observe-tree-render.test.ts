@@ -8,7 +8,8 @@ const mk = (o: Partial<CompactElement> & { index: number; role: string }): Compa
 
 function body(out: string): string {
   // 跳过 header（SnapshotId/URL/Title/Viewport + 空行），只取树体
-  return out.split("\n").slice(out.split("\n").indexOf("") + 1).join("\n");
+  const parts = out.split("\n");
+  return parts.slice(parts.indexOf("") + 1).join("\n");
 }
 
 describe("renderObserveTree", () => {
@@ -67,5 +68,24 @@ describe("renderObserveTree", () => {
       mk({ index: 0, role: "button", name: "Q", bbox: [1, 2, 3, 4] }),
     ]), null, true);
     expect(body(out)).toContain(`- button "Q" [ref=@e0] bbox=[1,2,3,4]`);
+  });
+
+  it("emits frame note for a not-scanned frame", () => {
+    const out = renderObserveTree({
+      snapshotId: "snap_x", url: "http://t",
+      frames: [
+        { frameId: 0, parentFrameId: -1, url: "http://t", offset: { x: 0, y: 0 }, elementCount: 1, truncated: false, scanned: true },
+        { frameId: 2, parentFrameId: 0, url: "http://cross", offset: { x: 0, y: 0 }, elementCount: 0, truncated: false, scanned: false },
+      ],
+      elements: [mk({ index: 0, role: "button", name: "Q" })],
+    } as any, null);
+    expect(out).toContain("# frame 2 not scanned (url=http://cross)");
+  });
+
+  it("promotes self-loop parentIndex to root", () => {
+    const out = renderObserveTree(base([
+      mk({ index: 3, role: "button", name: "Self", parentIndex: 3 }),
+    ]), null);
+    expect(body(out)).toBe(`- button "Self" [ref=@e3]`);
   });
 });
