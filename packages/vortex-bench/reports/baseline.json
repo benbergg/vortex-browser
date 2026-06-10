@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-06-04T13:01:45.078Z",
+  "generatedAt": "2026-06-10T10:48:10.879Z",
   "playgroundUrl": "http://localhost:5173",
   "cases": [
     {
@@ -8,17 +8,16 @@
       "callCount": 7,
       "fallbackToEvaluate": 0,
       "observeMissedPopperItems": 0,
-      "outputBytes": 597,
-      "durationMs": 1095,
-      "repeats": 3,
-      "passRate": 1,
+      "outputBytes": 832,
+      "durationMs": 1216,
       "outputBytesByTool": {
-        "vortex_navigate": 183,
+        "vortex_navigate": 327,
         "vortex_wait_for": 124,
-        "vortex_observe": 163,
-        "vortex_act": 101,
+        "vortex_observe": 222,
+        "vortex_act": 133,
         "vortex_evaluate": 26
-      }
+      },
+      "tier": "easy"
     },
     {
       "case": "aria-cursor-nested-no-dup",
@@ -26,19 +25,18 @@
       "callCount": 4,
       "fallbackToEvaluate": 0,
       "observeMissedPopperItems": 0,
-      "outputBytes": 728,
-      "durationMs": 933,
-      "repeats": 3,
-      "passRate": 1,
+      "outputBytes": 1102,
+      "durationMs": 899,
       "outputBytesByTool": {
-        "vortex_navigate": 211,
+        "vortex_navigate": 355,
         "vortex_wait_for": 62,
-        "vortex_observe": 455
+        "vortex_observe": 685
       },
       "customMetrics": {
-        "totalRefBytes": 415,
+        "totalRefBytes": 645,
         "ariaItems": 8
-      }
+      },
+      "tier": "medium"
     },
     {
       "case": "async-loading-spinner",
@@ -46,17 +44,16 @@
       "callCount": 9,
       "fallbackToEvaluate": 0,
       "observeMissedPopperItems": 0,
-      "outputBytes": 619,
-      "durationMs": 1561,
-      "repeats": 3,
-      "passRate": 1,
+      "outputBytes": 823,
+      "durationMs": 1642,
       "outputBytesByTool": {
-        "vortex_navigate": 188,
+        "vortex_navigate": 332,
         "vortex_wait_for": 124,
-        "vortex_observe": 167,
+        "vortex_observe": 190,
         "vortex_extract": 32,
-        "vortex_act": 108
-      }
+        "vortex_act": 145
+      },
+      "tier": "easy"
     },
     {
       "case": "b-occluded-input",
@@ -64,16 +61,15 @@
       "callCount": 5,
       "fallbackToEvaluate": 0,
       "observeMissedPopperItems": 0,
-      "outputBytes": 467,
-      "durationMs": 5035,
-      "repeats": 3,
-      "passRate": 1,
+      "outputBytes": 611,
+      "durationMs": 2889,
       "outputBytesByTool": {
-        "vortex_navigate": 193,
+        "vortex_navigate": 337,
         "vortex_wait_for": 62,
         "vortex_act": 210,
         "vortex_evaluate": 2
-      }
+      },
+      "tier": "hard"
     },
     {
       "case": "c-native-controls",
@@ -81,17 +77,16 @@
       "callCount": 7,
       "fallbackToEvaluate": 0,
       "observeMissedPopperItems": 0,
-      "outputBytes": 679,
-      "durationMs": 722,
-      "repeats": 3,
-      "passRate": 1,
+      "outputBytes": 947,
+      "durationMs": 741,
       "outputBytesByTool": {
-        "vortex_navigate": 195,
+        "vortex_navigate": 339,
         "vortex_wait_for": 62,
-        "vortex_observe": 227,
-        "vortex_act": 165,
+        "vortex_observe": 245,
+        "vortex_act": 271,
         "vortex_evaluate": 30
-      }
+      },
+      "tier": "easy"
     },
     {
       "case": "contenteditable-rich-text",
@@ -99,16 +94,15 @@
       "callCount": 11,
       "fallbackToEvaluate": 0,
       "observeMissedPopperItems": 0,
-      "outputBytes": 841,
-      "durationMs": 1461,
-      "repeats": 3,
-      "passRate": 1,
+      "outputBytes": 1044,
+      "durationMs": 1523,
       "outputBytesByTool": {
-        "vortex_navigate": 231,
+        "vortex_navigate": 375,
         "vortex_wait_for": 186,
-        "vortex_act": 340,
+        "vortex_act": 399,
         "vortex_evaluate": 84
-      }
+      },
+      "tier": "hard"
     },
     {
       "case": "cross-observe-ref-stale",
@@ -116,14 +110,12 @@
       "callCount": 6,
       "fallbackToEvaluate": 0,
       "observeMissedPopperItems": 0,
-      "outputBytes": 1373,
-      "durationMs": 851,
-      "repeats": 3,
-      "passRate": 1,
+      "outputBytes": 1977,
+      "durationMs": 846,
       "outputBytesByTool": {
-        "vortex_navigate": 211,
+        "vortex_navigate": 355,
         "vortex_wait_for": 62,
-        "vortex_observe": 910,
+        "vortex_observe": 1370,
         "vortex_act": 190
       },
       "customMetrics": {
@@ -132,22 +124,37 @@
       }
     },
     {
+      "case": "csr-in-oopif",
+      "passed": true,
+      "callCount": 5,
+      "fallbackToEvaluate": 0,
+      "observeMissedPopperItems": 0,
+      "outputBytes": 987,
+      "durationMs": 2370,
+      "outputBytesByTool": {
+        "vortex_navigate": 331,
+        "vortex_wait_for": 62,
+        "vortex_observe": 235,
+        "vortex_act": 359
+      },
+      "tier": "hard"
+    },
+    {
       "case": "dynamic-role-mutation",
       "passed": true,
       "callCount": 7,
       "fallbackToEvaluate": 0,
       "observeMissedPopperItems": 0,
-      "outputBytes": 853,
-      "durationMs": 720,
-      "repeats": 3,
-      "passRate": 1,
+      "outputBytes": 1075,
+      "durationMs": 765,
       "outputBytesByTool": {
-        "vortex_navigate": 229,
+        "vortex_navigate": 373,
         "vortex_wait_for": 62,
-        "vortex_observe": 433,
-        "vortex_act": 115,
+        "vortex_observe": 479,
+        "vortex_act": 147,
         "vortex_extract": 14
-      }
+      },
+      "tier": "medium"
     },
     {
       "case": "el-autocomplete",
@@ -155,17 +162,16 @@
       "callCount": 9,
       "fallbackToEvaluate": 0,
       "observeMissedPopperItems": 0,
-      "outputBytes": 1636,
-      "durationMs": 2385,
-      "repeats": 3,
-      "passRate": 1,
+      "outputBytes": 3096,
+      "durationMs": 2221,
       "outputBytesByTool": {
-        "vortex_navigate": 192,
+        "vortex_navigate": 336,
         "vortex_wait_for": 124,
-        "vortex_act": 299,
-        "vortex_observe": 1007,
+        "vortex_act": 334,
+        "vortex_observe": 2288,
         "vortex_extract": 14
-      }
+      },
+      "tier": "medium"
     },
     {
       "case": "el-cascader",
@@ -173,16 +179,15 @@
       "callCount": 5,
       "fallbackToEvaluate": 0,
       "observeMissedPopperItems": 0,
-      "outputBytes": 449,
-      "durationMs": 2143,
-      "repeats": 3,
-      "passRate": 1,
+      "outputBytes": 593,
+      "durationMs": 1618,
       "outputBytesByTool": {
-        "vortex_navigate": 188,
+        "vortex_navigate": 332,
         "vortex_wait_for": 62,
         "vortex_fill": 160,
         "vortex_extract": 39
-      }
+      },
+      "tier": "medium"
     },
     {
       "case": "el-color-picker",
@@ -190,18 +195,17 @@
       "callCount": 13,
       "fallbackToEvaluate": 1,
       "observeMissedPopperItems": 0,
-      "outputBytes": 1422,
-      "durationMs": 12601,
-      "repeats": 3,
-      "passRate": 1,
+      "outputBytes": 1613,
+      "durationMs": 5868,
       "outputBytesByTool": {
-        "vortex_navigate": 192,
+        "vortex_navigate": 336,
         "vortex_wait_for": 248,
-        "vortex_act": 792,
+        "vortex_act": 839,
         "vortex_press": 163,
         "vortex_evaluate": 11,
         "vortex_extract": 16
-      }
+      },
+      "tier": "medium"
     },
     {
       "case": "el-date-picker-daterange",
@@ -209,16 +213,15 @@
       "callCount": 6,
       "fallbackToEvaluate": 0,
       "observeMissedPopperItems": 0,
-      "outputBytes": 481,
-      "durationMs": 10841,
-      "repeats": 3,
-      "passRate": 1,
+      "outputBytes": 625,
+      "durationMs": 7492,
       "outputBytesByTool": {
-        "vortex_navigate": 201,
+        "vortex_navigate": 345,
         "vortex_wait_for": 62,
         "vortex_fill": 150,
         "vortex_extract": 68
-      }
+      },
+      "tier": "medium"
     },
     {
       "case": "el-date-picker-datetimerange",
@@ -226,16 +229,15 @@
       "callCount": 6,
       "fallbackToEvaluate": 0,
       "observeMissedPopperItems": 0,
-      "outputBytes": 543,
-      "durationMs": 16842,
-      "repeats": 3,
-      "passRate": 1,
+      "outputBytes": 687,
+      "durationMs": 12328,
       "outputBytesByTool": {
-        "vortex_navigate": 205,
+        "vortex_navigate": 349,
         "vortex_wait_for": 62,
         "vortex_fill": 172,
         "vortex_extract": 104
-      }
+      },
+      "tier": "medium"
     },
     {
       "case": "el-dialog-nested",
@@ -243,18 +245,17 @@
       "callCount": 9,
       "fallbackToEvaluate": 0,
       "observeMissedPopperItems": 0,
-      "outputBytes": 1545,
-      "durationMs": 1943,
-      "repeats": 3,
-      "passRate": 1,
+      "outputBytes": 3011,
+      "durationMs": 1602,
       "outputBytesByTool": {
-        "vortex_navigate": 193,
+        "vortex_navigate": 337,
         "vortex_wait_for": 124,
-        "vortex_observe": 979,
-        "vortex_act": 92,
+        "vortex_observe": 2254,
+        "vortex_act": 139,
         "vortex_fill": 105,
         "vortex_extract": 52
-      }
+      },
+      "tier": "medium"
     },
     {
       "case": "el-drawer",
@@ -262,16 +263,15 @@
       "callCount": 9,
       "fallbackToEvaluate": 0,
       "observeMissedPopperItems": 0,
-      "outputBytes": 670,
-      "durationMs": 1826,
-      "repeats": 3,
-      "passRate": 1,
+      "outputBytes": 883,
+      "durationMs": 1618,
       "outputBytesByTool": {
-        "vortex_navigate": 186,
+        "vortex_navigate": 330,
         "vortex_wait_for": 124,
-        "vortex_act": 286,
+        "vortex_act": 355,
         "vortex_extract": 74
-      }
+      },
+      "tier": "medium"
     },
     {
       "case": "el-dropdown",
@@ -279,17 +279,16 @@
       "callCount": 9,
       "fallbackToEvaluate": 0,
       "observeMissedPopperItems": 0,
-      "outputBytes": 2608,
-      "durationMs": 1902,
-      "repeats": 3,
-      "passRate": 1,
+      "outputBytes": 5447,
+      "durationMs": 1260,
       "outputBytesByTool": {
-        "vortex_navigate": 188,
+        "vortex_navigate": 332,
         "vortex_wait_for": 124,
-        "vortex_observe": 2081,
-        "vortex_act": 196,
+        "vortex_observe": 4700,
+        "vortex_act": 272,
         "vortex_extract": 19
-      }
+      },
+      "tier": "medium"
     },
     {
       "case": "el-form-composite",
@@ -297,17 +296,16 @@
       "callCount": 13,
       "fallbackToEvaluate": 0,
       "observeMissedPopperItems": 0,
-      "outputBytes": 1269,
-      "durationMs": 1621,
-      "repeats": 3,
-      "passRate": 1,
+      "outputBytes": 1515,
+      "durationMs": 1301,
       "outputBytesByTool": {
-        "vortex_navigate": 194,
+        "vortex_navigate": 338,
         "vortex_wait_for": 62,
-        "vortex_act": 249,
+        "vortex_act": 351,
         "vortex_fill": 259,
         "vortex_extract": 505
-      }
+      },
+      "tier": "medium"
     },
     {
       "case": "el-input-number",
@@ -315,17 +313,16 @@
       "callCount": 8,
       "fallbackToEvaluate": 0,
       "observeMissedPopperItems": 0,
-      "outputBytes": 616,
-      "durationMs": 1593,
-      "repeats": 3,
-      "passRate": 1,
+      "outputBytes": 782,
+      "durationMs": 1128,
       "outputBytesByTool": {
-        "vortex_navigate": 192,
+        "vortex_navigate": 336,
         "vortex_wait_for": 124,
-        "vortex_act": 186,
-        "vortex_press": 106,
+        "vortex_act": 207,
+        "vortex_press": 107,
         "vortex_extract": 8
-      }
+      },
+      "tier": "medium"
     },
     {
       "case": "el-message-box",
@@ -333,17 +330,16 @@
       "callCount": 8,
       "fallbackToEvaluate": 0,
       "observeMissedPopperItems": 0,
-      "outputBytes": 1579,
-      "durationMs": 1791,
-      "repeats": 3,
-      "passRate": 1,
+      "outputBytes": 3164,
+      "durationMs": 1439,
       "outputBytesByTool": {
-        "vortex_navigate": 191,
+        "vortex_navigate": 335,
         "vortex_wait_for": 124,
-        "vortex_act": 172,
-        "vortex_observe": 1069,
+        "vortex_act": 269,
+        "vortex_observe": 2413,
         "vortex_extract": 23
-      }
+      },
+      "tier": "medium"
     },
     {
       "case": "el-pagination",
@@ -351,17 +347,16 @@
       "callCount": 6,
       "fallbackToEvaluate": 0,
       "observeMissedPopperItems": 0,
-      "outputBytes": 1697,
-      "durationMs": 1288,
-      "repeats": 3,
-      "passRate": 1,
+      "outputBytes": 3320,
+      "durationMs": 839,
       "outputBytesByTool": {
-        "vortex_navigate": 190,
+        "vortex_navigate": 334,
         "vortex_wait_for": 62,
-        "vortex_observe": 1355,
-        "vortex_act": 74,
+        "vortex_observe": 2787,
+        "vortex_act": 121,
         "vortex_extract": 16
-      }
+      },
+      "tier": "medium"
     },
     {
       "case": "el-radio-group",
@@ -369,17 +364,16 @@
       "callCount": 6,
       "fallbackToEvaluate": 0,
       "observeMissedPopperItems": 0,
-      "outputBytes": 1377,
-      "durationMs": 1190,
-      "repeats": 3,
-      "passRate": 1,
+      "outputBytes": 2893,
+      "durationMs": 784,
       "outputBytesByTool": {
-        "vortex_navigate": 191,
+        "vortex_navigate": 335,
         "vortex_wait_for": 62,
-        "vortex_observe": 1028,
-        "vortex_act": 84,
+        "vortex_observe": 2348,
+        "vortex_act": 136,
         "vortex_extract": 12
-      }
+      },
+      "tier": "medium"
     },
     {
       "case": "el-select-multiple",
@@ -387,16 +381,15 @@
       "callCount": 6,
       "fallbackToEvaluate": 0,
       "observeMissedPopperItems": 0,
-      "outputBytes": 734,
-      "durationMs": 1395,
-      "repeats": 3,
-      "passRate": 1,
+      "outputBytes": 878,
+      "durationMs": 948,
       "outputBytesByTool": {
-        "vortex_navigate": 195,
+        "vortex_navigate": 339,
         "vortex_wait_for": 62,
         "vortex_fill": 439,
         "vortex_extract": 38
-      }
+      },
+      "tier": "medium"
     },
     {
       "case": "el-select-single",
@@ -404,16 +397,15 @@
       "callCount": 5,
       "fallbackToEvaluate": 0,
       "observeMissedPopperItems": 0,
-      "outputBytes": 382,
-      "durationMs": 1266,
-      "repeats": 3,
-      "passRate": 1,
+      "outputBytes": 526,
+      "durationMs": 775,
       "outputBytesByTool": {
-        "vortex_navigate": 193,
+        "vortex_navigate": 337,
         "vortex_wait_for": 62,
         "vortex_fill": 112,
         "vortex_extract": 15
-      }
+      },
+      "tier": "medium"
     },
     {
       "case": "el-select-v2",
@@ -421,16 +413,15 @@
       "callCount": 5,
       "fallbackToEvaluate": 0,
       "observeMissedPopperItems": 0,
-      "outputBytes": 376,
-      "durationMs": 1497,
-      "repeats": 3,
-      "passRate": 1,
+      "outputBytes": 520,
+      "durationMs": 963,
       "outputBytesByTool": {
-        "vortex_navigate": 189,
+        "vortex_navigate": 333,
         "vortex_wait_for": 62,
         "vortex_fill": 112,
         "vortex_extract": 13
-      }
+      },
+      "tier": "hard"
     },
     {
       "case": "el-select-v2-virtual",
@@ -438,16 +429,15 @@
       "callCount": 5,
       "fallbackToEvaluate": 0,
       "observeMissedPopperItems": 0,
-      "outputBytes": 380,
-      "durationMs": 1511,
-      "repeats": 3,
-      "passRate": 1,
+      "outputBytes": 524,
+      "durationMs": 948,
       "outputBytesByTool": {
-        "vortex_navigate": 189,
+        "vortex_navigate": 333,
         "vortex_wait_for": 62,
         "vortex_fill": 114,
         "vortex_extract": 15
-      }
+      },
+      "tier": "hard"
     },
     {
       "case": "el-slider",
@@ -455,17 +445,16 @@
       "callCount": 7,
       "fallbackToEvaluate": 0,
       "observeMissedPopperItems": 0,
-      "outputBytes": 452,
-      "durationMs": 2806,
-      "repeats": 3,
-      "passRate": 1,
+      "outputBytes": 741,
+      "durationMs": 1247,
       "outputBytesByTool": {
-        "vortex_navigate": 186,
-        "vortex_wait_for": 124,
+        "vortex_navigate": 330,
+        "vortex_wait_for": 269,
         "vortex_fill": 21,
         "vortex_press": 113,
         "vortex_extract": 8
-      }
+      },
+      "tier": "medium"
     },
     {
       "case": "el-slider-drag",
@@ -473,16 +462,15 @@
       "callCount": 7,
       "fallbackToEvaluate": 0,
       "observeMissedPopperItems": 0,
-      "outputBytes": 585,
-      "durationMs": 4514,
-      "repeats": 3,
-      "passRate": 1,
+      "outputBytes": 729,
+      "durationMs": 1033,
       "outputBytesByTool": {
-        "vortex_navigate": 186,
+        "vortex_navigate": 330,
         "vortex_wait_for": 124,
         "vortex_evaluate": 106,
         "vortex_mouse_drag": 169
-      }
+      },
+      "tier": "medium"
     },
     {
       "case": "el-table",
@@ -490,16 +478,15 @@
       "callCount": 8,
       "fallbackToEvaluate": 0,
       "observeMissedPopperItems": 0,
-      "outputBytes": 515,
-      "durationMs": 2220,
-      "repeats": 3,
-      "passRate": 1,
+      "outputBytes": 771,
+      "durationMs": 1188,
       "outputBytesByTool": {
-        "vortex_navigate": 185,
+        "vortex_navigate": 329,
         "vortex_wait_for": 124,
-        "vortex_act": 160,
+        "vortex_act": 272,
         "vortex_extract": 46
-      }
+      },
+      "tier": "medium"
     },
     {
       "case": "el-tabs",
@@ -507,17 +494,16 @@
       "callCount": 9,
       "fallbackToEvaluate": 0,
       "observeMissedPopperItems": 0,
-      "outputBytes": 1580,
-      "durationMs": 1649,
-      "repeats": 3,
-      "passRate": 1,
+      "outputBytes": 3025,
+      "durationMs": 1326,
       "outputBytesByTool": {
-        "vortex_navigate": 184,
+        "vortex_navigate": 328,
         "vortex_wait_for": 124,
-        "vortex_observe": 1026,
-        "vortex_act": 188,
+        "vortex_observe": 2295,
+        "vortex_act": 220,
         "vortex_extract": 58
-      }
+      },
+      "tier": "medium"
     },
     {
       "case": "el-time-picker",
@@ -525,16 +511,15 @@
       "callCount": 5,
       "fallbackToEvaluate": 0,
       "observeMissedPopperItems": 0,
-      "outputBytes": 289,
-      "durationMs": 1564,
-      "repeats": 3,
-      "passRate": 1,
+      "outputBytes": 433,
+      "durationMs": 722,
       "outputBytesByTool": {
-        "vortex_navigate": 191,
+        "vortex_navigate": 335,
         "vortex_wait_for": 62,
         "vortex_act": 21,
         "vortex_extract": 15
-      }
+      },
+      "tier": "medium"
     },
     {
       "case": "el-transfer",
@@ -542,17 +527,16 @@
       "callCount": 9,
       "fallbackToEvaluate": 0,
       "observeMissedPopperItems": 0,
-      "outputBytes": 1817,
-      "durationMs": 2166,
-      "repeats": 3,
-      "passRate": 1,
+      "outputBytes": 3551,
+      "durationMs": 1384,
       "outputBytesByTool": {
-        "vortex_navigate": 188,
+        "vortex_navigate": 332,
         "vortex_wait_for": 124,
-        "vortex_observe": 1248,
-        "vortex_act": 241,
+        "vortex_observe": 2695,
+        "vortex_act": 384,
         "vortex_extract": 16
-      }
+      },
+      "tier": "medium"
     },
     {
       "case": "el-tree",
@@ -560,17 +544,16 @@
       "callCount": 13,
       "fallbackToEvaluate": 0,
       "observeMissedPopperItems": 0,
-      "outputBytes": 3890,
-      "durationMs": 3021,
-      "repeats": 3,
-      "passRate": 1,
+      "outputBytes": 8019,
+      "durationMs": 2617,
       "outputBytesByTool": {
-        "vortex_navigate": 184,
+        "vortex_navigate": 328,
         "vortex_wait_for": 248,
-        "vortex_observe": 3195,
-        "vortex_act": 240,
+        "vortex_observe": 7039,
+        "vortex_act": 381,
         "vortex_extract": 23
-      }
+      },
+      "tier": "medium"
     },
     {
       "case": "el-tree-select",
@@ -578,17 +561,16 @@
       "callCount": 15,
       "fallbackToEvaluate": 0,
       "observeMissedPopperItems": 0,
-      "outputBytes": 4711,
-      "durationMs": 3997,
-      "repeats": 3,
-      "passRate": 1,
+      "outputBytes": 9080,
+      "durationMs": 3365,
       "outputBytesByTool": {
-        "vortex_navigate": 191,
+        "vortex_navigate": 335,
         "vortex_wait_for": 310,
-        "vortex_act": 323,
-        "vortex_observe": 3873,
+        "vortex_act": 511,
+        "vortex_observe": 7910,
         "vortex_extract": 14
-      }
+      },
+      "tier": "medium"
     },
     {
       "case": "el-upload",
@@ -596,16 +578,15 @@
       "callCount": 6,
       "fallbackToEvaluate": 0,
       "observeMissedPopperItems": 0,
-      "outputBytes": 405,
-      "durationMs": 1568,
-      "repeats": 3,
-      "passRate": 1,
+      "outputBytes": 549,
+      "durationMs": 963,
       "outputBytesByTool": {
-        "vortex_navigate": 186,
+        "vortex_navigate": 330,
         "vortex_wait_for": 124,
         "vortex_file_upload": 69,
         "vortex_extract": 26
-      }
+      },
+      "tier": "medium"
     },
     {
       "case": "extract-multi-field-card",
@@ -613,15 +594,14 @@
       "callCount": 6,
       "fallbackToEvaluate": 0,
       "observeMissedPopperItems": 0,
-      "outputBytes": 332,
-      "durationMs": 706,
-      "repeats": 3,
-      "passRate": 1,
+      "outputBytes": 476,
+      "durationMs": 731,
       "outputBytesByTool": {
-        "vortex_navigate": 210,
+        "vortex_navigate": 354,
         "vortex_wait_for": 62,
         "vortex_extract": 60
-      }
+      },
+      "tier": "easy"
     },
     {
       "case": "extract-nested-card-list",
@@ -629,15 +609,14 @@
       "callCount": 4,
       "fallbackToEvaluate": 0,
       "observeMissedPopperItems": 0,
-      "outputBytes": 353,
-      "durationMs": 573,
-      "repeats": 3,
-      "passRate": 1,
+      "outputBytes": 497,
+      "durationMs": 613,
       "outputBytesByTool": {
-        "vortex_navigate": 213,
+        "vortex_navigate": 357,
         "vortex_wait_for": 62,
         "vortex_extract": 78
-      }
+      },
+      "tier": "medium"
     },
     {
       "case": "extract-numeric-suffix",
@@ -645,15 +624,14 @@
       "callCount": 4,
       "fallbackToEvaluate": 0,
       "observeMissedPopperItems": 0,
-      "outputBytes": 274,
-      "durationMs": 624,
-      "repeats": 3,
-      "passRate": 1,
+      "outputBytes": 418,
+      "durationMs": 550,
       "outputBytesByTool": {
-        "vortex_navigate": 205,
+        "vortex_navigate": 349,
         "vortex_wait_for": 62,
         "vortex_extract": 7
-      }
+      },
+      "tier": "medium"
     },
     {
       "case": "extract-table-rows",
@@ -661,15 +639,14 @@
       "callCount": 4,
       "fallbackToEvaluate": 0,
       "observeMissedPopperItems": 0,
-      "outputBytes": 1004,
-      "durationMs": 600,
-      "repeats": 3,
-      "passRate": 1,
+      "outputBytes": 1148,
+      "durationMs": 548,
       "outputBytesByTool": {
-        "vortex_navigate": 206,
+        "vortex_navigate": 350,
         "vortex_wait_for": 62,
         "vortex_extract": 736
-      }
+      },
+      "tier": "medium"
     },
     {
       "case": "extract-targeted-value",
@@ -677,15 +654,14 @@
       "callCount": 5,
       "fallbackToEvaluate": 0,
       "observeMissedPopperItems": 0,
-      "outputBytes": 285,
-      "durationMs": 831,
-      "repeats": 3,
-      "passRate": 1,
+      "outputBytes": 429,
+      "durationMs": 616,
       "outputBytesByTool": {
-        "vortex_navigate": 205,
+        "vortex_navigate": 349,
         "vortex_wait_for": 62,
         "vortex_extract": 18
-      }
+      },
+      "tier": "easy"
     },
     {
       "case": "f-scroll-to-bottom",
@@ -693,16 +669,15 @@
       "callCount": 6,
       "fallbackToEvaluate": 0,
       "observeMissedPopperItems": 0,
-      "outputBytes": 420,
-      "durationMs": 950,
-      "repeats": 3,
-      "passRate": 1,
+      "outputBytes": 564,
+      "durationMs": 901,
       "outputBytesByTool": {
-        "vortex_navigate": 188,
+        "vortex_navigate": 332,
         "vortex_wait_for": 124,
         "vortex_act": 78,
         "vortex_evaluate": 30
-      }
+      },
+      "tier": "medium"
     },
     {
       "case": "g-multi-tab",
@@ -710,17 +685,16 @@
       "callCount": 7,
       "fallbackToEvaluate": 0,
       "observeMissedPopperItems": 0,
-      "outputBytes": 397,
-      "durationMs": 1010,
-      "repeats": 3,
-      "passRate": 1,
+      "outputBytes": 541,
+      "durationMs": 1048,
       "outputBytesByTool": {
-        "vortex_navigate": 185,
+        "vortex_navigate": 329,
         "vortex_wait_for": 124,
         "vortex_tab_create": 49,
         "vortex_extract": 18,
         "vortex_tab_close": 21
-      }
+      },
+      "tier": "medium"
     },
     {
       "case": "h-click-disabled",
@@ -728,16 +702,47 @@
       "callCount": 5,
       "fallbackToEvaluate": 0,
       "observeMissedPopperItems": 0,
-      "outputBytes": 484,
-      "durationMs": 2612,
-      "repeats": 3,
-      "passRate": 1,
+      "outputBytes": 628,
+      "durationMs": 2169,
       "outputBytesByTool": {
-        "vortex_navigate": 206,
+        "vortex_navigate": 350,
         "vortex_wait_for": 62,
         "vortex_act": 210,
         "vortex_extract": 6
-      }
+      },
+      "tier": "hard"
+    },
+    {
+      "case": "h-force-occluded",
+      "passed": true,
+      "callCount": 5,
+      "fallbackToEvaluate": 0,
+      "observeMissedPopperItems": 0,
+      "outputBytes": 431,
+      "durationMs": 611,
+      "outputBytesByTool": {
+        "vortex_navigate": 337,
+        "vortex_wait_for": 62,
+        "vortex_act": 21,
+        "vortex_evaluate": 11
+      },
+      "tier": "hard"
+    },
+    {
+      "case": "h-heal-bad-selector",
+      "passed": true,
+      "callCount": 5,
+      "fallbackToEvaluate": 0,
+      "observeMissedPopperItems": 0,
+      "outputBytes": 765,
+      "durationMs": 2094,
+      "outputBytesByTool": {
+        "vortex_navigate": 338,
+        "vortex_wait_for": 62,
+        "vortex_act": 359,
+        "vortex_evaluate": 6
+      },
+      "tier": "medium"
     },
     {
       "case": "h-no-js-click",
@@ -745,17 +750,32 @@
       "callCount": 6,
       "fallbackToEvaluate": 0,
       "observeMissedPopperItems": 0,
-      "outputBytes": 629,
-      "durationMs": 717,
-      "repeats": 3,
-      "passRate": 1,
+      "outputBytes": 778,
+      "durationMs": 698,
       "outputBytesByTool": {
-        "vortex_navigate": 204,
+        "vortex_navigate": 348,
         "vortex_wait_for": 62,
-        "vortex_observe": 193,
+        "vortex_observe": 198,
         "vortex_act": 153,
         "vortex_extract": 17
-      }
+      },
+      "tier": "hard"
+    },
+    {
+      "case": "h-nonsense-fill-static",
+      "passed": true,
+      "callCount": 6,
+      "fallbackToEvaluate": 0,
+      "observeMissedPopperItems": 0,
+      "outputBytes": 684,
+      "durationMs": 586,
+      "outputBytesByTool": {
+        "vortex_navigate": 338,
+        "vortex_wait_for": 62,
+        "vortex_evaluate": 60,
+        "vortex_act": 224
+      },
+      "tier": "medium"
     },
     {
       "case": "i-file-upload-observe",
@@ -763,15 +783,14 @@
       "callCount": 4,
       "fallbackToEvaluate": 0,
       "observeMissedPopperItems": 0,
-      "outputBytes": 436,
-      "durationMs": 544,
-      "repeats": 3,
-      "passRate": 1,
+      "outputBytes": 585,
+      "durationMs": 657,
       "outputBytesByTool": {
-        "vortex_navigate": 195,
+        "vortex_navigate": 339,
         "vortex_wait_for": 62,
-        "vortex_observe": 179
-      }
+        "vortex_observe": 184
+      },
+      "tier": "medium"
     },
     {
       "case": "icon-name-priority",
@@ -779,19 +798,18 @@
       "callCount": 4,
       "fallbackToEvaluate": 0,
       "observeMissedPopperItems": 0,
-      "outputBytes": 530,
-      "durationMs": 876,
-      "repeats": 3,
-      "passRate": 1,
+      "outputBytes": 779,
+      "durationMs": 837,
       "outputBytesByTool": {
-        "vortex_navigate": 206,
+        "vortex_navigate": 350,
         "vortex_wait_for": 62,
-        "vortex_observe": 262
+        "vortex_observe": 367
       },
       "customMetrics": {
-        "totalRefBytes": 254,
-        "p6IconPrioritySnapBytes": 254
-      }
+        "totalRefBytes": 359,
+        "p6IconPrioritySnapBytes": 359
+      },
+      "tier": "medium"
     },
     {
       "case": "iframe-nested-empty-deep",
@@ -799,19 +817,18 @@
       "callCount": 4,
       "fallbackToEvaluate": 0,
       "observeMissedPopperItems": 0,
-      "outputBytes": 622,
-      "durationMs": 1667,
-      "repeats": 3,
-      "passRate": 1,
+      "outputBytes": 763,
+      "durationMs": 1792,
       "outputBytesByTool": {
-        "vortex_navigate": 203,
+        "vortex_navigate": 347,
         "vortex_wait_for": 62,
-        "vortex_observe": 357
+        "vortex_observe": 354
       },
       "customMetrics": {
-        "observeLen": 357,
+        "observeLen": 354,
         "emptyHintCount": 2
-      }
+      },
+      "tier": "hard"
     },
     {
       "case": "iframe-nested-with-content",
@@ -819,19 +836,18 @@
       "callCount": 4,
       "fallbackToEvaluate": 0,
       "observeMissedPopperItems": 0,
-      "outputBytes": 604,
-      "durationMs": 1673,
-      "repeats": 3,
-      "passRate": 1,
+      "outputBytes": 761,
+      "durationMs": 1830,
       "outputBytesByTool": {
-        "vortex_navigate": 191,
+        "vortex_navigate": 335,
         "vortex_wait_for": 62,
-        "vortex_observe": 351
+        "vortex_observe": 364
       },
       "customMetrics": {
-        "observeAllLen": 325,
+        "observeAllLen": 338,
         "subFrameRefCount": 3
-      }
+      },
+      "tier": "hard"
     },
     {
       "case": "iframe-spif-click",
@@ -839,17 +855,16 @@
       "callCount": 6,
       "fallbackToEvaluate": 0,
       "observeMissedPopperItems": 0,
-      "outputBytes": 565,
-      "durationMs": 690,
-      "repeats": 3,
-      "passRate": 1,
+      "outputBytes": 750,
+      "durationMs": 842,
       "outputBytesByTool": {
-        "vortex_navigate": 190,
+        "vortex_navigate": 334,
         "vortex_wait_for": 62,
-        "vortex_observe": 184,
-        "vortex_act": 115,
+        "vortex_observe": 188,
+        "vortex_act": 152,
         "vortex_extract": 14
-      }
+      },
+      "tier": "hard"
     },
     {
       "case": "issue-18-nameless-div-noise",
@@ -857,18 +872,80 @@
       "callCount": 4,
       "fallbackToEvaluate": 0,
       "observeMissedPopperItems": 0,
-      "outputBytes": 491,
-      "durationMs": 599,
-      "repeats": 3,
-      "passRate": 1,
+      "outputBytes": 657,
+      "durationMs": 565,
       "outputBytesByTool": {
-        "vortex_navigate": 225,
+        "vortex_navigate": 369,
         "vortex_wait_for": 62,
-        "vortex_observe": 204
+        "vortex_observe": 226
       },
       "customMetrics": {
         "namelessDivCount": 0
-      }
+      },
+      "tier": "medium"
+    },
+    {
+      "case": "jd-list-01-reactclickable",
+      "passed": true,
+      "callCount": 7,
+      "fallbackToEvaluate": 0,
+      "observeMissedPopperItems": 0,
+      "outputBytes": 1553,
+      "durationMs": 1120,
+      "outputBytesByTool": {
+        "vortex_navigate": 397,
+        "vortex_wait_for": 62,
+        "vortex_observe": 841,
+        "vortex_evaluate": 1,
+        "vortex_act": 178,
+        "vortex_extract": 74
+      },
+      "customMetrics": {
+        "snapBytes": 765,
+        "reactClickableMarkedCount": 7,
+        "clickResultText": 54
+      },
+      "tier": "medium"
+    },
+    {
+      "case": "jd-list-02-iconlink",
+      "passed": true,
+      "callCount": 5,
+      "fallbackToEvaluate": 0,
+      "observeMissedPopperItems": 0,
+      "outputBytes": 1301,
+      "durationMs": 539,
+      "outputBytesByTool": {
+        "vortex_navigate": 397,
+        "vortex_wait_for": 62,
+        "vortex_observe": 841,
+        "vortex_evaluate": 1
+      },
+      "customMetrics": {
+        "snapBytes": 765,
+        "iconLinkObserved": 0
+      },
+      "tier": "medium"
+    },
+    {
+      "case": "jd-list-03-imgalt",
+      "passed": true,
+      "callCount": 5,
+      "fallbackToEvaluate": 0,
+      "observeMissedPopperItems": 0,
+      "outputBytes": 1156,
+      "durationMs": 529,
+      "outputBytesByTool": {
+        "vortex_navigate": 397,
+        "vortex_wait_for": 62,
+        "vortex_extract": 697
+      },
+      "customMetrics": {
+        "extractWithAltBytes": 286,
+        "altKeywordsFound": 7,
+        "extractNoAltBytes": 253
+      },
+      "tier": "medium"
     },
     {
       "case": "jd-review-rm-01-open",
@@ -876,22 +953,21 @@
       "callCount": 7,
       "fallbackToEvaluate": 0,
       "observeMissedPopperItems": 0,
-      "outputBytes": 1080,
-      "durationMs": 1030,
-      "repeats": 3,
-      "passRate": 1,
+      "outputBytes": 1541,
+      "durationMs": 1077,
       "outputBytesByTool": {
-        "vortex_navigate": 195,
+        "vortex_navigate": 339,
         "vortex_wait_for": 62,
-        "vortex_observe": 694,
-        "vortex_act": 115,
+        "vortex_observe": 991,
+        "vortex_act": 135,
         "vortex_extract": 14
       },
       "customMetrics": {
-        "snap1Bytes": 159,
-        "snap2Bytes": 437,
+        "snap1Bytes": 181,
+        "snap2Bytes": 712,
         "fullTagNamesObserved": 4
-      }
+      },
+      "tier": "medium"
     },
     {
       "case": "jd-review-rm-02-switch-tab",
@@ -899,21 +975,20 @@
       "callCount": 8,
       "fallbackToEvaluate": 0,
       "observeMissedPopperItems": 0,
-      "outputBytes": 2037,
-      "durationMs": 1606,
-      "repeats": 3,
-      "passRate": 1,
+      "outputBytes": 2529,
+      "durationMs": 1523,
       "outputBytesByTool": {
-        "vortex_navigate": 195,
+        "vortex_navigate": 339,
         "vortex_wait_for": 62,
-        "vortex_observe": 694,
-        "vortex_act": 221,
+        "vortex_observe": 991,
+        "vortex_act": 272,
         "vortex_extract": 865
       },
       "customMetrics": {
         "observeFoundBadTagAsLeaf": 1,
         "listExtractBytes": 385
-      }
+      },
+      "tier": "medium"
     },
     {
       "case": "jd-review-rm-03-scroll-load",
@@ -921,21 +996,20 @@
       "callCount": 8,
       "fallbackToEvaluate": 0,
       "observeMissedPopperItems": 0,
-      "outputBytes": 3289,
-      "durationMs": 1602,
-      "repeats": 3,
-      "passRate": 1,
+      "outputBytes": 3475,
+      "durationMs": 1635,
       "outputBytesByTool": {
-        "vortex_navigate": 195,
+        "vortex_navigate": 339,
         "vortex_wait_for": 62,
-        "vortex_observe": 175,
-        "vortex_act": 192,
+        "vortex_observe": 197,
+        "vortex_act": 212,
         "vortex_extract": 2665
       },
       "customMetrics": {
         "itemsBefore": 8,
         "itemsAfter": 12
-      }
+      },
+      "tier": "medium"
     },
     {
       "case": "jd-review-rm-04-close",
@@ -943,22 +1017,21 @@
       "callCount": 12,
       "fallbackToEvaluate": 0,
       "observeMissedPopperItems": 0,
-      "outputBytes": 2387,
-      "durationMs": 2455,
-      "repeats": 3,
-      "passRate": 1,
+      "outputBytes": 3145,
+      "durationMs": 2397,
       "outputBytesByTool": {
-        "vortex_navigate": 195,
+        "vortex_navigate": 339,
         "vortex_wait_for": 62,
-        "vortex_observe": 1563,
-        "vortex_act": 451,
+        "vortex_observe": 2179,
+        "vortex_act": 449,
         "vortex_press": 116
       },
       "customMetrics": {
-        "afterCloseObsBytes": 159,
+        "afterCloseObsBytes": 181,
         "closeIconClickWorked": 1,
         "escapeKeyWorked": 1
-      }
+      },
+      "tier": "medium"
     },
     {
       "case": "jd-review-rm-05-photo-tag",
@@ -966,22 +1039,21 @@
       "callCount": 8,
       "fallbackToEvaluate": 0,
       "observeMissedPopperItems": 0,
-      "outputBytes": 1905,
-      "durationMs": 1437,
-      "repeats": 3,
-      "passRate": 1,
+      "outputBytes": 2398,
+      "durationMs": 1519,
       "outputBytesByTool": {
-        "vortex_navigate": 195,
+        "vortex_navigate": 339,
         "vortex_wait_for": 62,
-        "vortex_observe": 694,
-        "vortex_act": 226,
+        "vortex_observe": 991,
+        "vortex_act": 278,
         "vortex_extract": 728
       },
       "customMetrics": {
         "keywordTagFullText": 1,
         "photoListBytes": 392,
         "photoUsers": 8
-      }
+      },
+      "tier": "medium"
     },
     {
       "case": "jd-review-rm-06-sort-toggle",
@@ -989,19 +1061,39 @@
       "callCount": 8,
       "fallbackToEvaluate": 0,
       "observeMissedPopperItems": 0,
-      "outputBytes": 1701,
-      "durationMs": 1335,
-      "repeats": 3,
-      "passRate": 1,
+      "outputBytes": 2456,
+      "durationMs": 1454,
       "outputBytesByTool": {
-        "vortex_navigate": 195,
+        "vortex_navigate": 339,
         "vortex_wait_for": 62,
-        "vortex_observe": 1213,
-        "vortex_act": 231
+        "vortex_observe": 1785,
+        "vortex_act": 270
       },
       "customMetrics": {
         "sortToggleVerified": 1
-      }
+      },
+      "tier": "medium"
+    },
+    {
+      "case": "jd-search-01-stickyautoforce",
+      "passed": true,
+      "callCount": 9,
+      "fallbackToEvaluate": 0,
+      "observeMissedPopperItems": 0,
+      "outputBytes": 508,
+      "durationMs": 1222,
+      "outputBytesByTool": {
+        "vortex_navigate": 367,
+        "vortex_wait_for": 62,
+        "vortex_evaluate": 37,
+        "vortex_act": 42
+      },
+      "customMetrics": {
+        "defaultFillResBytes": 21,
+        "defaultFillInputValue": 13,
+        "forceFalseNotStableThrown": 0
+      },
+      "tier": "medium"
     },
     {
       "case": "k-act-then-extract",
@@ -1009,17 +1101,16 @@
       "callCount": 7,
       "fallbackToEvaluate": 0,
       "observeMissedPopperItems": 0,
-      "outputBytes": 647,
-      "durationMs": 988,
-      "repeats": 3,
-      "passRate": 1,
+      "outputBytes": 834,
+      "durationMs": 1044,
       "outputBytesByTool": {
-        "vortex_navigate": 199,
+        "vortex_navigate": 343,
         "vortex_wait_for": 124,
-        "vortex_observe": 182,
-        "vortex_act": 109,
+        "vortex_observe": 187,
+        "vortex_act": 147,
         "vortex_extract": 33
-      }
+      },
+      "tier": "medium"
     },
     {
       "case": "latency-p50",
@@ -1027,23 +1118,21 @@
       "callCount": 208,
       "fallbackToEvaluate": 0,
       "observeMissedPopperItems": 0,
-      "outputBytes": 29884,
-      "durationMs": 181360,
-      "repeats": 3,
-      "passRate": 1,
+      "outputBytes": 33546,
+      "durationMs": 16289,
       "outputBytesByTool": {
-        "vortex_navigate": 374,
+        "vortex_navigate": 662,
         "vortex_wait_for": 124,
-        "vortex_observe": 988,
-        "vortex_act": 11500,
+        "vortex_observe": 2262,
+        "vortex_act": 13600,
         "vortex_evaluate": 98,
         "vortex_mouse_drag": 16800
       },
       "customMetrics": {
-        "nativeP50_ms": 51,
-        "nativeP90_ms": 85,
-        "cdpP50_ms": 1898,
-        "cdpP90_ms": 2045,
+        "nativeP50_ms": 59,
+        "nativeP90_ms": 99,
+        "cdpP50_ms": 62,
+        "cdpP90_ms": 98,
         "sampleCount": 100,
         "totalTokenBaseline": 0
       }
@@ -1054,17 +1143,16 @@
       "callCount": 6,
       "fallbackToEvaluate": 0,
       "observeMissedPopperItems": 0,
-      "outputBytes": 695,
-      "durationMs": 760,
-      "repeats": 3,
-      "passRate": 1,
+      "outputBytes": 885,
+      "durationMs": 1152,
       "outputBytesByTool": {
-        "vortex_navigate": 202,
+        "vortex_navigate": 346,
         "vortex_wait_for": 62,
-        "vortex_observe": 298,
-        "vortex_act": 111,
+        "vortex_observe": 301,
+        "vortex_act": 154,
         "vortex_extract": 22
-      }
+      },
+      "tier": "hard"
     },
     {
       "case": "observe-srcdoc-same-origin",
@@ -1072,15 +1160,78 @@
       "callCount": 4,
       "fallbackToEvaluate": 0,
       "observeMissedPopperItems": 0,
-      "outputBytes": 526,
-      "durationMs": 667,
-      "repeats": 3,
-      "passRate": 1,
+      "outputBytes": 697,
+      "durationMs": 699,
       "outputBytesByTool": {
-        "vortex_navigate": 216,
+        "vortex_navigate": 360,
         "vortex_wait_for": 62,
-        "vortex_observe": 248
-      }
+        "vortex_observe": 275
+      },
+      "tier": "hard"
+    },
+    {
+      "case": "oopif-in-csr",
+      "passed": true,
+      "callCount": 7,
+      "fallbackToEvaluate": 0,
+      "observeMissedPopperItems": 0,
+      "outputBytes": 993,
+      "durationMs": 1227,
+      "outputBytesByTool": {
+        "vortex_navigate": 331,
+        "vortex_wait_for": 124,
+        "vortex_observe": 391,
+        "vortex_act": 147
+      },
+      "tier": "hard"
+    },
+    {
+      "case": "oopif-in-osr",
+      "passed": true,
+      "callCount": 7,
+      "fallbackToEvaluate": 0,
+      "observeMissedPopperItems": 0,
+      "outputBytes": 993,
+      "durationMs": 3951,
+      "outputBytesByTool": {
+        "vortex_navigate": 331,
+        "vortex_wait_for": 124,
+        "vortex_observe": 391,
+        "vortex_act": 147
+      },
+      "tier": "hard"
+    },
+    {
+      "case": "oopif-plain-click",
+      "passed": true,
+      "callCount": 7,
+      "fallbackToEvaluate": 0,
+      "observeMissedPopperItems": 0,
+      "outputBytes": 987,
+      "durationMs": 1245,
+      "outputBytesByTool": {
+        "vortex_navigate": 329,
+        "vortex_wait_for": 124,
+        "vortex_observe": 387,
+        "vortex_act": 147
+      },
+      "tier": "hard"
+    },
+    {
+      "case": "osr-in-oopif",
+      "passed": true,
+      "callCount": 7,
+      "fallbackToEvaluate": 0,
+      "observeMissedPopperItems": 0,
+      "outputBytes": 997,
+      "durationMs": 1189,
+      "outputBytesByTool": {
+        "vortex_navigate": 331,
+        "vortex_wait_for": 124,
+        "vortex_observe": 395,
+        "vortex_act": 147
+      },
+      "tier": "hard"
     },
     {
       "case": "shadow-closed-unreachable",
@@ -1088,16 +1239,15 @@
       "callCount": 5,
       "fallbackToEvaluate": 0,
       "observeMissedPopperItems": 0,
-      "outputBytes": 640,
-      "durationMs": 2129,
-      "repeats": 3,
-      "passRate": 1,
+      "outputBytes": 784,
+      "durationMs": 2124,
       "outputBytesByTool": {
-        "vortex_navigate": 213,
+        "vortex_navigate": 357,
         "vortex_wait_for": 62,
         "vortex_act": 359,
         "vortex_extract": 6
-      }
+      },
+      "tier": "hard"
     },
     {
       "case": "shadow-dom-counter",
@@ -1105,17 +1255,16 @@
       "callCount": 7,
       "fallbackToEvaluate": 0,
       "observeMissedPopperItems": 0,
-      "outputBytes": 568,
-      "durationMs": 730,
-      "repeats": 3,
-      "passRate": 1,
+      "outputBytes": 775,
+      "durationMs": 871,
       "outputBytesByTool": {
-        "vortex_navigate": 201,
+        "vortex_navigate": 345,
         "vortex_wait_for": 62,
-        "vortex_observe": 181,
-        "vortex_act": 103,
+        "vortex_observe": 203,
+        "vortex_act": 144,
         "vortex_extract": 21
-      }
+      },
+      "tier": "hard"
     },
     {
       "case": "shadow-in-spif",
@@ -1123,17 +1272,16 @@
       "callCount": 6,
       "fallbackToEvaluate": 0,
       "observeMissedPopperItems": 0,
-      "outputBytes": 577,
-      "durationMs": 832,
-      "repeats": 3,
-      "passRate": 1,
+      "outputBytes": 766,
+      "durationMs": 835,
       "outputBytesByTool": {
-        "vortex_navigate": 191,
+        "vortex_navigate": 335,
         "vortex_wait_for": 62,
-        "vortex_observe": 187,
-        "vortex_act": 113,
+        "vortex_observe": 191,
+        "vortex_act": 154,
         "vortex_extract": 24
-      }
+      },
+      "tier": "hard"
     },
     {
       "case": "shadow-open-click",
@@ -1141,17 +1289,16 @@
       "callCount": 6,
       "fallbackToEvaluate": 0,
       "observeMissedPopperItems": 0,
-      "outputBytes": 572,
-      "durationMs": 676,
-      "repeats": 3,
-      "passRate": 1,
+      "outputBytes": 761,
+      "durationMs": 734,
       "outputBytesByTool": {
-        "vortex_navigate": 197,
+        "vortex_navigate": 341,
         "vortex_wait_for": 62,
-        "vortex_observe": 186,
-        "vortex_act": 113,
+        "vortex_observe": 191,
+        "vortex_act": 153,
         "vortex_extract": 14
-      }
+      },
+      "tier": "hard"
     },
     {
       "case": "spa-route-residue",
@@ -1159,17 +1306,16 @@
       "callCount": 12,
       "fallbackToEvaluate": 0,
       "observeMissedPopperItems": 0,
-      "outputBytes": 2735,
-      "durationMs": 2178,
-      "repeats": 3,
-      "passRate": 1,
+      "outputBytes": 5525,
+      "durationMs": 2335,
       "outputBytesByTool": {
-        "vortex_navigate": 418,
+        "vortex_navigate": 562,
         "vortex_wait_for": 186,
-        "vortex_observe": 2016,
-        "vortex_act": 84,
+        "vortex_observe": 4610,
+        "vortex_act": 136,
         "vortex_extract": 31
-      }
+      },
+      "tier": "medium"
     },
     {
       "case": "spif-in-shadow",
@@ -1177,17 +1323,16 @@
       "callCount": 6,
       "fallbackToEvaluate": 0,
       "observeMissedPopperItems": 0,
-      "outputBytes": 577,
-      "durationMs": 791,
-      "repeats": 3,
-      "passRate": 1,
+      "outputBytes": 766,
+      "durationMs": 980,
       "outputBytesByTool": {
-        "vortex_navigate": 191,
+        "vortex_navigate": 335,
         "vortex_wait_for": 62,
-        "vortex_observe": 187,
-        "vortex_act": 113,
+        "vortex_observe": 191,
+        "vortex_act": 154,
         "vortex_extract": 24
-      }
+      },
+      "tier": "hard"
     },
     {
       "case": "tap-gesture-md-select",
@@ -1195,16 +1340,60 @@
       "callCount": 5,
       "fallbackToEvaluate": 0,
       "observeMissedPopperItems": 0,
-      "outputBytes": 417,
-      "durationMs": 642,
-      "repeats": 3,
-      "passRate": 1,
+      "outputBytes": 598,
+      "durationMs": 677,
       "outputBytesByTool": {
-        "vortex_navigate": 238,
+        "vortex_navigate": 382,
         "vortex_wait_for": 62,
-        "vortex_act": 103,
+        "vortex_act": 140,
         "vortex_extract": 14
-      }
+      },
+      "tier": "medium"
+    },
+    {
+      "case": "v4-multisite-layer3",
+      "passed": true,
+      "callCount": 6,
+      "fallbackToEvaluate": 0,
+      "observeMissedPopperItems": 0,
+      "outputBytes": 7814,
+      "durationMs": 1390,
+      "outputBytesByTool": {
+        "vortex_navigate": 594,
+        "vortex_wait_for": 124,
+        "vortex_observe": 7096
+      },
+      "customMetrics": {
+        "场景A_elRadioLabelTextKept": 3,
+        "场景B_ghA11yHiddenKept": 5,
+        "场景B_ghA11yHiddenMarkedOffScreen": 0,
+        "场景B_ghNote_designObservation": 1,
+        "场景C_antRadioFallbackNames": 3,
+        "场景D_subpixelToleranceInSource": 1
+      },
+      "tier": "medium"
+    },
+    {
+      "case": "v4-taobao-emoji-radio-offscreen",
+      "passed": true,
+      "callCount": 7,
+      "fallbackToEvaluate": 0,
+      "observeMissedPopperItems": 0,
+      "outputBytes": 9679,
+      "durationMs": 1166,
+      "outputBytesByTool": {
+        "vortex_navigate": 368,
+        "vortex_wait_for": 62,
+        "vortex_observe": 9059,
+        "vortex_act": 190
+      },
+      "customMetrics": {
+        "缺陷①emojiLabelFallbackNames": 3,
+        "缺陷②offscreenActionableKept": 5,
+        "缺陷③subpixelToleranceInSource": 1,
+        "缺陷⑤staleRefRejected": 1
+      },
+      "tier": "medium"
     },
     {
       "case": "visibility-hidden-megamenu",
@@ -1212,18 +1401,17 @@
       "callCount": 4,
       "fallbackToEvaluate": 0,
       "observeMissedPopperItems": 0,
-      "outputBytes": 542,
-      "durationMs": 766,
-      "repeats": 3,
-      "passRate": 1,
+      "outputBytes": 808,
+      "durationMs": 753,
       "outputBytesByTool": {
-        "vortex_navigate": 218,
+        "vortex_navigate": 362,
         "vortex_wait_for": 62,
-        "vortex_observe": 262
+        "vortex_observe": 384
       },
       "customMetrics": {
-        "snapshotBytes": 262
-      }
+        "snapshotBytes": 384
+      },
+      "tier": "easy"
     },
     {
       "case": "vortex-debug-read-console",
@@ -1231,36 +1419,32 @@
       "callCount": 8,
       "fallbackToEvaluate": 0,
       "observeMissedPopperItems": 0,
-      "outputBytes": 53625,
-      "durationMs": 693,
-      "repeats": 3,
-      "passRate": 1,
+      "outputBytes": 1308,
+      "durationMs": 756,
       "outputBytesByTool": {
-        "vortex_navigate": 210,
+        "vortex_navigate": 354,
         "vortex_wait_for": 62,
-        "vortex_debug_read": 53039,
-        "vortex_observe": 190,
-        "vortex_act": 108,
+        "vortex_debug_read": 519,
+        "vortex_observe": 212,
+        "vortex_act": 145,
         "vortex_extract": 16
       }
     },
     {
       "case": "vortex-debug-read-network",
       "passed": true,
-      "callCount": 8,
+      "callCount": 9,
       "fallbackToEvaluate": 0,
       "observeMissedPopperItems": 0,
-      "outputBytes": 10296,
-      "durationMs": 692,
-      "repeats": 3,
-      "passRate": 1,
+      "outputBytes": 2762,
+      "durationMs": 1281,
       "outputBytesByTool": {
-        "vortex_navigate": 211,
+        "vortex_navigate": 355,
         "vortex_wait_for": 62,
-        "vortex_debug_read": 9679,
-        "vortex_observe": 195,
-        "vortex_act": 112,
-        "vortex_extract": 37
+        "vortex_debug_read": 1940,
+        "vortex_observe": 217,
+        "vortex_act": 149,
+        "vortex_extract": 39
       }
     },
     {
@@ -1269,12 +1453,10 @@
       "callCount": 6,
       "fallbackToEvaluate": 0,
       "observeMissedPopperItems": 0,
-      "outputBytes": 292,
-      "durationMs": 789,
-      "repeats": 3,
-      "passRate": 1,
+      "outputBytes": 436,
+      "durationMs": 788,
       "outputBytesByTool": {
-        "vortex_navigate": 196,
+        "vortex_navigate": 340,
         "vortex_wait_for": 62,
         "vortex_evaluate": 34
       }
@@ -1285,14 +1467,12 @@
       "callCount": 10,
       "fallbackToEvaluate": 0,
       "observeMissedPopperItems": 0,
-      "outputBytes": 758,
-      "durationMs": 851,
-      "repeats": 3,
-      "passRate": 1,
+      "outputBytes": 929,
+      "durationMs": 870,
       "outputBytesByTool": {
-        "vortex_navigate": 201,
+        "vortex_navigate": 345,
         "vortex_wait_for": 62,
-        "vortex_act": 100,
+        "vortex_act": 127,
         "vortex_press": 329,
         "vortex_extract": 66
       }
@@ -1303,17 +1483,15 @@
       "callCount": 5,
       "fallbackToEvaluate": 0,
       "observeMissedPopperItems": 0,
-      "outputBytes": 261,
-      "durationMs": 787,
-      "repeats": 3,
-      "passRate": 1,
+      "outputBytes": 405,
+      "durationMs": 680,
       "outputBytesByTool": {
-        "vortex_navigate": 199,
+        "vortex_navigate": 343,
         "vortex_wait_for": 62,
         "vortex_screenshot": 0
       },
       "customMetrics": {
-        "fullBytes": 71144,
+        "fullBytes": 72076,
         "elementBytes": 3824
       }
     },
@@ -1323,16 +1501,14 @@
       "callCount": 8,
       "fallbackToEvaluate": 0,
       "observeMissedPopperItems": 0,
-      "outputBytes": 658,
-      "durationMs": 692,
-      "repeats": 3,
-      "passRate": 1,
+      "outputBytes": 853,
+      "durationMs": 807,
       "outputBytesByTool": {
-        "vortex_navigate": 206,
+        "vortex_navigate": 350,
         "vortex_wait_for": 62,
         "vortex_storage": 46,
-        "vortex_observe": 192,
-        "vortex_act": 117,
+        "vortex_observe": 214,
+        "vortex_act": 146,
         "vortex_extract": 35
       }
     }
