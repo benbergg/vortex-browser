@@ -20,7 +20,23 @@ async function queryIframeRectInParent(
         } catch {
           frameOrigin = null;
         }
-        const iframes = Array.from(document.querySelectorAll("iframe"));
+        // 穿 open shadow 深度收集 iframe：浅 querySelectorAll('iframe') 漏掉嵌在
+        // shadow root 里的 iframe，导致 shadow-nested iframe 的 offset 被算成
+        // {0,0} → realMouse 用 frame-local 坐标点空（oopif-in-osr / spif-in-shadow）。
+        // 与 observe 走 querySelectorAllDeep 穿 shadow 同源。closed shadow 仍够不到
+        // (el.shadowRoot=null)，由 getIframeOffset 上层降级处理。
+        const collectIframes = (
+          root: Document | ShadowRoot,
+          acc: HTMLIFrameElement[],
+        ): HTMLIFrameElement[] => {
+          for (const el of Array.from(root.querySelectorAll("*"))) {
+            if (el.tagName === "IFRAME") acc.push(el as HTMLIFrameElement);
+            const sr = (el as HTMLElement).shadowRoot;
+            if (sr) collectIframes(sr, acc);
+          }
+          return acc;
+        };
+        const iframes = collectIframes(document, []);
         let iframe = iframes.find((f) => f.src === frameUrl);
         if (!iframe && frameOrigin) {
           iframe = iframes.find((f) => {

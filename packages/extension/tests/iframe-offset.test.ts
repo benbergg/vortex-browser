@@ -109,3 +109,48 @@ describe("getIframeOffset", () => {
     await expect(getIframeOffset(1, 99)).resolves.toEqual({ x: 0, y: 0 });
   });
 });
+
+// queryIframeRectInParent 的 inject func 用深度遍历穿 open shadow 找 iframe（浅
+// querySelectorAll('iframe') 漏掉 shadow 内嵌 iframe → offset {0,0} → realMouse
+// 点空）。inject func 不导出，这里用与之字面一致的 collectIframes 复刻验证「穿
+// open shadow 找得到」。须与 iframe-offset.ts 的内联实现同步（真源+测试副本）。
+// 注：jsdom 不做布局，getBoundingClientRect 恒 0，故只验 count（能否找到），
+// 实际 offset 值由 live bench(oopif-in-osr / spif-in-shadow) 验证。
+const COLLECT_IFRAMES = `
+  const collectIframes = (root, acc) => {
+    for (const el of Array.from(root.querySelectorAll("*"))) {
+      if (el.tagName === "IFRAME") acc.push(el);
+      const sr = el.shadowRoot;
+      if (sr) collectIframes(sr, acc);
+    }
+    return acc;
+  };
+  return collectIframes(document, []).length;
+`;
+const collectCount = (doc: Document): number =>
+  new Function("document", COLLECT_IFRAMES)(doc);
+
+describe("queryIframeRectInParent collectIframes — 穿 open shadow", () => {
+  it("finds an iframe nested in an open shadow root (shallow querySelectorAll misses it)", async () => {
+    const { JSDOM } = await import("jsdom");
+    const doc = new JSDOM(
+      `<!DOCTYPE html><body><div id="host"></div></body>`,
+    ).window.document;
+    const host = doc.getElementById("host")!;
+    const sr = host.attachShadow({ mode: "open" });
+    const ifr = doc.createElement("iframe");
+    ifr.src = "https://child/";
+    sr.appendChild(ifr);
+    // 浅查（light DOM only）找不到；深查穿 shadow 找到 1 个。
+    expect(doc.querySelectorAll("iframe").length).toBe(0);
+    expect(collectCount(doc)).toBe(1);
+  });
+
+  it("still finds light-DOM iframes (no regression)", async () => {
+    const { JSDOM } = await import("jsdom");
+    const doc = new JSDOM(
+      `<!DOCTYPE html><body><iframe src="https://a/"></iframe></body>`,
+    ).window.document;
+    expect(collectCount(doc)).toBe(1);
+  });
+});
