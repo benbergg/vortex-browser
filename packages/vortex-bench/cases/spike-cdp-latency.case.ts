@@ -26,11 +26,14 @@ const def: CaseDefinition = {
     // ===== pass 1:合成 click(forceSynthetic 压过 trusted Chrome 的注入,
     // 否则本机 --silent-debugger-extension-api 下两组全是 CDP,对照失效)× N =====
     const synthetic: number[] = [];
+    let syntheticWasCdp = 0; // 自检:合成组结果若出现 realMouse = forceSynthetic 失效/被污染
     for (let i = 0; i < SAMPLES; i++) {
       const t0 = Date.now();
-      await ctx.call("vortex_act", { action: "click", target, forceSynthetic: true });
+      const res = await ctx.call("vortex_act", { action: "click", target, forceSynthetic: true });
       synthetic.push(Date.now() - t0);
+      if (i === 0 && extractText(res).includes("realMouse")) syntheticWasCdp = 1;
     }
+    ctx.recordMetric("syntheticWasCdp", syntheticWasCdp);
 
     // ===== pass 2:CDP 真鼠标 × N(首次即冷 attach)=====
     const cdp: number[] = [];

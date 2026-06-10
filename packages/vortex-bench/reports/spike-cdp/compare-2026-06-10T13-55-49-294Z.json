@@ -1,0 +1,775 @@
+{
+  "generatedAt": "2026-06-10T13:55:49.294Z",
+  "total": 90,
+  "bothPass": 48,
+  "cdpRegressions": [
+    "el-time-picker"
+  ],
+  "cdpFixes": [
+    "a-nav-click",
+    "async-loading-spinner",
+    "c-native-controls",
+    "dynamic-role-mutation",
+    "el-autocomplete",
+    "el-dialog-nested",
+    "el-drawer",
+    "el-dropdown",
+    "el-form-composite",
+    "el-message-box",
+    "el-pagination",
+    "el-radio-group",
+    "el-table",
+    "el-tabs",
+    "el-transfer",
+    "el-tree",
+    "el-tree-select",
+    "iframe-spif-click",
+    "jd-list-01-reactclickable",
+    "jd-review-rm-01-open",
+    "jd-review-rm-02-switch-tab",
+    "jd-review-rm-03-scroll-load",
+    "jd-review-rm-04-close",
+    "jd-review-rm-05-photo-tag",
+    "jd-review-rm-06-sort-toggle",
+    "k-act-then-extract",
+    "nested-iframe-2deep",
+    "shadow-dom-counter",
+    "shadow-in-spif",
+    "shadow-open-click",
+    "spa-route-residue",
+    "spike-infobar-viewport",
+    "tap-gesture-md-select",
+    "vortex-debug-read-console",
+    "vortex-storage-roundtrip"
+  ],
+  "bothFail": [
+    "oopif-in-csr",
+    "oopif-in-osr",
+    "oopif-plain-click",
+    "osr-in-oopif",
+    "spif-in-shadow",
+    "vortex-debug-read-network"
+  ],
+  "rows": [
+    {
+      "case": "a-nav-click",
+      "baselinePassed": false,
+      "cdpPassed": true,
+      "verdict": "cdp-fixes",
+      "baselineMs": 2499,
+      "cdpMs": 1393
+    },
+    {
+      "case": "aria-cursor-nested-no-dup",
+      "baselinePassed": true,
+      "cdpPassed": true,
+      "verdict": "both-pass",
+      "baselineMs": 895,
+      "cdpMs": 960
+    },
+    {
+      "case": "async-loading-spinner",
+      "baselinePassed": false,
+      "cdpPassed": true,
+      "verdict": "cdp-fixes",
+      "baselineMs": 5358,
+      "cdpMs": 2358
+    },
+    {
+      "case": "b-occluded-input",
+      "baselinePassed": true,
+      "cdpPassed": true,
+      "verdict": "both-pass",
+      "baselineMs": 2433,
+      "cdpMs": 2584
+    },
+    {
+      "case": "c-native-controls",
+      "baselinePassed": false,
+      "cdpPassed": true,
+      "verdict": "cdp-fixes",
+      "baselineMs": 855,
+      "cdpMs": 830
+    },
+    {
+      "case": "contenteditable-rich-text",
+      "baselinePassed": true,
+      "cdpPassed": true,
+      "verdict": "both-pass",
+      "baselineMs": 1742,
+      "cdpMs": 3349
+    },
+    {
+      "case": "cross-observe-ref-stale",
+      "baselinePassed": true,
+      "cdpPassed": true,
+      "verdict": "both-pass",
+      "baselineMs": 834,
+      "cdpMs": 862
+    },
+    {
+      "case": "csr-in-oopif",
+      "baselinePassed": true,
+      "cdpPassed": true,
+      "verdict": "both-pass",
+      "baselineMs": 2564,
+      "cdpMs": 3049
+    },
+    {
+      "case": "dynamic-role-mutation",
+      "baselinePassed": false,
+      "cdpPassed": true,
+      "verdict": "cdp-fixes",
+      "baselineMs": 3880,
+      "cdpMs": 1258
+    },
+    {
+      "case": "el-autocomplete",
+      "baselinePassed": false,
+      "cdpPassed": true,
+      "verdict": "cdp-fixes",
+      "baselineMs": 6466,
+      "cdpMs": 3558
+    },
+    {
+      "case": "el-cascader",
+      "baselinePassed": true,
+      "cdpPassed": true,
+      "verdict": "both-pass",
+      "baselineMs": 1479,
+      "cdpMs": 1643
+    },
+    {
+      "case": "el-color-picker",
+      "baselinePassed": true,
+      "cdpPassed": true,
+      "verdict": "both-pass",
+      "baselineMs": 6713,
+      "cdpMs": 7709
+    },
+    {
+      "case": "el-date-picker-daterange",
+      "baselinePassed": true,
+      "cdpPassed": true,
+      "verdict": "both-pass",
+      "baselineMs": 3253,
+      "cdpMs": 3812
+    },
+    {
+      "case": "el-date-picker-datetimerange",
+      "baselinePassed": true,
+      "cdpPassed": true,
+      "verdict": "both-pass",
+      "baselineMs": 4759,
+      "cdpMs": 3953
+    },
+    {
+      "case": "el-dialog-nested",
+      "baselinePassed": false,
+      "cdpPassed": true,
+      "verdict": "cdp-fixes",
+      "baselineMs": 4274,
+      "cdpMs": 1574
+    },
+    {
+      "case": "el-drawer",
+      "baselinePassed": false,
+      "cdpPassed": true,
+      "verdict": "cdp-fixes",
+      "baselineMs": 8193,
+      "cdpMs": 1281
+    },
+    {
+      "case": "el-dropdown",
+      "baselinePassed": false,
+      "cdpPassed": true,
+      "verdict": "cdp-fixes",
+      "baselineMs": 1137,
+      "cdpMs": 1237
+    },
+    {
+      "case": "el-form-composite",
+      "baselinePassed": false,
+      "cdpPassed": true,
+      "verdict": "cdp-fixes",
+      "baselineMs": 4250,
+      "cdpMs": 1216
+    },
+    {
+      "case": "el-input-number",
+      "baselinePassed": true,
+      "cdpPassed": true,
+      "verdict": "both-pass",
+      "baselineMs": 1130,
+      "cdpMs": 1186
+    },
+    {
+      "case": "el-message-box",
+      "baselinePassed": false,
+      "cdpPassed": true,
+      "verdict": "cdp-fixes",
+      "baselineMs": 4218,
+      "cdpMs": 1445
+    },
+    {
+      "case": "el-pagination",
+      "baselinePassed": false,
+      "cdpPassed": true,
+      "verdict": "cdp-fixes",
+      "baselineMs": 3923,
+      "cdpMs": 791
+    },
+    {
+      "case": "el-radio-group",
+      "baselinePassed": false,
+      "cdpPassed": true,
+      "verdict": "cdp-fixes",
+      "baselineMs": 3826,
+      "cdpMs": 798
+    },
+    {
+      "case": "el-select-multiple",
+      "baselinePassed": true,
+      "cdpPassed": true,
+      "verdict": "both-pass",
+      "baselineMs": 855,
+      "cdpMs": 846
+    },
+    {
+      "case": "el-select-single",
+      "baselinePassed": true,
+      "cdpPassed": true,
+      "verdict": "both-pass",
+      "baselineMs": 763,
+      "cdpMs": 749
+    },
+    {
+      "case": "el-select-v2",
+      "baselinePassed": true,
+      "cdpPassed": true,
+      "verdict": "both-pass",
+      "baselineMs": 981,
+      "cdpMs": 983
+    },
+    {
+      "case": "el-select-v2-virtual",
+      "baselinePassed": true,
+      "cdpPassed": true,
+      "verdict": "both-pass",
+      "baselineMs": 953,
+      "cdpMs": 961
+    },
+    {
+      "case": "el-slider",
+      "baselinePassed": true,
+      "cdpPassed": true,
+      "verdict": "both-pass",
+      "baselineMs": 1209,
+      "cdpMs": 1234
+    },
+    {
+      "case": "el-slider-drag",
+      "baselinePassed": true,
+      "cdpPassed": true,
+      "verdict": "both-pass",
+      "baselineMs": 1013,
+      "cdpMs": 976
+    },
+    {
+      "case": "el-table",
+      "baselinePassed": false,
+      "cdpPassed": true,
+      "verdict": "cdp-fixes",
+      "baselineMs": 4203,
+      "cdpMs": 1202
+    },
+    {
+      "case": "el-tabs",
+      "baselinePassed": false,
+      "cdpPassed": true,
+      "verdict": "cdp-fixes",
+      "baselineMs": 7121,
+      "cdpMs": 1227
+    },
+    {
+      "case": "el-time-picker",
+      "baselinePassed": true,
+      "cdpPassed": false,
+      "verdict": "cdp-regression",
+      "baselineMs": 735,
+      "cdpMs": 3842
+    },
+    {
+      "case": "el-transfer",
+      "baselinePassed": false,
+      "cdpPassed": true,
+      "verdict": "cdp-fixes",
+      "baselineMs": 6608,
+      "cdpMs": 1364
+    },
+    {
+      "case": "el-tree",
+      "baselinePassed": false,
+      "cdpPassed": true,
+      "verdict": "cdp-fixes",
+      "baselineMs": 4832,
+      "cdpMs": 1999
+    },
+    {
+      "case": "el-tree-select",
+      "baselinePassed": false,
+      "cdpPassed": true,
+      "verdict": "cdp-fixes",
+      "baselineMs": 5263,
+      "cdpMs": 3353
+    },
+    {
+      "case": "el-upload",
+      "baselinePassed": true,
+      "cdpPassed": true,
+      "verdict": "both-pass",
+      "baselineMs": 959,
+      "cdpMs": 964
+    },
+    {
+      "case": "extract-multi-field-card",
+      "baselinePassed": true,
+      "cdpPassed": true,
+      "verdict": "both-pass",
+      "baselineMs": 719,
+      "cdpMs": 716
+    },
+    {
+      "case": "extract-nested-card-list",
+      "baselinePassed": true,
+      "cdpPassed": true,
+      "verdict": "both-pass",
+      "baselineMs": 563,
+      "cdpMs": 542
+    },
+    {
+      "case": "extract-numeric-suffix",
+      "baselinePassed": true,
+      "cdpPassed": true,
+      "verdict": "both-pass",
+      "baselineMs": 549,
+      "cdpMs": 558
+    },
+    {
+      "case": "extract-table-rows",
+      "baselinePassed": true,
+      "cdpPassed": true,
+      "verdict": "both-pass",
+      "baselineMs": 559,
+      "cdpMs": 563
+    },
+    {
+      "case": "extract-targeted-value",
+      "baselinePassed": true,
+      "cdpPassed": true,
+      "verdict": "both-pass",
+      "baselineMs": 580,
+      "cdpMs": 608
+    },
+    {
+      "case": "f-scroll-to-bottom",
+      "baselinePassed": true,
+      "cdpPassed": true,
+      "verdict": "both-pass",
+      "baselineMs": 898,
+      "cdpMs": 902
+    },
+    {
+      "case": "g-multi-tab",
+      "baselinePassed": true,
+      "cdpPassed": true,
+      "verdict": "both-pass",
+      "baselineMs": 1079,
+      "cdpMs": 1076
+    },
+    {
+      "case": "h-click-disabled",
+      "baselinePassed": true,
+      "cdpPassed": true,
+      "verdict": "both-pass",
+      "baselineMs": 2446,
+      "cdpMs": 2276
+    },
+    {
+      "case": "h-force-occluded",
+      "baselinePassed": true,
+      "cdpPassed": true,
+      "verdict": "both-pass",
+      "baselineMs": 574,
+      "cdpMs": 613
+    },
+    {
+      "case": "h-heal-bad-selector",
+      "baselinePassed": true,
+      "cdpPassed": true,
+      "verdict": "both-pass",
+      "baselineMs": 2130,
+      "cdpMs": 2153
+    },
+    {
+      "case": "h-no-js-click",
+      "baselinePassed": true,
+      "cdpPassed": true,
+      "verdict": "both-pass",
+      "baselineMs": 1355,
+      "cdpMs": 1202
+    },
+    {
+      "case": "h-nonsense-fill-static",
+      "baselinePassed": true,
+      "cdpPassed": true,
+      "verdict": "both-pass",
+      "baselineMs": 609,
+      "cdpMs": 605
+    },
+    {
+      "case": "i-file-upload-observe",
+      "baselinePassed": true,
+      "cdpPassed": true,
+      "verdict": "both-pass",
+      "baselineMs": 547,
+      "cdpMs": 557
+    },
+    {
+      "case": "icon-name-priority",
+      "baselinePassed": true,
+      "cdpPassed": true,
+      "verdict": "both-pass",
+      "baselineMs": 846,
+      "cdpMs": 920
+    },
+    {
+      "case": "iframe-nested-empty-deep",
+      "baselinePassed": true,
+      "cdpPassed": true,
+      "verdict": "both-pass",
+      "baselineMs": 2392,
+      "cdpMs": 2260
+    },
+    {
+      "case": "iframe-nested-with-content",
+      "baselinePassed": true,
+      "cdpPassed": true,
+      "verdict": "both-pass",
+      "baselineMs": 2607,
+      "cdpMs": 1835
+    },
+    {
+      "case": "iframe-spif-click",
+      "baselinePassed": false,
+      "cdpPassed": true,
+      "verdict": "cdp-fixes",
+      "baselineMs": 1731,
+      "cdpMs": 1556
+    },
+    {
+      "case": "issue-18-nameless-div-noise",
+      "baselinePassed": true,
+      "cdpPassed": true,
+      "verdict": "both-pass",
+      "baselineMs": 1504,
+      "cdpMs": 556
+    },
+    {
+      "case": "jd-list-01-reactclickable",
+      "baselinePassed": false,
+      "cdpPassed": true,
+      "verdict": "cdp-fixes",
+      "baselineMs": 1244,
+      "cdpMs": 1227
+    },
+    {
+      "case": "jd-list-02-iconlink",
+      "baselinePassed": true,
+      "cdpPassed": true,
+      "verdict": "both-pass",
+      "baselineMs": 992,
+      "cdpMs": 1040
+    },
+    {
+      "case": "jd-list-03-imgalt",
+      "baselinePassed": true,
+      "cdpPassed": true,
+      "verdict": "both-pass",
+      "baselineMs": 586,
+      "cdpMs": 737
+    },
+    {
+      "case": "jd-review-rm-01-open",
+      "baselinePassed": false,
+      "cdpPassed": true,
+      "verdict": "cdp-fixes",
+      "baselineMs": 1156,
+      "cdpMs": 1087
+    },
+    {
+      "case": "jd-review-rm-02-switch-tab",
+      "baselinePassed": false,
+      "cdpPassed": true,
+      "verdict": "cdp-fixes",
+      "baselineMs": 1626,
+      "cdpMs": 1596
+    },
+    {
+      "case": "jd-review-rm-03-scroll-load",
+      "baselinePassed": false,
+      "cdpPassed": true,
+      "verdict": "cdp-fixes",
+      "baselineMs": 1580,
+      "cdpMs": 2290
+    },
+    {
+      "case": "jd-review-rm-04-close",
+      "baselinePassed": false,
+      "cdpPassed": true,
+      "verdict": "cdp-fixes",
+      "baselineMs": 1836,
+      "cdpMs": 2395
+    },
+    {
+      "case": "jd-review-rm-05-photo-tag",
+      "baselinePassed": false,
+      "cdpPassed": true,
+      "verdict": "cdp-fixes",
+      "baselineMs": 1359,
+      "cdpMs": 1878
+    },
+    {
+      "case": "jd-review-rm-06-sort-toggle",
+      "baselinePassed": false,
+      "cdpPassed": true,
+      "verdict": "cdp-fixes",
+      "baselineMs": 1703,
+      "cdpMs": 1511
+    },
+    {
+      "case": "jd-search-01-stickyautoforce",
+      "baselinePassed": true,
+      "cdpPassed": true,
+      "verdict": "both-pass",
+      "baselineMs": 1872,
+      "cdpMs": 1406
+    },
+    {
+      "case": "k-act-then-extract",
+      "baselinePassed": false,
+      "cdpPassed": true,
+      "verdict": "cdp-fixes",
+      "baselineMs": 1042,
+      "cdpMs": 2001
+    },
+    {
+      "case": "latency-p50",
+      "baselinePassed": true,
+      "cdpPassed": true,
+      "verdict": "both-pass",
+      "baselineMs": 14881,
+      "cdpMs": 28007
+    },
+    {
+      "case": "nested-iframe-2deep",
+      "baselinePassed": false,
+      "cdpPassed": true,
+      "verdict": "cdp-fixes",
+      "baselineMs": 1432,
+      "cdpMs": 1199
+    },
+    {
+      "case": "observe-srcdoc-same-origin",
+      "baselinePassed": true,
+      "cdpPassed": true,
+      "verdict": "both-pass",
+      "baselineMs": 686,
+      "cdpMs": 750
+    },
+    {
+      "case": "oopif-in-csr",
+      "baselinePassed": false,
+      "cdpPassed": false,
+      "verdict": "both-fail",
+      "baselineMs": 1496,
+      "cdpMs": 682
+    },
+    {
+      "case": "oopif-in-osr",
+      "baselinePassed": false,
+      "cdpPassed": false,
+      "verdict": "both-fail",
+      "baselineMs": 770,
+      "cdpMs": 777
+    },
+    {
+      "case": "oopif-plain-click",
+      "baselinePassed": false,
+      "cdpPassed": false,
+      "verdict": "both-fail",
+      "baselineMs": 738,
+      "cdpMs": 692
+    },
+    {
+      "case": "osr-in-oopif",
+      "baselinePassed": false,
+      "cdpPassed": false,
+      "verdict": "both-fail",
+      "baselineMs": 1295,
+      "cdpMs": 707
+    },
+    {
+      "case": "shadow-closed-unreachable",
+      "baselinePassed": true,
+      "cdpPassed": true,
+      "verdict": "both-pass",
+      "baselineMs": 2265,
+      "cdpMs": 2156
+    },
+    {
+      "case": "shadow-dom-counter",
+      "baselinePassed": false,
+      "cdpPassed": true,
+      "verdict": "cdp-fixes",
+      "baselineMs": 4185,
+      "cdpMs": 764
+    },
+    {
+      "case": "shadow-in-spif",
+      "baselinePassed": false,
+      "cdpPassed": true,
+      "verdict": "cdp-fixes",
+      "baselineMs": 1525,
+      "cdpMs": 863
+    },
+    {
+      "case": "shadow-open-click",
+      "baselinePassed": false,
+      "cdpPassed": true,
+      "verdict": "cdp-fixes",
+      "baselineMs": 645,
+      "cdpMs": 601
+    },
+    {
+      "case": "spa-route-residue",
+      "baselinePassed": false,
+      "cdpPassed": true,
+      "verdict": "cdp-fixes",
+      "baselineMs": 4737,
+      "cdpMs": 2244
+    },
+    {
+      "case": "spif-in-shadow",
+      "baselinePassed": false,
+      "cdpPassed": false,
+      "verdict": "both-fail",
+      "baselineMs": 1540,
+      "cdpMs": 886
+    },
+    {
+      "case": "spike-cdp-fill-matrix",
+      "baselinePassed": true,
+      "cdpPassed": true,
+      "verdict": "both-pass",
+      "baselineMs": 1192,
+      "cdpMs": 907
+    },
+    {
+      "case": "spike-cdp-latency",
+      "baselinePassed": true,
+      "cdpPassed": true,
+      "verdict": "both-pass",
+      "baselineMs": 8882,
+      "cdpMs": 8827
+    },
+    {
+      "case": "spike-infobar-viewport",
+      "baselinePassed": false,
+      "cdpPassed": true,
+      "verdict": "cdp-fixes",
+      "baselineMs": 975,
+      "cdpMs": 661
+    },
+    {
+      "case": "tap-gesture-md-select",
+      "baselinePassed": false,
+      "cdpPassed": true,
+      "verdict": "cdp-fixes",
+      "baselineMs": 4589,
+      "cdpMs": 588
+    },
+    {
+      "case": "v4-multisite-layer3",
+      "baselinePassed": true,
+      "cdpPassed": true,
+      "verdict": "both-pass",
+      "baselineMs": 1409,
+      "cdpMs": 1324
+    },
+    {
+      "case": "v4-taobao-emoji-radio-offscreen",
+      "baselinePassed": true,
+      "cdpPassed": true,
+      "verdict": "both-pass",
+      "baselineMs": 1123,
+      "cdpMs": 1067
+    },
+    {
+      "case": "visibility-hidden-megamenu",
+      "baselinePassed": true,
+      "cdpPassed": true,
+      "verdict": "both-pass",
+      "baselineMs": 1343,
+      "cdpMs": 703
+    },
+    {
+      "case": "vortex-debug-read-console",
+      "baselinePassed": false,
+      "cdpPassed": true,
+      "verdict": "cdp-fixes",
+      "baselineMs": 3803,
+      "cdpMs": 603
+    },
+    {
+      "case": "vortex-debug-read-network",
+      "baselinePassed": false,
+      "cdpPassed": false,
+      "verdict": "both-fail",
+      "baselineMs": 4451,
+      "cdpMs": 1048
+    },
+    {
+      "case": "vortex-evaluate",
+      "baselinePassed": true,
+      "cdpPassed": true,
+      "verdict": "both-pass",
+      "baselineMs": 1489,
+      "cdpMs": 739
+    },
+    {
+      "case": "vortex-press-combo",
+      "baselinePassed": true,
+      "cdpPassed": true,
+      "verdict": "both-pass",
+      "baselineMs": 777,
+      "cdpMs": 640
+    },
+    {
+      "case": "vortex-screenshot",
+      "baselinePassed": true,
+      "cdpPassed": true,
+      "verdict": "both-pass",
+      "baselineMs": 847,
+      "cdpMs": 650
+    },
+    {
+      "case": "vortex-storage-roundtrip",
+      "baselinePassed": false,
+      "cdpPassed": true,
+      "verdict": "cdp-fixes",
+      "baselineMs": 4456,
+      "cdpMs": 620
+    }
+  ]
+}

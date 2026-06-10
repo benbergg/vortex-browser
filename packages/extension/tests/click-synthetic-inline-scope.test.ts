@@ -94,9 +94,10 @@ describe("合成 click inline func 注入作用域(P0 isTransient 回归锁)", (
     registerDomHandlers(router, debuggerMgr as never);
   });
 
-  it("合成 click 在剥离模块作用域后仍成功——无 'X is not defined'", async () => {
-    // 不传 trustedMode(单测无 server 注入)→ 默认即合成路径
-    const resp = await router.dispatch(mkReq({ selector: "#btn" }));
+  it("合成 click(forceSynthetic)在剥离模块作用域后仍成功——无 'X is not defined'", async () => {
+    const resp = await router.dispatch(
+      mkReq({ selector: "#btn", trustedMode: true, forceSynthetic: true }),
+    );
     expect(resp.error?.message ?? "").not.toMatch(/is not defined/);
     expect(resp.error).toBeUndefined();
   });
@@ -106,7 +107,7 @@ describe("合成 click inline func 注入作用域(P0 isTransient 回归锁)", (
     dom.window.document.getElementById("btn")!.addEventListener("click", () => {
       clicked++;
     });
-    await router.dispatch(mkReq({ selector: "#btn" }));
+    await router.dispatch(mkReq({ selector: "#btn", forceSynthetic: true }));
     expect(clicked).toBeGreaterThan(0);
   });
 });
