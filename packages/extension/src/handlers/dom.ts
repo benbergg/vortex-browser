@@ -555,6 +555,57 @@ export function registerDomHandlers(
         return { success: true, typed: text.length, path: "cdp-insertText" };
       }
 
+      // === spike(cdp-first 阶段0): input/textarea 的 CDP insertText 实验分支 ===
+      // cdpType=true 时 input/textarea 也走 CDP 真实输入(对齐上方 contentEditable
+      // 路径),供 compare-cdp 双模式对比;默认仍走下方 page-side dispatch 不变。
+      if (args.cdpType === true) {
+        // 替换语义:全选已有内容(等价人手 Ctrl+A);type("") 保持 no-op,
+        // 对齐 input/textarea 默认分支的 clear-before 契约。
+        if (text !== "") {
+          await nativePageQuery(
+            tid,
+            frameId,
+            (sel: string) => {
+              const els = (window as any).__vortexDomResolve.queryAllDeep(sel) as Element[];
+              const el = els[0] as HTMLInputElement | undefined;
+              if (el && typeof el.select === "function") el.select();
+            },
+            [selector],
+          );
+        }
+        await debuggerMgr.attach(tid);
+        if (delay > 0) {
+          for (const ch of text) {
+            await debuggerMgr.sendCommand(tid, "Input.insertText", { text: ch });
+            await new Promise((r) => setTimeout(r, delay));
+          }
+        } else {
+          await debuggerMgr.sendCommand(tid, "Input.insertText", { text });
+        }
+        // readback 校验副作用真发生(族 A 一致):非空 text 读回空 = 被约束拒绝。
+        const rb = await nativePageQuery<{ value?: string } | undefined>(
+          tid,
+          frameId,
+          (sel: string) => {
+            const els = (window as any).__vortexDomResolve.queryAllDeep(sel) as Element[];
+            const el = els[0] as HTMLInputElement | undefined;
+            return { value: el && typeof el.value === "string" ? el.value : "" };
+          },
+          [selector],
+        );
+        if (text !== "" && (rb?.value ?? "") === "") {
+          mapPageError(
+            {
+              errorCode: "NO_EFFECT",
+              error: `Element ${selector} rejected typed text "${text}" via CDP insertText; value is empty after type`,
+              extras: { attempted: text },
+            },
+            selector,
+          );
+        }
+        return { success: true, typed: text.length, path: "cdp-type-insertText", value: rb?.value };
+      }
+
       // input / textarea path — legacy synthetic dispatch (kept
       // byte-identical to v0.8 for every passing case in bench).
       const res = await nativePageQuery<{
@@ -684,6 +735,69 @@ export function registerDomHandlers(
         { timeout: args.timeout as number | undefined, needsEditable: true },
         args.force as boolean | undefined,
       );
+
+      // === spike(cdp-first 阶段0): CDP Input.insertText 实验分支 ===
+      // cdpFill=true 走「真实输入」:focus+全选(替换语义)→ CDP Input.insertText
+      // (isTrusted=true)→ readback 校验(族 A 处方)。刻意跳过 fill-reject 探测
+      // ——验证启发式在真实输入下是否仍必要,是 compare-cdp 双模式的实验变量。
+      // 不改默认路径;实验数据落 reports/spike-cdp/。
+      if (args.cdpFill === true) {
+        await loadPageSideModule(tid, frameId, "dom-resolve");
+        const probe = await nativePageQuery<{
+          ok?: true;
+          errorCode?: string;
+          error?: string;
+          extras?: Record<string, unknown>;
+        } | undefined>(
+          tid,
+          frameId,
+          (sel: string, hasText: boolean) => {
+            const els = (window as any).__vortexDomResolve.queryAllDeep(sel) as Element[];
+            if (els.length === 0) {
+              return { errorCode: "ELEMENT_NOT_FOUND", error: `Element not found: ${sel}` };
+            }
+            if (els.length > 1) {
+              return {
+                errorCode: "SELECTOR_AMBIGUOUS",
+                error: `Selector "${sel}" matched ${els.length} elements`,
+                extras: { matchCount: els.length },
+              };
+            }
+            const el = els[0] as HTMLInputElement;
+            el.focus();
+            // 替换语义:全选已有内容让 insertText 覆盖(等价人手 Ctrl+A 后输入);
+            // 空值不全选保持 no-op,对齐默认路径契约。
+            if (hasText && typeof el.select === "function") el.select();
+            return { ok: true };
+          },
+          [selector, value !== ""],
+        );
+        if (probe?.error) mapPageError(probe, selector);
+        await debuggerMgr.attach(tid);
+        await debuggerMgr.sendCommand(tid, "Input.insertText", { text: value });
+        // readback 校验副作用真发生:非空 value 读回空 = 被类型/格式约束拒绝。
+        const rb = await nativePageQuery<{ value?: string } | undefined>(
+          tid,
+          frameId,
+          (sel: string) => {
+            const els = (window as any).__vortexDomResolve.queryAllDeep(sel) as Element[];
+            const el = els[0] as HTMLInputElement | undefined;
+            return { value: el && typeof el.value === "string" ? el.value : "" };
+          },
+          [selector],
+        );
+        if (value !== "" && (rb?.value ?? "") === "") {
+          mapPageError(
+            {
+              errorCode: "NO_EFFECT",
+              error: `Element ${selector} rejected value "${value}" via CDP insertText; value is empty after fill`,
+              extras: { attempted: value },
+            },
+            selector,
+          );
+        }
+        return { success: true, path: "cdp-fill-insertText", value: rb?.value };
+      }
 
       // === framework-aware rejection via page-side bundle (@since 0.4.0, migrated T2.7a) ===
       if (!fallbackToNative) {
