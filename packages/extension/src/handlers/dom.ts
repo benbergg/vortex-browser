@@ -41,6 +41,11 @@ import { waitActionableAutoForce } from "../action/wait-actionable-auto-force.js
  * 真实遮挡 (京东物流弹层遮罩) opacity=1, transform=定位 matrix,
  * aria-hidden="false" → 不被误判为 transient → 仍报 ELEMENT_OCCLUDED。
  */
+// 注意:本函数在 CLICK handler 的 executeScript inline func 内有一份**内联副本**
+// (executeScript 注入丢模块作用域,裸引用模块级 helper 会 ReferenceError——
+// 2026-06-10 spike 实测非 trusted Chrome 合成 click 100% 抛错即此因)。
+// 真源+内联副本,改一处须改另一处;tests/click-synthetic-inline-scope.test.ts
+// 用 new Function 剥离作用域真执行守护。
 export function isTransient(el: Element): boolean {
   const cs = getComputedStyle(el);
   if (parseFloat(cs.opacity) < 0.99) return true;
@@ -253,7 +258,19 @@ export function registerDomHandlers(
             // 检测, 命中 transient overlay → 放行。真遮挡 (京东物流弹层遮罩)
             // opacity=1 / transform=定位 matrix / aria-hidden="false" → 不被
             // 误判, 仍报 ELEMENT_OCCLUDED。
-            const isTransientOverlay = isTransient(topEl);
+            // isTransient 内联副本(与模块级 export 同步,改一处须改另一处——
+            // executeScript 注入丢模块作用域,不能裸引用模块 helper)。
+            const isTransientInline = (x: Element | null): boolean => {
+              if (!x) return false;
+              const cs = getComputedStyle(x);
+              if (parseFloat(cs.opacity) < 0.99) return true;
+              if (cs.transform && cs.transform !== "none" && cs.transform.includes("matrix")) {
+                return true;
+              }
+              if (x.getAttribute("aria-hidden") === "true") return true;
+              return false;
+            };
+            const isTransientOverlay = isTransientInline(topEl);
             if (
               topEl &&
               topEl !== el &&

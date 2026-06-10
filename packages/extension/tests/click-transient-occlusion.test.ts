@@ -108,13 +108,15 @@ describe("click probe 集成: isTransient 在 vortex click 中放行 (BUG-012 N0
     expect(DOM_SRC).toMatch(/export\s+function\s+isTransient/);
   });
 
-  it("click probe 中 isTransient(topEl) 调用在 isInteractiveEl 函数定义之后 (不破坏淘宝 el-select carve-out)", () => {
-    // 验证 click probe 内 isTransient(topEl) 调用位置在 isInteractiveEl
+  it("click probe 中 isTransientInline(topEl) 调用在 isInteractiveEl 函数定义之后 (不破坏淘宝 el-select carve-out)", () => {
+    // 验证 click probe 内 isTransientInline(topEl) 调用位置在 isInteractiveEl
     // 函数定义之后 (顺序敏感, 否则会破坏现有 sameWidgetDecoration 路径)。
-    // 跳到 page-side func 内: isInteractiveEl 函数定义 (`= (x: Element) =>`)
-    // 必须早于 isTransient(topEl) 调用。
+    // 注:probe 内用的是 isTransient 的**内联副本** isTransientInline——
+    // executeScript 注入丢模块作用域,裸引用模块级 isTransient 会
+    // ReferenceError(2026-06-10 spike 实测 P0,行为级守护见
+    // tests/click-synthetic-inline-scope.test.ts)。
     const interactiveDefIdx = DOM_SRC.indexOf("isInteractiveEl = (x: Element)");
-    const transientCallIdx = DOM_SRC.indexOf("isTransient(topEl)");
+    const transientCallIdx = DOM_SRC.indexOf("isTransientInline(topEl)");
     expect(interactiveDefIdx).toBeGreaterThan(-1);
     expect(transientCallIdx).toBeGreaterThan(-1);
     expect(transientCallIdx).toBeGreaterThan(interactiveDefIdx);
