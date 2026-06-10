@@ -1225,6 +1225,46 @@ async function scanOneFrame(
           }
           return false;
         };
+        // content-card 判据内联副本——真源见 page-side/content-card.ts(可单测),
+        // inject func 自包含不能 import,改一处须同步另一处。
+        const collectClickableDesc = (el: Element, cap = 200): Set<Element> => {
+          const set = new Set<Element>();
+          const all = el.querySelectorAll("*");
+          for (let i = 0; i < all.length && i < cap; i++) {
+            const d = all[i];
+            if (getComputedStyle(d as Element).cursor === "pointer" || hasFrameworkClick(d)) set.add(d);
+          }
+          return set;
+        };
+        const hasOwnContentText = (el: Element, threshold = 8): boolean => {
+          const clickable = collectClickableDesc(el);
+          const walker = el.ownerDocument!.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+          let own = 0;
+          let node: Node | null;
+          while ((node = walker.nextNode())) {
+            const t = (node.nodeValue || "").trim();
+            if (!t) continue;
+            let inClickable = false;
+            for (let p = node.parentElement; p && p !== el; p = p.parentElement) {
+              if (clickable.has(p)) {
+                inClickable = true;
+                break;
+              }
+            }
+            if (!inClickable) {
+              own += t.length;
+              if (own >= threshold) return true;
+            }
+          }
+          return own >= threshold;
+        };
+        const isClickableContentCard = (el: Element): boolean =>
+          hasFrameworkClick(el) && hasOwnContentText(el);
+        // self-clickable 内联副本——真源见 page-side/content-card.ts,改一处须同步。
+        // 卡自身独立可点(cursor:pointer 或框架 onClick),用于门 1247:含交互后代但
+        // 自身可点的内容卡(京东 _card)保留入池。
+        const isSelfClickable = (el: Element): boolean =>
+          getComputedStyle(el).cursor === "pointer" || hasFrameworkClick(el);
         for (const el of Array.from(fallbackPool)) {
           if (cursorPointerExtras.length >= FALLBACK_CAP) break;
           if (interactiveSet.has(el)) continue;
@@ -1244,7 +1284,11 @@ async function scanOneFrame(
           // (Use INTERACTIVE_SELECTORS, not the table-extended set, so
           // table cells with cursor:pointer still get collected when
           // filter='all'.)
-          if (el.querySelector(INTERACTIVE_SELECTORS)) continue;
+          // 内容卡(自身 cursor:pointer 或 framework onClick)即使含交互后代也保留——
+          // 它本身是可点击单元(京东商品卡 _card 含客服 a/addCart button,自身可点)。
+          // 用 isSelfClickable 而非 isClickableContentCard:真实 _card 全文在可点子里
+          // (hasOwnContentText=false),但卡自身 cursor:pointer+onClick 是确凿信号。
+          if (el.querySelector(INTERACTIVE_SELECTORS) && !isSelfClickable(el)) continue;
           // Cross-pool ancestor short-circuit: 若祖先链上有 INTERACTIVE_SELECTORS
           // 元素（如 `<li role=menuitem><div cursor:pointer>`、`<label>` 包
           // `<span cursor:pointer>`、`<button>` 包装饰 span 等），整个 ARIA
@@ -1279,7 +1323,9 @@ async function scanOneFrame(
                 break;
               }
             }
-            if (hasFinerPointer) continue;
+            // 内容卡不让位——评价卡 li.item 自身有 onClick + 评价正文,内部
+            // cursor:pointer 标签是附属,不该让位给标签(SKU 容器无自有文本仍让位)。
+            if (hasFinerPointer && !isClickableContentCard(el)) continue;
           }
           // Use textContent for the gate check — innerText forces layout
           // and we only need the gate decision here. The accessible name
@@ -1298,6 +1344,31 @@ async function scanOneFrame(
           if (!probe) continue;
           cursorPointerExtras.push(el);
         }
+        // [卡吸收内部] 自身可点的内容卡(isSelfClickable 且含交互后代,如京东 _card
+        // 整张可点、内含 addCart button + 客服 a)吸收其内部所有 cursor:pointer 后代——
+        // 卡是单一点击单元,内部 pointer 子部件(标题/标签/价格块)不是独立目标。否则
+        // 京东每张卡碎成 ~9 条(整页 877 个 cursor:pointer)把 maxElements 预算炸穿。
+        // addCart/客服(button/a)在 ARIA 池独立存活,不在 cursorPointerExtras,不受影响。
+        // 仅 filter=interactive 启用(filter=all 保持穷尽)。
+        let survivingExtras = cursorPointerExtras;
+        if (filter === "interactive") {
+          const cardAbsorbers = new Set<Element>(
+            cursorPointerExtras.filter(
+              (el) => isSelfClickable(el) && el.querySelector(INTERACTIVE_SELECTORS) != null,
+            ),
+          );
+          const absorbedByCard = new WeakSet<Element>();
+          for (const el of cursorPointerExtras) {
+            if (cardAbsorbers.has(el)) continue; // 卡本身不被吸收
+            for (let p = el.parentElement; p; p = p.parentElement) {
+              if (cardAbsorbers.has(p)) {
+                absorbedByCard.add(el);
+                break;
+              }
+            }
+          }
+          survivingExtras = cursorPointerExtras.filter((el) => !absorbedByCard.has(el));
+        }
         // 嵌套 cursor:pointer 时择一保留：
         // - 同文本（如 bytenew sidebar `li > div > div > div` 全是 "首页"）
         //   保留 leaf，drop ancestor；leaf 离 click 目标最近、文本无损失
@@ -1305,11 +1376,11 @@ async function scanOneFrame(
         //   "全部 96%好评" 含 leaf 子串 + 主标签）保留 ancestor，drop leaf；
         //   leaf 仅含 inner span 部分文本会让 LLM 拿不到主标签
         // 走每条 candidate 至多一次到最近的 candidate ancestor (O(N·depth))。
-        const candidateSet = new Set<Element>(cursorPointerExtras);
+        const candidateSet = new Set<Element>(survivingExtras);
         const dropSet = new WeakSet<Element>();
         const normText = (el: Element): string =>
           (el.textContent ?? "").replace(/\s+/g, " ").trim();
-        for (const leaf of cursorPointerExtras) {
+        for (const leaf of survivingExtras) {
           let p: Element | null = leaf.parentElement;
           while (p) {
             if (candidateSet.has(p)) {
@@ -1317,6 +1388,10 @@ async function scanOneFrame(
               const ancText = normText(p);
               if (ancText.length > leafText.length && ancText.includes(leafText)) {
                 // ancestor 有额外文本（主标签+leaf 子串），保留 ancestor
+                dropSet.add(leaf);
+              } else if (isClickableContentCard(p)) {
+                // 内容卡 ancestor(评价卡/商品卡)优先保留:其正文与标签子异文本
+                // 且不含标签词,旧逻辑会误 drop 容器保留标签 → 评价卡整条丢失。
                 dropSet.add(leaf);
               } else {
                 // 文本等价（嵌套同文本 wrapper），保留 leaf
@@ -1327,7 +1402,7 @@ async function scanOneFrame(
             p = p.parentElement;
           }
         }
-        const cursorPointerLeaves = cursorPointerExtras.filter(
+        const cursorPointerLeaves = survivingExtras.filter(
           (el) => !dropSet.has(el),
         );
 
@@ -1537,6 +1612,17 @@ async function scanOneFrame(
 
           const role = withAX ? getRole(htmlEl) : htmlEl.tagName.toLowerCase();
           const name = withText ? getAccessibleName(htmlEl) : "";
+
+          // 内容卡内「无文本 icon-link 子」(京东客服 16x16 ×60)是冗余噪声,且占
+          // maxElements 预算挤掉商品卡。formLike(<a href>)绕过下方 BUG-3 的 !name
+          // 过滤,置空名仍占输出 slot → 必须显式 continue 丢弃,而非置空名。
+          if (filter === "interactive" && /^icon-link @/.test(name)) {
+            let inCard = false;
+            for (let p = htmlEl.parentElement; p; p = p.parentElement) {
+              if (isSelfClickable(p)) { inCard = true; break; }
+            }
+            if (inCard) continue;
+          }
 
           // BUG-3: in filter='interactive' mode, drop wrappers that the
           // selector caught structurally but carry no semantic info —
