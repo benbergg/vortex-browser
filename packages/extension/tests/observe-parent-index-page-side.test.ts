@@ -5,9 +5,8 @@ const COMPUTE_PARENT_INDEX = `
   const set = new Set(collectedEls);
   const out = [];
   for (let i = 0; i < collectedEls.length; i++) {
-    let node = collectedEls[i];
     let parentIdx = undefined;
-    let cur = node.parentElement || (node.getRootNode() && node.getRootNode().host) || null;
+    let cur = collectedEls[i].parentElement || (collectedEls[i].getRootNode() && collectedEls[i].getRootNode().host) || null;
     while (cur) {
       if (set.has(cur)) {
         parentIdx = collectedEls.indexOf(cur);
@@ -49,5 +48,14 @@ describe("computeParentIndex (page-side 建树逻辑)", () => {
     const b1 = document.getElementById("b1")!;
     const list = document.getElementById("list")!;
     expect(computeParentIndex([list, li1, b1])).toEqual([undefined, 0, 1]);
+  });
+
+  it("shadow DOM: button inside shadow host resolves to host", () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const sr = host.attachShadow({ mode: "open" });
+    const btn = document.createElement("button");
+    sr.appendChild(btn);
+    expect(computeParentIndex([host, btn])).toEqual([undefined, 0]);
   });
 });

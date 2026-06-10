@@ -1693,6 +1693,7 @@ async function scanOneFrame(
           // a11y-tree: 记引用，下标严格与 elements 对齐（此处是循环内最后一个
           // 可能 continue 之后、elements.push 之前的唯一 push 点）。
           collectedEls.push(htmlEl);
+          const __href = role === "link" ? (htmlEl.getAttribute("href") || undefined) : undefined;
           elements.push({
             index: elements.length,
             tag: htmlEl.tagName.toLowerCase(),
@@ -1714,9 +1715,7 @@ async function scanOneFrame(
             ...(reactMarker
               ? { reactClickable: true as const, clickHint: reactMarker.clickHint }
               : {}),
-            ...(role === "link" && htmlEl.getAttribute("href")
-              ? { href: htmlEl.getAttribute("href") }
-              : {}),
+            ...(__href !== undefined ? { href: __href } : {}),
             _sel: buildSelector(htmlEl),
           });
         }
