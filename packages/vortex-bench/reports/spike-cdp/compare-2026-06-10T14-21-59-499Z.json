@@ -1,0 +1,29 @@
+{
+  "generatedAt": "2026-06-10T14:21:59.499Z",
+  "total": 2,
+  "bothPass": 0,
+  "cdpRegressions": [
+    "spif-in-shadow",
+    "el-time-picker"
+  ],
+  "cdpFixes": [],
+  "bothFail": [],
+  "rows": [
+    {
+      "case": "spif-in-shadow",
+      "baselinePassed": true,
+      "cdpPassed": false,
+      "verdict": "cdp-regression",
+      "baselineMs": 1216,
+      "cdpMs": 1681
+    },
+    {
+      "case": "el-time-picker",
+      "baselinePassed": true,
+      "cdpPassed": false,
+      "verdict": "cdp-regression",
+      "baselineMs": 1511,
+      "cdpMs": 4585
+    }
+  ]
+}
