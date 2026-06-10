@@ -116,7 +116,7 @@ spike-cdp-fill-matrix（{React 受控, 中文, maxlength=5, number} × {value-se
 1. **立即（独立于翻转）**：`885ce97` isTransient P0 修复 cherry-pick 回 main；`vortex_act fill+kind` 静默死参记 issue（dead-param 族）。
 2. **click CDP-first 转正**：trusted 环境已是既成事实（本机全部 dogfood 流量）；非 trusted 同样翻转，合成留 attach-fail 降级。残余风险=非 trusted infobar 视觉/offset 未实测，作为转正 PR 的验证项（无 flag Chrome 实例跑 spike-infobar-viewport 即可）。
 3. **fill/type 写入机制换 Input.insertText**：分流启发式照旧，仅换 plain 路径的写入；value-setter 留 fallback。
-4. **前置依赖**：feat/observe-a11y-tree 的 iframe-offset CDP 兜底先合 main（spif-in-shadow）。
+4. **前置依赖**：~~feat/observe-a11y-tree 的 iframe-offset CDP 兜底先合 main~~ **已满足**——该分支已于 2026-06-10 合入 main（`1c02b04`），转正 PR rebase 到新 main 后 spif-in-shadow 应消失（rebase 后复跑确认）。
 5. **退役候选（翻转后数据驱动逐个验证）**：reactClickable 标记、framework-handlers 探测、submit-intent defer——CDP-first 下它们从「补救机制」降级为「死代码候选」。
 6. 工作量级：中，约 1-2 周（含降级链测试 + baseline 重置 + 文档）。
 
