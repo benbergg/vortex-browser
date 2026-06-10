@@ -1225,6 +1225,41 @@ async function scanOneFrame(
           }
           return false;
         };
+        // content-card 判据内联副本——真源见 page-side/content-card.ts(可单测),
+        // inject func 自包含不能 import,改一处须同步另一处。
+        const collectClickableDesc = (el: Element, cap = 200): Set<Element> => {
+          const set = new Set<Element>();
+          const all = el.querySelectorAll("*");
+          for (let i = 0; i < all.length && i < cap; i++) {
+            const d = all[i];
+            if (getComputedStyle(d as Element).cursor === "pointer" || hasFrameworkClick(d)) set.add(d);
+          }
+          return set;
+        };
+        const hasOwnContentText = (el: Element, threshold = 8): boolean => {
+          const clickable = collectClickableDesc(el);
+          const walker = el.ownerDocument!.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+          let own = 0;
+          let node: Node | null;
+          while ((node = walker.nextNode())) {
+            const t = (node.nodeValue || "").trim();
+            if (!t) continue;
+            let inClickable = false;
+            for (let p = node.parentElement; p && p !== el; p = p.parentElement) {
+              if (clickable.has(p)) {
+                inClickable = true;
+                break;
+              }
+            }
+            if (!inClickable) {
+              own += t.length;
+              if (own >= threshold) return true;
+            }
+          }
+          return own >= threshold;
+        };
+        const isClickableContentCard = (el: Element): boolean =>
+          hasFrameworkClick(el) && hasOwnContentText(el);
         for (const el of Array.from(fallbackPool)) {
           if (cursorPointerExtras.length >= FALLBACK_CAP) break;
           if (interactiveSet.has(el)) continue;
