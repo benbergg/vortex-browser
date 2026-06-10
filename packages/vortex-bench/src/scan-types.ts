@@ -51,6 +51,10 @@ export interface ObserveRow {
   /** [x,y,w,h] frame-local 视口坐标;无 includeBoxes 或离屏时 null */
   bbox: [number, number, number, number] | null;
   frameId: number;
+  /** 缩进深度（0=根）。@since a11y-tree */
+  depth?: number;
+  /** 父节点 ref（由缩进栈推导）；根为 null。@since a11y-tree */
+  parentRef?: string | null;
 }
 
 export interface ObserveHeader {

@@ -107,3 +107,36 @@ URL: u
     expect(p.rows[5].name).toBe("普通");
   });
 });
+
+// ── 树格式（a11y-tree）测试 ──────────────────────────────────────────────────
+
+const SNAP = [
+  "SnapshotId: snap_x",
+  "URL: http://t",
+  "",
+  `- list "小程序" [ref=@a3:e0]:`,
+  `  - listitem "VOC工作台" [ref=@a3:e1]:`,
+  `    - button "+ 新增" [ref=@a3:e2] [cursor=pointer]`,
+  `- link "京东" [ref=@a3:e3]:`,
+  `  - /url: //jd.com/`,
+].join("\n");
+
+describe("parseObserveSnapshot — 树格式", () => {
+  const { rows } = parseObserveSnapshot(SNAP);
+
+  it("parses role bare + ref from [ref=] + name", () => {
+    expect(rows[0]).toMatchObject({ ref: "@a3:e0", role: "list", name: "小程序", depth: 0 });
+  });
+  it("computes depth from indentation", () => {
+    expect(rows.map((r) => r.depth)).toEqual([0, 1, 2, 0]);
+  });
+  it("derives parentRef from indentation stack", () => {
+    expect(rows.map((r) => r.parentRef)).toEqual([null, "@a3:e0", "@a3:e1", null]);
+  });
+  it("keeps flags (cursor=pointer 归一为 token)", () => {
+    expect(rows[2].flags).toContain("cursor=pointer");
+  });
+  it("ignores /url property line (not a row)", () => {
+    expect(rows).toHaveLength(4); // list/listitem/button/link，/url 不计行
+  });
+});

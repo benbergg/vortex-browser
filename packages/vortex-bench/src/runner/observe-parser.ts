@@ -3,16 +3,27 @@
 
 import type { ObserveRow, ObserveHeader, ParsedObserve } from "../scan-types.js";
 
-// 元素行:@<ref> [<role>] "<name>"? (<flags>)* (value=..)? (bbox=[..])?
-// ref=@[\w:]+,role=[^\]]+,name 含转义 \" 与非 " 字符。
-// value= 段(值域控件当前值,observe-render.ts 注入)用非捕获组容忍并跳过——
-// 取值可为裸 token(value=30/100)或带引号(value="3 of 5 stars"),不进 ObserveRow
-// (bench oracle 不比对值,只需不让该行整行失配被丢)。
-// flag 段容忍 `:`:aria-sort 渲染为 [sort:asc]/[sort:desc](observe-render.ts),
-// 旧 [a-z]+ 不含冒号会让整行失配被静默丢(2026-06-02 AC,同 value= 段教训)。
-const ROW_RE =
+// ── 树格式（新，a11y-tree）─────────────────────────────────────────────────
+// 每行：{indent}- {role} "{name}"? [ref=@..] {[flag]..}? {value=..}? {bbox=[..]}? {:}?
+// 缩进 2 空格/层；role 裸词；name 可含转义 \"；flag 容忍 = 与 :（cursor=pointer / sort:asc）；
+// value= 段容忍跳过（不进 ObserveRow，同旧格式处理）。
+const TREE_ROW_RE =
+  /^(\s*)-\s+(\S+)(?:\s+"((?:\\.|[^"\\])*)")?\s+\[ref=(@[\w:]+)\]((?:\s+\[[a-z:=]+\])*)(?:\s+value=(?:"(?:\\.|[^"\\])*"|\S+))?(?:\s+bbox=\[(\d+),(\d+),(\d+),(\d+)\])?\s*:?\s*$/;
+
+// ── 旧扁平格式（向后兼容）──────────────────────────────────────────────────
+// 元素行: @<ref> [<role>] "<name>"? (<flags>)* (value=..)? (bbox=[..])?
+// flag 段容忍 `:`:aria-sort 渲染为 [sort:asc]/[sort:desc]（observe-render.ts），
+// 旧 [a-z]+ 不含冒号会让整行失配被静默丢（2026-06-02 AC，同 value= 段教训）。
+const FLAT_ROW_RE =
   /^(@[\w:]+)\s+\[([^\]]+)\](?:\s+"((?:\\.|[^"\\])*)")?((?:\s+\[[a-z:]+\])*)(?:\s+value=(?:"(?:\\.|[^"\\])*"|\S+))?(?:\s+bbox=\[(\d+),(\d+),(\d+),(\d+)\])?\s*$/;
-const FLAG_RE = /\[([a-z:]+)\]/g;
+
+// flag 匹配（树格式：含 = 符，如 cursor=pointer；扁平格式：仅含 a-z:）
+const FLAG_RE_TREE = /\[([a-z:=]+)\]/g;
+const FLAG_RE_FLAT = /\[([a-z:]+)\]/g;
+
+// /url 属性行（树格式 link 节点子行），不计入 rows
+const URL_RE = /^\s*-\s+\/url:/;
+
 const OFFSET_RE = /^#\s+frame\s+(\d+)\s+offset=\[(\d+),(\d+)\]/;
 const VIEWPORT_RE = /^Viewport:\s+(\d+)x(\d+),\s+scrollY=(\d+)\/(\d+)/;
 
@@ -26,9 +37,13 @@ export function parseObserveSnapshot(text: string): ParsedObserve {
   const header: ObserveHeader = { snapshotId: "", url: "" };
   const rows: ObserveRow[] = [];
   const frameOffsets: Record<number, [number, number]> = {};
+  // 缩进栈：stack[depth] = 该深度最近一行的 ref，用于推导 parentRef
+  const stack: string[] = [];
 
   for (const raw of text.split("\n")) {
     const line = raw.trimEnd();
+
+    // ── header 分支（保持不变）──────────────────────────────────────────
     if (line.startsWith("SnapshotId:")) {
       header.snapshotId = line.slice("SnapshotId:".length).trim();
       continue;
@@ -59,20 +74,52 @@ export function parseObserveSnapshot(text: string): ParsedObserve {
       ];
       continue;
     }
-    const m = line.match(ROW_RE);
-    if (m) {
-      const flags = m[4] ? [...m[4].matchAll(FLAG_RE)].map((f) => f[1]) : [];
+
+    // ── /url 属性行（树格式 link 节点子行，不计入 rows）─────────────────
+    if (URL_RE.test(line)) continue;
+
+    // ── 树格式元素行（新 a11y-tree 格式）────────────────────────────────
+    const mt = line.match(TREE_ROW_RE);
+    if (mt) {
+      const indent = mt[1].length;
+      const depth = indent / 2; // 2 空格/层
+      const flags = mt[5] ? [...mt[5].matchAll(FLAG_RE_TREE)].map((f) => f[1]) : [];
       const bbox: ObserveRow["bbox"] =
-        m[5] !== undefined
-          ? [Number.parseInt(m[5], 10), Number.parseInt(m[6], 10), Number.parseInt(m[7], 10), Number.parseInt(m[8], 10)]
+        mt[6] !== undefined
+          ? [Number.parseInt(mt[6], 10), Number.parseInt(mt[7], 10), Number.parseInt(mt[8], 10), Number.parseInt(mt[9], 10)]
           : null;
+      // 缩进栈：截断到当前深度，父 = stack[depth-1]
+      stack.length = depth;
+      const parentRef = depth > 0 ? (stack[depth - 1] ?? null) : null;
+      stack[depth] = mt[4];
       rows.push({
-        ref: m[1],
-        role: m[2],
-        name: m[3] !== undefined ? m[3].replace(/\\"/g, '"') : null,
+        ref: mt[4],
+        role: mt[2],
+        name: mt[3] !== undefined ? mt[3].replace(/\\"/g, '"') : null,
         flags,
         bbox,
-        frameId: frameIdOf(m[1]),
+        frameId: frameIdOf(mt[4]),
+        depth,
+        parentRef,
+      });
+      continue;
+    }
+
+    // ── 旧扁平格式元素行（向后兼容，depth/parentRef 不注入）────────────
+    const mf = line.match(FLAT_ROW_RE);
+    if (mf) {
+      const flags = mf[4] ? [...mf[4].matchAll(FLAG_RE_FLAT)].map((f) => f[1]) : [];
+      const bbox: ObserveRow["bbox"] =
+        mf[5] !== undefined
+          ? [Number.parseInt(mf[5], 10), Number.parseInt(mf[6], 10), Number.parseInt(mf[7], 10), Number.parseInt(mf[8], 10)]
+          : null;
+      rows.push({
+        ref: mf[1],
+        role: mf[2],
+        name: mf[3] !== undefined ? mf[3].replace(/\\"/g, '"') : null,
+        flags,
+        bbox,
+        frameId: frameIdOf(mf[1]),
       });
     }
   }
