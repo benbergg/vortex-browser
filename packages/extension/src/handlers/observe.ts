@@ -1260,6 +1260,11 @@ async function scanOneFrame(
         };
         const isClickableContentCard = (el: Element): boolean =>
           hasFrameworkClick(el) && hasOwnContentText(el);
+        // self-clickable 内联副本——真源见 page-side/content-card.ts,改一处须同步。
+        // 卡自身独立可点(cursor:pointer 或框架 onClick),用于门 1247:含交互后代但
+        // 自身可点的内容卡(京东 _card)保留入池。
+        const isSelfClickable = (el: Element): boolean =>
+          getComputedStyle(el).cursor === "pointer" || hasFrameworkClick(el);
         for (const el of Array.from(fallbackPool)) {
           if (cursorPointerExtras.length >= FALLBACK_CAP) break;
           if (interactiveSet.has(el)) continue;
@@ -1279,9 +1284,11 @@ async function scanOneFrame(
           // (Use INTERACTIVE_SELECTORS, not the table-extended set, so
           // table cells with cursor:pointer still get collected when
           // filter='all'.)
-          // 内容卡(自身 framework onClick + 自有内容文本)即使含交互后代也保留——
-          // 它本身是可点击单元(京东商品卡 div._card 含客服 a/addCart button)。
-          if (el.querySelector(INTERACTIVE_SELECTORS) && !isClickableContentCard(el)) continue;
+          // 内容卡(自身 cursor:pointer 或 framework onClick)即使含交互后代也保留——
+          // 它本身是可点击单元(京东商品卡 _card 含客服 a/addCart button,自身可点)。
+          // 用 isSelfClickable 而非 isClickableContentCard:真实 _card 全文在可点子里
+          // (hasOwnContentText=false),但卡自身 cursor:pointer+onClick 是确凿信号。
+          if (el.querySelector(INTERACTIVE_SELECTORS) && !isSelfClickable(el)) continue;
           // Cross-pool ancestor short-circuit: 若祖先链上有 INTERACTIVE_SELECTORS
           // 元素（如 `<li role=menuitem><div cursor:pointer>`、`<label>` 包
           // `<span cursor:pointer>`、`<button>` 包装饰 span 等），整个 ARIA
@@ -1587,7 +1594,7 @@ async function scanOneFrame(
           let suppressedName = name;
           if (filter === "interactive" && /^icon-link @/.test(name)) {
             for (let p = htmlEl.parentElement; p; p = p.parentElement) {
-              if (isClickableContentCard(p)) { suppressedName = ""; break; }
+              if (isSelfClickable(p)) { suppressedName = ""; break; }
             }
           }
 

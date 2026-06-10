@@ -18,3 +18,26 @@ describe("observe content-card 判据 page-side 内联(dist 静态分析)", () =
     expect((dist.match(/createTreeWalker/g) || []).length).toBeGreaterThanOrEqual(1);
   });
 });
+
+import { readFileSync as _rf } from "node:fs";
+const OBSERVE_SRC = _rf(
+  "/Users/lg/workspace/vortex/packages/extension/src/handlers/observe.ts",
+  "utf8",
+);
+
+describe("observe v2:isSelfClickable 内联 + 信号 swap(源码锁)", () => {
+  it("inject func 含内联 isSelfClickable 定义", () => {
+    expect(OBSERVE_SRC).toMatch(/const isSelfClickable = \(el: Element\): boolean =>/);
+  });
+  it("门 1247 守卫用 !isSelfClickable", () => {
+    expect(OBSERVE_SRC).toMatch(
+      /querySelector\(INTERACTIVE_SELECTORS\) && !isSelfClickable\(el\)\) continue;/,
+    );
+  });
+  it("Task6 抑制祖先判据用 isSelfClickable(p)", () => {
+    expect(OBSERVE_SRC).toMatch(/if \(isSelfClickable\(p\)\) \{ suppressedName = ""; break; \}/);
+  });
+  it("门 1282 仍用 isClickableContentCard(评价卡 BUG-04 不回退)", () => {
+    expect(OBSERVE_SRC).toMatch(/hasFinerPointer && !isClickableContentCard\(el\)\) continue;/);
+  });
+});
