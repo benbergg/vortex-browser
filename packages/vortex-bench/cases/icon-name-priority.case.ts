@@ -17,25 +17,25 @@ const def: CaseDefinition = {
 
     // 1. svg <title> > className（即使没 className 也优先 title）
     ctx.assert(
-      /\[button\]\s+"关闭"/.test(snap),
+      /- button "关闭"/.test(snap),
       `场景 1：svg <title> 应作为 button name "关闭"：${snap}`,
     );
 
     // 2. img alt > className
     ctx.assert(
-      /\[link\]\s+"GitHub"/.test(snap),
+      /- link "GitHub"/.test(snap),
       `场景 2：img alt 应作为 link name "GitHub"：${snap}`,
     );
 
     // 3. svg aria-label > className
     ctx.assert(
-      /\[button\]\s+"设置"/.test(snap),
+      /- button "设置"/.test(snap),
       `场景 3：svg aria-label 应作为 button name "设置"：${snap}`,
     );
 
     // 4. framework prefix denylist：el-icon 应**不**入 ref
     ctx.assert(
-      !/\[i\]\s+"el-icon"/.test(snap),
+      !/- i "el-icon"/.test(snap),
       `场景 4：el-icon 应被 denylist 过滤：${snap}`,
     );
 
@@ -47,7 +47,7 @@ const def: CaseDefinition = {
 
     // 6. 合法 CSS Modules 名（closeIcon）应保留
     ctx.assert(
-      /\[div\]\s+"closeIcon"/.test(snap),
+      /- div "closeIcon"/.test(snap),
       `场景 6：closeIcon 应保留作 name：${snap}`,
     );
 

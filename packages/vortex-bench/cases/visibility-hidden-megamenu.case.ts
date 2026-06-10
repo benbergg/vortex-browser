@@ -38,15 +38,15 @@ const def: CaseDefinition = {
     //    via innerText is well-defined ("Home" / "Pricing"). If
     //    visibility filter is too aggressive it will kill these too.
     ctx.assert(
-      /\[link\]\s+"Home"/.test(snap),
+      /- link "Home"/.test(snap),
       `visible top-trigger "Home" must surface. snapshot:\n${snap.slice(0, 600)}`,
     );
     ctx.assert(
-      /\[link\]\s+"Pricing"/.test(snap),
+      /- link "Pricing"/.test(snap),
       `visible top-trigger "Pricing" must surface. snapshot:\n${snap.slice(0, 600)}`,
     );
     ctx.assert(
-      /\[link\]\s+"Visible documentation link"/.test(snap),
+      /- link "Visible documentation link"/.test(snap),
       `main-content visible link must surface. snapshot:\n${snap.slice(0, 600)}`,
     );
 
@@ -70,7 +70,7 @@ const def: CaseDefinition = {
     // 3. Total link count sanity — exactly the 3 visible links
     //    (Home, Pricing, Visible documentation link). Hidden 5 must
     //    not be counted.
-    const linkMatches = snap.match(/\[link\]/g) ?? [];
+    const linkMatches = snap.match(/- link /g) ?? [];
     ctx.assert(
       linkMatches.length === 3,
       `expected exactly 3 visible links surfaced, got ${linkMatches.length}. snapshot:\n${snap}`,

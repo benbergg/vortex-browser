@@ -17,14 +17,14 @@ const def: CaseDefinition = {
     // open modal
     const s0 = extractText(await ctx.call("vortex_observe", {}));
     // v0.8 hashed ref support: @\w+ doesn't match the ':' in @<hash>:eN, so widen to [\w:]+
-    const triggerRef = s0.match(/(@[\w:]+)\s+\[\w+\]\s+"全部评价"/)?.[1];
+    const triggerRef = s0.match(/- \w+ "全部评价"\s+\[ref=(@[\w:]+)\]/)?.[1];
     ctx.assert(triggerRef, "找不到全部评价 trigger");
     await ctx.call("vortex_act", { target: triggerRef!, action: "click" });
     await new Promise((r) => setTimeout(r, 300));
 
     // P1 fix 后：tag observe 输出完整 ancestor 文本（"差评200+"），可直接 ref click
     const s1 = extractText(await ctx.call("vortex_observe", {}));
-    const badRefMatch = s1.match(/(@[\w:]+)\s+\[\w+\]\s+"[^"]*差评[^"]*"/);
+    const badRefMatch = s1.match(/- \w+ "[^"]*差评[^"]*"\s+\[ref=(@[\w:]+)\]/);
     ctx.assert(badRefMatch !== null, `应找到含 "差评" 的 ref：${s1.slice(0, 600)}`);
     ctx.recordMetric("observeFoundBadTagAsLeaf", 1);
 

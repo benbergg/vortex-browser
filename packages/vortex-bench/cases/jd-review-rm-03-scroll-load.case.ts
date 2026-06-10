@@ -17,7 +17,7 @@ const def: CaseDefinition = {
     // open modal
     const s0 = extractText(await ctx.call("vortex_observe", {}));
     // v0.8 hashed ref support: @\w+ doesn't match the ':' in @<hash>:eN, so widen to [\w:]+
-    const triggerRef = s0.match(/(@[\w:]+)\s+\[\w+\]\s+"全部评价"/)?.[1];
+    const triggerRef = s0.match(/- \w+ "全部评价"\s+\[ref=(@[\w:]+)\]/)?.[1];
     await ctx.call("vortex_act", { target: triggerRef!, action: "click" });
     await new Promise((r) => setTimeout(r, 300));
 

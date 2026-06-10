@@ -17,16 +17,16 @@ const def: CaseDefinition = {
     // open modal
     const s0 = extractText(await ctx.call("vortex_observe", {}));
     // v0.8 hashed ref support: @\w+ doesn't match the ':' in @<hash>:eN, so widen to [\w:]+
-    const triggerRef = s0.match(/(@[\w:]+)\s+\[\w+\]\s+"全部评价"/)?.[1];
+    const triggerRef = s0.match(/- \w+ "全部评价"\s+\[ref=(@[\w:]+)\]/)?.[1];
     await ctx.call("vortex_act", { target: triggerRef!, action: "click" });
     await new Promise((r) => setTimeout(r, 300));
 
     // 初始 sort 状态：最新 [active]，当前商品 不 [active]
     const s1 = extractText(await ctx.call("vortex_observe", {}));
-    const latestActive = /(@[\w:]+)\s+\[\w+\]\s+"最新"\s+\[active\]/.test(s1);
+    const latestActive = /- \w+ "最新"[^\n]*\[active\]/.test(s1);
     ctx.assert(latestActive, `初始 "最新" 应有 [active] state：${s1.slice(0, 600)}`);
 
-    const currentSkuMatch = s1.match(/(@[\w:]+)\s+\[\w+\]\s+"当前商品"(?!\s+\[active\])/);
+    const currentSkuMatch = s1.match(/- \w+ "当前商品"\s+\[ref=(@[\w:]+)\](?![^\n]*\[active\])/);
     ctx.assert(
       currentSkuMatch !== null,
       `初始 "当前商品" 不应 [active]：${s1.slice(0, 600)}`,
@@ -39,11 +39,11 @@ const def: CaseDefinition = {
     // 验证 active 切换：当前商品 [active]，最新 不再 [active]
     const s2 = extractText(await ctx.call("vortex_observe", {}));
     ctx.assert(
-      /(@[\w:]+)\s+\[\w+\]\s+"当前商品"\s+\[active\]/.test(s2),
+      /- \w+ "当前商品"[^\n]*\[active\]/.test(s2),
       `切换后 "当前商品" 应 [active]：${s2.slice(0, 600)}`,
     );
     ctx.assert(
-      /(@[\w:]+)\s+\[\w+\]\s+"最新"(?!\s+\[active\])/.test(s2),
+      /- \w+ "最新"\s+\[ref=[@\w:]+\](?![^\n]*\[active\])/.test(s2),
       `切换后 "最新" 不应再 [active]：${s2.slice(0, 600)}`,
     );
     ctx.recordMetric("sortToggleVerified", 1);

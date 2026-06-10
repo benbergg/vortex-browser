@@ -41,7 +41,7 @@ const def: CaseDefinition = {
     );
 
     // 验证 click 行为: 找第一张卡 (iPhone 16 Pro 256GB) 的 ref, click → 反馈 SKU
-    const cardMatch = snap.match(/(@[\w:]+)\s+\[\w+\]\s+"Apple iPhone 16 Pro 256GB[^"]*"/);
+    const cardMatch = snap.match(/- \w+ "Apple iPhone 16 Pro 256GB[^"]*"\s+\[ref=(@[\w:]+)\]/);
     ctx.assert(
       cardMatch !== null,
       `应找到第一张商品卡的 ref: ${snap.slice(0, 600)}`,
