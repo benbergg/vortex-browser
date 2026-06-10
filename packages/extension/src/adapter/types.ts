@@ -39,8 +39,12 @@ export interface CdpAdapter {
 
 /** 容量探测：决定走 native 还是 cdp 路径。 */
 export interface CapabilityDetector {
-  /** 当前 tab 能否 attach chrome.debugger（mock 失败时返回 false）。 */
-  canUseCDP(tabId: number): Promise<boolean>;
+  /**
+   * 当前 tab 能否 attach chrome.debugger（mock 失败时返回 false）。
+   * 传 debuggerMgr 时为 try-attach 留驻模式（探测成功保持 attached，经 manager 记账复用）；
+   * 不传为 legacy 纯探测（attach→立即 detach）。
+   */
+  canUseCDP(tabId: number, debuggerMgr?: DebuggerManager): Promise<boolean>;
   /** 操作是否要求 trusted event（如 drag / 部分 element-plus 组件）。 */
   needsTrustedEvent(action: "click" | "fill" | "type" | "drag", elementHint?: { tagName?: string }): boolean;
 }
