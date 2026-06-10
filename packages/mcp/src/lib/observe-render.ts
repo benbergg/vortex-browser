@@ -14,6 +14,12 @@ export interface CompactElement {
   // includeBoxes:true AND the element intersects the frame viewport.
   // Tuple form (not object) saves ~6 tokens/element vs `{x,y,w,h}`.
   bbox?: [number, number, number, number];
+  /** 最近的已收集祖先的全局 index；根节点 undefined。@since a11y-tree */
+  parentIndex?: number;
+  /** react onClick / cursor:pointer 命中 → 渲染 [cursor=pointer]。@since a11y-tree */
+  reactClickable?: true;
+  /** role=link 的 href，渲染 /url: 属性行。@since a11y-tree */
+  href?: string;
 }
 
 interface CompactFrame {
@@ -123,6 +129,90 @@ export function renderObserveCompact(
   // / sub-pixel transforms). Rounding here keeps the documented
   // "integer px, frame-local viewport coords" contract honest and lets
   // simple regex parsers like /offset=\[(\d+),(\d+)\]/ work uniformly.
+  if (includeBoxes) {
+    for (const f of data.frames ?? []) {
+      if (f.scanned && f.frameId !== 0) {
+        scanNotes.push(
+          `# frame ${f.frameId} offset=[${Math.round(f.offset.x)},${Math.round(f.offset.y)}]`,
+        );
+      }
+    }
+  }
+  if (scanNotes.length > 0) {
+    lines.push("");
+    lines.push(...scanNotes);
+  }
+  return lines.join("\n");
+}
+
+export function renderObserveTree(
+  data: CompactObserve,
+  snapshotHash: string | null,
+  includeBoxes = false,
+): string {
+  const lines: string[] = [];
+  lines.push(`SnapshotId: ${data.snapshotId}`);
+  lines.push(`URL: ${data.url}`);
+  if (data.title) lines.push(`Title: ${data.title}`);
+  if (data.viewport) {
+    const vp = data.viewport;
+    lines.push(`Viewport: ${vp.width}x${vp.height}, scrollY=${vp.scrollY}/${vp.scrollHeight}`);
+  }
+  lines.push("");
+
+  const els = data.elements;
+  const byIndex = new Map<number, CompactElement>();
+  for (const e of els) byIndex.set(e.index, e);
+
+  // 按 parentIndex 建子节点表；孤儿（parentIndex 缺失或指向不存在 index）当根。
+  // els 已按文档序 → roots 与每个 children 数组的 push 序即文档序，渲染稳定。
+  const childrenOf = new Map<number, CompactElement[]>();
+  const roots: CompactElement[] = [];
+  for (const e of els) {
+    const p = e.parentIndex;
+    if (p === undefined || !byIndex.has(p)) {
+      roots.push(e);
+    } else {
+      const arr = childrenOf.get(p);
+      if (arr) arr.push(e);
+      else childrenOf.set(p, [e]);
+    }
+  }
+
+  const visited = new Set<number>();
+  const emit = (e: CompactElement, depth: number): void => {
+    if (visited.has(e.index)) return; // 防环兜底（parentIndex<index 已保证 DAG）
+    visited.add(e.index);
+    const indent = "  ".repeat(depth);
+    const name = e.name ? ` "${escapeName(e.name)}"` : "";
+    const ref = ` [ref=${refOf(e, snapshotHash)}]`;
+    const cursor = e.reactClickable ? " [cursor=pointer]" : "";
+    const valueSeg =
+      e.valueNow !== undefined
+        ? ` value=${/\s/.test(e.valueNow) ? JSON.stringify(e.valueNow) : e.valueNow}`
+        : "";
+    const bboxSeg =
+      includeBoxes && e.bbox !== undefined ? ` bbox=[${e.bbox.join(",")}]` : "";
+    const kids = childrenOf.get(e.index) ?? [];
+    const hasUrl = e.role === "link" && !!e.href;
+    const hasChildren = kids.length > 0 || hasUrl;
+    lines.push(
+      `${indent}- ${e.role}${name}${ref}${stateFlags(e.state)}${cursor}${valueSeg}${bboxSeg}${hasChildren ? ":" : ""}`,
+    );
+    if (hasUrl) lines.push(`${indent}  - /url: ${e.href}`);
+    for (const k of kids) emit(k, depth + 1);
+  };
+  for (const r of roots) emit(r, 0);
+
+  // frame 提示行：与 renderObserveCompact 完全一致（未扫 / 0 元素子 frame / offset）。
+  const scanNotes: string[] = [];
+  for (const f of data.frames ?? []) {
+    if (!f.scanned) {
+      scanNotes.push(`# frame ${f.frameId} not scanned (url=${f.url})`);
+    } else if (f.elementCount === 0 && f.frameId !== 0) {
+      scanNotes.push(`# frame ${f.frameId} scanned, 0 interactive elements (url=${f.url})`);
+    }
+  }
   if (includeBoxes) {
     for (const f of data.frames ?? []) {
       if (f.scanned && f.frameId !== 0) {
