@@ -1,4 +1,4 @@
-import { DomActions, VtxErrorCode, vtxError } from "@vortex-browser/shared";
+import { DomActions, VtxError, VtxErrorCode, vtxError } from "@vortex-browser/shared";
 import type { ActionRouter } from "../lib/router.js";
 import type { DebuggerManager } from "../lib/debugger-manager.js";
 import { getActiveTabId, buildExecuteTarget, ensureFrameAttached } from "../lib/tab-utils.js";
@@ -140,15 +140,16 @@ export function registerDomHandlers(
       const tid = await getActiveTabId(__t.boundTabId ?? (args.tabId as number | undefined) ?? tabId);
       const frameId = __t.boundFrameId ?? (args.frameId as number | undefined);
       if (frameId != null) await ensureFrameAttached(tid, frameId);
-      const useRealMouse = args.useRealMouse as boolean | undefined;
-      // flag-自适应:server 在 trusted Chrome(带 --silent-debugger-extension-api)下注入
-      // trustedMode=true。此时 click 默认走 CDP trusted(无黄条、广覆盖 isTrusted-gated),
-      // 等价于隐式 useRealMouse。非 trusted 时落到下方合成 + submit-intent 路径(不变)。
-      // spike(cdp-first):forceSynthetic=true 压过注入的 trustedMode——server 对
-      // dom.click 无条件注入(spread 在 args 之后,调用方覆盖不了),trusted Chrome 上
-      // compare-cdp 的「合成对照组」必须用本开关还原非 trusted 默认路径。
-      // 仅否 trustedMode,不动 deferToCdp 启发式(非 trusted 现状本就含启发式升级)。
-      const trustedMode = args.trustedMode === true && args.forceSynthetic !== true;
+      // CDP-first 路由(2026-06-11 转正,spike 报告 reports/spike-cdp/):
+      // 主流对齐(playwright-mcp/chrome-devtools-mcp/Stagehand 输入全程 CDP Input,
+      // isTrusted=true);合成事件白盒审计 9 根因族中 ≥4 族与输入不真实相关,且偏离
+      // 主流的默认路径会因「无人行走」静默腐烂(isTransient P0 断 2 天无报警)。
+      // - 默认/trustedMode → CDP 真鼠标;仅 CDP 基础设施失败(attach 被占/策略禁用
+      //   等非 VtxError)降级合成。trustedMode(server 注入)与默认同义,不再单独成路。
+      // - useRealMouse=true → strict CDP,attach 失败也直抛(显式真鼠标,静默降级是背叛)。
+      // - forceSynthetic=true → 纯合成,不触碰 debugger(对照/逃生口)。
+      const useRealMouse = args.useRealMouse === true;
+      const forceSynthetic = args.forceSynthetic === true && !useRealMouse;
 
       // L2 integration: actionability + auto-wait pre-check
       // NOT_STABLE 自动 force 重试(对齐 FILL BUG-011):京东 sticky 搜索按钮在
@@ -164,15 +165,23 @@ export function registerDomHandlers(
         args.force as boolean | undefined,
       );
 
-      if (useRealMouse || trustedMode) {
+      if (!forceSynthetic && (debuggerMgr || useRealMouse)) {
         // 预加载 dom-resolve,使 cdpClickElement 的 page-side 探测能经
         // __vortexDomResolve 穿 open shadow + 走门同款 isEnabled——与同步路径一致,
         // 堵 shadow-internal ref 假阴 ELEMENT_NOT_FOUND(#14)。
         await loadPageSideModule(tid, frameId, "dom-resolve");
-        return await cdpClickElement(debuggerMgr, tid, frameId, selector, { force: args.force as boolean | undefined });
+        try {
+          return await cdpClickElement(debuggerMgr, tid, frameId, selector, { force: args.force as boolean | undefined });
+        } catch (err) {
+          // 元素级错误(VtxError:NOT_FOUND/OCCLUDED/DISABLED/JS_EXECUTION…)直抛——
+          // probe 在 attach 之前跑,合成重跑只会得到同样结论;useRealMouse 显式
+          // 要求真鼠标,任何失败都直抛。仅 CDP 基础设施失败(chrome.debugger 原生
+          // 错误:DevTools 独占/企业策略禁用/target 不可调试)落入下方合成降级。
+          if (useRealMouse || err instanceof VtxError) throw err;
+        }
       }
 
-      // 普通 element.click() 路径（含失败探测）
+      // 合成 element.click() 路径（含失败探测）——CDP 基础设施失败的降级 + forceSynthetic
       // 加载 dom-resolve 模块，使 inline func 能通过 shadow 穿透解析 selector
       await loadPageSideModule(tid, frameId, "dom-resolve");
       // 方案 A:可重跑闭包。cdpAvailable=true 时页内 func 对 submit-intent 元素返回
@@ -297,6 +306,11 @@ export function registerDomHandlers(
                 extras: { blocker: desc },
               };
             }
+            // ⚠️ 退役候选(CDP-first 转正 2026-06-11,spike 报告 reports/spike-cdp/ 第 5 步):
+            // runSyntheticClick 现仅以 cdpAvailable=false 调用(默认走 CDP,本路径=CDP 基础
+            // 设施失败后的降级),故下方两处 `&& cdpAvailable` 恒 false、deferToCdp 永不产生,
+            // submit-intent / reactClickable 升级机制在 CDP-first 下已不可达。暂留代码因
+            // reactClickable 跨 observe emit 端(dataset 标记)依赖未验证,退役需数据驱动逐个确认。
             // 方案 A:表单提交意图元素(button[type=submit] / input[type=submit] /
             // <form> 内无显式 type 的 <button>——HTML 默认 type=submit)。合成 click 的
             // isTrusted=false,React 拦截 submit 的站点(淘宝搜索)会丢弃且常清空输入框;
@@ -418,20 +432,10 @@ export function registerDomHandlers(
           throw vtxError(code, r.error, { selector, extras: r.extras });
         }
       };
-      // 首跑:cdpAvailable=!!debuggerMgr。submit-intent 会返回 deferToCdp(未点击)。
-      let res = await runSyntheticClick(!!debuggerMgr);
+      // CDP-first 下到达此处 = CDP 基础设施已失败(或 forceSynthetic),
+      // cdpAvailable=false:submit-intent 的 deferToCdp 升级不再有意义(升上去还是会失败)。
+      const res = await runSyntheticClick(false);
       throwIfClickError(res);
-      const inner = res?.result as { deferToCdp?: boolean } | undefined;
-      if (inner?.deferToCdp) {
-        try {
-          return await cdpClickElement(debuggerMgr, tid, frameId, selector, { force: args.force as boolean | undefined });
-        } catch {
-          // CDP 探测/attach 失败 → 回退合成(cdpAvailable=false 强制不再 defer,本次真点击)。
-          res = await runSyntheticClick(false);
-          throwIfClickError(res);
-          return res?.result;
-        }
-      }
       return res?.result;
     },
 
