@@ -91,11 +91,12 @@ describe("assertExtractNumericBand", () => {
 });
 
 describe("findRef（按 accessible name 从 observe 快照取 ref）", () => {
+  // a11y-tree 格式：`- role "name" [ref=@..]`（旧扁平是行首 @ref [role] "name"）。
   const snap = [
     "SnapshotId: snap_x",
-    '@e985:e0 [button] "open shadow 按钮"',
-    '@7336:f354e1 [button] "iframe 同源按钮"',
-    '@e0 [link] "纯 ref 无 hash"',
+    '- button "open shadow 按钮" [ref=@e985:e0]',
+    '- button "iframe 同源按钮" [ref=@7336:f354e1]',
+    '- link "纯 ref 无 hash" [ref=@e0]',
   ].join("\n");
   it("hashed ref 命中", () => {
     expect(findRef(snap, "open shadow 按钮")).toBe("@e985:e0");
