@@ -1357,6 +1357,10 @@ async function scanOneFrame(
               if (ancText.length > leafText.length && ancText.includes(leafText)) {
                 // ancestor 有额外文本（主标签+leaf 子串），保留 ancestor
                 dropSet.add(leaf);
+              } else if (isClickableContentCard(p)) {
+                // 内容卡 ancestor(评价卡/商品卡)优先保留:其正文与标签子异文本
+                // 且不含标签词,旧逻辑会误 drop 容器保留标签 → 评价卡整条丢失。
+                dropSet.add(leaf);
               } else {
                 // 文本等价（嵌套同文本 wrapper），保留 leaf
                 dropSet.add(p);
