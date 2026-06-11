@@ -177,11 +177,14 @@ export function dispatchNewTool(
       } else if (value !== undefined) {
         next.value = value;
       }
-      // options.timeout / options.force 透传
+      // options.timeout / options.force / observeEffect / windowMs 透传
       if (options && typeof options === "object") {
         const o = options as Record<string, unknown>;
         if (o.timeout !== undefined) next.timeout = o.timeout;
         if (o.force !== undefined) next.force = o.force;
+        // GAP-G(N0062): click 效果信号采集开关，透传到 dom.ts CLICK handler
+        if (o.observeEffect !== undefined) next.observeEffect = o.observeEffect;
+        if (o.windowMs !== undefined) next.windowMs = o.windowMs;
       }
       return { action: v05Action, params: next };
     }

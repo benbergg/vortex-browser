@@ -145,6 +145,11 @@ export function registerDomHandlers(
       // trustedMode=true。此时 click 默认走 CDP trusted(无黄条、广覆盖 isTrusted-gated),
       // 等价于隐式 useRealMouse。非 trusted 时落到下方合成 + submit-intent 路径(不变)。
       const trustedMode = args.trustedMode === true;
+      // GAP-G(N0062): click 效果信号采集。opt-in,默认关(零开销)。开启时派发前后采集
+      // 非判定性证据(domMutations/urlChanged/focusChanged/ariaChanged),让 agent 自判
+      // silent failure——success 不翻转。见知识库 N0062 GAP-G 设计 / page-side/click-effect.ts。
+      const observeEffect = args.observeEffect === true;
+      const windowMs = args.windowMs as number | undefined;
 
       // L2 integration: actionability + auto-wait pre-check
       // NOT_STABLE 自动 force 重试(对齐 FILL BUG-011):京东 sticky 搜索按钮在
@@ -165,18 +170,24 @@ export function registerDomHandlers(
         // __vortexDomResolve 穿 open shadow + 走门同款 isEnabled——与同步路径一致,
         // 堵 shadow-internal ref 假阴 ELEMENT_NOT_FOUND(#14)。
         await loadPageSideModule(tid, frameId, "dom-resolve");
-        return await cdpClickElement(debuggerMgr, tid, frameId, selector, { force: args.force as boolean | undefined });
+        if (observeEffect) await loadPageSideModule(tid, frameId, "click-effect");
+        return await cdpClickElement(debuggerMgr, tid, frameId, selector, {
+          force: args.force as boolean | undefined,
+          observeEffect,
+          windowMs,
+        });
       }
 
       // 普通 element.click() 路径（含失败探测）
       // 加载 dom-resolve 模块，使 inline func 能通过 shadow 穿透解析 selector
       await loadPageSideModule(tid, frameId, "dom-resolve");
+      if (observeEffect) await loadPageSideModule(tid, frameId, "click-effect");
       // 方案 A:可重跑闭包。cdpAvailable=true 时页内 func 对 submit-intent 元素返回
       // deferToCdp(不合成点击)→ handler 改走 CDP trusted;CDP 失败时用 false 重跑合成。
       const runSyntheticClick = async (cdpAvailable: boolean) => {
       const results = await chrome.scripting.executeScript({
         target: buildExecuteTarget(tid, frameId),
-        func: (sel: string, cdpAvailable: boolean) => {
+        func: async (sel: string, cdpAvailable: boolean, observeEffect: boolean, windowMs: number | undefined) => {
           try {
             // 探测阶段：逐项检查失败原因，细化错误码
             const els = (window as any).__vortexDomResolve.queryAllDeep(sel) as Element[];
@@ -338,6 +349,16 @@ export function registerDomHandlers(
                 },
               };
             }
+            // GAP-G(N0062): 派发前启动效果信号采集(opt-in)。begin 在 focus/dispatch 之前,
+            // 捕获点击前 url/activeElement/aria 快照,使后续 focus/dispatch 引起的变化都计入。
+            // 经 window.__vortexClickEffect(loadPageSideModule 预注入),禁止 inline 复制逻辑。
+            let __effectToken: string | undefined;
+            const __ce = (window as unknown as {
+              __vortexClickEffect?: { begin(s: string, w: number): string; end(t: string): Promise<unknown> };
+            }).__vortexClickEffect;
+            if (observeEffect && __ce) {
+              __effectToken = __ce.begin(sel, windowMs ?? 300);
+            }
             // 通过所有检查，执行 click；对可 focus 元素（input/textarea/button/select）
             // 先 focus 再 click，保证后续 vortex_press 键盘事件能落在 active element 上
             // （JS .click() 不像真实鼠标那样顺带 focus，修掉这个行为差异）
@@ -379,6 +400,9 @@ export function registerDomHandlers(
             try { el.dispatchEvent(new PointerEvent("pointerup", { ...ptrInit, buttons: 0 })); } catch { /* */ }
             el.dispatchEvent(new MouseEvent("mouseup", mouseUp));
             el.click();
+            // GAP-G(N0062): 派发后采集效果信号(await windowMs 窗口)。success 恒 true,effect
+            // 仅作旁证;__effectToken 为空(未 opt-in / 模块未就绪)时不带 effect,保持零开销。
+            const __effect = __effectToken && __ce ? await __ce.end(__effectToken) : undefined;
             return {
               result: {
                 success: true,
@@ -387,13 +411,14 @@ export function registerDomHandlers(
                   id: el.id || undefined,
                   text: el.innerText?.slice(0, 200),
                 },
+                ...(__effect ? { effect: __effect } : {}),
               },
             };
           } catch (err) {
             return { error: err instanceof Error ? err.message : String(err) };
           }
         },
-        args: [selector, cdpAvailable],
+        args: [selector, cdpAvailable, observeEffect, windowMs],
         world: "MAIN",
       });
       return results[0]?.result as {
@@ -418,9 +443,16 @@ export function registerDomHandlers(
       let res = await runSyntheticClick(!!debuggerMgr);
       throwIfClickError(res);
       const inner = res?.result as { deferToCdp?: boolean } | undefined;
+      // observeEffect 透传:reactClickable 元素(如京东"加入购物车" div)走此 defer 分支,
+      // 正是 GAP-G silent success 现场——CDP 路径同样需采集效果信号。click-effect 模块
+      // 已在 runSyntheticClick 前预注入。
       if (inner?.deferToCdp) {
         try {
-          return await cdpClickElement(debuggerMgr, tid, frameId, selector, { force: args.force as boolean | undefined });
+          return await cdpClickElement(debuggerMgr, tid, frameId, selector, {
+            force: args.force as boolean | undefined,
+            observeEffect,
+            windowMs,
+          });
         } catch {
           // CDP 探测/attach 失败 → 回退合成(cdpAvailable=false 强制不再 defer,本次真点击)。
           res = await runSyntheticClick(false);

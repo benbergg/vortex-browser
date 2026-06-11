@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="zh"><head><meta charset="utf-8"><title>GAP-G click 效果信号</title></head>
+<body>
+<h1>vortex_act click observeEffect 验证床</h1>
+<!--
+  GAP-G(N0062): 验证 vortex_act click + options.observeEffect:true 返回的 effect 信号。
+  三种按钮分别触发不同效果，case 断言 effect 字段:
+  - #eff   有效果: onclick 追加 DOM 节点 → effect.domMutations > 0
+  - #inert 惰性  : 无 handler → effect.domMutations=0 且 networkRequests=0 (silent no-op 签名)
+  - #net   网络  : onclick fetch 同源资源 → effect.networkRequests >= 1
+-->
+<button id="eff" style="padding:8px">有效果按钮</button>
+<button id="inert" style="padding:8px">惰性按钮</button>
+<button id="net" style="padding:8px">网络按钮</button>
+<div id="sink"></div>
+<p data-testid="result">idle</p>
+<script>
+  // 有效果: 追加节点(触发 MutationObserver childList) + 更新 result
+  document.getElementById("eff").addEventListener("click", function () {
+    var d = document.createElement("div");
+    d.textContent = "eff fired";
+    document.getElementById("sink").appendChild(d);
+    document.querySelector("[data-testid=result]").textContent = "eff-clicked";
+  });
+  // 惰性按钮刻意不绑定任何 handler —— 点击无任何页面副作用(no-op)
+  // 网络: fetch 同源唯一 URL(no-store 防缓存)→ 生成 Resource Timing fetch 条目
+  document.getElementById("net").addEventListener("click", function () {
+    var u = location.pathname + "?probe=" + (window.__seq = (window.__seq || 0) + 1);
+    fetch(u, { cache: "no-store" }).catch(function () {});
+  });
+</script>
+</body></html>

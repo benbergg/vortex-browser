@@ -15,7 +15,8 @@ export type PageSideModule =
   | "commit-checkbox-group"
   | "commit-select"
   | "commit-aria-select"
-  | "dom-resolve";
+  | "dom-resolve"
+  | "click-effect";
 
 const loadedModules = new Map<string, true | Promise<void>>();
 

@@ -281,6 +281,9 @@ function domTools(): ToolDef[] {
         properties: {
           ...targetRef,
           useRealMouse: { type: "boolean" },
+          // GAP-G(N0062): 效果信号采集，与 public vortex_act options.observeEffect 对齐
+          observeEffect: { type: "boolean" },
+          windowMs: { type: "number" },
           ...optionalTabId,
           ...optionalFrameId,
         },

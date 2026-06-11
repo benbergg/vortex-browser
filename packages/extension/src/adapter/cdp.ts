@@ -5,6 +5,7 @@
 import { getIframeOffset } from "../lib/iframe-offset.js";
 import type { DebuggerManager } from "../lib/debugger-manager.js";
 import { pageQuery as nativePageQuery, mapPageError } from "./native.js";
+import type { ClickEffect } from "../page-side/click-effect.js";
 
 /**
  * CDP 真鼠标 click at page-coords (x, y)。
@@ -46,15 +47,17 @@ export async function cdpClickElement(
   frameId: number | undefined,
   selector: string,
   // force=true skips occlusion check (ELEMENT_OCCLUDED only); disabled/detached/not_found/ambiguous still apply
-  options: { force?: boolean } = {},
+  // observeEffect: GAP-G(N0062) 效果信号采集，需 caller 预注入 click-effect 模块；opt-in，默认关
+  options: { force?: boolean; observeEffect?: boolean; windowMs?: number } = {},
 ): Promise<{
   success: true;
   element: { tag: string; text?: string };
   x: number;
   y: number;
   mode: "realMouse";
+  effect?: ClickEffect;
 }> {
-  const { force = false } = options;
+  const { force = false, observeEffect = false, windowMs } = options;
   // page-side 探测（与原 dom.ts useRealMouse 分支 L106-169 完全一致，逐行复制 func 字面量）
   const rectRes = await nativePageQuery<{
     result?: { x: number; y: number; tag: string; text?: string };
@@ -185,8 +188,43 @@ export async function cdpClickElement(
   const { x: ox, y: oy } = await getIframeOffset(tabId, frameId, debuggerMgr);
   const px = cx + ox;
   const py = cy + oy;
+
+  // GAP-G(N0062): 派发前启动效果信号采集。begin/end 是 clickBBox 前后两次独立 pageQuery,
+  // observer 实例存 window.__vortexClickEffect._pending[token] 跨两次调用存活,正好覆盖
+  // CDP 派发期间 + windowMs 窗口的 mutation。caller(dom.ts)已预注入 click-effect 模块;
+  // 万一未就绪(__vortexClickEffect undefined)则 token 为空,end 拿 observed:false 不崩。
+  let effectToken: string | undefined;
+  if (observeEffect) {
+    effectToken = await nativePageQuery<string | undefined>(
+      tabId,
+      frameId,
+      (sel: string, w: number) => {
+        const ce = (window as unknown as {
+          __vortexClickEffect?: { begin(s: string, w: number): string };
+        }).__vortexClickEffect;
+        return ce ? ce.begin(sel, w) : undefined;
+      },
+      [selector, windowMs ?? 300],
+    );
+  }
+
   // CDP 真鼠标三连击（已 page-coords，clickBBox 内部不再算 offset）
   await clickBBox(debuggerMgr, tabId, px, py);
+
+  let effect: ClickEffect | undefined;
+  if (observeEffect && effectToken) {
+    effect = await nativePageQuery<ClickEffect | undefined>(
+      tabId,
+      frameId,
+      (token: string) => {
+        const ce = (window as unknown as {
+          __vortexClickEffect?: { end(t: string): Promise<ClickEffect> };
+        }).__vortexClickEffect;
+        return ce ? ce.end(token) : undefined;
+      },
+      [effectToken],
+    );
+  }
 
   // 返回的 x/y 是 page-coords（含 iframe offset），与原 dom.ts L189-190 一致
   return {
@@ -195,5 +233,6 @@ export async function cdpClickElement(
     x: px,
     y: py,
     mode: "realMouse" as const,
+    ...(effect ? { effect } : {}),
   };
 }

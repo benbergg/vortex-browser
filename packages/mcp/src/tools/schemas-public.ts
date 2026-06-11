@@ -42,7 +42,9 @@ export const PUBLIC_TOOLS: ToolDef[] = [
   {
     name: "vortex_act",
     action: "L4.act",
-    description: "Write to a UI element. scroll: value={container?,position}.",
+    description:
+      "Write to a UI element. scroll: value={container?,position}. " +
+      "click options.observeEffect:true→effect signals (0=no-op).",
     schema: {
       type: "object",
       properties: {
@@ -52,9 +54,12 @@ export const PUBLIC_TOOLS: ToolDef[] = [
         useRealMouse: { type: "boolean" },
         options: {
           type: "object",
+          // I15 invariant: properties 内无 description。observeEffect 含义见工具级 description。
           properties: {
             timeout: { type: "number" },
             force: { type: "boolean" },
+            observeEffect: { type: "boolean" },
+            windowMs: { type: "number" },
           },
         },
         ...tabFields,
