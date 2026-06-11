@@ -25,13 +25,14 @@ describe("click-effect page-side module (__vortexClickEffect)", () => {
       end(t: string): Promise<{
         domMutations: number; urlChanged: boolean; focusChanged: boolean;
         ariaChanged: boolean; observed: boolean; windowMs: number;
+        networkRequests: number; networkSample: string[]; clamped: boolean;
       }>;
     };
   }
 
-  it("挂载 __vortexClickEffect(version=1, begin/end 函数)", async () => {
+  it("挂载 __vortexClickEffect(version=2, begin/end 函数)", async () => {
     const ns = await load();
-    expect(ns.version).toBe(1);
+    expect(ns.version).toBe(2);
     expect(typeof ns.begin).toBe("function");
     expect(typeof ns.end).toBe("function");
   });
@@ -184,20 +185,89 @@ describe("click-effect page-side module (__vortexClickEffect)", () => {
     }
   });
 
-  it("windowMs 钳制:超 1000 截到 1000, 负数/非法回退 300", async () => {
+  it("windowMs 语义=实际耗时：超 3000 钳到 3000 且 clamped=true；非法回退 300", async () => {
     const ns = await load();
     vi.useFakeTimers();
     try {
       const t1 = ns.begin("#b", 99999);
       const p1 = ns.end(t1);
-      await vi.advanceTimersByTimeAsync(1000);
-      expect((await p1).windowMs).toBe(1000);
+      await vi.advanceTimersByTimeAsync(3000); // 无网络活动 → 等到 ceiling
+      const e1 = await p1;
+      expect(e1.windowMs).toBe(3000);
+      expect(e1.clamped).toBe(true);
 
       const t2 = ns.begin("#b", -5 as unknown as number);
       const p2 = ns.end(t2);
-      await vi.advanceTimersByTimeAsync(300);
-      expect((await p2).windowMs).toBe(300);
+      await vi.advanceTimersByTimeAsync(300); // 非法 → 默认 300 ceiling
+      const e2 = await p2;
+      expect(e2.windowMs).toBe(300);
+      expect(e2.clamped).toBe(false);
     } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("晚到 POST（>1000ms）被自适应窗口捕获（#43 核心：旧固定 1000ms 会漏报 networkRequests:0）", async () => {
+    const ns = await load();
+    vi.useFakeTimers();
+    // 受控 Resource Timing：POST 在 1500ms 才出现。perfStart=0。
+    const entries: { name: string; initiatorType: string; startTime: number }[] = [];
+    let clock = 0;
+    vi.stubGlobal("performance", {
+      now: () => clock,
+      getEntriesByType: () => entries.slice(),
+    });
+    try {
+      const t = ns.begin("#b", 3000); // ceiling 3000
+      const p = ns.end(t);
+      // 0~1450ms 无网络
+      await vi.advanceTimersByTimeAsync(1450);
+      clock = 1500;
+      entries.push({ name: "https://api.bytenew.com/work/submit", initiatorType: "xmlhttprequest", startTime: 1500 });
+      // 推进到 POST 后静默早返（1500 + IDLE_QUIET 400 + 轮询粒度）
+      await vi.advanceTimersByTimeAsync(800);
+      const eff = await p;
+      expect(eff.networkRequests).toBe(1);
+      expect(eff.networkSample).toEqual(["api.bytenew.com/work/submit"]);
+      expect(eff.windowMs).toBeLessThan(3000); // 静默早返，未拖满 ceiling
+      expect(eff.windowMs).toBeGreaterThanOrEqual(1500);
+    } finally {
+      vi.unstubAllGlobals();
+      vi.useRealTimers();
+    }
+  });
+
+  it("网络活动后静默 IDLE_QUIET → 早返，不拖满 ceiling", async () => {
+    const ns = await load();
+    vi.useFakeTimers();
+    const entries = [{ name: "https://api.bytenew.com/x", initiatorType: "fetch", startTime: 0 }];
+    vi.stubGlobal("performance", { now: () => 0, getEntriesByType: () => entries.slice() });
+    try {
+      const t = ns.begin("#b", 3000);
+      const p = ns.end(t);
+      await vi.advanceTimersByTimeAsync(700); // 首 step 即见 1 个请求 → 之后静默 400 早返
+      const eff = await p;
+      expect(eff.networkRequests).toBe(1);
+      expect(eff.windowMs).toBeLessThan(1000);
+    } finally {
+      vi.unstubAllGlobals();
+      vi.useRealTimers();
+    }
+  });
+
+  it("全程无网络（静默失败 / isTrusted 拦截）→ 不早返，等到 ceiling，networkRequests:0 仍成立", async () => {
+    const ns = await load();
+    vi.useFakeTimers();
+    vi.stubGlobal("performance", { now: () => 0, getEntriesByType: () => [] });
+    try {
+      const t = ns.begin("#b", 2000);
+      const p = ns.end(t);
+      await vi.advanceTimersByTimeAsync(2000);
+      const eff = await p;
+      expect(eff.networkRequests).toBe(0);
+      expect(eff.windowMs).toBe(2000); // 等到 ceiling，未提前
+    } finally {
+      vi.unstubAllGlobals();
       vi.useRealTimers();
     }
   });

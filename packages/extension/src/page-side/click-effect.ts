@@ -34,8 +34,10 @@ export interface ClickEffect {
   networkSample: string[];
   /** 采集是否成功完成（false=document 被导航替换 / token 已超时清理，信号不可信）。 */
   observed: boolean;
-  /** 实际等待窗口（ms）。 */
+  /** 实际等待耗时（ms）。自适应窗口下 = 网络静默早返或到达 ceiling 的实际时长，非请求值。 */
   windowMs: number;
+  /** 请求的 windowMs 超过硬上限 WINDOW_MAX_MS 被钳制时为 true（调用方传值被改写的显式提示）。 */
+  clamped: boolean;
 }
 
 interface PendingEntry {
@@ -48,12 +50,17 @@ interface PendingEntry {
   // Resource Timing 起点：end 只统计 startTime >= perfStart 的请求（即 click 之后发起的）。
   // NaN 表示 performance API 不可用（采集降级，networkRequests 留 0）。
   perfStart: number;
-  windowMs: number;
+  /** 调用方请求的原始 windowMs（未钳制），用于回报 clamped。 */
+  requestedWindowMs: number;
+  /** 钳制后的等待上限（ceiling），end() 自适应轮询以此为硬上限。 */
+  ceilingMs: number;
   timer: ReturnType<typeof setTimeout>;
 }
 
 (function () {
-  if ((window as unknown as { __vortexClickEffect?: { version?: number } }).__vortexClickEffect?.version === 1) {
+  // version 2（#43 自适应窗口）：bump 自 1，使旧 v1 模块在已加载页被新注入覆盖——
+  // 否则扩展 reload 后未硬刷新的页面仍跑旧固定钳制逻辑（活验证 2026-06-11 实测踩到）。
+  if ((window as unknown as { __vortexClickEffect?: { version?: number } }).__vortexClickEffect?.version === 2) {
     return;
   }
 
@@ -62,8 +69,12 @@ interface PendingEntry {
 
   // begin 后无 end（异常 / 调用方崩）则强制 disconnect，防 observer 悬挂泄漏。
   const PENDING_TTL_MS = 5000;
-  const WINDOW_MAX_MS = 1000;
+  // 硬上限：自适应窗口最长等待（#43 慢站提交后置 POST 常在 1000~2500ms，1000 太短）。
+  const WINDOW_MAX_MS = 3000;
   const WINDOW_DEFAULT_MS = 300;
+  // 自适应轮询间隔与网络静默判定阈值。
+  const POLL_MS = 150;
+  const IDLE_QUIET_MS = 400;
 
   const ariaFingerprint = (el: Element | null): string => {
     if (!el) return "";
@@ -142,7 +153,7 @@ interface PendingEntry {
   };
 
   (window as unknown as { __vortexClickEffect: unknown }).__vortexClickEffect = {
-    version: 1,
+    version: 2,
 
     /** 派发前调用：snapshot（url/activeElement/target aria）+ 启动 document 根 observer。返回 token。 */
     begin(sel: string, windowMs: number): string {
@@ -165,7 +176,8 @@ interface PendingEntry {
             return NaN;
           }
         })(),
-        windowMs: clampWindow(windowMs),
+        requestedWindowMs: typeof windowMs === "number" ? windowMs : NaN,
+        ceilingMs: clampWindow(windowMs),
         timer: setTimeout(() => {
           try {
             entry.observer.disconnect();
@@ -189,7 +201,8 @@ interface PendingEntry {
       return token;
     },
 
-    /** 派发后调用：await windowMs → diff snapshot + 读 observer 计数 + disconnect。返回 ClickEffect。 */
+    /** 派发后调用：自适应轮询网络（仅 sawNetwork 后静默 IDLE_QUIET_MS 早返，否则到 ceiling）
+     *  → diff snapshot + 读 observer 计数 + disconnect。返回 ClickEffect。 */
     end(token: string): Promise<ClickEffect> {
       const entry = PENDING[token];
       if (!entry) {
@@ -203,11 +216,27 @@ interface PendingEntry {
           networkSample: [],
           observed: false,
           windowMs: 0,
+          clamped: false,
         });
       }
+      // 取消 begin 的 TTL 看门狗；下面用本地 pollTimer 自管。
+      clearTimeout(entry.timer);
+      const ceiling = entry.ceilingMs;
+      const clamped =
+        typeof entry.requestedWindowMs === "number" &&
+        isFinite(entry.requestedWindowMs) &&
+        entry.requestedWindowMs > WINDOW_MAX_MS;
       return new Promise<ClickEffect>((resolve) => {
-        setTimeout(() => {
-          clearTimeout(entry.timer);
+        let elapsed = 0;
+        let quietFor = 0;
+        // perfStart 标记在 click 派发前；collectNetwork(perfStart) 计的是 click 之后的请求。
+        // sawNetwork = 自 perfStart 以来有过任何请求（curNet>0）——覆盖"快点击 POST 已落地"
+        // （基线已含）与"晚到 POST"（轮询中新增）两种。quietFor 仅在请求**增量**时归零。
+        let lastNet = collectNetwork(entry.perfStart).networkRequests;
+        let sawNetwork = lastNet > 0;
+        let pollTimer: ReturnType<typeof setTimeout>;
+        const finish = (): void => {
+          clearTimeout(pollTimer);
           try {
             entry.observer.disconnect();
           } catch {
@@ -237,9 +266,30 @@ interface PendingEntry {
             networkRequests: net.networkRequests,
             networkSample: net.networkSample,
             observed,
-            windowMs: entry.windowMs,
+            windowMs: elapsed,
+            clamped,
           });
-        }, entry.windowMs);
+        };
+        const step = (): void => {
+          const curNet = collectNetwork(entry.perfStart).networkRequests;
+          if (curNet > lastNet) {
+            lastNet = curNet;
+            quietFor = 0;
+          }
+          if (curNet > 0) sawNetwork = true;
+          if (elapsed >= ceiling) return finish();
+          // 仅在「观察到过网络 + 网络静默达阈值」时早返；静默失败/DOM-only 不早返，等到 ceiling。
+          if (sawNetwork && quietFor >= IDLE_QUIET_MS) return finish();
+          const dt = Math.min(POLL_MS, ceiling - elapsed);
+          elapsed += dt;
+          quietFor += dt;
+          pollTimer = setTimeout(step, dt);
+        };
+        if (ceiling <= 0) return finish();
+        const dt0 = Math.min(POLL_MS, ceiling);
+        elapsed += dt0;
+        quietFor += dt0;
+        pollTimer = setTimeout(step, dt0);
       });
     },
   };
