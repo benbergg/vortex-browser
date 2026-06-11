@@ -60,3 +60,20 @@ describe("observe v2:卡吸收内部 cursor:pointer 后代(源码锁)", () => {
     expect(OBSERVE_SRC).toMatch(/let survivingExtras = cursorPointerExtras;/);
   });
 });
+
+describe("observe #42:多 CTA 容器去重内联(源码锁)", () => {
+  it("inject func 含 inline isMultiCtaContainer 定义", () => {
+    expect(OBSERVE_SRC).toMatch(/const isMultiCtaContainer = \(anc: Element, kids: Element\[\]\): boolean =>/);
+  });
+  it("含 ancChildren 分组 + multiCtaAncestors 预算", () => {
+    expect(OBSERVE_SRC).toMatch(/const ancChildren = new Map<Element, Element\[\]>\(\)/);
+    expect(OBSERVE_SRC).toMatch(/const multiCtaAncestors = new Set<Element>\(\)/);
+  });
+  it("决策分支:多 CTA 祖先 drop 容器保子", () => {
+    expect(OBSERVE_SRC).toMatch(/if \(multiCtaAncestors\.has\(p\)\) \{\s*\/\/[^\n]*\n\s*dropSet\.add\(p\);/);
+  });
+  it("内联多 CTA 判据不做子串检查(只计数+有文本+非内容卡)", () => {
+    // 防回归到设计文档误写的'互不为子串'(会误排除 createBox)
+    expect(OBSERVE_SRC).toMatch(/不查子文本互不为子串/);
+  });
+});

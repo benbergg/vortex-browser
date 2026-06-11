@@ -1397,22 +1397,61 @@ async function scanOneFrame(
         const dropSet = new WeakSet<Element>();
         const normText = (el: Element): string =>
           (el.textContent ?? "").replace(/\s+/g, " ").trim();
+        // #42 多 CTA 容器修复:先按「最近 candidate 祖先」把 leaves 分组,预算多 CTA 祖先。
+        // isMultiCtaContainer 真源见 page-side/content-card.ts,inline 副本须同步。
+        const nearestCandidateAnc = (leaf: Element): Element | null => {
+          let p: Element | null = leaf.parentElement;
+          while (p) {
+            if (candidateSet.has(p)) return p;
+            p = p.parentElement;
+          }
+          return null;
+        };
+        const ancChildren = new Map<Element, Element[]>();
+        for (const leaf of survivingExtras) {
+          const anc = nearestCandidateAnc(leaf);
+          if (anc) {
+            const arr = ancChildren.get(anc);
+            if (arr) arr.push(leaf);
+            else ancChildren.set(anc, [leaf]);
+          }
+        }
+        // 多 CTA 容器:≥2 个有文本的最近 candidate 子、且自身非内容卡 → 保子、drop 容器。
+        // 不查子文本互不为子串(createBox '创建'⊂'创建空白工作表'是中文巧合,仍是独立按钮)。
+        const isMultiCtaContainer = (anc: Element, kids: Element[]): boolean => {
+          if (kids.length < 2) return false;
+          let withText = 0;
+          for (const c of kids) {
+            if ((c.textContent ?? "").trim().length > 0) withText++;
+          }
+          if (withText < 2) return false;
+          return !isClickableContentCard(anc);
+        };
+        const multiCtaAncestors = new Set<Element>();
+        for (const [anc, kids] of ancChildren) {
+          if (isMultiCtaContainer(anc, kids)) multiCtaAncestors.add(anc);
+        }
         for (const leaf of survivingExtras) {
           let p: Element | null = leaf.parentElement;
           while (p) {
             if (candidateSet.has(p)) {
-              const leafText = normText(leaf);
-              const ancText = normText(p);
-              if (ancText.length > leafText.length && ancText.includes(leafText)) {
-                // ancestor 有额外文本（主标签+leaf 子串），保留 ancestor
-                dropSet.add(leaf);
-              } else if (isClickableContentCard(p)) {
-                // 内容卡 ancestor(评价卡/商品卡)优先保留:其正文与标签子异文本
-                // 且不含标签词,旧逻辑会误 drop 容器保留标签 → 评价卡整条丢失。
-                dropSet.add(leaf);
-              } else {
-                // 文本等价（嵌套同文本 wrapper），保留 leaf
+              if (multiCtaAncestors.has(p)) {
+                // 多 CTA 容器:drop 容器、保所有子 leaf(各自独立动作,如 createBox 三按钮)。
                 dropSet.add(p);
+              } else {
+                const leafText = normText(leaf);
+                const ancText = normText(p);
+                if (ancText.length > leafText.length && ancText.includes(leafText)) {
+                  // ancestor 有额外文本（主标签+leaf 子串），保留 ancestor
+                  dropSet.add(leaf);
+                } else if (isClickableContentCard(p)) {
+                  // 内容卡 ancestor(评价卡/商品卡)优先保留:其正文与标签子异文本
+                  // 且不含标签词,旧逻辑会误 drop 容器保留标签 → 评价卡整条丢失。
+                  dropSet.add(leaf);
+                } else {
+                  // 文本等价（嵌套同文本 wrapper），保留 leaf
+                  dropSet.add(p);
+                }
               }
               break; // 链上更深 ancestor 由它们各自的 leaf 触发处理
             }
