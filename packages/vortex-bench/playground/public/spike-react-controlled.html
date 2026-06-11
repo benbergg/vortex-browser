@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>spike(cdp-first) — React 受控 input + 事件序列探针</title>
+  <style>
+    body { font-family: -apple-system, sans-serif; padding: 24px; max-width: 720px; }
+    label { display: block; margin-top: 16px; font-weight: 600; }
+    input { padding: 6px 10px; font-size: 14px; width: 320px; }
+    #event-log { margin-top: 20px; font-family: monospace; font-size: 12px;
+                 background: #f6f6f6; padding: 8px; max-height: 200px; overflow: auto; }
+  </style>
+  <!-- 固定版本 UMD,与 playground 其他 CDN 依赖同策略 -->
+  <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
+</head>
+<body>
+  <h1>spike fill 矩阵 fixture</h1>
+
+  <div id="react-root"></div>
+
+  <label>plain(中文)<input id="plain-input" type="text"></label>
+  <label>maxlength=5<input id="maxlen-input" type="text" maxlength="5"></label>
+  <label>number<input id="num-input" type="number"></label>
+
+  <div id="event-log"></div>
+
+  <script>
+    // 事件序列探针:记录 {target,type,isTrusted},窗口级捕获相位避免漏 React 合成层
+    window.__events = [];
+    const KINDS = ["keydown","keypress","keyup","beforeinput","input","change","compositionstart","compositionend"];
+    for (const k of KINDS) {
+      window.addEventListener(k, (e) => {
+        const t = e.target && e.target.id ? e.target.id : "?";
+        window.__events.push({ target: t, type: k, isTrusted: e.isTrusted === true });
+        const log = document.getElementById("event-log");
+        if (log) log.textContent = window.__events.length + " events";
+      }, true);
+    }
+
+    // React 18 受控 input:state 即真值,绕过 state 的写入会被 render 覆盖回去
+    window.__reactState = "";
+    const e = React.createElement;
+    function Controlled() {
+      const [val, setVal] = React.useState("");
+      window.__reactState = val;
+      return e("label", null, "React controlled",
+        e("input", {
+          id: "react-input",
+          type: "text",
+          value: val,
+          onChange: (ev) => setVal(ev.target.value),
+        }));
+    }
+    const root = ReactDOM.createRoot(document.getElementById("react-root"));
+    root.render(e(Controlled));
+
+    // 矩阵 case 每轮复位:清 React state / 原生 value / 事件流水
+    window.__resetSpike = () => {
+      window.__events = [];
+      for (const id of ["plain-input", "maxlen-input", "num-input"]) {
+        document.getElementById(id).value = "";
+      }
+      // React 受控复位:经原生 setter + input 事件走 onChange,确保 state 同步清空
+      const ri = document.getElementById("react-input");
+      if (ri) {
+        const set = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+        set.call(ri, "");
+        ri.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+      window.__events = [];
+      return true;
+    };
+  </script>
+</body>
+</html>

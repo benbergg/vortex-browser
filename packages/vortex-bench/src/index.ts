@@ -25,6 +25,12 @@ import { probeLive, type LiveTarget } from "./runner/robustness-live.js";
 import { renderRobustnessMarkdown, rankRobustnessFindings } from "./robustness-report.js";
 import type { FixtureRobustness, RobustnessReport } from "./robustness-types.js";
 import { judgePage, type JudgeTarget } from "./runner/judge.js";
+import {
+  CDP_FIRST_OVERRIDES,
+  SYNTHETIC_BASELINE_OVERRIDES,
+  summarizeCdpCompare,
+  renderCdpCompareTable,
+} from "./compare-cdp.js";
 import { renderJudgeMarkdown } from "./judge-report.js";
 import type { JudgeReport, JudgePageResult } from "./judge-types.js";
 import { resolveProfile } from "./runner/judge-screenshot-profile.js";
@@ -49,6 +55,10 @@ Commands:
                          issue #21 token budget sweep: 跑同一组 case 两遍
                          （baseline vs includeBoxes:true），输出 ratio /
                          median / p95 / max + reports/boxes-budget-*.json
+  compare-cdp [--all] [cases...]
+                         跑同一组 case 两遍（合成降级 forceSynthetic vs
+                         CDP-first 默认+useRealMouse），输出 regression/fixes
+                         名单 + reports/spike-cdp/compare-*.json
   scan --all             扫全部合成 fixture,产 reports/scan/<ts>.{md,json}
   scan --pattern <name>  扫单个 pattern
   snapshot <name>        冻结当前活动 tab 为 synth/<name>.html + 提议 manifest
@@ -278,6 +288,59 @@ async function cmdCompareBoxes(args: string[]): Promise<number> {
   // truth. Exit 0 = gate pass, 3 = gate fail (distinct from 2 which
   // `run` uses for case failures).
   return passesGate(summary) ? 0 : 3;
+}
+
+async function cmdCompareCdp(args: string[]): Promise<number> {
+  const runAll = args.includes("--all");
+  const caseNames = runAll
+    ? await listCaseNames()
+    : args.filter((a) => !a.startsWith("-"));
+
+  if (caseNames.length === 0) {
+    process.stderr.write("[vortex-bench] compare-cdp 需要 <caseName> 或 --all\n");
+    return 1;
+  }
+
+  const mcpBin = resolveMcpBin();
+  const url = playgroundUrl();
+  process.stdout.write(`[vortex-bench] compare-cdp  playground=${url}  mcp=${mcpBin}\n`);
+  process.stdout.write(
+    `[vortex-bench] 跑 ${caseNames.length} 个 case × 2 passes (baseline vs CDP-first)\n\n`,
+  );
+
+  async function runPass(
+    label: string,
+    argOverrides?: Record<string, Record<string, unknown>>,
+  ): Promise<CaseMetrics[]> {
+    process.stdout.write(`── pass: ${label} ──\n`);
+    const results: CaseMetrics[] = [];
+    for (const name of caseNames) {
+      const def = await loadCase(name);
+      const m = await runCase(def, { mcpBin, playgroundUrl: url, argOverrides });
+      results.push(m);
+      process.stdout.write(formatRow(m) + "\n");
+    }
+    process.stdout.write("\n");
+    return results;
+  }
+
+  const before = await runPass("synthetic 降级 (forceSynthetic)", SYNTHETIC_BASELINE_OVERRIDES);
+  const after = await runPass("CDP-first 默认 (useRealMouse)", CDP_FIRST_OVERRIDES);
+
+  const summary = summarizeCdpCompare(before, after);
+  summary.generatedAt = new Date().toISOString();
+
+  process.stdout.write(renderCdpCompareTable(summary) + "\n\n");
+
+  const outDir = join(REPORTS_DIR, "spike-cdp");
+  await mkdir(outDir, { recursive: true });
+  const stamp = summary.generatedAt.replace(/[:.]/g, "-");
+  const reportPath = join(outDir, `compare-${stamp}.json`);
+  await writeFile(reportPath, JSON.stringify(summary, null, 2));
+  process.stdout.write(`[report] ${reportPath}\n`);
+
+  // spike 是数据采集,不设 gate:有 regression 退出码 2 提醒,纯对比信息在报告里。
+  return summary.cdpRegressions.length === 0 ? 0 : 2;
 }
 
 async function cmdBaseline(): Promise<number> {
@@ -797,6 +860,8 @@ async function main(): Promise<number> {
       return cmdBaseline();
     case "compare-boxes":
       return cmdCompareBoxes(rest);
+    case "compare-cdp":
+      return cmdCompareCdp(rest);
     case "scan":
       return cmdScan(rest);
     case "snapshot":

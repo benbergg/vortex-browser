@@ -46,8 +46,10 @@ describe("FILL handler textarea 原生 value setter (2026-06-03 Bing dogfood)", 
   it("contenteditable 走 fill 时响亮报错而非静默假成功(回退 el.value=val 会伪装成功)", () => {
     // contenteditable 不是 value-bearing 元素,valueProto 为 null 会落到 `el.value = val`
     // 写幽灵 expando + dispatch 事件 → success:true 但页面无变化。必须在 fill 前拦截报错。
-    const guardIdx = DOM_SRC.indexOf("if (el.isContentEditable) {");
+    // CDP-first 转正后 TYPE probe 也有 `if (el.isContentEditable) {`(select-all 分支)
+    // 在 FILL 之前,故从 FILL 写值标记向前 lastIndexOf 定位 FILL 块内的 contentEditable guard。
     const fillOpIdx = DOM_SRC.indexOf("// === fill operation ===");
+    const guardIdx = DOM_SRC.lastIndexOf("if (el.isContentEditable) {", fillOpIdx);
     expect(guardIdx).toBeGreaterThan(-1);
     // guard 必须在 fill 写值操作之前
     expect(guardIdx).toBeLessThan(fillOpIdx);

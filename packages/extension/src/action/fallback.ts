@@ -43,7 +43,7 @@ export async function clickWithFallback(
   if (dispatched.ok) return { path: "dispatchEvent" };
 
   // 2) CDP fallback
-  if (await capabilityDetector.canUseCDP(ctx.tabId)) {
+  if (await capabilityDetector.canUseCDP(ctx.tabId, ctx.debuggerMgr)) {
     attempted.push("cdp");
     try {
       // cdpClickBBox signature is (debuggerMgr, tabId, x, y) — no frameId
@@ -97,7 +97,7 @@ export async function fillWithFallback(
   if (r1.ok) return { path: "value-setter" };
 
   // 2) CDP Input.insertText (trusted event for ProseMirror/Slate/Lexical)
-  if (await capabilityDetector.canUseCDP(ctx.tabId)) {
+  if (await capabilityDetector.canUseCDP(ctx.tabId, ctx.debuggerMgr)) {
     attempted.push("insertText");
     try {
       await ctx.debuggerMgr.attach(ctx.tabId);
@@ -153,7 +153,7 @@ export async function dragWithFallback(
   fromXY: { x: number; y: number },
   toXY: { x: number; y: number },
 ): Promise<{ path: ActionPath }> {
-  if (!(await capabilityDetector.canUseCDP(ctx.tabId))) {
+  if (!(await capabilityDetector.canUseCDP(ctx.tabId, ctx.debuggerMgr))) {
     throw vtxError(
       VtxErrorCode.DRAG_REQUIRES_CDP,
       "Drag requires CDP but CDP unavailable",

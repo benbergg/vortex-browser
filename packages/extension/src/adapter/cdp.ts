@@ -53,8 +53,11 @@ export async function cdpClickElement(
   x: number;
   y: number;
   mode: "realMouse";
+  /** spike(cdp-first 阶段1):延迟拆分。attach 冷热差异/探测/dispatch 三段,供决策矩阵。 */
+  timings: { attachMs: number; probeMs: number; dispatchMs: number };
 }> {
   const { force = false } = options;
+  const tProbe0 = Date.now();
   // page-side 探测（与原 dom.ts useRealMouse 分支 L106-169 完全一致，逐行复制 func 字面量）
   const rectRes = await nativePageQuery<{
     result?: { x: number; y: number; tag: string; text?: string };
@@ -177,6 +180,7 @@ export async function cdpClickElement(
   );
 
   if (rectRes?.error) mapPageError(rectRes, selector);
+  const probeMs = Date.now() - tProbe0;
 
   const { x: cx, y: cy, tag, text } = rectRes.result!;
   // 提前算 1 次 iframe offset，给 dispatch + return 共用（避免两次 round-trip + race）
@@ -185,8 +189,14 @@ export async function cdpClickElement(
   const { x: ox, y: oy } = await getIframeOffset(tabId, frameId, debuggerMgr);
   const px = cx + ox;
   const py = cy + oy;
+  // attach 单独计时(幂等,冷 attach 在此显化;clickBBox 内的二次 attach 命中 map 为 0)
+  const tAttach0 = Date.now();
+  await debuggerMgr.attach(tabId);
+  const attachMs = Date.now() - tAttach0;
   // CDP 真鼠标三连击（已 page-coords，clickBBox 内部不再算 offset）
+  const tDispatch0 = Date.now();
   await clickBBox(debuggerMgr, tabId, px, py);
+  const dispatchMs = Date.now() - tDispatch0;
 
   // 返回的 x/y 是 page-coords（含 iframe offset），与原 dom.ts L189-190 一致
   return {
@@ -195,5 +205,6 @@ export async function cdpClickElement(
     x: px,
     y: py,
     mode: "realMouse" as const,
+    timings: { attachMs, probeMs, dispatchMs },
   };
 }

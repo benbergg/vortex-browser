@@ -49,8 +49,12 @@ describe("族 A #7 — FILL number/date 非法值回读报 NO_EFFECT", () => {
   });
 
   it("回读在 dispatch input/change 之后(确保框架已处理)", () => {
-    const dispatchIdx = DOM_SRC.indexOf('el.dispatchEvent(new Event("change", { bubbles: true }));\n            // 回读');
-    expect(dispatchIdx).toBeGreaterThan(-1);
+    // 缩进不锁(CDP-first 转正后 FILL inline func 提取为命名函数,缩进减一级);
+    // 仅锁顺序契约:dispatch change 紧跟回读注释。
+    const block = DOM_SRC.match(
+      /el\.dispatchEvent\(new Event\("change", \{ bubbles: true \}\)\);\s*\/\/ 回读/,
+    );
+    expect(block).not.toBeNull();
   });
 });
 
