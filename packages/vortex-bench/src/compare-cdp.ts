@@ -1,26 +1,21 @@
 /**
  * Author: qingwa
- * Description: spike(cdp-first 阶段0) — compare-cdp 双模式对比的归类/汇总。
+ * Description: compare-cdp 双模式对比的归类/汇总。
  *
- * pass A = 现状默认(合成事件优先);pass B = CDP-first(useRealMouse + cdpFill +
- * cdpType 实验开关,见 extension dom.ts 实验分支)。决策矩阵的核心输入是
- * cdpRegressions(baseline 过而 CDP 挂)与 cdpFixes(baseline 挂而 CDP 裸过)。
+ * CDP-first 转正(2026-06-11)后默认即 CDP,两 pass 重定义:
+ *   pass A(SYNTHETIC_BASELINE)= forceSynthetic 合成降级路径(value-setter/dispatch);
+ *   pass B(CDP_FIRST)= 默认 CDP-first(useRealMouse 让 click 走 strict CDP 不降级)。
+ * 用于持续监控合成降级路径不退化 + CDP-first 无新 regression。
+ * 注:cdpFill/cdpType 实验开关已随转正退役(dom.ts 默认即 insertText,该参数不再读)。
  */
 import type { CaseMetrics } from "./types.js";
 
-/** pass B 的 argOverrides:click 走 CDP 真鼠标,fill/type 走 CDP insertText。 */
+/** pass B:CDP-first(转正后即默认;useRealMouse 让 click 走 strict CDP 不降级合成)。 */
 export const CDP_FIRST_OVERRIDES: Record<string, Record<string, unknown>> = {
-  // vortex_act 按 action 分发到 dom.click/fill/type,各 handler 只读自己的
-  // 开关,多余参数惰性忽略,故三个旋钮一起给。
-  vortex_act: { useRealMouse: true, cdpFill: true, cdpType: true },
-  vortex_fill: { cdpFill: true },
+  vortex_act: { useRealMouse: true },
 };
 
-/**
- * pass A 的 argOverrides:server 对 dom.click 无条件注入 trustedMode=detect(),
- * trusted Chrome(--silent-debugger-extension-api)上 click 恒走 CDP,基线被污染。
- * forceSynthetic 在 extension 侧压过注入,还原非 trusted 普通用户的合成默认路径。
- */
+/** pass A:合成降级对照(forceSynthetic 压过 CDP-first,还原 value-setter/dispatch 路径)。 */
 export const SYNTHETIC_BASELINE_OVERRIDES: Record<string, Record<string, unknown>> = {
   vortex_act: { forceSynthetic: true },
 };

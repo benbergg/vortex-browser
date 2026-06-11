@@ -56,9 +56,9 @@ Commands:
                          （baseline vs includeBoxes:true），输出 ratio /
                          median / p95 / max + reports/boxes-budget-*.json
   compare-cdp [--all] [cases...]
-                         spike(cdp-first): 跑同一组 case 两遍（baseline vs
-                         CDP-first: useRealMouse+cdpFill+cdpType），输出
-                         regression/fixes 名单 + reports/spike-cdp/compare-*.json
+                         跑同一组 case 两遍（合成降级 forceSynthetic vs
+                         CDP-first 默认+useRealMouse），输出 regression/fixes
+                         名单 + reports/spike-cdp/compare-*.json
   scan --all             扫全部合成 fixture,产 reports/scan/<ts>.{md,json}
   scan --pattern <name>  扫单个 pattern
   snapshot <name>        冻结当前活动 tab 为 synth/<name>.html + 提议 manifest
@@ -324,8 +324,8 @@ async function cmdCompareCdp(args: string[]): Promise<number> {
     return results;
   }
 
-  const before = await runPass("baseline (synthetic, forceSynthetic 压过 trusted)", SYNTHETIC_BASELINE_OVERRIDES);
-  const after = await runPass("CDP-first (useRealMouse+cdpFill+cdpType)", CDP_FIRST_OVERRIDES);
+  const before = await runPass("synthetic 降级 (forceSynthetic)", SYNTHETIC_BASELINE_OVERRIDES);
+  const after = await runPass("CDP-first 默认 (useRealMouse)", CDP_FIRST_OVERRIDES);
 
   const summary = summarizeCdpCompare(before, after);
   summary.generatedAt = new Date().toISOString();
