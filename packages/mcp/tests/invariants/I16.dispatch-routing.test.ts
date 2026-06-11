@@ -102,9 +102,13 @@ describe("I16: dispatch routing for 11 public tools", () => {
       expect(r?.params.selector).toBe("#submit");
     });
 
-    it("mode=element + @ref throws INVALID_PARAMS（value 不经 server.ts target 翻译）", () => {
+    // BUG-002 (N0063): @ref 现已支持 —— server.ts liftWaitForRefToTarget 在 dispatch 前把
+    // @ref value 抬成 target 并翻译成 index+snapshotId(端到端见 wait-for-ref-target /
+    // page-wait-ref-resolve 测试)。到 dispatch 仍见 @ref 表示上游未翻译(无 active snapshot
+    // 等异常),防御性抛 STALE_SNAPSHOT 而非把 @ref 当 selector 静默失败。
+    it("mode=element + 未翻译的 @ref → 防御性 STALE_SNAPSHOT(正常流由 server.ts 翻译)", () => {
       expect(() => dispatchNewTool("vortex_wait_for", { mode: "element", value: "@e3" }))
-        .toThrowError(/INVALID_PARAMS|@ref form not supported/);
+        .toThrowError(/STALE_SNAPSHOT|no active snapshot/);
     });
 
     it("mode=idle value=network → page.waitForNetworkIdle", () => {

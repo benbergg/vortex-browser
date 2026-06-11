@@ -418,7 +418,13 @@ export function registerDomHandlers(
             return { error: err instanceof Error ? err.message : String(err) };
           }
         },
-        args: [selector, cdpAvailable, observeEffect, windowMs],
+        // BUG-001 (N0063): windowMs 缺省时为 undefined,chrome.scripting.executeScript 的
+        // args 走 structured clone 拒 undefined(报 "unserializable at index 3"),非 trusted
+        // 合成路径默认 click 100% 崩。默认 300 对齐 page-side click-effect.ts 的 `windowMs ?? 300`
+        // ——observeEffect=false 时该值不被使用(begin 不调),observeEffect=true 且未传时给回正确
+        // 的 300ms 窗口(用 ?? 0 会因 0 非 nullish 把窗口塌成 0ms,故不可用 0)。observeEffect
+        // 恒为 boolean(args.observeEffect === true),无需兜底。
+        args: [selector, cdpAvailable, observeEffect, windowMs ?? 300],
         world: "MAIN",
       });
       return results[0]?.result as {
@@ -849,7 +855,18 @@ export function registerDomHandlers(
                 extras: { attempted: String(val), type: (el as HTMLInputElement).type },
               };
             }
-            return { result: { success: true } };
+            // DESIGN-002 (N0063): fill 成功后显式 focus,让后续 vortex_press/Enter 落在 input 上。
+            // 原生 value setter 不触发 focus,React 受控组件 click→fill 链路常使 activeElement
+            // 停在 BODY(实测 bytenew 搜索框 fill 后 activeElement=BODY → 搜索+回车整类失效)。
+            // preventScroll 避免 sticky 容器 fill 后视口跳变;不支持该选项的环境兜底裸 focus。
+            if (typeof el.focus === "function") {
+              try { el.focus({ preventScroll: true }); } catch { try { el.focus(); } catch { /* focus 非所有元素可用 */ } }
+            }
+            // focused 反映真实结果(focus 在 disabled/hidden 上不抛错但静默 no-op,review N0063):
+            // 取 el 所在 root(穿 shadow)的 activeElement 是否就是 el,而非硬编码 true。
+            const __root = (el.getRootNode?.() ?? el.ownerDocument) as Document | ShadowRoot;
+            const focused = __root?.activeElement === el;
+            return { result: { success: true, focused } };
           } catch (err) {
             return { error: err instanceof Error ? err.message : String(err) };
           }
