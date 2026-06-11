@@ -49,3 +49,22 @@ export function isClickableContentCard(el: Element): boolean {
 export function isSelfClickable(el: Element): boolean {
   return getComputedStyle(el).cursor === "pointer" || hasFrameworkClickHandler(el);
 }
+
+/**
+ * 多 CTA 容器判据（#42 嵌套 cursor:pointer 去重）：
+ * ancestor 拥有 ≥2 个「最近 candidate 子」(children，由调用方按最近 candidate 祖先分组,
+ * 保证彼此非 DOM 祖裔)、其中 ≥2 个有非空文本、且 ancestor 自身不是内容卡 →
+ * 这些子是各自独立的动作（如 createBox 的"创建空白工作表/模板中心/创建"），应分别保留 ref、
+ * drop 容器。区分「单一语义标签(仅 1 个文本片段子，如 JD '全部'+span'96%好评')」。
+ * 不做"子文本互不为子串"检查——createBox 的'创建'是'创建空白工作表'子串但确为独立按钮,
+ * 子串重合是中文巧合非合并信号;分组已保证非 DOM 祖裔,计数+有文本即足够。
+ */
+export function isMultiCtaContainer(ancestor: Element, children: Element[]): boolean {
+  if (children.length < 2) return false;
+  let withText = 0;
+  for (const c of children) {
+    if ((c.textContent ?? "").trim().length > 0) withText++;
+  }
+  if (withText < 2) return false;
+  return !isClickableContentCard(ancestor);
+}

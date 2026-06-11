@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { JSDOM } from "jsdom";
-import { hasOwnContentText, isClickableContentCard, isSelfClickable } from "../src/page-side/content-card.js";
+import { hasOwnContentText, isClickableContentCard, isSelfClickable, isMultiCtaContainer } from "../src/page-side/content-card.js";
 
 function setupDom(html: string): Document {
   const dom = new JSDOM(`<!DOCTYPE html><body>${html}</body>`);
@@ -104,5 +104,48 @@ describe("isSelfClickable — 自身独立可点", () => {
   it("cursor:auto 无 fw(普通布局 wrapper)→ false", () => {
     const doc = setupDom(`<div id="t"><button style="cursor:pointer">提交</button></div>`);
     expect(isSelfClickable(doc.getElementById("t")!)).toBe(false);
+  });
+});
+
+describe("isMultiCtaContainer — 多 CTA 容器判据(#42)", () => {
+  it("createBox 型:3 个有文本的 cursor:pointer 子 + 非内容卡 → true", () => {
+    const doc = setupDom(
+      `<div id="t" style="cursor:pointer"><div class="illust">创建工作表</div>` +
+      `<span style="cursor:pointer">创建空白工作表</span>` +
+      `<span style="cursor:pointer">模板中心</span>` +
+      `<span style="cursor:pointer">创建</span></div>`,
+    );
+    const t = doc.getElementById("t")!;
+    const kids = [...t.querySelectorAll("span")];
+    expect(isMultiCtaContainer(t, kids)).toBe(true);
+  });
+
+  it("JD 标签型:仅 1 个片段子 → false(保 ancestor)", () => {
+    const doc = setupDom(`<div id="t" style="cursor:pointer">全部<span style="cursor:pointer">96%好评</span></div>`);
+    const t = doc.getElementById("t")!;
+    const kids = [...t.querySelectorAll("span")];
+    expect(isMultiCtaContainer(t, kids)).toBe(false);
+  });
+
+  it("内容卡:≥2 子但自身有正文(content card) → false(豁免保 ancestor)", () => {
+    const doc = setupDom(
+      `<div id="t"><div class="info">这是一条很长的真实评价正文内容</div>` +
+      `<span style="cursor:pointer">拍照清晰</span>` +
+      `<span style="cursor:pointer">值得购买</span></div>`,
+    );
+    const t = doc.getElementById("t")!;
+    attachReactClick(t); // 内容卡需 framework onClick(见既有 helper)
+    const kids = [...t.querySelectorAll("span")];
+    expect(isMultiCtaContainer(t, kids)).toBe(false);
+  });
+
+  it("子项无文本(纯图标) → 有文本子<2 → false", () => {
+    const doc = setupDom(
+      `<div id="t" style="cursor:pointer"><span style="cursor:pointer"></span>` +
+      `<span style="cursor:pointer">  </span></div>`,
+    );
+    const t = doc.getElementById("t")!;
+    const kids = [...t.querySelectorAll("span")];
+    expect(isMultiCtaContainer(t, kids)).toBe(false);
   });
 });
