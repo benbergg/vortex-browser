@@ -78,9 +78,11 @@ describe("vortex_wait_for dispatch 行为 (B3-1, 回归保护)", () => {
     expect(r?.params.selector).toBe(".loaded");
   });
 
-  it("mode:element + @ref 抛错 (显式引导用 CSS selector)", () => {
+  // BUG-002 (N0063): @ref 现已支持(server.ts 翻译);dispatch 层见到未翻译 @ref 防御性抛
+  // STALE_SNAPSHOT(端到端正常流见 wait-for-ref-target / page-wait-ref-resolve 测试)。
+  it("mode:element + 未翻译 @ref → STALE_SNAPSHOT(正常流由 server.ts 翻译)", () => {
     expect(() => dispatchNewTool("vortex_wait_for", { mode: "element", value: "@e15" }))
-      .toThrow(/CSS selector/);
+      .toThrow(/STALE_SNAPSHOT|no active snapshot/);
   });
 
   it("mode:custom + JS expression → page.waitForExpression + expression 字段", () => {

@@ -2,6 +2,7 @@ import { PageActions, VtxErrorCode, vtxError } from "@vortex-browser/shared";
 import type { ActionRouter } from "../lib/router.js";
 import type { DebuggerManager } from "../lib/debugger-manager.js";
 import { buildExecuteTarget, ensureFrameAttached } from "../lib/tab-utils.js";
+import { resolveTargetOptional } from "../lib/resolve-target.js";
 
 async function getActiveTabId(tabId?: number): Promise<number> {
   if (tabId) return tabId;
@@ -279,12 +280,19 @@ export function registerPageHandlers(router: ActionRouter, debuggerMgr: Debugger
     },
 
     [PageActions.WAIT]: async (args, tabId) => {
-      const tid = await getActiveTabId(tabId);
-      const selector = args.selector as string | undefined;
+      // BUG-002 (N0063): 支持 @ref —— server.ts 把 @ref 翻成 index+snapshotId,这里经
+      // resolveTargetOptional 反查 selector(与 dom.* handler 同源,含 STALE_SNAPSHOT 防御);
+      // 纯 CSS selector 直接返回;两者都缺时返回 undefined,走下方无目标 plain-wait。
+      // 空串 selector 规范化为无目标:历史上 `if (selector)` 视其为 falsy 落 plain-wait,
+      // resolveTargetOptional 对 "" 非 null 会进 resolveTarget 抛 INVALID_PARAMS(review N0063)。
+      const targetArgs = args.selector === "" ? { ...args, selector: undefined } : args;
+      const __t = resolveTargetOptional(targetArgs);
+      const selector = __t?.selector;
+      const tid = await getActiveTabId(__t?.boundTabId ?? tabId);
       const timeout = (args.timeout as number) ?? 10_000;
 
       if (selector) {
-        const frameId = args.frameId as number | undefined;
+        const frameId = __t?.boundFrameId ?? (args.frameId as number | undefined);
         if (frameId != null) await ensureFrameAttached(tid, frameId);
         const result = await chrome.scripting.executeScript({
           target: buildExecuteTarget(tid, frameId),

@@ -121,4 +121,25 @@ describe("合成 click 效果信号(GAP-G observeEffect)", () => {
     await router.dispatch(mkReq({ selector: "#btn", observeEffect: true }));
     expect(beginCalls).toEqual([["#btn", 300]]);
   });
+
+  // BUG-001 (N0063): 缺省 click(无 windowMs/observeEffect)走合成路径时,executeScript 的
+  // args 第 4 位 windowMs=undefined → 真 Chrome structured clone 拒 "Value is unserializable
+  // at index 3"(非 trusted 模式 100% 崩;trusted 走 CDP 不经此路径故掩盖)。Node 测 mock 不
+  // 校验序列化,故显式断言 args 无 undefined,锁住 structured-clone 安全契约。
+  it("BUG-001: 缺省 click 的 executeScript args 无 undefined(structured-clone 安全)", async () => {
+    let capturedArgs: unknown[] | undefined;
+    (globalThis as unknown as { chrome: { scripting: { executeScript: unknown } } }).chrome.scripting.executeScript =
+      async (opts: { func?: (...a: unknown[]) => unknown; args?: unknown[] }) => {
+        capturedArgs = opts.args;
+        if (typeof opts.func !== "function") return [{}];
+        const stripped = new Function(`return (${String(opts.func)})`)() as (...a: unknown[]) => unknown;
+        return [{ result: await Promise.resolve(stripped(...(opts.args ?? []))) }];
+      };
+    const resp = await router.dispatch(mkReq({ selector: "#btn" }));
+    expect(resp.error).toBeUndefined();
+    expect(capturedArgs).toBeDefined();
+    expect(capturedArgs!.some((a) => a === undefined)).toBe(false);
+    // args = [selector, cdpAvailable, observeEffect, windowMs];第 4 位须为 number(默认),非 undefined
+    expect(typeof capturedArgs![3]).toBe("number");
+  });
 });

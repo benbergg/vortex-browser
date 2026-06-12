@@ -315,13 +315,14 @@ export const PUBLIC_TOOLS: ToolDef[] = [
     schema: {
       type: "object",
       properties: {
+        target: TargetOptional,
         selector: { type: "string" },
         fileName: { type: "string" },
         fileContent: { type: "string" },
         mimeType: { type: "string" },
         ...tabFields,
       },
-      required: ["selector", "fileName", "fileContent"],
+      required: ["fileName", "fileContent"],
     },
     // Submits attacker-chosen bytes to whatever endpoint the page form posts to.
     annotations: { destructiveHint: true, openWorldHint: true },

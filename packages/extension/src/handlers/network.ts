@@ -85,6 +85,71 @@ function addLog(tabId: number, entry: NetworkEntry): void {
   }
 }
 
+function mapInitiatorType(it: string): string {
+  if (it === "xmlhttprequest") return "XHR";
+  if (it === "fetch") return "Fetch";
+  return it ? it.charAt(0).toUpperCase() + it.slice(1) : "Other";
+}
+
+/**
+ * BUG-003 (N0063): 读 page-side Resource Timing 历史。CDP Network 只捕获 enable 之后的请求,
+ * 首次 debug_read 之前已发生的全丢(实测 bytenew CDP 0 vs Resource Timing 250)。
+ * performance.getEntriesByType('resource') 总能拿到已完成请求的 url/initiator/duration
+ * (无 method/status/headers,这是 Resource Timing 的固有限制)。startTime 用 timeOrigin
+ * 对齐成 epoch ms,与 CDP 条目(Date.now())可同轴排序。缺 chrome.scripting / performance
+ * 时优雅降级返回 []。
+ */
+async function readResourceTimingEntries(tabId: number): Promise<NetworkEntry[]> {
+  try {
+    const results = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: () => {
+        try {
+          if (
+            typeof performance === "undefined" ||
+            typeof performance.getEntriesByType !== "function"
+          ) {
+            return [];
+          }
+          const origin = typeof performance.timeOrigin === "number" ? performance.timeOrigin : 0;
+          return (performance.getEntriesByType("resource") as PerformanceResourceTiming[]).map(
+            (e) => ({
+              url: e.name,
+              initiatorType: e.initiatorType,
+              startTime: Math.round(origin + e.startTime),
+              duration: Math.round(e.duration),
+            }),
+          );
+        } catch {
+          return [];
+        }
+      },
+    });
+    const raw = (results[0]?.result ?? []) as Array<{
+      url: string;
+      initiatorType: string;
+      startTime: number;
+      duration: number;
+    }>;
+    return raw.map((r) => ({
+      requestId: `rt:${r.url}:${r.startTime}`,
+      url: r.url,
+      method: "",
+      type: mapInitiatorType(r.initiatorType),
+      startTime: r.startTime,
+      duration: r.duration,
+    }));
+  } catch (err) {
+    // 不静默吞:executeScript 真失败(frame detached / chrome:// 受限页 / CSP / 导航中)
+    // 会让历史回填退回空,与"确无历史"无法区分。至少 warn 出信号,便于诊断(review N0063)。
+    console.warn(
+      "[vortex] Resource Timing 历史回填失败,network 历史可能不完整:",
+      err instanceof Error ? err.message : String(err),
+    );
+    return [];
+  }
+}
+
 export function registerNetworkHandlers(
   router: ActionRouter,
   debuggerMgr: DebuggerManager,
@@ -277,10 +342,21 @@ export function registerNetworkHandlers(
       );
       await ensureSubscribed(debuggerMgr, tid);
       const includeResources = args.includeResources as boolean | undefined;
+      const pattern = (args.pattern ?? args.url) as string | undefined;
       const apis = apiLogs.get(tid) ?? [];
-      if (!includeResources) return apis;
-      const resources = resourceLogs.get(tid) ?? [];
-      return [...apis, ...resources].sort((a, b) => a.startTime - b.startTime);
+      const cdpResources = includeResources ? (resourceLogs.get(tid) ?? []) : [];
+      // BUG-003 (N0063): 回填 Resource Timing 历史 —— CDP 漏 enable 前的请求(首次 debug_read
+      // 之前的全丢)。dedup by URL 对 apis + cdpResources 都做,CDP 条目(有 method/status/
+      // headers)优先于 RT 摘要,避免 includeResources 时静态资源 CDP+RT 双现(review N0063)。
+      const rt = await readResourceTimingEntries(tid);
+      const seenUrls = new Set([...apis, ...cdpResources].map((a) => a.url));
+      const rtFresh = rt.filter((e) => !seenUrls.has(e.url));
+      let merged: NetworkEntry[] = [...apis, ...cdpResources, ...rtFresh];
+      // 默认只留 API 类(XHR/Fetch),滤掉静态资源噪声;includeResources 时全保留。
+      if (!includeResources) merged = merged.filter((e) => API_TYPES.has(e.type ?? ""));
+      // pattern 过滤(debug_read 必带 pattern;缺省则不滤)。
+      if (pattern) merged = merged.filter((e) => e.url.includes(pattern));
+      return merged.sort((a, b) => a.startTime - b.startTime);
     },
 
     [NetworkActions.GET_ERRORS]: async (args, tabId) => {

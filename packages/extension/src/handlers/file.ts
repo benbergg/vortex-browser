@@ -4,13 +4,9 @@ import { FileActions, VtxErrorCode, vtxError, VtxEventType } from "@vortex-brows
 import type { ActionRouter } from "../lib/router.js";
 import type { NativeMessagingClient } from "../lib/native-messaging.js";
 import type { EventDispatcher } from "../events/dispatcher.js";
-
-async function getActiveTabId(tabId?: number): Promise<number> {
-  if (tabId) return tabId;
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (!tab?.id) throw vtxError(VtxErrorCode.TAB_NOT_FOUND, "No active tab found");
-  return tab.id;
-}
+import { resolveTarget } from "../lib/resolve-target.js";
+import { getActiveTabId, buildExecuteTarget, ensureFrameAttached } from "../lib/tab-utils.js";
+import { loadPageSideModule } from "../adapter/page-side-loader.js";
 
 export function registerFileHandlers(
   router: ActionRouter,
@@ -35,20 +31,29 @@ export function registerFileHandlers(
 
   router.registerAll({
     [FileActions.UPLOAD]: async (args, tabId) => {
-      const selector = args.selector as string;
+      // DESIGN-001 (N0063): 经 resolveTarget 支持 @ref/index+snapshotId(server.ts 翻译后)
+      // 与裸 selector,和其它 14 工具一致;原仅认 args.selector,@ref 必报 Missing。
+      const __t = resolveTarget(args);
+      const selector = __t.selector;
       const fileName = args.fileName as string;
       const fileContent = args.fileContent as string; // base64
       const mimeType = (args.mimeType as string) ?? "application/octet-stream";
       if (!selector || !fileName || !fileContent) {
-        throw vtxError(VtxErrorCode.INVALID_PARAMS, "Missing required params: selector, fileName, fileContent (base64)");
+        throw vtxError(VtxErrorCode.INVALID_PARAMS, "Missing required params: target (@ref/CSS) or selector, fileName, fileContent (base64)");
       }
-      const tid = await getActiveTabId((args.tabId as number | undefined) ?? tabId);
+      const tid = await getActiveTabId(__t.boundTabId ?? (args.tabId as number | undefined) ?? tabId);
+      const frameId = __t.boundFrameId ?? (args.frameId as number | undefined);
+      if (frameId != null) await ensureFrameAttached(tid, frameId);
+      // dom-resolve 让 page-side func 经 queryAllDeep 穿 open shadow + 走 @ref 一致路径,
+      // 取代旧的 document.querySelector(光 DOM)+ target:{tabId}(无 frameId,iframe 内 file input 漏)。
+      await loadPageSideModule(tid, frameId, "dom-resolve");
 
       const results = await chrome.scripting.executeScript({
-        target: { tabId: tid },
+        target: buildExecuteTarget(tid, frameId),
         func: (sel: string, name: string, b64: string, mime: string) => {
           try {
-            const input = document.querySelector(sel) as HTMLInputElement | null;
+            const els = (window as unknown as { __vortexDomResolve: { queryAllDeep(s: string): Element[] } }).__vortexDomResolve.queryAllDeep(sel);
+            const input = els[0] as HTMLInputElement | undefined;
             if (!input) return { error: `Element not found: ${sel}` };
             if (input.type !== "file") return { error: "Element is not a file input" };
 

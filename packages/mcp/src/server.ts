@@ -16,6 +16,7 @@ import { sendRequest } from "./client.js";
 import { getToolDefs, getToolDef } from "./tools/registry.js";
 import { dispatchNewTool } from "./tools/dispatch.js";
 import { computeTransportTimeout } from "./lib/timeout.js";
+import { liftWaitForRefToTarget } from "./lib/wait-for-ref.js";
 export { dispatchNewTool };
 
 // Read package.json via createRequire so the bundle works under both ts-node
@@ -378,6 +379,10 @@ export async function handleCallTool(
     const resultText = JSON.stringify(resp.result, null, 2) ?? "undefined";
     return withEvents([{ type: "text" as const, text: resultText }]);
   }
+
+  // BUG-002 (N0063): wait_for(mode=element) 的 @ref 经 value 字段传入,这里抬成 target,
+  // 复用下方同一条翻译链 + STALE/tab 校验(dispatch 拿不到 snapshot 状态无法自译)。
+  liftWaitForRefToTarget(toolDef.name, params);
 
   // target 翻译：@eN / @fNeM → { index, snapshotId, frameId }
   const target = params.target as string | undefined;

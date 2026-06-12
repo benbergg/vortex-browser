@@ -213,11 +213,15 @@ export function dispatchNewTool(
       if (timeout !== undefined) next.timeout = timeout;
       switch (mode) {
         case "element": {
-          // value 不经 server.ts target translation；@ref 形式手动展开
+          // BUG-002 (N0063): @ref 形式的 value 已由 server.ts liftWaitForRefToTarget 抬成
+          // target 并翻译成 selector / index+snapshotId+frameId(随 ...rest 流入 next),这里
+          // 不会再见到 @ref。剩下的 value 是裸 CSS selector,直接透传为 selector。
           if (typeof value === "string" && value.startsWith("@")) {
+            // 防御:正常流不可达(server 已翻译)。若仍见到 @ref,说明无 active snapshot 等
+            // 上游异常,响亮报错而非把 @ref 当 selector 静默失败。
             throw vtxError(
-              VtxErrorCode.INVALID_PARAMS,
-              "wait_for(mode=element): @ref form not supported here. Pass a CSS selector as value.",
+              VtxErrorCode.STALE_SNAPSHOT,
+              "wait_for(mode=element): @ref could not be resolved (no active snapshot — call vortex_observe first).",
             );
           }
           if (value !== undefined) next.selector = value;
