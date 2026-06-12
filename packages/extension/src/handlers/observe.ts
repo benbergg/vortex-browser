@@ -520,7 +520,10 @@ async function scanOneFrame(
             if (ICON_FONT_MODIFIERS.has(lower)) continue;
             for (const p of ICON_FONT_PREFIXES) {
               if (lower.startsWith(p) && lower.length > p.length) {
-                return lower.slice(p.length).replace(/-/g, " ");
+                // DESIGN-003 (N0063): 前缀匹配大小写无关,但返回保留原 token 大小写
+                // (与 aria-label/text 路径对称)。c.slice 而非 lower.slice:icon-addCube→
+                // "addCube" 不再压成 "addcube",可读 + 可反查 [class*="addCube"]。
+                return c.slice(p.length).replace(/-/g, " ");
               }
             }
           }
@@ -532,7 +535,9 @@ async function scanOneFrame(
             for (const c of tokens) {
               const lower = c.toLowerCase();
               if (lower.startsWith("icon-") && lower.length > 5) {
-                return lower.slice(5).replace(/-/g, " ");
+                // DESIGN-003 (N0063): 保留原大小写(c.slice 非 lower.slice),icon-addCube→
+                // "addCube"。与上方前缀分支 + 测试副本 WICON_BRANCH 同步。
+                return c.slice(5).replace(/-/g, " ");
               }
             }
           }

@@ -78,7 +78,7 @@ const WICON_BRANCH = `
   if (tokens.includes("wicon")) {
     for (const c of tokens) {
       const lower = c.toLowerCase();
-      if (lower.startsWith("icon-") && lower.length > 5) return lower.slice(5).replace(/-/g, " ");
+      if (lower.startsWith("icon-") && lower.length > 5) return c.slice(5).replace(/-/g, " ");
     }
   }
   return "";
@@ -98,5 +98,15 @@ describe("iconFontName 班牛 wicon 分支(行为)", () => {
   });
   it("有 wicon 但无 icon- 类 → ''", () => {
     expect(wiconName("wicon w-font-more")).toBe("");
+  });
+
+  // DESIGN-003 (N0063): 保留原 class 大小写。原实现全链路 toLowerCase,把 icon-addCube
+  // 压成 "addcube",既不可读也无法反查原 class([class*="addCube"])。匹配前缀仍可大小写
+  // 无关,但返回的图标名须保留原 token 大小写(与 aria-label/text 路径对称,它们都不小写)。
+  it("wicon + icon-addCube → 'addCube'(保留驼峰,不小写化)", () => {
+    expect(wiconName("wicon icon-addCube el-popover__reference")).toBe("addCube");
+  });
+  it("wicon + icon-FlowChart → 'FlowChart'(保留首字母大写)", () => {
+    expect(wiconName("wicon icon-FlowChart")).toBe("FlowChart");
   });
 });
