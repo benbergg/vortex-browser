@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="zh"><head><meta charset="utf-8"><title>dialog 应答</title></head>
+<body>
+<h1>vortex_act dialog 应答验证床</h1>
+<!--
+  JS dialog(alert/confirm/prompt)应答策略端到端验证。
+  - #confirm-btn  confirm: 测 dismiss(false) / accept(true) / 缺省警告
+  - #alert-btn    alert:   测无冻结 + dialogHandled.type=alert
+  - #prompt-btn   prompt:  测 accept+promptText=X → window.__p==="X"
+  - #async-btn    async:   setTimeout 300ms 后触发 confirm → grace 窗口应抑制
+-->
+<button id="confirm-btn" onclick="window.__r = window.confirm('确定提交?')">confirm</button>
+<button id="alert-btn" onclick="window.alert('已保存')">alert</button>
+<button id="prompt-btn" onclick="window.__p = window.prompt('输入名称', '默认名')">prompt</button>
+<button id="async-btn" onclick="setTimeout(function(){ window.__a = window.confirm('延迟确认'); }, 300)">async</button>
+</body></html>

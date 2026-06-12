@@ -37,6 +37,10 @@ describe("cdpClickElement 效果信号(GAP-G observeEffect)", () => {
   beforeEach(async () => {
     vi.clearAllMocks();
     events.length = 0;
+    // armDialogPolicyCdp / readDialogCapturedAndDisarmCdp 调用 chrome.scripting.executeScript
+    vi.stubGlobal("chrome", {
+      scripting: { executeScript: vi.fn().mockResolvedValue([{ result: [] }]) },
+    });
     const native = await import("../src/adapter/native.js");
     pageQuery = vi.mocked(native.pageQuery as never);
     const cdp = await import("../src/adapter/cdp.js");

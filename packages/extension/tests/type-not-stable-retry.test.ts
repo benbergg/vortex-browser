@@ -47,6 +47,10 @@ describe("vortex_act type NOT_STABLE 自动 force=true 重试 (对齐 FILL BUG-0
 
   beforeEach(() => {
     vi.clearAllMocks();
+    // armDialogPolicy / readDialogCapturedAndDisarm 调用 chrome.scripting.executeScript
+    vi.stubGlobal("chrome", {
+      scripting: { executeScript: vi.fn().mockResolvedValue([{ result: [] }]) },
+    });
     const debuggerMgr = {
       attach: vi.fn().mockResolvedValue(undefined),
       sendCommand: vi.fn().mockResolvedValue(undefined),

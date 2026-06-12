@@ -6,6 +6,39 @@ import { getIframeOffset } from "../lib/iframe-offset.js";
 import type { DebuggerManager } from "../lib/debugger-manager.js";
 import { pageQuery as nativePageQuery, mapPageError } from "./native.js";
 import type { ClickEffect } from "../page-side/click-effect.js";
+import { buildExecuteTarget } from "../lib/tab-utils.js";
+
+// dialog 应答策略 arm/read 共享 helper(与 dom.ts 版本同源,因 cdp.ts 不能 import dom.ts 而本地重复)。
+async function armDialogPolicyCdp(
+  tid: number, frameId: number | undefined,
+  answer: "accept" | "dismiss", promptText: string | null,
+): Promise<void> {
+  await chrome.scripting.executeScript({
+    target: buildExecuteTarget(tid, frameId), world: "MAIN",
+    func: (a: string, pt: string | null) => {
+      (window as any).__vortexDialogPolicy = {
+        armed: true, until: 0, answer: a === "accept" ? "accept" : "dismiss",
+        promptText: pt, captured: [],
+      };
+    },
+    args: [answer, promptText],
+  });
+}
+
+async function readDialogCapturedAndDisarmCdp(
+  tid: number, frameId: number | undefined,
+): Promise<Array<{ type: string; message: string }>> {
+  const r = await chrome.scripting.executeScript({
+    target: buildExecuteTarget(tid, frameId), world: "MAIN",
+    func: () => {
+      const d = (window as any).__vortexDialogPolicy;
+      const cap = (d?.captured ?? []) as Array<{ type: string; message: string }>;
+      if (d) { d.armed = false; d.until = Date.now() + 1000; }
+      return cap;
+    },
+  });
+  return (r[0]?.result as Array<{ type: string; message: string }>) ?? [];
+}
 
 /**
  * CDP 真鼠标 click at page-coords (x, y)。
@@ -48,7 +81,8 @@ export async function cdpClickElement(
   selector: string,
   // force=true skips occlusion check (ELEMENT_OCCLUDED only); disabled/detached/not_found/ambiguous still apply
   // observeEffect: GAP-G(N0062) 效果信号采集，需 caller 预注入 click-effect 模块；opt-in，默认关
-  options: { force?: boolean; observeEffect?: boolean; windowMs?: number } = {},
+  // onDialog/promptText: dialog 应答策略，arm 后 CDP 点击触发的 confirm/prompt 按此策略应答
+  options: { force?: boolean; observeEffect?: boolean; windowMs?: number; onDialog?: string; promptText?: string | null } = {},
 ): Promise<{
   success: true;
   element: { tag: string; text?: string };
@@ -56,8 +90,9 @@ export async function cdpClickElement(
   y: number;
   mode: "realMouse";
   effect?: ClickEffect;
+  dialogs?: Array<{ type: string; message: string }>;
 }> {
-  const { force = false, observeEffect = false, windowMs } = options;
+  const { force = false, observeEffect = false, windowMs, onDialog, promptText } = options;
   // page-side 探测（与原 dom.ts useRealMouse 分支 L106-169 完全一致，逐行复制 func 字面量）
   const rectRes = await nativePageQuery<{
     result?: { x: number; y: number; tag: string; text?: string };
@@ -208,31 +243,45 @@ export async function cdpClickElement(
     );
   }
 
-  // CDP 真鼠标三连击（已 page-coords，clickBBox 内部不再算 offset）
-  await clickBBox(debuggerMgr, tabId, px, py);
+  // dialog arm:CDP 真鼠标点击可能同步触发 confirm/alert/prompt,arm 后 override 据此抑制 + 应答。
+  const dlgAnswer = onDialog === "accept" ? "accept" : "dismiss";
+  await armDialogPolicyCdp(tabId, frameId, dlgAnswer, promptText ?? null);
+  let dialogs: Array<{ type: string; message: string }> = [];
+  try {
+    // CDP 真鼠标三连击（已 page-coords，clickBBox 内部不再算 offset）
+    await clickBBox(debuggerMgr, tabId, px, py);
 
-  let effect: ClickEffect | undefined;
-  if (observeEffect && effectToken) {
-    effect = await nativePageQuery<ClickEffect | undefined>(
-      tabId,
-      frameId,
-      (token: string) => {
-        const ce = (window as unknown as {
-          __vortexClickEffect?: { end(t: string): Promise<ClickEffect> };
-        }).__vortexClickEffect;
-        return ce ? ce.end(token) : undefined;
-      },
-      [effectToken],
-    );
+    let effect: ClickEffect | undefined;
+    if (observeEffect && effectToken) {
+      effect = await nativePageQuery<ClickEffect | undefined>(
+        tabId,
+        frameId,
+        (token: string) => {
+          const ce = (window as unknown as {
+            __vortexClickEffect?: { end(t: string): Promise<ClickEffect> };
+          }).__vortexClickEffect;
+          return ce ? ce.end(token) : undefined;
+        },
+        [effectToken],
+      );
+    }
+
+    // 读 dialog captured + grace disarm(在 finally 之前读,确保 dialogs 变量已赋值后再返回)
+    dialogs = await readDialogCapturedAndDisarmCdp(tabId, frameId);
+
+    // 返回的 x/y 是 page-coords（含 iframe offset），与原 dom.ts L189-190 一致
+    return {
+      success: true as const,
+      element: { tag, text },
+      x: px,
+      y: py,
+      mode: "realMouse" as const,
+      ...(effect ? { effect } : {}),
+      ...(dialogs.length ? { dialogs } : {}),
+    };
+  } catch (err) {
+    // 即便 click 抛错也 disarm(guard against page-freeze)
+    try { await readDialogCapturedAndDisarmCdp(tabId, frameId); } catch { /* ignore */ }
+    throw err;
   }
-
-  // 返回的 x/y 是 page-coords（含 iframe offset），与原 dom.ts L189-190 一致
-  return {
-    success: true as const,
-    element: { tag, text },
-    x: px,
-    y: py,
-    mode: "realMouse" as const,
-    ...(effect ? { effect } : {}),
-  };
 }

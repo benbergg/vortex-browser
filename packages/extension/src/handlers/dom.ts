@@ -56,6 +56,39 @@ export function isTransient(el: Element): boolean {
   return false;
 }
 
+// dialog 应答策略 arm/read 共享 helper(各一次 world:MAIN executeScript)。
+// 动作交互前 arm(override 据此抑制 + 应答弹窗),交互后 read+grace-disarm。
+async function armDialogPolicy(
+  tid: number, frameId: number | undefined,
+  answer: "accept" | "dismiss", promptText: string | null,
+): Promise<void> {
+  await chrome.scripting.executeScript({
+    target: buildExecuteTarget(tid, frameId), world: "MAIN",
+    func: (a: string, pt: string | null) => {
+      (window as any).__vortexDialogPolicy = {
+        armed: true, until: 0, answer: a === "accept" ? "accept" : "dismiss",
+        promptText: pt, captured: [],
+      };
+    },
+    args: [answer, promptText],
+  });
+}
+
+async function readDialogCapturedAndDisarm(
+  tid: number, frameId: number | undefined,
+): Promise<Array<{ type: string; message: string }>> {
+  const r = await chrome.scripting.executeScript({
+    target: buildExecuteTarget(tid, frameId), world: "MAIN",
+    func: () => {
+      const d = (window as any).__vortexDialogPolicy;
+      const cap = (d?.captured ?? []) as Array<{ type: string; message: string }>;
+      if (d) { d.armed = false; d.until = Date.now() + 1000; }
+      return cap;
+    },
+  });
+  return (r[0]?.result as Array<{ type: string; message: string }>) ?? [];
+}
+
 export function registerDomHandlers(
   router: ActionRouter,
   debuggerMgr: DebuggerManager,
@@ -150,6 +183,7 @@ export function registerDomHandlers(
       // silent failure——success 不翻转。见知识库 N0062 GAP-G 设计 / page-side/click-effect.ts。
       const observeEffect = args.observeEffect === true;
       const windowMs = args.windowMs as number | undefined;
+      const explicitOnDialog = args.onDialog !== undefined;
 
       // L2 integration: actionability + auto-wait pre-check
       // NOT_STABLE 自动 force 重试(对齐 FILL BUG-011):京东 sticky 搜索按钮在
@@ -175,6 +209,8 @@ export function registerDomHandlers(
           force: args.force as boolean | undefined,
           observeEffect,
           windowMs,
+          onDialog: args.onDialog as string | undefined,
+          promptText: (args.promptText as string | undefined) ?? null,
         });
       }
 
@@ -187,7 +223,7 @@ export function registerDomHandlers(
       const runSyntheticClick = async (cdpAvailable: boolean) => {
       const results = await chrome.scripting.executeScript({
         target: buildExecuteTarget(tid, frameId),
-        func: async (sel: string, cdpAvailable: boolean, observeEffect: boolean, windowMs: number | undefined) => {
+        func: async (sel: string, cdpAvailable: boolean, observeEffect: boolean, windowMs: number | undefined, dialogAnswer: string, dialogPromptText: string | null) => {
           try {
             // 探测阶段：逐项检查失败原因，细化错误码
             const els = (window as any).__vortexDomResolve.queryAllDeep(sel) as Element[];
@@ -382,6 +418,13 @@ export function registerDomHandlers(
             // el.click() so element-level click handlers (form submit /
             // anchor navigation) fire reliably even when intermediate
             // listeners stopPropagation.
+            // dialog 应答 arm:点击可能同步触发 confirm/alert/prompt,override 据此抑制 + 应答。
+            // armed 无时限覆盖整个派发;读 captured 后置 until grace 覆盖 setTimeout 异步弹框。
+            (window as any).__vortexDialogPolicy = {
+              armed: true, until: 0,
+              answer: dialogAnswer === "accept" ? "accept" : "dismiss",
+              promptText: dialogPromptText, captured: [],
+            };
             const ptrInit: PointerEventInit = {
               bubbles: true, cancelable: true, composed: true, view: window,
               button: 0, buttons: 1, clientX: cx, clientY: cy,
@@ -403,6 +446,10 @@ export function registerDomHandlers(
             // GAP-G(N0062): 派发后采集效果信号(await windowMs 窗口)。success 恒 true,effect
             // 仅作旁证;__effectToken 为空(未 opt-in / 模块未就绪)时不带 effect,保持零开销。
             const __effect = __effectToken && __ce ? await __ce.end(__effectToken) : undefined;
+            // 读 dialog captured 并以 grace 时间戳 disarm(覆盖派发后短窗内的异步弹框)。
+            const __dlg = (window as any).__vortexDialogPolicy;
+            const __dialogs = (__dlg?.captured ?? []) as Array<{ type: string; message: string }>;
+            if (__dlg) { __dlg.armed = false; __dlg.until = Date.now() + 1000; }
             return {
               result: {
                 success: true,
@@ -412,6 +459,7 @@ export function registerDomHandlers(
                   text: el.innerText?.slice(0, 200),
                 },
                 ...(__effect ? { effect: __effect } : {}),
+                ...(__dialogs.length ? { dialogs: __dialogs } : {}),
               },
             };
           } catch (err) {
@@ -424,7 +472,7 @@ export function registerDomHandlers(
         // ——observeEffect=false 时该值不被使用(begin 不调),observeEffect=true 且未传时给回正确
         // 的 300ms 窗口(用 ?? 0 会因 0 非 nullish 把窗口塌成 0ms,故不可用 0)。observeEffect
         // 恒为 boolean(args.observeEffect === true),无需兜底。
-        args: [selector, cdpAvailable, observeEffect, windowMs ?? 300],
+        args: [selector, cdpAvailable, observeEffect, windowMs ?? 300, (args.onDialog as string) ?? "dismiss", (args.promptText as string | undefined) ?? null],
         world: "MAIN",
       });
       return results[0]?.result as {
@@ -445,6 +493,22 @@ export function registerDomHandlers(
           throw vtxError(code, r.error, { selector, extras: r.extras });
         }
       };
+      // 把 page-side 返回的 raw dialogs 数组转成对外 dialogHandled 字段 + 默认 dismiss 的 warning。
+      const attachDialogHandled = (r: unknown): unknown => {
+        const obj = r as { dialogs?: Array<{ type: string; message: string }> } | undefined;
+        if (!obj?.dialogs?.length) return r;
+        const first = obj.dialogs[0];
+        const policy = (args.onDialog as string) === "accept" ? "accepted" : "dismissed";
+        const needsWarn = !explicitOnDialog && (first.type === "confirm" || first.type === "prompt");
+        const { dialogs, ...restResult } = obj;
+        return {
+          ...restResult,
+          dialogHandled: {
+            type: first.type, message: first.message, policy,
+            ...(needsWarn ? { warning: "未设 onDialog,已默认 dismiss;若本意是确认请带 onDialog:accept 重试" } : {}),
+          },
+        };
+      };
       // 首跑:cdpAvailable=!!debuggerMgr。submit-intent 会返回 deferToCdp(未点击)。
       let res = await runSyntheticClick(!!debuggerMgr);
       throwIfClickError(res);
@@ -454,19 +518,21 @@ export function registerDomHandlers(
       // 已在 runSyntheticClick 前预注入。
       if (inner?.deferToCdp) {
         try {
-          return await cdpClickElement(debuggerMgr, tid, frameId, selector, {
+          return attachDialogHandled(await cdpClickElement(debuggerMgr, tid, frameId, selector, {
             force: args.force as boolean | undefined,
             observeEffect,
             windowMs,
-          });
+            onDialog: args.onDialog as string | undefined,
+            promptText: (args.promptText as string | undefined) ?? null,
+          }));
         } catch {
           // CDP 探测/attach 失败 → 回退合成(cdpAvailable=false 强制不再 defer,本次真点击)。
           res = await runSyntheticClick(false);
           throwIfClickError(res);
-          return res?.result;
+          return attachDialogHandled(res?.result);
         }
       }
-      return res?.result;
+      return attachDialogHandled(res?.result);
     },
 
     [DomActions.TYPE]: async (args, tabId) => {
@@ -574,6 +640,10 @@ export function registerDomHandlers(
       if (probe?.error) {
         mapPageError(probe, selector);
       }
+
+      // dialog arm:type 操作(键盘事件序列 / CDP insertText)可能触发同步 confirm,默认 dismiss 防冻屏。
+      await armDialogPolicy(tid, frameId, "dismiss", null);
+      try {
 
       if (probe?.isContentEditable) {
         // contentEditable path — Input.insertText is the only way to
@@ -687,6 +757,9 @@ export function registerDomHandlers(
       );
       if (res?.error) mapPageError(res, selector);
       return res?.result;
+      } finally {
+        await readDialogCapturedAndDisarm(tid, frameId);
+      }
     },
 
     [DomActions.FILL]: async (args, tabId) => {
@@ -745,7 +818,16 @@ export function registerDomHandlers(
 
       // 加载 dom-resolve 模块，使 inline func 能通过 shadow 穿透解析 selector
       await loadPageSideModule(tid, frameId, "dom-resolve");
-      const res = await nativePageQuery<{
+      // dialog arm:fill 操作(input 事件 / React onChange 处理)可能触发同步 confirm,默认 dismiss 防冻屏。
+      await armDialogPolicy(tid, frameId, "dismiss", null);
+      let res: {
+        result?: unknown;
+        error?: string;
+        errorCode?: string;
+        extras?: Record<string, unknown>;
+      } | undefined;
+      try {
+      res = await nativePageQuery<{
         result?: unknown;
         error?: string;
         errorCode?: string;
@@ -873,6 +955,9 @@ export function registerDomHandlers(
         },
         [selector, value],
       );
+      } finally {
+        await readDialogCapturedAndDisarm(tid, frameId);
+      }
       if (res?.error) mapPageError(res, selector);
       return res?.result;
     },
@@ -892,7 +977,16 @@ export function registerDomHandlers(
 
       // 加载 dom-resolve 模块，使 inline func 能通过 shadow 穿透解析 selector
       await loadPageSideModule(tid, frameId, "dom-resolve");
-      const res = await nativePageQuery<{
+      // dialog arm:select 操作(change 事件)可能触发同步 confirm,默认 dismiss 防冻屏。
+      await armDialogPolicy(tid, frameId, "dismiss", null);
+      let res: {
+        result?: unknown;
+        error?: string;
+        errorCode?: string;
+        extras?: Record<string, unknown>;
+      } | undefined;
+      try {
+      res = await nativePageQuery<{
         result?: unknown;
         error?: string;
         errorCode?: string;
@@ -1061,6 +1155,9 @@ export function registerDomHandlers(
         },
         [selector, value, (args.timeout as number | undefined) ?? 5000],
       );
+      } finally {
+        await readDialogCapturedAndDisarm(tid, frameId);
+      }
       if (res?.error) mapPageError(res, selector);
       return res?.result;
     },
@@ -1215,6 +1312,9 @@ export function registerDomHandlers(
       if (frameId != null) await ensureFrameAttached(tid, frameId);
       // 加载 dom-resolve 模块，使 inline func 能通过 shadow 穿透解析 selector
       await loadPageSideModule(tid, frameId, "dom-resolve");
+      // dialog arm:hover 操作(mouseover/mouseenter + CDP mouseMoved)可能触发同步 confirm,默认 dismiss 防冻屏。
+      await armDialogPolicy(tid, frameId, "dismiss", null);
+      try {
       const res = await nativePageQuery<{
         result?: unknown;
         error?: string;
@@ -1300,6 +1400,9 @@ export function registerDomHandlers(
         });
       }
       return { success: true, ...(hr?.tooltip ?? {}) };
+      } finally {
+        await readDialogCapturedAndDisarm(tid, frameId);
+      }
     },
 
     [DomActions.GET_ATTRIBUTE]: async (args, tabId) => {

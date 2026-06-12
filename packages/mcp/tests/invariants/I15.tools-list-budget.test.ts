@@ -42,6 +42,14 @@
 // cap +100 至 5600 留 94 B 余量,沿用"加能力微调 cap 不压缩字符"惯例。
 // description 长度上限同步放宽 60 → 120 (vortex-evaluate-description.test.ts
 // 镜像此决策)。
+//
+// feat/dialog-handling (修正版): 5800 → 6000 B。vortex_act options 新增
+// onDialog(enum) + promptText(string) 两个弹窗应答字段 (+84B schema),
+// vortex_act description 恢复载荷性 hint (windowMs上限3000,慢站0网络≠失败
+// + click observeEffect→effect signals),并追加 onDialog clause。
+// 恢复后 description 174 char,schema 字段 +84B,payload 实测 5918B。
+// cap +200 至 6000,留 82B 余量。description 长度上限同步放宽 120 → 180
+// (沿用"加能力微调 cap 不压缩字符"惯例；174 char = 120 原始 + 54 onDialog子句)。
 
 import { describe, it, expect } from "vitest";
 import { COMMIT_KINDS } from "@vortex-browser/shared";
@@ -53,12 +61,13 @@ describe("I15: tools/list budget + count + internalized grep", () => {
     defs.map(d => ({ name: d.name, description: d.description, inputSchema: d.schema })),
   );
 
-  it("tools/list 字节 ≤ 5800 B (V2 P0 修复 D16 放宽 200B 豁免, 实测 5622 留 178 B buffer)", () => {
+  it("tools/list 字节 ≤ 6000 B (dialog-handling onDialog/promptText +84B schema + 恢复 vortex_act description, 实测 5918 留 82B buffer)", () => {
     // V2 P0 修复 D16: filter 子字段 description 是必要的文档化豁免
     // (handler 已实现 console.ts:160 level / network.ts:305-321 pattern+statusMin/Max),
     // 移除豁免会触发 V2 D16 真发现复发 (LLM 不知可用子字段)。
-    // 上限 5800 = 5600 (V4 REQ-009 基线) + 200 (filter 文档化豁免)。
-    expect(toolsListPayload.length).toBeLessThanOrEqual(5800);
+    // 上限 6000 = 5800 (上轮基线) + 200 (onDialog/promptText 真新增能力豁免
+    // + vortex_act description 恢复载荷性 hint，实测 5918B，留 82B 余量)。
+    expect(toolsListPayload.length).toBeLessThanOrEqual(6000);
   });
 
   it("公开工具数量 = 17（v2.1 PR-A: v0.8 15 + tab_list + history）", () => {
@@ -118,9 +127,11 @@ describe("I15: tools/list budget + count + internalized grep", () => {
     }
   });
 
-  it("description 长度 ≤ 120 char", () => {
+  it("description 长度 ≤ 180 char", () => {
+    // 120 → 180: vortex_act description 恢复原始 hint + 追加 onDialog clause = 174 char。
+    // 174 = 120 原始 + 54 onDialog 子句，是真新增能力驱动的增长。
     for (const d of defs) {
-      expect(d.description.length).toBeLessThanOrEqual(120);
+      expect(d.description.length).toBeLessThanOrEqual(180);
     }
   });
 

@@ -74,6 +74,10 @@ describe("FILL 后回焦 (DESIGN-002 N0063)", () => {
       checkRejectPattern: () => ({ rejected: false }),
     };
 
+    // armDialogPolicy / readDialogCapturedAndDisarm 调用 chrome.scripting.executeScript
+    vi.stubGlobal("chrome", {
+      scripting: { executeScript: vi.fn().mockResolvedValue([{ result: [] }]) },
+    });
     router = new ActionRouter();
     const debuggerMgr = {
       attach: vi.fn().mockResolvedValue(undefined),

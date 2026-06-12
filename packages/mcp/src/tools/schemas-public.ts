@@ -44,7 +44,8 @@ export const PUBLIC_TOOLS: ToolDef[] = [
     action: "L4.act",
     description:
       "Write to a UI element. scroll:value={container?,position}. " +
-      "click observeEffect→effect signals; windowMs上限3000,慢站0网络≠失败.",
+      "click observeEffect→effect signals; windowMs上限3000,慢站0网络≠失败. " +
+      "onDialog:accept|dismiss(默认dismiss),promptText给prompt框.",
     schema: {
       type: "object",
       properties: {
@@ -54,12 +55,14 @@ export const PUBLIC_TOOLS: ToolDef[] = [
         useRealMouse: { type: "boolean" },
         options: {
           type: "object",
-          // I15 invariant: properties 内无 description。observeEffect 含义见工具级 description。
+          // I15 invariant: properties 内无 description。onDialog 含义见工具级 description。
           properties: {
             timeout: { type: "number" },
             force: { type: "boolean" },
             observeEffect: { type: "boolean" },
             windowMs: { type: "number" },
+            onDialog: { enum: ["accept", "dismiss"] },
+            promptText: { type: "string" },
           },
         },
         ...tabFields,

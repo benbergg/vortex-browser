@@ -113,6 +113,10 @@ describe("cdpClickElement force option — runtime (Case 7, anti-brittleness)", 
 
   beforeEach(() => {
     vi.resetModules();
+    // armDialogPolicyCdp / readDialogCapturedAndDisarmCdp 调用 chrome.scripting.executeScript
+    vi.stubGlobal("chrome", {
+      scripting: { executeScript: vi.fn().mockResolvedValue([{ result: [] }]) },
+    });
     // Mock native.js BEFORE importing cdp.ts so cdpClickElement picks up the mock.
     mockPageQuery = vi.fn();
     vi.doMock("../src/adapter/native.js", () => ({

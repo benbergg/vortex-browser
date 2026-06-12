@@ -59,6 +59,10 @@ describe("vortex_fill NOT_STABLE 自动 force=true 重试 (BUG-011 N0060 方案 
 
   beforeEach(() => {
     vi.clearAllMocks();
+    // armDialogPolicy / readDialogCapturedAndDisarm 调用 chrome.scripting.executeScript
+    vi.stubGlobal("chrome", {
+      scripting: { executeScript: vi.fn().mockResolvedValue([{ result: [] }]) },
+    });
     const dom = new JSDOM("<!DOCTYPE html><html><body><input id='kw'/></body></html>");
     globalThis.window = dom.window as unknown as Window & typeof globalThis;
     globalThis.document = dom.window.document as unknown as Document;

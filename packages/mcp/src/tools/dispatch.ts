@@ -185,6 +185,8 @@ export function dispatchNewTool(
         // GAP-G(N0062): click 效果信号采集开关，透传到 dom.ts CLICK handler
         if (o.observeEffect !== undefined) next.observeEffect = o.observeEffect;
         if (o.windowMs !== undefined) next.windowMs = o.windowMs;
+        if (o.onDialog !== undefined) next.onDialog = o.onDialog;
+        if (o.promptText !== undefined) next.promptText = o.promptText;
       }
       return { action: v05Action, params: next };
     }

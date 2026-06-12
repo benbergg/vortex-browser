@@ -26,7 +26,7 @@ const CB_SRC = readFileSync(
 
 // 原生 SELECT handler 区间
 const selectIdx = DOM_SRC.indexOf("[DomActions.SELECT]");
-const SELECT_BLOCK = DOM_SRC.slice(selectIdx, selectIdx + 8600);
+const SELECT_BLOCK = DOM_SRC.slice(selectIdx, selectIdx + 9200);
 
 describe("族 I #25 — checkbox-group label 折叠内部空白匹配", () => {
   it("不再用 (b.innerText||\"\").trim() === name 严格等值", () => {
