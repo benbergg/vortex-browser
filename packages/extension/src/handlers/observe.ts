@@ -245,6 +245,80 @@ export function applyReactClickableMarker(
   return { reactClickable: true, clickHint: REACT_CLICKABLE_HINT };
 }
 
+/**
+ * 跨池祖先短路的"原子控件 vs 聚焦容器"判据(N0064 D6 dogfood 根因)。
+ *
+ * cursor:pointer fallback 收候选时会跳过"祖先链上已有 INTERACTIVE_SELECTORS 元素"
+ * 的子项,避免 `<button><span cursor:pointer>` 双现。但 Element UI 2.x 的浮层容器
+ * (el-popover/el-dialog/el-drawer)自带 `tabindex="0"` + `role="tooltip|dialog"`,
+ * 因 `[tabindex]:not([-1])` 进池却**不是原子点击目标**——它只是聚焦/浮层容器,内部的
+ * bnCheck / el-dropdown-menu__item 等自定义控件是独立目标。短路若把这类容器当原子控件,
+ * 会把整层弹窗内容全吞掉(实机:columnDisplay 9 列 checkbox 全丢)。
+ *
+ * 判据:祖先 role ∈ 容器角色集(grouping/overlay,不描述子树),或它仅因 tabindex 入池
+ * (不匹配任何原子控件选择器)→ 视为聚焦容器,短路**不**应触发。真原子控件
+ * (button/a/[role=button|menuitem|option…]/label/[onclick] 等)仍触发短路防双现。
+ *
+ * Why export:供 `observe-focus-container-suppress.test.ts` jsdom 直测真源;inject func
+ * 内联同语义副本(closure 注入无法 import),改一处须同步另一处,源码锁守护。
+ */
+export const FOCUS_CONTAINER_ROLES = new Set<string>([
+  "tooltip",
+  "dialog",
+  "alertdialog",
+  "group",
+  "region",
+  "menu",
+  "listbox",
+  "tree",
+  "grid",
+  "table",
+  "tabpanel",
+  "navigation",
+  "toolbar",
+  "document",
+  "application",
+  "none",
+  "presentation",
+]);
+export const ATOMIC_INTERACTIVE_SELECTORS =
+  "button,a[href],summary,input:not([type=hidden]),select,textarea,label,[role=button],[role=link],[role=textbox],[role=checkbox],[role=radio],[role=tab],[role=menuitem],[role=treeitem],[role=option],[contenteditable],[onclick]";
+export function isFocusContainerOnly(el: Element): boolean {
+  const role = el.getAttribute("role")?.trim().split(/\s+/)[0];
+  if (role && FOCUS_CONTAINER_ROLES.has(role)) return true;
+  return !el.matches(ATOMIC_INTERACTIVE_SELECTORS);
+}
+
+/**
+ * 班牛(bytenew)bnCheck 自定义勾选控件识别(N0064 P2-1 dogfood)。
+ *
+ *   <div class="bnCheck"><span class="bnCheck-status[ checked]">…</span>
+ *        <span class="bnCheck-label">名</span></div>
+ *
+ * 无 role / 无原生 <input> / 无 aria-checked,勾选态是 `.bnCheck-status` 上的**裸**
+ * `checked` class。getRole 因此返 tag(span),controlRoleFromClass 末位 token 规则
+ * 抓不到缩写 "bnCheck"(≠checkbox),getUiState 的 is-checked/aria/native 路径也全漏
+ * (checked 落在后代 status span)。本判据从 collected 元素(常是 bnCheck-label)上溯
+ * ≤5 层命中 `.bnCheck` 根 → role=checkbox + checked。只覆盖实机验证过的 bnCheck,
+ * 不臆测 bnRadio(未复现)。
+ *
+ * Why export:供 `observe-bncheck-checkbox.test.ts` jsdom 直测真源;inject func 注入丢
+ * 模块作用域不能 import,内联同语义副本,改一处须同步(源码锁守护)。
+ */
+export function bnCheckInfo(el: Element): { role: "checkbox"; checked: boolean } | null {
+  let root: Element | null = null;
+  for (let p: Element | null = el, d = 0; p && d < 5; p = p.parentElement, d++) {
+    const cls = typeof p.className === "string" ? p.className : "";
+    if (/(^|\s)bnCheck(\s|$)/.test(cls)) {
+      root = p;
+      break;
+    }
+  }
+  if (!root) return null;
+  const status = root.querySelector(".bnCheck-status");
+  return { role: "checkbox", checked: !!status && status.classList.contains("checked") };
+}
+
 async function scanOneFrame(
   tabId: number,
   frameId: number,
@@ -347,6 +421,26 @@ async function scanOneFrame(
           "paragraph",
         ]);
 
+        // bnCheckInfo 内联副本——真源见导出函数(可单测),inject func 注入丢模块作用域
+        // 不能 import,改一处须同步(源码锁守护)。班牛 bnCheck 自定义勾选控件:无 role/无
+        // 原生 input/无 aria-checked,勾选态 = 后代 .bnCheck-status 上裸 `checked` class。
+        // 上溯 ≤5 层命中 .bnCheck 根 → checkbox + checked(N0064 P2-1)。
+        const bnCheckInfo = (
+          el: Element,
+        ): { role: "checkbox"; checked: boolean } | null => {
+          let root: Element | null = null;
+          for (let p: Element | null = el, d = 0; p && d < 5; p = p.parentElement, d++) {
+            const cls = typeof p.className === "string" ? p.className : "";
+            if (/(^|\s)bnCheck(\s|$)/.test(cls)) {
+              root = p;
+              break;
+            }
+          }
+          if (!root) return null;
+          const status = root.querySelector(".bnCheck-status");
+          return { role: "checkbox", checked: !!status && status.classList.contains("checked") };
+        };
+
         function getRole(el: Element): string {
           const explicit = el.getAttribute("role");
           if (explicit) {
@@ -380,6 +474,8 @@ async function scanOneFrame(
           // <summary> 是 disclosure 开合控件,交互模型等同按钮,role 报 button 让
           // LLM 直接理解为可点(原生 <details>/<summary>,2026-06-02 dogfood)。
           if (tag === "summary") return "button";
+          // 班牛 bnCheck 自定义勾选控件(无 role/无原生 input)→ checkbox(N0064 P2-1)。
+          if (bnCheckInfo(el)) return "checkbox";
           return tag;
         }
 
@@ -966,6 +1062,12 @@ async function scanOneFrame(
               s.checked = true;
             }
           }
+          // 班牛 bnCheck:勾选态 = 后代 .bnCheck-status 的裸 `checked` class,既非
+          // is-checked 也非 aria/native,上面全漏——单独补(N0064 P2-1)。
+          if (s.checked === undefined) {
+            const bn = bnCheckInfo(el);
+            if (bn && bn.checked) s.checked = true;
+          }
           // 禁用判定用 :disabled 伪类而非 IDL .disabled 属性:<fieldset disabled>
           // 会级联禁用内部所有控件(浏览器真禁用、阻断交互),但子控件的 IDL
           // .disabled 仍返 false——只有 :disabled 伪类反映级联真状态(同样覆盖
@@ -1287,6 +1389,24 @@ async function scanOneFrame(
         // 自身可点的内容卡(京东 _card)保留入池。
         const isSelfClickable = (el: Element): boolean =>
           getComputedStyle(el).cursor === "pointer" || hasFrameworkClick(el);
+        // isFocusContainerOnly 内联副本——真源见导出函数(可单测),inject func 注入丢
+        // 模块作用域不能 import,改一处须同步另一处(源码锁守护)。判据:祖先 role ∈
+        // 容器角色集 或 仅靠 tabindex 入池(非原子控件)→ 聚焦/浮层容器(Element UI
+        // el-popover/el-dialog/el-drawer 自带 tabindex=0+role=tooltip|dialog),它不
+        // 描述子树,下方跨池祖先短路不应因它跳过其 cursor:pointer 子项(N0064 D6
+        // columnDisplay 9 列 bnCheck 全丢)。
+        const FOCUS_CONTAINER_ROLES = new Set([
+          "tooltip", "dialog", "alertdialog", "group", "region", "menu",
+          "listbox", "tree", "grid", "table", "tabpanel", "navigation",
+          "toolbar", "document", "application", "none", "presentation",
+        ]);
+        const ATOMIC_INTERACTIVE_SELECTORS =
+          "button,a[href],summary,input:not([type=hidden]),select,textarea,label,[role=button],[role=link],[role=textbox],[role=checkbox],[role=radio],[role=tab],[role=menuitem],[role=treeitem],[role=option],[contenteditable],[onclick]";
+        const isFocusContainerOnly = (anc: Element): boolean => {
+          const role = anc.getAttribute("role")?.trim().split(/\s+/)[0];
+          if (role && FOCUS_CONTAINER_ROLES.has(role)) return true;
+          return !anc.matches(ATOMIC_INTERACTIVE_SELECTORS);
+        };
         for (const el of Array.from(fallbackPool)) {
           if (cursorPointerExtras.length >= FALLBACK_CAP) break;
           if (interactiveSet.has(el)) continue;
@@ -1316,9 +1436,13 @@ async function scanOneFrame(
           // `<span cursor:pointer>`、`<button>` 包装饰 span 等），整个 ARIA
           // 子树由 ARIA 池独家表述，fallback 跳过避免双现 dual-instance。
           // 走 parentElement 链，命中第一个 ARIA 祖先即停（O(depth)）。
+          // 例外:仅因 tabindex 可聚焦的浮层容器(Element UI el-popover/el-dialog/
+          // el-drawer:tabindex=0 + role=tooltip|dialog)不是原子点击目标,它不
+          // 描述子树——isFocusContainerOnly 跳过它,否则整层弹窗 cursor:pointer 子项
+          // (bnCheck/el-dropdown-menu__item)被全吞(N0064 D2/D3/D5/D6/D8)。
           let hasInteractiveAncestor = false;
           for (let p = el.parentElement; p && p !== docBody; p = p.parentElement) {
-            if (interactiveSet.has(p)) {
+            if (interactiveSet.has(p) && !isFocusContainerOnly(p)) {
               hasInteractiveAncestor = true;
               break;
             }
