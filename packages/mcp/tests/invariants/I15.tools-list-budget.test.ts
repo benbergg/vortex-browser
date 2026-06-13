@@ -49,7 +49,11 @@
 // + click observeEffect→effect signals),并追加 onDialog clause。
 // 恢复后 description 174 char,schema 字段 +84B,payload 实测 5918B。
 // cap +200 至 6000,留 82B 余量。description 长度上限同步放宽 120 → 180
-// (沿用"加能力微调 cap 不压缩字符"惯例；174 char = 120 原始 + 54 onDialog子句)。
+// (沿用"加能力微调 cap 不压缩字符"惯例；174 char = 120 原始 + 54 onDialog子句)
+//
+// 工具横向优化 T7: 6500 → 7100 B。vortex_fill_form 新增(fields[] 批量填表,
+// 部分成功语义)。schema 含 fields.items.properties 结构,payload 实测 6880B,
+// cap +600 至 7100 留 220B 余量。沿用"加能力微调 cap 不压缩字符"惯例。。
 
 import { describe, it, expect } from "vitest";
 import { COMMIT_KINDS } from "@vortex-browser/shared";
@@ -61,20 +65,19 @@ describe("I15: tools/list budget + count + internalized grep", () => {
     defs.map(d => ({ name: d.name, description: d.description, inputSchema: d.schema })),
   );
 
-  it("tools/list 字节 ≤ 6500 B (T6 vortex_drag 元素级 DnD 工具, 实测 6348 留 152B buffer)", () => {
+  it("tools/list 字节 ≤ 7100 B (T7 vortex_fill_form 批量填表工具, 实测 6880 留 220B buffer)", () => {
     // V2 P0 修复 D16: filter 子字段 description 是必要的文档化豁免
     // (handler 已实现 console.ts:160 level / network.ts:305-321 pattern+statusMin/Max),
     // 移除豁免会触发 V2 D16 真发现复发 (LLM 不知可用子字段)。
-    // 上限 6500 = 6100 (T4基线) + ~332 (vortex_drag schema+description) + 余量 buffer。
-    // 工具横向优化批后续 T7 fill_form / T9 query 还会涨, 最终默认面 20 工具 ~6900。
-    expect(toolsListPayload.length).toBeLessThanOrEqual(6500);
+    // 上限 7100 = 6500 (T6基线) + ~380 (vortex_fill_form schema+description) + 余量 buffer。
+    expect(toolsListPayload.length).toBeLessThanOrEqual(7100);
   });
 
-  it("公开工具数量 = 18（工具横向优化 T6: 17 + vortex_drag 元素级 DnD）", () => {
-    expect(defs.length).toBe(18);
+  it("公开工具数量 = 19（工具横向优化 T7: 18 + vortex_fill_form 批量填表）", () => {
+    expect(defs.length).toBe(19);
   });
 
-  it("18 个公开工具名匹配 spec L4 §1.1+§1.2 + 工具横向优化 T6", () => {
+  it("19 个公开工具名匹配 spec L4 §1.1+§1.2 + 工具横向优化 T6+T7", () => {
     const names = defs.map(d => d.name).sort();
     expect(names).toEqual([
       "vortex_act",
@@ -84,6 +87,7 @@ describe("I15: tools/list budget + count + internalized grep", () => {
       "vortex_extract",
       "vortex_file_upload",
       "vortex_fill",
+      "vortex_fill_form",
       "vortex_history",
       "vortex_mouse_drag",
       "vortex_navigate",

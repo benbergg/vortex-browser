@@ -367,6 +367,33 @@ export const PUBLIC_TOOLS: ToolDef[] = [
       required: ["target", "value"],
     },
   },
+  {
+    // 工具横向优化 T7: 批量填表，fields[] 循环复用 fill/dom.commit 分流，部分成功语义。
+    // 内部由 server.ts 特殊处理（逐 field 串行调 L4.fill/dom.commit），不走单次 sendRequest。
+    name: "vortex_fill_form",
+    action: "L4.fill_form",
+    description: "Batch-fill multiple fields; partial-success per field. kind=cascader/select/daterange for widgets.",
+    schema: {
+      type: "object",
+      properties: {
+        fields: {
+          type: "array" as const,
+          items: {
+            type: "object" as const,
+            properties: {
+              target: TargetRequired,
+              value: {},
+              kind: { enum: [...COMMIT_KINDS] },
+              force: { type: "boolean" as const },
+            },
+            required: ["target", "value"],
+          },
+        },
+        ...tabFields,
+      },
+      required: ["fields"],
+    },
+  },
 ];
 
 export function getPublicToolDefs(): ToolDef[] {

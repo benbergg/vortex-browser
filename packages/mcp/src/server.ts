@@ -385,6 +385,123 @@ export async function handleCallTool(
     return withEvents([{ type: "text" as const, text: resultText }]);
   }
 
+  // 特殊 tool: vortex_fill_form（批量填表，部分成功语义）
+  // 逐 field 串行执行，失败不中断后续，收集 results[] 返回。
+  if (toolDef.name === "vortex_fill_form") {
+    const fields = params.fields as Array<{
+      target: string;
+      value: unknown;
+      kind?: string;
+      force?: boolean;
+    }>;
+    const tabId = params.tabId as number | undefined;
+    const currentTabId = typeof tabId === "number" ? tabId : null;
+
+    // 空 fields 列表：报 INVALID_PARAMS
+    if (!Array.isArray(fields) || fields.length === 0) {
+      return {
+        isError: true,
+        content: [{
+          type: "text" as const,
+          text: "Error [INVALID_PARAMS]: vortex_fill_form: fields must be a non-empty array.",
+        }],
+      };
+    }
+
+    const { resolveTargetParam } = await import("./lib/ref-parser.js");
+    const results: Array<{ index: number; target: string; ok: boolean; error?: string }> = [];
+
+    for (let i = 0; i < fields.length; i++) {
+      const field = fields[i];
+      const rawTarget = field.target;
+
+      // 解析 target ref → selector / index+snapshotId（复用单工具路径相同逻辑）
+      let fieldParams: Record<string, unknown> = {};
+      try {
+        const resolved = resolveTargetParam(
+          rawTarget,
+          activeSnapshotId,
+          activeSnapshotHash,
+          activeSnapshotTabId,
+          currentTabId,
+        );
+        if (resolved.selector) fieldParams.selector = resolved.selector;
+        if (resolved.index != null) {
+          fieldParams.index = resolved.index;
+          fieldParams.snapshotId = resolved.snapshotId;
+          if (resolved.frameId && resolved.frameId !== 0) fieldParams.frameId = resolved.frameId;
+        }
+      } catch (err) {
+        // target 解析失败：记录错误，继续下一字段
+        results.push({
+          index: i,
+          target: rawTarget,
+          ok: false,
+          error: formatError(err),
+        });
+        continue;
+      }
+
+      // 复用 vortex_fill dispatch 逻辑：kind 存在 → dom.commit；否则 → dom.fill
+      let action: string;
+      if (!field.kind) {
+        action = "dom.fill";
+        fieldParams.value = field.value;
+      } else {
+        action = "dom.commit";
+        fieldParams.kind = field.kind;
+        // 结构化 value 可能被 client 序列化为 JSON 字符串，还原
+        const raw = field.value;
+        if (typeof raw === "string") {
+          try {
+            const parsed: unknown = JSON.parse(raw);
+            fieldParams.value = parsed !== null && typeof parsed === "object" ? parsed : raw;
+          } catch {
+            fieldParams.value = raw;
+          }
+        } else {
+          fieldParams.value = raw;
+        }
+      }
+      if (field.force !== undefined) fieldParams.force = field.force;
+
+      // 发请求
+      try {
+        const resp = await sendRequest(action, fieldParams, PORT, tabId, DEFAULT_TIMEOUT);
+        if (resp.error) {
+          results.push({
+            index: i,
+            target: rawTarget,
+            ok: false,
+            error: `[${resp.error.code}]: ${resp.error.message}`,
+          });
+        } else {
+          results.push({ index: i, target: rawTarget, ok: true });
+        }
+      } catch (err) {
+        results.push({
+          index: i,
+          target: rawTarget,
+          ok: false,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+
+    const successCount = results.filter((r) => r.ok).length;
+    const failed = results.filter((r) => !r.ok);
+    const summary = {
+      total: fields.length,
+      success: successCount,
+      failed: failed.length,
+      results,
+    };
+    return withEvents([{
+      type: "text" as const,
+      text: JSON.stringify(summary, null, 2),
+    }]);
+  }
+
   // BUG-002 (N0063): wait_for(mode=element) 的 @ref 经 value 字段传入,这里抬成 target,
   // 复用下方同一条翻译链 + STALE/tab 校验(dispatch 拿不到 snapshot 状态无法自译)。
   liftWaitForRefToTarget(toolDef.name, params);

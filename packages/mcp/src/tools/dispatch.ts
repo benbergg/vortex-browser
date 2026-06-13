@@ -343,6 +343,12 @@ export function dispatchNewTool(
       return null;
     }
 
+    case "vortex_fill_form": {
+      // 批量填表由 server.ts 特殊分支处理（逐 field 串行调 fill/dom.commit），
+      // dispatch 层无需 reshape，返回 null 透传 toolDef.action。
+      return null;
+    }
+
     default:
       return null;
   }

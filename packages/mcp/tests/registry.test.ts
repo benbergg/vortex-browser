@@ -15,11 +15,12 @@ describe("getToolDefs", () => {
     expect(a).toEqual(b);
   });
 
-  it("returns 18 public tools (工具横向优化 T6: 17 + vortex_drag 元素级 DnD)", () => {
+  it("returns 19 public tools (工具横向优化 T7: 18 + vortex_fill_form 批量填表)", () => {
     // v2.1 PR-A: 把 v0.5 内部化的 vortex_tab_list + vortex_history
     // promote 回 public（spec 12-Projects/0000-vortex优化/v2.1-实施方案.md §2 §3）。
     // 后端 handler 早就 ready,只是 schemas-public.ts 没复制 schema 块。
     // 工具横向优化 T6: 新增 vortex_drag(元素级 DnD, action=mouse.dragElement)。
+    // 工具横向优化 T7: 新增 vortex_fill_form(fields[] 批量填表, 部分成功语义)。
     const names = getToolDefs().map((d) => d.name);
     expect(names.sort()).toEqual([
       "vortex_act",
@@ -29,6 +30,7 @@ describe("getToolDefs", () => {
       "vortex_extract",
       "vortex_file_upload",
       "vortex_fill",
+      "vortex_fill_form",
       "vortex_history",
       "vortex_mouse_drag",
       "vortex_navigate",
@@ -97,10 +99,11 @@ describe("getToolDefs", () => {
     expect(navigate?.returnsImage).toBeUndefined();
   });
 
-  it("has exactly 18 public tools (工具横向优化 T6: 17 + vortex_drag)", () => {
+  it("has exactly 19 public tools (工具横向优化 T7: 18 + vortex_fill_form)", () => {
     // v2.1 PR-A 工作量 ≤ 0.3 人天:schemas-public.ts 复制 2 个 schema 块 +
     // 2 段 description 改写,后端零代码改动。
-    expect(getToolDefs().length).toBe(18);
+    // 工具横向优化 T7: 新增 vortex_fill_form(fields[] 批量填表, 部分成功语义)。
+    expect(getToolDefs().length).toBe(19);
   });
 });
 
