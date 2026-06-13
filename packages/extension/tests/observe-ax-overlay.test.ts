@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { computeAXOverlay, extractCompound } from "../src/handlers/observe-ax-overlay.js";
+import { computeAXOverlay, extractCompound, applyOverlay } from "../src/handlers/observe-ax-overlay.js";
 import type { CDPAXNode } from "../src/reasoning/types.js";
 
 const ax = (o: Partial<CDPAXNode>): CDPAXNode => ({ nodeId: "x", ...o });
@@ -61,5 +61,65 @@ describe("extractCompound", () => {
   it("非复合控件返回 undefined", () => {
     const c = extractCompound(ax({ role: { value: "button" } }), new Map());
     expect(c).toBeUndefined();
+  });
+});
+
+describe("applyOverlay 召回安全 + 回退", () => {
+  it("AX map 为空:全部标 heuristic,role/name 不变,元素集大小恒定", () => {
+    const els = [
+      { role: "button", name: "保存" },
+      { role: "div", name: "x", reactClickable: true as const },
+    ];
+    applyOverlay(els as any, new Map([[0, 100], [1, 200]]), new Map(), new Map());
+    expect(els.length).toBe(2);             // 召回铁律:元素集大小不变
+    expect(els[0].role).toBe("button");     // 漏命中保留启发式
+    expect(els[1].role).toBe("div");
+    expect((els[0] as any).nameSource).toBe("heuristic");
+    expect((els[1] as any).nameSource).toBe("heuristic");
+  });
+
+  it("indexToBackend 失配(标记丢失):不抛,元素回退 heuristic", () => {
+    const els = [{ role: "a", name: "" }];
+    expect(() => applyOverlay(els as any, new Map(), new Map(), new Map())).not.toThrow();
+    expect((els[0] as any).nameSource).toBe("heuristic");
+    expect(els.length).toBe(1);
+  });
+
+  it("AX role=generic 不夺启发式交互 role(信召回);name 仍取 AX", () => {
+    const els = [{ role: "button", name: "更多", reactClickable: true as const }];
+    const byBackend = new Map<number, CDPAXNode>([
+      [100, ax({ role: { value: "generic" }, name: { value: "更多按钮" } })],
+    ]);
+    applyOverlay(els as any, new Map([[0, 100]]), byBackend, new Map());
+    expect(els[0].role).toBe("button");      // generic 不覆盖
+    expect(els[0].name).toBe("更多按钮");     // name 仍取 AX
+  });
+
+  it("compound 经 applyOverlay 端到端写入 el.compound + 覆盖 role", () => {
+    const byNodeId = new Map<string, CDPAXNode>([
+      ["sel", ax({ nodeId: "sel", role: { value: "combobox" }, childIds: ["lb"] })],
+      ["lb", ax({ nodeId: "lb", role: { value: "listbox" }, childIds: ["o1", "o2"] })],
+      ["o1", ax({ nodeId: "o1", role: { value: "option" }, name: { value: "A" } })],
+      ["o2", ax({ nodeId: "o2", role: { value: "option" }, name: { value: "B" } })],
+    ]);
+    const byBackend = new Map<number, CDPAXNode>([[100, byNodeId.get("sel")!]]);
+    const els = [{ role: "div", name: "下拉" }];
+    applyOverlay(els as any, new Map([[0, 100]]), byBackend, byNodeId);
+    expect((els[0] as any).compound).toEqual({ role: "listbox", count: 2, options: ["A", "B"] });
+    expect(els[0].role).toBe("combobox");
+  });
+
+  it("errorMessage 经 applyOverlay 写入(invalid 字段场景)", () => {
+    const byBackend = new Map<number, CDPAXNode>([
+      [100, ax({ role: { value: "textbox" }, name: { value: "邮箱" },
+        properties: [
+          { name: "invalid", value: { value: true } },
+          { name: "errormessage", value: { relatedNodes: [{ text: "邮箱格式不正确" }] } },
+        ] })],
+    ]);
+    const els = [{ role: "textbox", name: "邮箱" }];
+    applyOverlay(els as any, new Map([[0, 100]]), byBackend, new Map());
+    expect((els[0] as any).errorMessage).toBe("邮箱格式不正确");
+    expect((els[0] as any).state?.invalid).toBe(true);
   });
 });
