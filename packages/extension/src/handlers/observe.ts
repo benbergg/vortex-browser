@@ -11,6 +11,7 @@ import {
 } from "../lib/snapshot-store.js";
 import { captureAXNodeMap } from "../reasoning/ax-snapshot.js";
 import { buildIndexToBackend, applyOverlay, type OverlayableElement } from "./observe-ax-overlay.js";
+import { collectJsListenerIndices, applyListenerSignal } from "./observe-js-listener.js";
 
 type FramesParam =
   | "main"
@@ -102,6 +103,9 @@ interface ScannedElement {
   reactClickable?: true;
   /** reactClickable=true 时给 LLM 的可读提示, 含具体兜底命令名。 */
   clickHint?: string;
+  /** CDP getEventListeners 确认有 click/mousedown/pointerdown 监听器。
+   * 高优先交互判定信号（优先级高于 cursor:pointer 启发），并集增强不删元素。@since T3 */
+  listenerInteractive?: true;
   /** 最近的已收集祖先的 frame-local index；根节点 undefined。@since a11y-tree */
   parentIndex?: number;
   /** role=link 的 href，供 compact 树渲染 /url。@since a11y-tree */
@@ -1985,7 +1989,7 @@ async function scanOneFrame(
 }
 
 export function registerObserveHandlers(router: ActionRouter, debuggerMgr: DebuggerManager): void {
-  void debuggerMgr; // 后续 AX pass 使用
+  // debuggerMgr 用于 AX overlay pass + JS listener 信号（T3）
   router.registerAll({
     [ObserveActions.SNAPSHOT]: async (args, tabId) => {
       gcSnapshots();
@@ -2168,6 +2172,23 @@ export function registerObserveHandlers(router: ActionRouter, debuggerMgr: Debug
           }
         }
       }
+      // JS 监听器真值信号层(T3)：CDP getEventListeners 对主 frame 已扫元素打
+      // listenerInteractive 标记。须在 AX overlay pass 之后（data-vtx-ax 已打）、
+      // marker 清理之前（data-vtx-ax 尚存）运行。
+      // 召回零回退：只新增 listenerInteractive，不删除任何元素；CDP 失败 → 空集
+      // → applyListenerSignal no-op，observe 整轮不崩。
+      if (includeAX) {
+        const mainScan = scans.find((s) => s.frameId === 0);
+        if (mainScan?.page && mainScan.page.elements.length > 0) {
+          // collectJsListenerIndices 内置 try-catch，失败返回空集，不抛
+          const listenerIndices = await collectJsListenerIndices(debuggerMgr, tid, 0);
+          applyListenerSignal(
+            mainScan.page.elements as unknown as { listenerInteractive?: true; [k: string]: unknown }[],
+            listenerIndices,
+          );
+        }
+      }
+
       // marker 清理(无条件):page-side stamping 无条件,故清理也须无条件,
       // 防 includeAX:false 时标记被打上却永不清除(终审 Issue 1)。清理失败不致命。
       try {
@@ -2201,6 +2222,8 @@ export function registerObserveHandlers(router: ActionRouter, debuggerMgr: Debug
         /** BUG-010 N0060 京东评测: onClick 桩 / cursor:pointer 命中 (compact 也透传) */
         reactClickable?: true;
         clickHint?: string;
+        /** CDP getEventListeners 真值信号，透传渲染层。@since T3 */
+        listenerInteractive?: true;
         frameId: number;
         // Issue #21 — populated only when input.includeBoxes && e.inViewport (T4).
         bbox?: [number, number, number, number];
@@ -2294,6 +2317,8 @@ export function registerObserveHandlers(router: ActionRouter, debuggerMgr: Debug
               ...(e.reactClickable
                 ? { reactClickable: true as const, clickHint: e.clickHint! }
                 : {}),
+              // T3: CDP getEventListeners 真值信号透传渲染层（并集增强）。
+              ...(e.listenerInteractive ? { listenerInteractive: true as const } : {}),
               // a11y-tree: 全局重映射后的父指针 + href（link 元素）。
               ...(globalParentIndex !== undefined ? { parentIndex: globalParentIndex } : {}),
               ...(e.href ? { href: e.href } : {}),
@@ -2333,6 +2358,8 @@ export function registerObserveHandlers(router: ActionRouter, debuggerMgr: Debug
               ...(e.reactClickable
                 ? { reactClickable: true as const, clickHint: e.clickHint! }
                 : {}),
+              // T3: CDP getEventListeners 真值信号透传渲染层（并集增强）。
+              ...(e.listenerInteractive ? { listenerInteractive: true as const } : {}),
               // a11y-tree: 全局重映射后的父指针 + href（link 元素）。
               ...(globalParentIndex !== undefined ? { parentIndex: globalParentIndex } : {}),
               ...(e.href ? { href: e.href } : {}),

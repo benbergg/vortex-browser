@@ -18,6 +18,8 @@ export interface CompactElement {
   parentIndex?: number;
   /** react onClick / cursor:pointer 命中 → 渲染 [cursor=pointer]。@since a11y-tree */
   reactClickable?: true;
+  /** CDP getEventListeners 确认有 click/mousedown/pointerdown 监听器 → 渲染 [listener]。@since T3 */
+  listenerInteractive?: true;
   /** role=link 的 href，渲染 /url: 属性行。@since a11y-tree */
   href?: string;
   /** AX nameSource：名称来源(label/placeholder/title/heuristic 等)。@since ax-overlay */
@@ -202,6 +204,8 @@ export function renderObserveTree(
     const name = e.name ? ` "${escapeName(e.name)}"` : "";
     const ref = ` [ref=${refOf(e, snapshotHash)}]`;
     const cursor = e.reactClickable ? " [cursor=pointer]" : "";
+    // CDP getEventListeners 真值信号：[listener] 标记区分「真有 JS 监听器」vs「仅 cursor 启发」。
+    const listener = e.listenerInteractive ? " [listener]" : "";
     const valueSeg =
       e.valueNow !== undefined
         ? ` value=${/\s/.test(e.valueNow) ? JSON.stringify(e.valueNow) : e.valueNow}`
@@ -221,7 +225,7 @@ export function renderObserveTree(
       : "";
     const desc = e.description ? ` desc=${JSON.stringify(e.description.slice(0, 60))}` : "";
     lines.push(
-      `${indent}- ${e.role}${name}${ref}${stateFlags(e.state)}${weak}${cursor}${valueSeg}${comp}${err}${ctrl}${desc}${bboxSeg}${hasChildren ? ":" : ""}`,
+      `${indent}- ${e.role}${name}${ref}${stateFlags(e.state)}${weak}${cursor}${listener}${valueSeg}${comp}${err}${ctrl}${desc}${bboxSeg}${hasChildren ? ":" : ""}`,
     );
     if (hasUrl) lines.push(`${indent}  - /url: ${e.href}`);
     for (const k of kids) emit(k, depth + 1);
