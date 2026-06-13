@@ -34,6 +34,19 @@ export interface CompactElement {
   description?: string;
   /** 复合控件元数据(combobox/listbox 等)。@since ax-overlay */
   compound?: { role: string; count?: number; options?: string[]; formatHint?: string };
+  /**
+   * 元素是否在当前视口内（由 extension observe.ts 计算）。
+   * true=视口内可直接点击，false=需要滚动后才可操作。
+   * undefined=旧快照数据（向后兼容，不打 [offscreen]）。
+   * @since T4-viewport
+   */
+  inViewport?: boolean;
+  /**
+   * 视口外但 CDP 仍可操作的元素（例如粘性 header 下的隐藏元素）。
+   * true=屏外可交互，计入"N more below"汇总计数。
+   * @since T4-viewport
+   */
+  offScreenActionable?: boolean;
 }
 
 interface CompactFrame {
@@ -53,6 +66,80 @@ interface CompactObserve {
   viewport?: { width: number; height: number; scrollY: number; scrollHeight: number };
   frames?: CompactFrame[];
   elements: CompactElement[];
+  /**
+   * 传入上一次 observe 返回的 snapshotId，渲染时相比上次新增的元素会打 `*` 前缀，
+   * 方便 LLM 快速识别弹层/Toast 等动态新 UI。
+   * 不传则行为完全不变（向后兼容）。
+   * @since T4-diff
+   */
+  prevSnapshotId?: string;
+}
+
+// =========================================================
+// MCP 侧轻量快照缓存（供 prevSnapshotId diff 使用）
+// =========================================================
+
+/** 渲染侧快照缓存条目：仅保存元素身份键集合（不存完整元素，省内存）。*/
+export interface RenderSnapshotEntry {
+  /** 元素身份键：`role::name::frameId`，用于跨快照判定是否新增。 */
+  elementKey: string;
+  index: number;
+}
+
+/** 快照 ID → 身份键集合映射；TTL 5 分钟，容量上限 20 条。 */
+const renderSnapshotCache = new Map<string, { keys: Set<string>; ts: number }>();
+const RENDER_CACHE_TTL_MS = 5 * 60 * 1000;
+const RENDER_CACHE_MAX = 20;
+
+/**
+ * 显式存入一个渲染侧快照（测试用）。
+ * 生产路径中每次 renderObserve* 结束后自动调用 `autoStoreSnapshot`。
+ */
+export function storeSnapshot(snapshotId: string, entries: RenderSnapshotEntry[]): void {
+  gcRenderCache();
+  renderSnapshotCache.set(snapshotId, {
+    keys: new Set(entries.map((e) => e.elementKey)),
+    ts: Date.now(),
+  });
+}
+
+/** 由 `buildElementKey` 计算元素身份键：role::name::frameId。 */
+function buildElementKey(e: CompactElement): string {
+  return `${e.role}::${e.name}::${e.frameId}`;
+}
+
+/** 渲染完成后把本次快照存入缓存供后续 diff 使用。 */
+function autoStoreSnapshot(snapshotId: string, elements: CompactElement[]): void {
+  gcRenderCache();
+  renderSnapshotCache.set(snapshotId, {
+    keys: new Set(elements.map(buildElementKey)),
+    ts: Date.now(),
+  });
+}
+
+/** 取出指定快照的身份键集合；不存在或已过期返回 null。 */
+function lookupSnapshot(snapshotId: string): Set<string> | null {
+  const entry = renderSnapshotCache.get(snapshotId);
+  if (!entry) return null;
+  if (Date.now() - entry.ts > RENDER_CACHE_TTL_MS) {
+    renderSnapshotCache.delete(snapshotId);
+    return null;
+  }
+  return entry.keys;
+}
+
+function gcRenderCache(): void {
+  const now = Date.now();
+  for (const [id, entry] of renderSnapshotCache) {
+    if (now - entry.ts > RENDER_CACHE_TTL_MS) renderSnapshotCache.delete(id);
+  }
+  // 容量超限时淘汰最早的条目
+  if (renderSnapshotCache.size > RENDER_CACHE_MAX) {
+    const oldest = [...renderSnapshotCache.entries()].sort((a, b) => a[1].ts - b[1].ts);
+    for (const [id] of oldest.slice(0, renderSnapshotCache.size - RENDER_CACHE_MAX)) {
+      renderSnapshotCache.delete(id);
+    }
+  }
 }
 
 export function refOf(e: CompactElement, snapshotHash: string | null): string {
@@ -102,6 +189,11 @@ export function renderObserveCompact(
     lines.push(`Viewport: ${vp.width}x${vp.height}, scrollY=${vp.scrollY}/${vp.scrollHeight}`);
   }
   lines.push("");
+
+  // T4-diff: 查找上一快照身份键集合（不存在/过期则 null → 不 diff）。
+  const prevKeys = data.prevSnapshotId ? lookupSnapshot(data.prevSnapshotId) : null;
+
+  let offScreenCount = 0;
   for (const el of data.elements) {
     const name = el.name ? ` "${escapeName(el.name)}"` : "";
     // Issue #21 — bbox segment is opt-in AND only present when the
@@ -117,10 +209,25 @@ export function renderObserveCompact(
       el.valueNow !== undefined
         ? ` value=${/\s/.test(el.valueNow) ? JSON.stringify(el.valueNow) : el.valueNow}`
         : "";
+    // T4-viewport: 视口外元素追加 [offscreen] 标记，提示 LLM 需要先滚动。
+    // inViewport===false（明确屏外）才打标记；undefined（旧快照）保持兼容不打。
+    const offscreenSeg = el.inViewport === false ? " [offscreen]" : "";
+    if (el.offScreenActionable) offScreenCount++;
+
+    // T4-diff: 新增元素（在上次快照不存在）打 * 前缀。
+    const isNew = prevKeys !== null && !prevKeys.has(buildElementKey(el));
+    const newPrefix = isNew ? "* " : "";
+
     lines.push(
-      `${refOf(el, snapshotHash)} [${el.role}]${name}${stateFlags(el.state)}${valueSeg}${bboxSeg}`,
+      `${newPrefix}${refOf(el, snapshotHash)} [${el.role}]${name}${stateFlags(el.state)}${valueSeg}${offscreenSeg}${bboxSeg}`,
     );
   }
+
+  // T4-viewport: 汇总屏外可交互元素数量提示。
+  if (offScreenCount > 0) {
+    lines.push(`# ${offScreenCount} more below — scroll to reveal`);
+  }
+
   // Frame 状态提示：1) 未扫的（cross-origin/destroyed）2) 扫描成功但 0 元素的
   // sub-frame。后者之前沉默 → 多 frame 场景下 LLM 看不到子 frame 存在就会
   // 下结论 "frame walker 漏掉了"（见 testc 评价分析 dogfood 误诊）。
@@ -158,6 +265,10 @@ export function renderObserveCompact(
     lines.push("");
     lines.push(...scanNotes);
   }
+
+  // T4-diff: 渲染完成后自动存储本次快照，供下次 prevSnapshotId 引用。
+  autoStoreSnapshot(data.snapshotId, data.elements);
+
   return lines.join("\n");
 }
 
@@ -176,6 +287,9 @@ export function renderObserveTree(
   }
   lines.push("");
 
+  // T4-diff: 查找上一快照身份键集合。
+  const prevKeys = data.prevSnapshotId ? lookupSnapshot(data.prevSnapshotId) : null;
+
   const els = data.elements;
   const byIndex = new Map<number, CompactElement>();
   for (const e of els) byIndex.set(e.index, e);
@@ -193,6 +307,11 @@ export function renderObserveTree(
       if (arr) arr.push(e);
       else childrenOf.set(p, [e]);
     }
+  }
+
+  let offScreenCount = 0;
+  for (const e of els) {
+    if (e.offScreenActionable) offScreenCount++;
   }
 
   const visited = new Set<number>();
@@ -224,13 +343,23 @@ export function renderObserveTree(
       ? ` controls=${e.controls.map((i) => refOf({ ...e, index: i }, snapshotHash)).join(",")}`
       : "";
     const desc = e.description ? ` desc=${JSON.stringify(e.description.slice(0, 60))}` : "";
+    // T4-viewport: 视口外元素追加 [offscreen] 标记（inViewport===false 明确屏外才打）。
+    const offscreenSeg = e.inViewport === false ? " [offscreen]" : "";
+    // T4-diff: 新增元素（上次快照无此身份键）在行首打 * 前缀。
+    const isNew = prevKeys !== null && !prevKeys.has(buildElementKey(e));
+    const newPrefix = isNew ? "* " : "";
     lines.push(
-      `${indent}- ${e.role}${name}${ref}${stateFlags(e.state)}${weak}${cursor}${listener}${valueSeg}${comp}${err}${ctrl}${desc}${bboxSeg}${hasChildren ? ":" : ""}`,
+      `${indent}${newPrefix}- ${e.role}${name}${ref}${stateFlags(e.state)}${weak}${cursor}${listener}${valueSeg}${comp}${err}${ctrl}${desc}${offscreenSeg}${bboxSeg}${hasChildren ? ":" : ""}`,
     );
     if (hasUrl) lines.push(`${indent}  - /url: ${e.href}`);
     for (const k of kids) emit(k, depth + 1);
   };
   for (const r of roots) emit(r, 0);
+
+  // T4-viewport: 屏外可交互元素汇总提示。
+  if (offScreenCount > 0) {
+    lines.push(`# ${offScreenCount} more below — scroll to reveal`);
+  }
 
   // frame 提示行：与 renderObserveCompact 完全一致（未扫 / 0 元素子 frame / offset）。
   const scanNotes: string[] = [];
@@ -254,5 +383,9 @@ export function renderObserveTree(
     lines.push("");
     lines.push(...scanNotes);
   }
+
+  // T4-diff: 渲染完成后自动存储本次快照，供下次 prevSnapshotId 引用。
+  autoStoreSnapshot(data.snapshotId, data.elements);
+
   return lines.join("\n");
 }

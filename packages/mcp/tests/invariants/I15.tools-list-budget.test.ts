@@ -61,13 +61,12 @@ describe("I15: tools/list budget + count + internalized grep", () => {
     defs.map(d => ({ name: d.name, description: d.description, inputSchema: d.schema })),
   );
 
-  it("tools/list 字节 ≤ 6000 B (dialog-handling onDialog/promptText +84B schema + 恢复 vortex_act description, 实测 5918 留 82B buffer)", () => {
+  it("tools/list 字节 ≤ 6100 B (T4 prevSnapshotId +16B，实测 6016 留 84B buffer)", () => {
     // V2 P0 修复 D16: filter 子字段 description 是必要的文档化豁免
     // (handler 已实现 console.ts:160 level / network.ts:305-321 pattern+statusMin/Max),
     // 移除豁免会触发 V2 D16 真发现复发 (LLM 不知可用子字段)。
-    // 上限 6000 = 5800 (上轮基线) + 200 (onDialog/promptText 真新增能力豁免
-    // + vortex_act description 恢复载荷性 hint，实测 5918B，留 82B 余量)。
-    expect(toolsListPayload.length).toBeLessThanOrEqual(6000);
+    // 上限 6100 = 5918 (T4前基线) + 16 (prevSnapshotId 字段) + 84 (余量 buffer)。
+    expect(toolsListPayload.length).toBeLessThanOrEqual(6100);
   });
 
   it("公开工具数量 = 17（v2.1 PR-A: v0.8 15 + tab_list + history）", () => {

@@ -366,7 +366,12 @@ export async function handleCallTool(
       const { renderObserveTree } = await import("./lib/observe-render.js");
       // a11y-tree: compact 输出升级为嵌套树（设计 20260610）。includeBoxes 透传。
       const includeBoxes = params.includeBoxes === true;
-      const text = renderObserveTree(resp.result as any, activeSnapshotHash, includeBoxes);
+      // T4-diff: 把 LLM 传入的 prevSnapshotId 合并进 result，渲染层负责 diff 计算。
+      const prevSnapshotId = typeof params.prevSnapshotId === "string" ? params.prevSnapshotId : undefined;
+      const resultWithDiff = prevSnapshotId
+        ? { ...(resp.result as object), prevSnapshotId }
+        : resp.result;
+      const text = renderObserveTree(resultWithDiff as any, activeSnapshotHash, includeBoxes);
       return withEvents([{ type: "text" as const, text }]);
     }
     // detail=full：原 JSON pretty（与 v0.4 行为一致）

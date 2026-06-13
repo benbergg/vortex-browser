@@ -81,6 +81,7 @@ export const PUBLIC_TOOLS: ToolDef[] = [
         filter: { enum: ["interactive", "all"] },
         frames: { enum: ["main", "all-same-origin", "all-permitted", "all"] },
         includeBoxes: { type: "boolean" },
+        prevSnapshotId: { type: "string" },
         ...tabFields,
       },
     },
