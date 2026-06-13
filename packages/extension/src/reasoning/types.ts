@@ -79,7 +79,7 @@ export interface AXOverlayInfo {
   nameSource?: "aria-label" | "aria-labelledby" | "label" | "contents" | "placeholder" | "title" | "heuristic";
   state?: {
     checked?: boolean | "mixed"; selected?: boolean; disabled?: boolean;
-    expanded?: boolean; required?: boolean; readonly?: boolean; invalid?: boolean; level?: number;
+    expanded?: boolean; required?: boolean; readonly?: boolean; invalid?: boolean;
   };
   valueNow?: string;
   controls?: number[];      // 目标 backendDOMNodeId(后续 remap 到 index)

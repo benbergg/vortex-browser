@@ -50,8 +50,6 @@ export function computeAXOverlay(
   if (getProp(node, "required") === true) state.required = true;
   if (getProp(node, "readonly") === true) state.readonly = true;
   if (getProp(node, "invalid") === true || getProp(node, "invalid") === "true") state.invalid = true;
-  const level = getProp(node, "level");
-  if (typeof level === "number") state.level = level;
   if (Object.keys(state).length > 0) out.state = state;
 
   const valuetext = getProp(node, "valuetext");

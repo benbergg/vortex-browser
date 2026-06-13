@@ -25,4 +25,11 @@ describe("renderObserveTree AX 语义段", () => {
     ]};
     expect(renderObserveTree(data as any, "h1", false)).toContain("[checked:mixed]");
   });
+
+  it("readonly 渲染 [readonly]", () => {
+    const data = { ...base, elements: [
+      { index: 0, tag: "input", role: "textbox", name: "ID", frameId: 0, state: { readonly: true } },
+    ]};
+    expect(renderObserveTree(data as any, "h1", false)).toContain("[readonly]");
+  });
 });

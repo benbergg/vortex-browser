@@ -93,7 +93,7 @@ interface ScannedElement {
   occludedBy?: string;
   attrs: Record<string, string>;
   /** Framework UI state derived from class / aria. @since 0.4.0 (O-8) */
-  state?: { checked?: boolean | "mixed"; selected?: boolean; active?: boolean; disabled?: boolean; expanded?: boolean; required?: boolean; current?: boolean; invalid?: boolean; sort?: "ascending" | "descending" | "none"; haspopup?: string };
+  state?: { checked?: boolean | "mixed"; selected?: boolean; active?: boolean; disabled?: boolean; expanded?: boolean; required?: boolean; current?: boolean; invalid?: boolean; sort?: "ascending" | "descending" | "none"; haspopup?: string; readonly?: boolean };
   /** 值域控件(slider/spinbutton/progressbar/meter 及原生 range/number/progress)的当前值,如 "30" 或 "30/100"。@since dogfood 2026-06-02 */
   valueNow?: string;
   /** BUG-010 N0060 京东评测: el 含 onClick 桩 / cursor:pointer 时标 true,
@@ -2167,17 +2167,18 @@ export function registerObserveHandlers(router: ActionRouter, debuggerMgr: Debug
             );
           }
         }
-        // marker 清理:一次 executeScript 清所有 frame 的 data-vtx-ax
-        try {
-          await chrome.scripting.executeScript({
-            target: { tabId: tid, allFrames: true },
-            func: () => {
-              for (const el of document.querySelectorAll("[data-vtx-ax]")) el.removeAttribute("data-vtx-ax");
-            },
-          });
-        } catch {
-          /* 清理失败不致命:标记仅 observe 内部用,下轮 scan 覆盖 */
-        }
+      }
+      // marker 清理(无条件):page-side stamping 无条件,故清理也须无条件,
+      // 防 includeAX:false 时标记被打上却永不清除(终审 Issue 1)。清理失败不致命。
+      try {
+        await chrome.scripting.executeScript({
+          target: { tabId: tid, allFrames: true },
+          func: () => {
+            for (const el of document.querySelectorAll("[data-vtx-ax]")) el.removeAttribute("data-vtx-ax");
+          },
+        });
+      } catch {
+        /* 标记仅 observe 内部用,下轮 scan 覆盖 */
       }
 
       // password 防护:type=password 的 valueNow 剥除,防敏感值泄露进下一个 prompt。
@@ -2194,7 +2195,7 @@ export function registerObserveHandlers(router: ActionRouter, debuggerMgr: Debug
         tag: string;
         role: string;
         name: string;
-        state?: { checked?: boolean | "mixed"; selected?: boolean; active?: boolean; disabled?: boolean; expanded?: boolean; required?: boolean; current?: boolean; invalid?: boolean; sort?: "ascending" | "descending" | "none"; haspopup?: string };
+        state?: { checked?: boolean | "mixed"; selected?: boolean; active?: boolean; disabled?: boolean; expanded?: boolean; required?: boolean; current?: boolean; invalid?: boolean; sort?: "ascending" | "descending" | "none"; haspopup?: string; readonly?: boolean };
         /** 值域控件当前值,如 "30" 或 "30/100"(getValueInfo 严格限定值域控件)。 */
         valueNow?: string;
         /** BUG-010 N0060 京东评测: onClick 桩 / cursor:pointer 命中 (compact 也透传) */
