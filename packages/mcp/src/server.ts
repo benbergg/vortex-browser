@@ -13,7 +13,7 @@ import {
   CallToolRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { sendRequest } from "./client.js";
-import { getToolDefs, getToolDef } from "./tools/registry.js";
+import { getToolDefs, getToolDef, setEnabledCaps } from "./tools/registry.js";
 import { dispatchNewTool } from "./tools/dispatch.js";
 import { computeTransportTimeout } from "./lib/timeout.js";
 import { liftWaitForRefToTarget } from "./lib/wait-for-ref.js";
@@ -729,7 +729,39 @@ export async function handleCallTool(
   }
 }
 
+/**
+ * 从 process.argv 解析 `--caps=<csv>`（caps opt-in 机制）。
+ *
+ * 健壮性：
+ * - 无 `--caps` → 返回空数组（默认面 20 工具，零回归）。
+ * - `--caps=` 空值 / 全逗号 → trim 后丢空段，返回空数组。
+ * - 多个 `--caps=a` `--caps=b,c` → 合并去重。
+ * - 同时支持 `--caps=a,b`（等号形式）和 `--caps a,b`（空格形式）。
+ * 未知 cap 不在此过滤（registry 提升时若无对应工具自然 no-op），保持解析纯净。
+ */
+export function parseCapsArg(argv: string[]): string[] {
+  const caps = new Set<string>();
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    let raw: string | undefined;
+    if (a.startsWith("--caps=")) {
+      raw = a.slice("--caps=".length);
+    } else if (a === "--caps") {
+      raw = argv[i + 1];
+      i++; // 跳过被消费的值
+    }
+    if (raw === undefined) continue;
+    for (const part of raw.split(",")) {
+      const t = part.trim();
+      if (t) caps.add(t);
+    }
+  }
+  return [...caps];
+}
+
 async function main(): Promise<void> {
+  // caps opt-in：启动期解析 --caps=<csv>，提升对应 internal 工具进 public 面。
+  setEnabledCaps(parseCapsArg(process.argv.slice(2)));
   installAutoRestart();
   const transport = new StdioServerTransport();
   await server.connect(transport);

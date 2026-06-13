@@ -27,6 +27,13 @@ export interface ToolDef {
   schema: object;
   returnsImage?: boolean;
   annotations?: ToolAnnotations;
+  /**
+   * caps opt-in 标记。带 cap 的工具默认**不**进 public 面（不在 tools/list），
+   * 仅当 server 启动时经 `--caps=<cap>` 显式启用、且 cap ∈ enabledCaps 时，
+   * 才被 registry 提升进 getToolDefs/getToolDef 返回结果。
+   * 例：vortex_verify cap:"testing" —— 仅 `--caps=testing` 时对外可见。
+   */
+  cap?: string;
 }
 
 const optionalTabId = {
