@@ -53,7 +53,12 @@
 //
 // 工具横向优化 T7: 6500 → 7100 B。vortex_fill_form 新增(fields[] 批量填表,
 // 部分成功语义)。schema 含 fields.items.properties 结构,payload 实测 6880B,
-// cap +600 至 7100 留 220B 余量。沿用"加能力微调 cap 不压缩字符"惯例。。
+// cap +600 至 7100 留 220B 余量。沿用"加能力微调 cap 不压缩字符"惯例。
+//
+// 工具横向优化 vortex_query: 7100 → 7500 B。vortex_query 零 LLM 探测工具新增
+// (text grep + css find),schema 含 mode/pattern/isRegex/caseSensitive/contextChars/
+// attr/includeText/maxResults 字段,payload 实测 7417B,
+// cap +400 至 7500 留 83B 余量。沿用"加能力微调 cap 不压缩字符"惯例。
 
 import { describe, it, expect } from "vitest";
 import { COMMIT_KINDS } from "@vortex-browser/shared";
@@ -65,19 +70,19 @@ describe("I15: tools/list budget + count + internalized grep", () => {
     defs.map(d => ({ name: d.name, description: d.description, inputSchema: d.schema })),
   );
 
-  it("tools/list 字节 ≤ 7100 B (T7 vortex_fill_form 批量填表工具, 实测 6880 留 220B buffer)", () => {
+  it("tools/list 字节 ≤ 7500 B (vortex_query 零 LLM 探测工具, 实测 7417 留 83B buffer)", () => {
     // V2 P0 修复 D16: filter 子字段 description 是必要的文档化豁免
     // (handler 已实现 console.ts:160 level / network.ts:305-321 pattern+statusMin/Max),
     // 移除豁免会触发 V2 D16 真发现复发 (LLM 不知可用子字段)。
-    // 上限 7100 = 6500 (T6基线) + ~380 (vortex_fill_form schema+description) + 余量 buffer。
-    expect(toolsListPayload.length).toBeLessThanOrEqual(7100);
+    // 上限 7500 = 7100 (T7基线) + ~317 (vortex_query schema+description) + 余量 buffer。
+    expect(toolsListPayload.length).toBeLessThanOrEqual(7500);
   });
 
-  it("公开工具数量 = 19（工具横向优化 T7: 18 + vortex_fill_form 批量填表）", () => {
-    expect(defs.length).toBe(19);
+  it("公开工具数量 = 20（vortex_query 零 LLM 探测: 19 + vortex_query）", () => {
+    expect(defs.length).toBe(20);
   });
 
-  it("19 个公开工具名匹配 spec L4 §1.1+§1.2 + 工具横向优化 T6+T7", () => {
+  it("20 个公开工具名匹配 spec L4 §1.1+§1.2 + 工具横向优化 T6+T7+vortex_query", () => {
     const names = defs.map(d => d.name).sort();
     expect(names).toEqual([
       "vortex_act",
@@ -93,6 +98,7 @@ describe("I15: tools/list budget + count + internalized grep", () => {
       "vortex_navigate",
       "vortex_observe",
       "vortex_press",
+      "vortex_query",
       "vortex_screenshot",
       "vortex_storage",
       "vortex_tab_close",

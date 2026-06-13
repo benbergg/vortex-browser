@@ -134,6 +134,11 @@ export const DiagnosticsActions = {
   VERSION: "diagnostics.version",
 } as const;
 
+export const QueryActions = {
+  /** 零 LLM 探测:text grep 页面可见文本 / css 查询元素。@since 0.9.x */
+  QUERY_PAGE: "query.queryPage",
+} as const;
+
 export type ActionString =
   | (typeof TabActions)[keyof typeof TabActions]
   | (typeof PageActions)[keyof typeof PageActions]
@@ -150,4 +155,5 @@ export type ActionString =
   | (typeof FileActions)[keyof typeof FileActions]
   | (typeof ObserveActions)[keyof typeof ObserveActions]
   | (typeof EventsActions)[keyof typeof EventsActions]
-  | (typeof DiagnosticsActions)[keyof typeof DiagnosticsActions];
+  | (typeof DiagnosticsActions)[keyof typeof DiagnosticsActions]
+  | (typeof QueryActions)[keyof typeof QueryActions];

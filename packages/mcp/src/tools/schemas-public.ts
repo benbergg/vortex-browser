@@ -368,6 +368,27 @@ export const PUBLIC_TOOLS: ToolDef[] = [
     },
   },
   {
+    // 零 LLM 探测:text grep 可见文本 / css 计数+取属性。一次 executeScript 即时返回。
+    name: "vortex_query",
+    action: "query.queryPage",
+    description: "Zero-LLM page probe: mode=text greps visible text; mode=css finds elements by selector (attr for attributes, e.g. href).",
+    schema: {
+      type: "object",
+      properties: {
+        mode: { enum: ["text", "css"] },
+        pattern: { type: "string" },
+        isRegex: { type: "boolean" },
+        caseSensitive: { type: "boolean" },
+        contextChars: { type: "number" },
+        attr: { type: "string" },
+        includeText: { type: "boolean" },
+        maxResults: { type: "number" },
+        ...tabFields,
+      },
+      required: ["mode", "pattern"],
+    },
+  },
+  {
     // 工具横向优化 T7: 批量填表，fields[] 循环复用 fill/dom.commit 分流，部分成功语义。
     // 内部由 server.ts 特殊处理（逐 field 串行调 L4.fill/dom.commit），不走单次 sendRequest。
     name: "vortex_fill_form",
