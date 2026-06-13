@@ -1,6 +1,12 @@
 import type { CDPAXNode, AXOverlayInfo, AXValueSource } from "../reasoning/types.js";
 
-const GENERIC_ROLES = new Set(["generic", "none", "presentation", "", "text", "InlineTextBox"]);
+// AX role 命中这些时不夺启发式 role(信召回 + 保留更清晰的启发式角色)。
+// 除无语义的 generic/none/presentation 外,也含 Chrome AX 内部文本角色 LabelText
+// ——可点 <label> 的 AX role 是 LabelText,但对 LLM 远不如启发式的 `label` 清晰
+// (bench aria-cursor-nested-no-dup 暴露)。name/state 仍取 AX。
+const GENERIC_ROLES = new Set([
+  "generic", "none", "presentation", "", "text", "InlineTextBox", "LabelText",
+]);
 
 function getProp(n: CDPAXNode, name: string): unknown {
   return n.properties?.find((p) => p.name === name)?.value?.value;

@@ -123,3 +123,12 @@ describe("applyOverlay 召回安全 + 回退", () => {
     expect((els[0] as any).state?.invalid).toBe(true);
   });
 });
+
+describe("computeAXOverlay LabelText 不夺 role", () => {
+  it("AX role=LabelText 不覆盖启发式 label(保留更清晰角色),name 仍取 AX", () => {
+    const node = ax({ role: { value: "LabelText" }, name: { value: "好评" } });
+    const r = computeAXOverlay({ backendId: 1, role: "label", name: "好评" }, node);
+    expect(r.role).toBeUndefined(); // LabelText 不夺,启发式 label 保留
+    expect(r.name).toBe("好评");
+  });
+});
