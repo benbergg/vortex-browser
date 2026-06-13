@@ -5,12 +5,13 @@
  * 凌驾于 cursor:pointer 启发式之上，但**绝不剔除**已有启发式识别的元素（并集增强）。
  *
  * 测试覆盖：
- *   1. 有监听器（click/mousedown/pointerdown）的元素返回索引集合
+ *   1. 有监听器（click/mousedown/mouseup/pointerdown/pointerup）的元素返回索引集合
  *   2. [listener] 标记出现在渲染输出
  *   3. 元素总数 >N 时跳过，返回空集，不抛
  *   4. CDP 失败时回退空集，不抛
  *   5. 召回不回退：原启发式判为交互的元素在 listenerIndices 为空时仍保留
  *   6. listenerInteractive 仅新增信号，不删除原有元素（并集增强语义）
+ *   7. mouseup/pointerup 也触发 listenerInteractive（事件类型补全覆盖）
  */
 
 import { describe, it, expect, vi } from "vitest";
@@ -82,6 +83,18 @@ describe("collectJsListenerIndices", () => {
     const indices = await collectJsListenerIndices(dbg as any, 1, 0);
     expect(indices.has(0)).toBe(true);
     expect(indices.has(3)).toBe(true);
+    expect(indices.size).toBe(2);
+  });
+
+  it("mouseup/pointerup 监听器元素同样被收入索引集（事件类型补全）", async () => {
+    // 模拟页面侧表达式识别到 mouseup(idx=1) 和 pointerup(idx=3) 监听器
+    // CDP 返回的是已过滤后的索引映射（页面侧 CLICK_TYPES 包含 mouseup/pointerup 后正确过滤）
+    const dbg = makeDbg({ evalResult: { 1: true, 3: true } });
+    const indices = await collectJsListenerIndices(dbg as any, 1, 0);
+    // 两者均应进入集合（证明调用方正确消费 CDP 结果）
+    expect(indices.has(1)).toBe(true);
+    expect(indices.has(3)).toBe(true);
+    expect(indices.has(0)).toBe(false);
     expect(indices.size).toBe(2);
   });
 });

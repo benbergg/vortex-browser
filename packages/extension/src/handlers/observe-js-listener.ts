@@ -2,15 +2,19 @@
  * getEventListeners 真值交互信号层（任务 T3）
  *
  * 设计：用 CDP Runtime.evaluate + includeCommandLineAPI:true 在页面侧调用
- * `getEventListeners(el)` 收集带 click/mousedown/pointerdown 监听器的元素，
- * 通过已打的 data-vtx-ax 下标关联到 ScannedElement 列表，原地标记
+ * `getEventListeners(el)` 收集带 click/mousedown/mouseup/pointerdown/pointerup
+ * 监听器的元素，通过已打的 data-vtx-ax 下标关联到 ScannedElement 列表，原地标记
  * `listenerInteractive: true`。
  *
  * 召回零回退铁律：
  *   - 此模块只**新增** listenerInteractive 标记，不删除任何元素，不修改
  *     原有 reactClickable/role/name 等字段。
- *   - CDP 失败 / 元素总数 > JS_LISTENER_ELEMENT_CAP → 静默返回空集，
- *     observe 整轮不崩、不丢元素，原启发式保持不变。
+ *   - CDP 失败 → 静默返回空集，observe 整轮不崩、不丢元素，原启发式保持不变。
+ *
+ * React 委托注意：React 17+ 将 onClick 委托到 root 容器（#root/document），
+ * 单个 `<div onClick>` 元素自身的 getEventListeners 查不到监听器，不会打
+ * [listener] 标记。但本信号是**并集增强**（非替换），该元素仍由 cursor:pointer
+ * 启发式（reactClickable）照常召回，零漏抓。维护者勿误判为 bug。
  *
  * 参考：browser-use dom/service.py 447-535（同路径：Runtime.evaluate +
  * includeCommandLineAPI + describeNode 批量；本实现用 data-vtx-ax 直接关联
@@ -20,16 +24,18 @@
 import type { DebuggerManager } from "../lib/debugger-manager.js";
 
 /**
- * 页面元素总数上限：超过此值时跳过 getEventListeners 扫描，静默回退。
- * 与 browser-use 保持一致（~10000），防止超重型页面卡死。
+ * 已打 [data-vtx-ax] 标记元素数上限：超过此值时跳过 getEventListeners 扫描，静默回退。
+ * 标记元素数 = observe 候选集大小（通常 ≤ maxElements 默认值 80），远低于全量 DOM 数。
+ * 此常量保留与 browser-use 同量级（~10000）以防极端场景（maxElements 被大幅放宽时）。
  */
 export const JS_LISTENER_ELEMENT_CAP = 10000;
 
 /**
  * 关注的事件类型：只有包含这些事件的元素才判为有 JS 监听器。
- * click / mousedown / pointerdown 覆盖所有主流点击类监听。
+ * 对齐 browser-use 参考实现的 5 类：click / mousedown / mouseup /
+ * pointerdown / pointerup 覆盖所有主流点击类监听。
  */
-const CLICK_EVENT_TYPES = ["click", "mousedown", "pointerdown"];
+const CLICK_EVENT_TYPES = ["click", "mousedown", "mouseup", "pointerdown", "pointerup"];
 
 /**
  * 通过 CDP Runtime.evaluate（includeCommandLineAPI:true）在页面侧调用
@@ -38,15 +44,16 @@ const CLICK_EVENT_TYPES = ["click", "mousedown", "pointerdown"];
  * 机制：
  *   1. 页面侧已打 `data-vtx-ax=<idx>` 标记（observe scan 后、AX overlay 前后均存在）
  *   2. 遍历所有 `[data-vtx-ax]` 元素（O(N)，N = 已收集候选数，通常 ≤ 80）
- *      而非 document.querySelectorAll('*')（O(全量），避免不必要全量遍历）
+ *      而非 document.querySelectorAll('*')（O(全量)），避免不必要全量遍历
  *   3. 对每个元素调 getEventListeners，返回 {idx: true} 的扁平映射
- *   4. 全量页面元素 > JS_LISTENER_ELEMENT_CAP 时提前 return null → 调用方收空集
+ *   4. 标记元素数 > JS_LISTENER_ELEMENT_CAP 时提前 return null → 调用方收空集
  *
  * 返回：Set<number>，含有监听器的 data-vtx-ax 索引；失败时返回空集。
  *
  * @param debuggerMgr  DebuggerManager 实例（已 attach）
  * @param tabId        目标 tab
- * @param frameId      目标 frame（仅主 frame 0，子 frame 暂不支持）
+ * @param _frameId     目标 frame（当前恒在 tab 主 frame 执行；子 frame 暂不支持，
+ *                     需改用 CDP executionContextId 路由，保留参数供将来扩展）
  */
 export async function collectJsListenerIndices(
   debuggerMgr: Pick<DebuggerManager, "sendCommand" | "attach">,
@@ -62,26 +69,27 @@ export async function collectJsListenerIndices(
 
     /**
      * 页面侧注入表达式：
-     *   - 先统计全量元素数，超 cap 返回 null（让调用方静默回退）。
-     *   - 遍历已打 data-vtx-ax 标记的元素（候选集，通常 ≤ 80），
-     *     对每个调 getEventListeners 检测 click/mousedown/pointerdown。
+     *   - 仅扫已打 data-vtx-ax 标记的候选元素（observe scan 输出集，通常 ≤ 80），
+     *     标记数超 cap 时返回 null（调用方静默回退）。
+     *   - 对每个元素调 getEventListeners 检测 5 类点击事件：
+     *     click / mousedown / mouseup / pointerdown / pointerup。
      *   - 返回 {vtxIdx: true, ...} 的扁平对象（JSON-serializable）。
      *
-     * 为什么只扫 [data-vtx-ax] 而非 querySelectorAll('*')：
-     *   候选数通常 ≤ 80（maxElements 默认值），全量可能 10000+；
-     *   只关心已收集元素的监听信号，扫全量既慢又无用。
+     * 不扫 querySelectorAll('*') 的理由：
+     *   真正循环的对象是 [data-vtx-ax] 标记元素（候选集），已天然有界；
+     *   全量 * 扫在重型页面是纯额外开销且与 cap 保护对象不符。
      */
     const expression = `
       (() => {
         // getEventListeners 仅在 includeCommandLineAPI 开启时可用
         if (typeof getEventListeners !== 'function') return null;
 
-        // 全量元素超 cap → 跳过防卡（与 browser-use 一致）
-        const allEls = document.querySelectorAll('*');
-        if (allEls.length > ${JS_LISTENER_ELEMENT_CAP}) return null;
-
         // 仅扫已打 data-vtx-ax 标记的候选元素（observe scan 输出集）
         const marked = document.querySelectorAll('[data-vtx-ax]');
+
+        // 标记元素数超 cap → 跳过防卡（极端场景：maxElements 被大幅放宽时）
+        if (marked.length > ${JS_LISTENER_ELEMENT_CAP}) return null;
+
         const result = {};
         const CLICK_TYPES = ${JSON.stringify(CLICK_EVENT_TYPES)};
         for (const el of marked) {
