@@ -97,10 +97,11 @@ describe("vortex_debug_read filter 子字段 description 文档化 (V2 P0 修复
     ).toMatch(/statusMax|statusMin\/Max/);
   });
 
-  it("description 总长度 ≤ 60 char (I15 invariant 约束, 顶层 description)", () => {
+  it("description 总长度 ≤ 180 char (I15 invariant 约束, 顶层 description, source=request 能力追加后放宽)", () => {
     const desc = getDebugReadDescription();
-    // 顶层 description 60 char 预算
+    // 顶层 description 放宽至 I15 v5.0 全局上限 180 char
+    // source=request 新能力将 description 扩至 ~76 char (在 180 之内)
     // filter 子字段 description 不在 I15 invariant 约束内 (可详尽)
-    expect(desc.length).toBeLessThanOrEqual(60);
+    expect(desc.length).toBeLessThanOrEqual(180);
   });
 });

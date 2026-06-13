@@ -70,6 +70,8 @@ export const NetworkActions = {
   FILTER: "network.filter",
   CLEAR: "network.clear",
   GET_RESPONSE_BODY: "network.getResponseBody",
+  /** 按 requestId 返回单请求的 status+statusText+headers+body。@since 0.9 */
+  GET_REQUEST_DETAIL: "network.getRequestDetail",
 } as const;
 
 export const CaptureActions = {

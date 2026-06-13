@@ -201,11 +201,14 @@ export const PUBLIC_TOOLS: ToolDef[] = [
   {
     name: "vortex_debug_read",
     action: "L4.debug_read",
-    description: "Network pattern REQUIRED. filter={level|pattern}",
+    // request: 用 network 列表里的 reqid 取单请求 status+body（确定性判定）
+    description: "Network pattern REQUIRED. request:reqid→status+body. filter={level|pattern}",
     schema: {
       type: "object",
       properties: {
-        source: { enum: ["console", "network"] },
+        source: { enum: ["console", "network", "request"] },
+        // request 模式：reqid 来自 source=network 返回列表里的 requestId 字段
+        reqid: { type: "string" },
         // V2 P0 修复 D16: filter 子字段文档化 (handler 已实现, LLM 此前不知可用)
         // console: { level: 'error'|'warn'|'all' }
         // network: { pattern: '<substr>', statusMin, statusMax }
