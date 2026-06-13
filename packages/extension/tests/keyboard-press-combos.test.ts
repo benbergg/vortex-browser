@@ -216,3 +216,84 @@ describe("keyboard PRESS handler dispatch sequence", () => {
     expect(sendCommand).not.toHaveBeenCalled();
   });
 });
+
+// 可打印字符文本插入(2026-06-13 Element Plus dogfood A3):press('a') 旧实现只发
+// keyDown/keyUp 不带 `text` → keydown/keyup 事件照发但浏览器不执行默认"插入字符"
+// 动作 → input.value 不变,却返回 success(silent false success)。CDP 规范要求
+// 可打印字符的 keyDown 带 `text`/`unmodifiedText` 才会插字符。对齐 Playwright
+// keyboard.press。只对「单个可打印字符 + 无修饰键」插 text;Enter/Tab/Arrow 等
+// 非可打印键与命令组合键(Ctrl+S)不插(它们是命令不是文本)。
+describe("keyboard PRESS 可打印字符 → keyDown 带 text (A3)", () => {
+  let router: ActionRouter;
+  let sendCommand: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    router = new ActionRouter();
+    sendCommand = vi.fn().mockResolvedValue(undefined);
+    const debuggerMgr = {
+      onEvent: vi.fn(),
+      enableDomain: vi.fn().mockResolvedValue(undefined),
+      attach: vi.fn().mockResolvedValue(undefined),
+      sendCommand,
+    } as unknown as Parameters<typeof registerKeyboardHandlers>[1];
+    vi.stubGlobal("chrome", { tabs: { query: vi.fn().mockResolvedValue([]) } });
+    registerKeyboardHandlers(router, debuggerMgr);
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  const press = (key: string) =>
+    router.dispatch({
+      type: "tool_request",
+      tool: "keyboard.press",
+      args: { key },
+      requestId: `r-${key}`,
+      tabId: 7,
+    });
+
+  it("单个可打印字符 'a':keyDown 带 text/unmodifiedText='a'", async () => {
+    await press("a");
+    expect(sendCommand).toHaveBeenCalledTimes(2);
+    expect(sendCommand.mock.calls[0][2]).toMatchObject({
+      type: "keyDown",
+      key: "a",
+      text: "a",
+      unmodifiedText: "a",
+    });
+  });
+
+  it("标点 '.':keyDown 带 text='.' 且 code=Period(可打印)", async () => {
+    await press(".");
+    expect(sendCommand.mock.calls[0][2]).toMatchObject({
+      type: "keyDown",
+      text: ".",
+      code: "Period",
+    });
+  });
+
+  it("大写 'A':keyDown 带 text='A'", async () => {
+    await press("A");
+    expect(sendCommand.mock.calls[0][2]).toMatchObject({ type: "keyDown", text: "A" });
+  });
+
+  it("keyUp 不带 text(text 只在 keyDown 触发插字符)", async () => {
+    await press("a");
+    expect(sendCommand.mock.calls[1][2]).not.toHaveProperty("text");
+  });
+
+  it("非可打印键 Enter:keyDown 不带 text", async () => {
+    await press("Enter");
+    expect(sendCommand.mock.calls[0][2]).not.toHaveProperty("text");
+  });
+
+  it("非可打印键 ArrowDown:keyDown 不带 text", async () => {
+    await press("ArrowDown");
+    expect(sendCommand.mock.calls[0][2]).not.toHaveProperty("text");
+  });
+
+  it("命令组合键 Ctrl+S:'S' 的 keyDown 不带 text(是命令非文本)", async () => {
+    await press("Ctrl+S");
+    // [Ctrl down, S down, S up, Ctrl up]
+    expect(sendCommand.mock.calls[1][2]).toMatchObject({ type: "keyDown", key: "S" });
+    expect(sendCommand.mock.calls[1][2]).not.toHaveProperty("text");
+  });
+});

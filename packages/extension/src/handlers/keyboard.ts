@@ -172,6 +172,14 @@ async function dispatchKey(
   const vk = keyToVk(key);
   const physicalCode = keyToCode(key);
 
+  // 可打印单字符 + 无修饰键:keyDown 带 text/unmodifiedText,让 Chrome 执行默认
+  // "插入字符"动作。缺 text 时 keydown/keyup 事件照发(JS 监听可见)但浏览器不插
+  // 字符 → press('a') 返回 success 却 input.value 不变(silent false success)。
+  // 对齐 Playwright keyboard.press 对可打印键插字符的行为。命令组合键(Ctrl/Alt/
+  // Meta,modifiers≠0)是命令不是文本,不插;非可打印键(Enter/Tab/Arrow,key 多字符)
+  // 也不插。Shift-only 等带修饰键的大小写场景仍走 type/fill。(2026-06-13 EP dogfood A3)
+  const isPrintable = modifiers === 0 && [...key].length === 1;
+
   await debuggerMgr.sendCommand(tabId, "Input.dispatchKeyEvent", {
     type: "keyDown",
     key,
@@ -179,6 +187,7 @@ async function dispatchKey(
     windowsVirtualKeyCode: vk,
     nativeVirtualKeyCode: vk,
     modifiers,
+    ...(isPrintable ? { text: key, unmodifiedText: key } : {}),
   });
 
   await debuggerMgr.sendCommand(tabId, "Input.dispatchKeyEvent", {
