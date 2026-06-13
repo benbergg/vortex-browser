@@ -787,8 +787,9 @@ function verifyTools(): ToolDef[] {
       // 比对，绝不旁路 evaluate 做 DOM 查询。失败返回 {ok:false,expected,actual}。
       description:
         "Assert page state via the observe a11y tree (testing cap). " +
-        "mode=visible(role+name exists & visible) / value(target==value) / " +
-        "text(page or target contains text) / list(all items present). " +
+        "mode=visible(role+name exists & visible) / value(element value equals expected) / " +
+        "text(element name contains substring) / list(all items present). " +
+        "Pass target=@ref to scope value/text assertions to a specific element. " +
         "Returns {ok:true} or {ok:false,expected,actual}.",
       cap: "testing",
       schema: {
@@ -799,11 +800,11 @@ function verifyTools(): ToolDef[] {
             enum: ["visible", "value", "text", "list"],
             description: "Assertion mode.",
           },
-          role: { type: "string", description: "ARIA role to match (visible mode)." },
-          name: { type: "string", description: "Accessible name to match (visible mode)." },
-          target: { type: "string", description: "@<hash>:eN ref to scope value/text assertions." },
-          value: { description: "Expected value (value mode)." },
-          text: { type: "string", description: "Expected substring (text mode)." },
+          role: { type: "string", description: "ARIA role to match (visible/value mode)." },
+          name: { type: "string", description: "Accessible name to match (visible/value mode)." },
+          target: { type: "string", description: "@<hash>:eN ref to scope value/text assertions to the specific element identified by the ref." },
+          value: { description: "Expected value (value mode). For text inputs reflects the current IDL value after fill." },
+          text: { type: "string", description: "Expected substring to find in element name(s) (text mode). Pass target to restrict search to a specific element." },
           items: {
             type: "array",
             items: { type: "object", properties: { role: { type: "string" }, name: { type: "string" } }, required: ["name"] },

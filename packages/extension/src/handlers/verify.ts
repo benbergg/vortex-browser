@@ -77,16 +77,37 @@ function findElement(
 }
 
 /**
- * 取元素的「值」：valueNow 优先（slider/spinbutton 等），其次 attrs.value（input 类）。
+ * 取元素的「值」：valueNow 优先（IDL 当前值 / slider / spinbutton 等），
+ * 其次 attrs.value（HTML 默认属性值，仅非 password 类型）。
+ *
+ * password 保护：即使 attrs.value 非空也不读——observe 密码防护层已剥除
+ * valueNow，但 attrs.value 是 HTML 属性(非 IDL)可能残留默认值。
+ * 此处二次拦截，确保密码值不进入断言比对链。
  */
 function elementValue(el: AxElement): string | undefined {
   if (el.valueNow !== undefined) return el.valueNow;
+  // password 类型：不暴露 attrs.value，防止 HTML 属性默认值泄露
+  if ((el.attrs?.type ?? "").toLowerCase() === "password") return undefined;
   return el.attrs?.value;
+}
+
+/**
+ * 按 index 从元素列表中查找指定元素（target 作用域）。
+ * MCP server.ts 已将 @ref 翻译成 index(+snapshotId)，handler 侧读 args.index。
+ */
+function findElementByIndex(
+  elements: AxElement[],
+  index: number,
+): AxElement | undefined {
+  return elements.find((el) => el.index === index);
 }
 
 export function registerVerifyHandlers(router: ActionRouter): void {
   router.register(VerifyActions.ASSERT, async (args) => {
     const mode = args.mode as string | undefined;
+    // target 作用域：MCP server 已将 @ref 翻译成 index，handler 按 index 收窄断言。
+    // index 仅对 value/text mode 生效（visible/list 语义上无收窄需求）。
+    const targetIndex = args.index as number | undefined;
 
     // ── visible mode：断言匹配 role+name 的元素存在且可见 ──────────────────
     if (mode === "visible") {
@@ -118,7 +139,12 @@ export function registerVerifyHandlers(router: ActionRouter): void {
       const name = args.name as string | undefined;
       const expected = args.value as string | undefined;
       const elements = await fetchElements(router, args);
-      const el = findElement(elements, role, name);
+
+      // target 作用域：若传了 index，按 index 精确定位，不按 role+name 扫全局
+      const el =
+        targetIndex !== undefined
+          ? findElementByIndex(elements, targetIndex)
+          : findElement(elements, role, name);
 
       if (!el) {
         return {
@@ -138,7 +164,9 @@ export function registerVerifyHandlers(router: ActionRouter): void {
       return { ok: true };
     }
 
-    // ── text mode：断言页面含 text（在任意元素 name 中子串匹配）────────────
+    // ── text mode：断言页面含 text（在元素 name 中子串匹配）────────────────
+    // 若传了 index，则只在该元素 name 中查找（target 作用域）；
+    // 否则在全部元素 name 中查找。
     if (mode === "text") {
       const text = args.text as string | undefined;
       if (!text) {
@@ -149,7 +177,21 @@ export function registerVerifyHandlers(router: ActionRouter): void {
         };
       }
       const elements = await fetchElements(router, args);
-      // 大小写不敏感子串搜索各 element name
+
+      if (targetIndex !== undefined) {
+        // target 作用域：只在指定元素 name 中搜索
+        const el = findElementByIndex(elements, targetIndex);
+        if (!el || !el.name.toLowerCase().includes(text.toLowerCase())) {
+          return {
+            ok: false,
+            expected: text,
+            actual: el ? { name: el.name } : { found: false },
+          };
+        }
+        return { ok: true };
+      }
+
+      // 全局搜索：大小写不敏感子串搜索各 element name
       const found = elements.some((el) =>
         el.name.toLowerCase().includes(text.toLowerCase()),
       );

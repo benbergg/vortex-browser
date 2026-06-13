@@ -119,6 +119,147 @@ describe("verify.assert — value mode", () => {
     );
     expect((res.result as { ok: boolean }).ok).toBe(true);
   });
+
+  // ── 必修1: valueNow 暴露文本控件 IDL 当前值 ─────────────────────────────
+  it("文本 input: valueNow 优先(IDL 当前值) → ok:true [必修1-core]", async () => {
+    // 模拟 observe 暴露了文本 input 的当前 IDL value（fill 后的状态）
+    // attrs.value 是 HTML 默认属性值（旧值），valueNow 是当前输入值
+    stubObserve(router, [
+      {
+        index: 0,
+        role: "textbox",
+        name: "用户名",
+        visible: true,
+        attrs: { value: "default", type: "text" },
+        valueNow: "alice@example.com",  // IDL el.value — fill 后的当前值
+      },
+    ]);
+    registerVerifyHandlers(router);
+    const res = await router.dispatch(
+      mkReq("verify.assert", { mode: "value", role: "textbox", name: "用户名", value: "alice@example.com" }),
+    );
+    expect((res.result as { ok: boolean }).ok).toBe(true);
+  });
+
+  it("文本 input: valueNow 优先于 attrs.value，attrs.value 不再误当当前值 [必修1-priority]", async () => {
+    // attrs.value = HTML 默认属性"old"，valueNow = fill 后实际当前值"new"
+    stubObserve(router, [
+      {
+        index: 0,
+        role: "textbox",
+        name: "Search",
+        visible: true,
+        attrs: { value: "old", type: "text" },
+        valueNow: "new input text",
+      },
+    ]);
+    registerVerifyHandlers(router);
+    // 断言期望值 = "old" → 应失败（因为当前值是 "new input text"）
+    const resFail = await router.dispatch(
+      mkReq("verify.assert", { mode: "value", role: "textbox", name: "Search", value: "old" }),
+    );
+    expect((resFail.result as { ok: boolean }).ok).toBe(false);
+
+    // 断言期望值 = "new input text" → 应成功
+    const resOk = await router.dispatch(
+      mkReq("verify.assert", { mode: "value", role: "textbox", name: "Search", value: "new input text" }),
+    );
+    expect((resOk.result as { ok: boolean }).ok).toBe(true);
+  });
+
+  it("password 元素 valueNow 被剥离不泄露 → verify 报 actual=undefined [必修1-password保护]", async () => {
+    // observe.ts password 防护：type=password → e.valueNow = undefined
+    // 因此 stubObserve 模拟 password 元素时 valueNow 已被剥离
+    stubObserve(router, [
+      {
+        index: 0,
+        role: "textbox",
+        name: "Password",
+        visible: true,
+        attrs: { value: "", type: "password" },
+        // valueNow 故意不设 —— observe 已在密码保护层剥除
+      },
+    ]);
+    registerVerifyHandlers(router);
+    const res = await router.dispatch(
+      mkReq("verify.assert", { mode: "value", role: "textbox", name: "Password", value: "secret" }),
+    );
+    // 结果 ok:false + actual 没有泄露密码值
+    const r = res.result as { ok: boolean; actual: unknown };
+    expect(r.ok).toBe(false);
+    expect(r.actual).toBeUndefined();
+  });
+});
+
+// ── 必修2: target 作用域（MCP server 已将 @ref 翻译成 index + snapshotId）──
+describe("verify.assert — target 作用域 (index 收窄)", () => {
+  let router: ActionRouter;
+  beforeEach(() => {
+    router = new ActionRouter();
+  });
+
+  it("传 index=0: value mode 收窄到该元素，不按 role+name 扫全局 [必修2-value]", async () => {
+    // 两个同名 textbox，index=0 的值为 "hello"，index=1 的值为 "world"
+    stubObserve(router, [
+      { index: 0, role: "textbox", name: "Field", visible: true, valueNow: "hello" },
+      { index: 1, role: "textbox", name: "Field", visible: true, valueNow: "world" },
+    ]);
+    registerVerifyHandlers(router);
+    // 指定 index=0 → 期望值 "hello" → ok:true
+    const res0 = await router.dispatch(
+      mkReq("verify.assert", { mode: "value", index: 0, value: "hello" }),
+    );
+    expect((res0.result as { ok: boolean }).ok).toBe(true);
+
+    // 指定 index=1 → 期望值 "hello" → ok:false（该元素值是 "world"）
+    const res1 = await router.dispatch(
+      mkReq("verify.assert", { mode: "value", index: 1, value: "hello" }),
+    );
+    expect((res1.result as { ok: boolean }).ok).toBe(false);
+  });
+
+  it("传 index=1: text mode 收窄到该元素 name [必修2-text]", async () => {
+    stubObserve(router, [
+      { index: 0, role: "heading", name: "Page Title", visible: true },
+      { index: 1, role: "paragraph", name: "Body content here", visible: true },
+    ]);
+    registerVerifyHandlers(router);
+    // 指定 index=1 → 在该元素 name 中找 "Body" → ok:true
+    const resOk = await router.dispatch(
+      mkReq("verify.assert", { mode: "text", index: 1, text: "Body" }),
+    );
+    expect((resOk.result as { ok: boolean }).ok).toBe(true);
+
+    // 指定 index=1 → 找 "Page Title"（在 index=0 不在 index=1）→ ok:false
+    const resFail = await router.dispatch(
+      mkReq("verify.assert", { mode: "text", index: 1, text: "Page Title" }),
+    );
+    expect((resFail.result as { ok: boolean }).ok).toBe(false);
+  });
+
+  it("传 index=2（不存在）: value mode → ok:false + actual:null [必修2-not-found]", async () => {
+    stubObserve(router, [
+      { index: 0, role: "textbox", name: "Field", visible: true, valueNow: "hello" },
+    ]);
+    registerVerifyHandlers(router);
+    const res = await router.dispatch(
+      mkReq("verify.assert", { mode: "value", index: 2, value: "hello" }),
+    );
+    expect((res.result as { ok: boolean }).ok).toBe(false);
+  });
+
+  it("list mode 传 index → ok:false（list 不支持 target 作用域）", async () => {
+    // list mode 本身就是批量检查，target 作用域无语义。不报错，走正常 list 逻辑。
+    stubObserve(router, [
+      { index: 0, role: "menuitem", name: "Home", visible: true },
+    ]);
+    registerVerifyHandlers(router);
+    const res = await router.dispatch(
+      mkReq("verify.assert", { mode: "list", index: 0, items: [{ name: "Home" }] }),
+    );
+    // list mode 不受 index 影响，正常按 items 扫全表
+    expect((res.result as { ok: boolean }).ok).toBe(true);
+  });
 });
 
 describe("verify.assert — text mode", () => {

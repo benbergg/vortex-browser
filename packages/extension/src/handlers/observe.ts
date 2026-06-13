@@ -1213,16 +1213,23 @@ async function scanOneFrame(
           return Object.keys(s).length > 0 ? s : undefined;
         }
 
-        // 值域控件的当前值:slider / spinbutton / progressbar / scrollbar / meter
-        // 及原生 <input type=range|number> / <progress> / <meter>。observe 原本
-        // 只给出控件名(如 "[slider] 音量"),agent 看得到滑块却不知设到几——调它
-        // 需要先知道当前值。**严格限定值域 role/控件**,绝不对普通文本输入暴露
-        // value(那是 extract 的职责,且 password/email 等值不应进 observe)。
+        // 值域控件の当前值:slider / spinbutton / progressbar / scrollbar / meter
+        // 及原生 <input type=range|number> / <progress> / <meter>。
+        // 同时暴露文本控件(text/email/search/tel/url/textarea/contenteditable)的
+        // IDL 当前值(el.value)，使 fill→verify value 闭环成立。
+        // password 类型**严格排除**：由 password 防护层(observe 后处理)统一剥除，
+        // 绝不进 LLM 上下文。
         // 优先 aria-valuetext(人类可读,如 "中" / "$50"),否则 valuenow,并在
         // 有 valuemax 时拼成 "now/max"(进度/百分比靠 max 才有意义)。返回字符串
         // 或 undefined(2026-06-02 dogfood)。
         const VALUE_ROLES = new Set([
           "slider", "spinbutton", "progressbar", "scrollbar", "meter",
+        ]);
+        // 文本输入控件:这些类型的 IDL el.value 反映用户当前输入值，
+        // 需暴露给 verify value mode 校验(fill 后 HTML 属性值不更新)。
+        // password 不含：其 IDL value 不应进 LLM 上下文，由密码防护层剥除。
+        const TEXT_INPUT_TYPES = new Set([
+          "text", "email", "search", "tel", "url", "",
         ]);
         function getValueInfo(el: HTMLElement, role: string): string | undefined {
           const tag = el.tagName.toLowerCase();
@@ -1238,6 +1245,21 @@ async function scanOneFrame(
           }
           const inputType =
             tag === "input" ? (el as HTMLInputElement).type : "";
+          // 文本控件 IDL 当前值:text/email/search/tel/url 及 type 未设(""=text)。
+          // password 严格排除——由 observe 后处理密码防护层剥除 valueNow。
+          // 截断至 200 字符，避免大型 textarea 撑爆输出。
+          if (tag === "input" && TEXT_INPUT_TYPES.has(inputType)) {
+            const v = (el as HTMLInputElement).value;
+            return v !== "" ? v.slice(0, 200) : undefined;
+          }
+          if (tag === "textarea") {
+            const v = (el as HTMLTextAreaElement).value;
+            return v !== "" ? v.slice(0, 200) : undefined;
+          }
+          if ((el as HTMLElement).isContentEditable) {
+            const v = (el as HTMLElement).textContent ?? "";
+            return v !== "" ? v.replace(/\s+/g, " ").trim().slice(0, 200) : undefined;
+          }
           const isNativeValue =
             (tag === "input" && (inputType === "range" || inputType === "number")) ||
             tag === "progress" ||
