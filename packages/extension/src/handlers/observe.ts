@@ -122,8 +122,20 @@ interface ScannedElement {
   errorMessage?: string;
   /** aria-describedby 关联描述文本。@since ax-overlay */
   description?: string;
-  /** 复合控件元数据(combobox/listbox 等)。@since ax-overlay */
-  compound?: { role: string; count?: number; options?: string[]; formatHint?: string };
+  /** 复合控件元数据(combobox/listbox/date-input/file-input/range-input 等)。@since ax-overlay */
+  compound?: {
+    role: string;
+    count?: number;
+    options?: string[];
+    /** date/time 格式串或 file input 当前文件名/None */
+    formatHint?: string;
+    /** range/number input 最小值约束 */
+    min?: string;
+    /** range/number input 最大值约束 */
+    max?: string;
+    /** range/number input 步长约束 */
+    step?: string;
+  };
   _sel: string;
 }
 
@@ -1253,6 +1265,60 @@ async function scanOneFrame(
           return max != null && max !== "" ? `${now}/${max}` : `${now}`;
         }
 
+        /**
+         * 为特殊 input 类型构建 compound 元数据对象。
+         * - date/time/datetime-local/month/week:注入格式串 formatHint。
+         * - file:读 element.files 当前文件名(多文件给计数),未选显 None。
+         * - range/number:读 min/max/step 属性(缺省不填)。
+         * 非目标类型返回 undefined,不干扰其他控件。
+         */
+        function buildInputCompound(el: HTMLElement): {
+          role: string; formatHint?: string;
+          min?: string; max?: string; step?: string;
+        } | undefined {
+          if (el.tagName !== "INPUT") return undefined;
+          const inputEl = el as HTMLInputElement;
+          const t = inputEl.type;
+          // date/time 格式族:按 type 注入对应格式串供 LLM fill 参考
+          const DATE_FORMAT_MAP: Record<string, string> = {
+            "date": "YYYY-MM-DD",
+            "time": "HH:mm",
+            "datetime-local": "YYYY-MM-DDTHH:mm",
+            "month": "YYYY-MM",
+            "week": "YYYY-Www",
+          };
+          if (t in DATE_FORMAT_MAP) {
+            return { role: "date-input", formatHint: DATE_FORMAT_MAP[t] };
+          }
+          // file input:显示当前选中文件名;多文件计数;未选显 None
+          if (t === "file") {
+            const files = inputEl.files;
+            let hint = "None";
+            if (files && files.length > 0) {
+              hint = files.length === 1
+                ? files[0].name
+                : `${files.length} files`;
+            }
+            return { role: "file-input", formatHint: hint };
+          }
+          // range/number:读 min/max/step 属性(缺省不显)
+          if (t === "range" || t === "number") {
+            const roleStr = t === "range" ? "range-input" : "number-input";
+            const minV = el.getAttribute("min") ?? undefined;
+            const maxV = el.getAttribute("max") ?? undefined;
+            const stepV = el.getAttribute("step") ?? undefined;
+            // 三属性均无时不生成 compound(避免噪声)
+            if (!minV && !maxV && !stepV) return undefined;
+            return {
+              role: roleStr,
+              ...(minV !== undefined ? { min: minV } : {}),
+              ...(maxV !== undefined ? { max: maxV } : {}),
+              ...(stepV !== undefined ? { step: stepV } : {}),
+            };
+          }
+          return undefined;
+        }
+
         // BUG-2: filter='all' previously was a dead parameter — server.ts
         // forwarded it but the handler never read args.filter, so the public
         // schema's promise of "non-interactive elements too" silently
@@ -1907,6 +1973,8 @@ async function scanOneFrame(
           // 可能 continue 之后、elements.push 之前的唯一 push 点）。
           collectedEls.push(htmlEl);
           const __href = role === "link" ? (htmlEl.getAttribute("href") || undefined) : undefined;
+          // T5: date/time/file/range/number input 注入 compound 元数据,供 LLM fill 参考格式/约束
+          const __inputCompound = buildInputCompound(htmlEl);
           elements.push({
             index: elements.length,
             tag: htmlEl.tagName.toLowerCase(),
@@ -1929,6 +1997,7 @@ async function scanOneFrame(
               ? { reactClickable: true as const, clickHint: reactMarker.clickHint }
               : {}),
             ...(__href !== undefined ? { href: __href } : {}),
+            ...(__inputCompound !== undefined ? { compound: __inputCompound } : {}),
             _sel: buildSelector(htmlEl),
           });
         }
@@ -2235,7 +2304,15 @@ export function registerObserveHandlers(router: ActionRouter, debuggerMgr: Debug
         owns?: number[];
         errorMessage?: string;
         description?: string;
-        compound?: { role: string; count?: number; options?: string[]; formatHint?: string };
+        compound?: {
+          role: string;
+          count?: number;
+          options?: string[];
+          formatHint?: string;
+          min?: string;
+          max?: string;
+          step?: string;
+        };
       };
       type FullElementOut = Omit<ScannedElement, "_sel"> & {
         frameId: number;

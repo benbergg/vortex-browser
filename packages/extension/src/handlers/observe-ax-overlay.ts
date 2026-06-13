@@ -119,7 +119,15 @@ export interface OverlayableElement {
   valueNow?: string;
   reactClickable?: true;
   nameSource?: string;
-  compound?: unknown;
+  compound?: {
+    role: string;
+    count?: number;
+    options?: string[];
+    formatHint?: string;
+    min?: string;
+    max?: string;
+    step?: string;
+  };
   controls?: number[]; owns?: number[]; errorMessage?: string; description?: string;
   tag?: string;
 }

@@ -32,8 +32,20 @@ export interface CompactElement {
   errorMessage?: string;
   /** aria-describedby 关联描述文本。@since ax-overlay */
   description?: string;
-  /** 复合控件元数据(combobox/listbox 等)。@since ax-overlay */
-  compound?: { role: string; count?: number; options?: string[]; formatHint?: string };
+  /** 复合控件元数据(combobox/listbox/date-input/file-input/range-input 等)。@since ax-overlay */
+  compound?: {
+    role: string;
+    count?: number;
+    options?: string[];
+    /** date/time 格式串或 file input 当前文件名/None */
+    formatHint?: string;
+    /** range/number input 最小值约束 */
+    min?: string;
+    /** range/number input 最大值约束 */
+    max?: string;
+    /** range/number input 步长约束 */
+    step?: string;
+  };
   /**
    * 元素是否在当前视口内（由 extension observe.ts 计算）。
    * true=视口内可直接点击，false=需要滚动后才可操作。
@@ -335,9 +347,36 @@ export function renderObserveTree(
     const hasUrl = e.role === "link" && !!e.href;
     const hasChildren = kids.length > 0 || hasUrl;
     const weak = e.nameSource === "placeholder" || e.nameSource === "title" ? " [weakname]" : "";
-    const comp = e.compound
-      ? ` compound=(${e.compound.role}${e.compound.count != null ? ` count=${e.compound.count}` : ""}${e.compound.options?.length ? ` options=${e.compound.options.join("|")}` : ""})`
-      : "";
+    // compound 渲染:按 compound.role 类型决定渲染哪些元数据字段
+    // - combobox/listbox 等:count + options
+    // - date-input:format=<formatHint>
+    // - file-input:file=<formatHint>
+    // - range-input/number-input:min=/max=/step=(有值则渲染)
+    let comp = "";
+    if (e.compound) {
+      const c = e.compound;
+      const role = c.role;
+      let extra = "";
+      if (role === "date-input") {
+        // date/time/datetime-local/month/week input 格式串
+        if (c.formatHint) extra = ` format=${c.formatHint}`;
+      } else if (role === "file-input") {
+        // file input 当前文件名或 None
+        if (c.formatHint) extra = ` file=${c.formatHint}`;
+      } else if (role === "range-input" || role === "number-input") {
+        // range/number 约束
+        const minSeg = c.min != null ? ` min=${c.min}` : "";
+        const maxSeg = c.max != null ? ` max=${c.max}` : "";
+        const stepSeg = c.step != null ? ` step=${c.step}` : "";
+        extra = `${minSeg}${maxSeg}${stepSeg}`;
+      } else {
+        // combobox/listbox 等:count + options(原有逻辑)
+        const countSeg = c.count != null ? ` count=${c.count}` : "";
+        const optSeg = c.options?.length ? ` options=${c.options.join("|")}` : "";
+        extra = `${countSeg}${optSeg}`;
+      }
+      comp = ` compound=(${role}${extra})`;
+    }
     const err = e.errorMessage ? ` error=${JSON.stringify(e.errorMessage)}` : "";
     const ctrl = e.controls?.length
       ? ` controls=${e.controls.map((i) => refOf({ ...e, index: i }, snapshotHash)).join(",")}`

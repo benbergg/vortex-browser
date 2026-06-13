@@ -86,5 +86,17 @@ export interface AXOverlayInfo {
   owns?: number[];
   errorMessage?: string;
   description?: string;
-  compound?: { role: string; count?: number; options?: string[]; formatHint?: string };
+  compound?: {
+    role: string;
+    count?: number;
+    options?: string[];
+    /** date/time 格式串(如 YYYY-MM-DD)或 file input 当前文件名/None */
+    formatHint?: string;
+    /** range/number input 的最小值约束 */
+    min?: string;
+    /** range/number input 的最大值约束 */
+    max?: string;
+    /** range/number input 的步长约束 */
+    step?: string;
+  };
 }

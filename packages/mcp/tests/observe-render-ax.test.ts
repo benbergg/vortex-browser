@@ -33,3 +33,71 @@ describe("renderObserveTree AX 语义段", () => {
     expect(renderObserveTree(data as any, "h1", false)).toContain("[readonly]");
   });
 });
+
+describe("renderObserveTree compound 元数据增强 (T5)", () => {
+  it("date-input compound 渲染 formatHint", () => {
+    const data = { ...base, elements: [
+      { index: 0, tag: "input", role: "textbox", name: "出生日期", frameId: 0,
+        compound: { role: "date-input", formatHint: "YYYY-MM-DD" } },
+    ]};
+    const out = renderObserveTree(data as any, "h1", false);
+    expect(out).toContain("compound=(date-input format=YYYY-MM-DD)");
+  });
+
+  it("time-input compound 渲染 formatHint", () => {
+    const data = { ...base, elements: [
+      { index: 0, tag: "input", role: "textbox", name: "时间", frameId: 0,
+        compound: { role: "date-input", formatHint: "HH:mm" } },
+    ]};
+    const out = renderObserveTree(data as any, "h1", false);
+    expect(out).toContain("compound=(date-input format=HH:mm)");
+  });
+
+  it("file-input compound 渲染有文件时显示文件名", () => {
+    const data = { ...base, elements: [
+      { index: 0, tag: "input", role: "textbox", name: "文件上传", frameId: 0,
+        compound: { role: "file-input", formatHint: "resume.pdf" } },
+    ]};
+    const out = renderObserveTree(data as any, "h1", false);
+    expect(out).toContain("compound=(file-input file=resume.pdf)");
+  });
+
+  it("file-input compound 渲染无文件时显示 None", () => {
+    const data = { ...base, elements: [
+      { index: 0, tag: "input", role: "textbox", name: "文件上传", frameId: 0,
+        compound: { role: "file-input", formatHint: "None" } },
+    ]};
+    const out = renderObserveTree(data as any, "h1", false);
+    expect(out).toContain("compound=(file-input file=None)");
+  });
+
+  it("range-input compound 渲染 min/max/step", () => {
+    const data = { ...base, elements: [
+      { index: 0, tag: "input", role: "slider", name: "音量", frameId: 0,
+        compound: { role: "range-input", min: "0", max: "100", step: "5" } },
+    ]};
+    const out = renderObserveTree(data as any, "h1", false);
+    expect(out).toContain("compound=(range-input min=0 max=100 step=5)");
+  });
+
+  it("number-input compound 仅有 min/max 时不渲染 step", () => {
+    const data = { ...base, elements: [
+      { index: 0, tag: "input", role: "spinbutton", name: "数量", frameId: 0,
+        compound: { role: "number-input", min: "1", max: "99" } },
+    ]};
+    const out = renderObserveTree(data as any, "h1", false);
+    expect(out).toContain("compound=(number-input min=1 max=99)");
+    expect(out).not.toContain("step=");
+  });
+
+  it("range-input 无约束属性时 compound 不渲染", () => {
+    // 无 min/max/step/formatHint 的 compound 应简洁,只显示 role
+    const data = { ...base, elements: [
+      { index: 0, tag: "input", role: "slider", name: "进度", frameId: 0,
+        compound: { role: "range-input" } },
+    ]};
+    const out = renderObserveTree(data as any, "h1", false);
+    // 仅 role,无其他元数据时极简
+    expect(out).toContain("compound=(range-input)");
+  });
+});
