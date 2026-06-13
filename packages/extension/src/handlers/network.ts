@@ -446,6 +446,10 @@ export function registerNetworkHandlers(
      * status/statusText/headers 来自 responseReceived 事件缓存的 NetworkEntry；
      * body 来自 responseBodies 缓存（loadingFinished 后异步写入）或实时 CDP 调用。
      * body 超过 maxLength（默认 10240）时截断并标注 truncated:true。
+     *
+     * 前置依赖：此 handler 依赖 tab 已通过 source=network 查询而被订阅；
+     * 若 tab 从未订阅，所有 entry 均为空（届时返回 not found 错误，
+     * hint 引导调用方先调 source=network）。
      */
     [NetworkActions.GET_REQUEST_DETAIL]: async (args, tabId) => {
       const requestId = args.requestId as string | undefined;
