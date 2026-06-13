@@ -899,12 +899,23 @@ async function scanOneFrame(
             // 多命中则 SELECTOR_AMBIGUOUS）。
             return el.tagName.toLowerCase();
           }
-          if (el.id && /^[a-zA-Z][\w-]*$/.test(el.id)) return `#${CSS.escape(el.id)}`;
+          // id 唯一才用 #id —— 重复 id(无效 HTML 但 Modal/Drawer 覆盖同结构表单时
+          // 常见,如 antd Pro 页面 search 与 Modal 均渲染 #name)会让下游 querySelector
+          // 命中第一个(弹层背后被 mask 遮挡)元素 → actionability OBSCURED。歧义时
+          // fall through 到路径/rid 分支保 1:1。(2026-06-13 antd Pro dogfood A1)
+          if (
+            el.id &&
+            /^[a-zA-Z][\w-]*$/.test(el.id) &&
+            document.querySelectorAll(`#${CSS.escape(el.id)}`).length === 1
+          )
+            return `#${CSS.escape(el.id)}`;
           const testId =
             el.getAttribute("data-testid") || el.getAttribute("data-test");
           if (testId) {
             const attr = el.getAttribute("data-testid") ? "data-testid" : "data-test";
-            return `[${attr}="${testId.replace(/"/g, '\\"')}"]`;
+            const testSel = `[${attr}="${testId.replace(/"/g, '\\"')}"]`;
+            // 同 id:testid 也可能重复(列表项复用),唯一才用,否则 fall through。
+            if (document.querySelectorAll(testSel).length === 1) return testSel;
           }
           // aria-label is the next-most-stable anchor for actionable widgets
           // (button / link / form control). It survives React re-renders that
