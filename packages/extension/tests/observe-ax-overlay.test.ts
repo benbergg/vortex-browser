@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { computeAXOverlay } from "../src/handlers/observe-ax-overlay.js";
+import { computeAXOverlay, extractCompound } from "../src/handlers/observe-ax-overlay.js";
 import type { CDPAXNode } from "../src/reasoning/types.js";
 
 const ax = (o: Partial<CDPAXNode>): CDPAXNode => ({ nodeId: "x", ...o });
@@ -41,5 +41,25 @@ describe("computeAXOverlay", () => {
     });
     const r = computeAXOverlay({ backendId: 13, role: "slider", name: "" }, node);
     expect(r.valueNow).toBe("50%");
+  });
+});
+
+describe("extractCompound", () => {
+  it("combobox/listbox: 取前4 option 文本 + count", () => {
+    const byNodeId = new Map<string, CDPAXNode>([
+      ["sel", ax({ nodeId: "sel", role: { value: "combobox" }, childIds: ["lb"] })],
+      ["lb", ax({ nodeId: "lb", role: { value: "listbox" }, childIds: ["o1","o2","o3","o4","o5"] })],
+      ...["中国","美国","日本","英国","德国"].map((t, i) =>
+        [`o${i+1}`, ax({ nodeId: `o${i+1}`, role: { value: "option" }, name: { value: t } })] as const),
+    ]);
+    const c = extractCompound(byNodeId.get("sel")!, byNodeId);
+    expect(c?.role).toBe("listbox");
+    expect(c?.count).toBe(5);
+    expect(c?.options).toEqual(["中国","美国","日本","英国"]);
+  });
+
+  it("非复合控件返回 undefined", () => {
+    const c = extractCompound(ax({ role: { value: "button" } }), new Map());
+    expect(c).toBeUndefined();
   });
 });

@@ -86,4 +86,5 @@ export interface AXOverlayInfo {
   owns?: number[];
   errorMessage?: string;
   description?: string;
+  compound?: { role: string; count?: number; options?: string[]; formatHint?: string };
 }

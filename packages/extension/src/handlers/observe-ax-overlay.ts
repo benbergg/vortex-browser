@@ -71,3 +71,36 @@ export function computeAXOverlay(
 
   return out;
 }
+
+const COMPOUND_TRIGGER_ROLES = new Set(["combobox", "listbox", "select", "slider", "spinbutton"]);
+
+/** 复合控件展开:从 AX 子树取 listbox 选项样本 / 范围。byNodeId 是 nodeId→CDPAXNode 全量索引。 */
+export function extractCompound(
+  node: CDPAXNode,
+  byNodeId: Map<string, CDPAXNode>,
+): NonNullable<AXOverlayInfo["compound"]> | undefined {
+  const role = node.role?.value ?? "";
+  // slider/spinbutton 的值域已由 valueNow 覆盖,此处仅展开 option 集合类。
+  if (role === "slider" || role === "spinbutton") return undefined;
+  if (!COMPOUND_TRIGGER_ROLES.has(role)) return undefined;
+
+  // 找 listbox(自身或子节点)
+  let listbox: CDPAXNode | undefined = role === "listbox" ? node : undefined;
+  if (!listbox) {
+    for (const cid of node.childIds ?? []) {
+      const c = byNodeId.get(cid);
+      if (c?.role?.value === "listbox") { listbox = c; break; }
+    }
+  }
+  if (!listbox) return undefined;
+  const optionIds = listbox.childIds ?? [];
+  const options: string[] = [];
+  for (const oid of optionIds) {
+    const o = byNodeId.get(oid);
+    const nm = (o?.name?.value ?? "").trim();
+    if (o?.role?.value === "option" && nm) {
+      if (options.length < 4) options.push(nm);
+    }
+  }
+  return { role: "listbox", count: optionIds.length, options };
+}
