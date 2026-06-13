@@ -1,5 +1,6 @@
 import { ObserveActions, VtxErrorCode, vtxError } from "@vortex-browser/shared";
 import type { ActionRouter } from "../lib/router.js";
+import type { DebuggerManager } from "../lib/debugger-manager.js";
 import { getActiveTabId, buildExecuteTarget, ensureFrameAttached } from "../lib/tab-utils.js";
 import { getIframeOffset } from "../lib/iframe-offset.js";
 import {
@@ -1961,7 +1962,8 @@ async function scanOneFrame(
   }
 }
 
-export function registerObserveHandlers(router: ActionRouter): void {
+export function registerObserveHandlers(router: ActionRouter, debuggerMgr: DebuggerManager): void {
+  void debuggerMgr; // 后续 AX pass 使用
   router.registerAll({
     [ObserveActions.SNAPSHOT]: async (args, tabId) => {
       gcSnapshots();
