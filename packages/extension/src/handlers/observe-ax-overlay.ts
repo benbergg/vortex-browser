@@ -80,6 +80,90 @@ export function CLEAR_MARKERS(doc: Document): void {
   for (const el of doc.querySelectorAll("[data-vtx-ax]")) el.removeAttribute("data-vtx-ax");
 }
 
+interface CDPDomNode {
+  backendNodeId?: number;
+  nodeName?: string;
+  attributes?: string[]; // 扁平 [name,value,name,value,...]
+  children?: CDPDomNode[];
+  shadowRoots?: CDPDomNode[];
+  contentDocument?: CDPDomNode;
+}
+
+/** 遍历 DOM.getDocument 树取 data-vtx-ax → backendNodeId。穿 shadowRoots,但**不**进
+ *  contentDocument(iframe 内容)——v1 仅覆盖主 frame,避免子 frame 同值标记冲突。 */
+export function buildIndexToBackend(root: CDPDomNode): Map<number, number> {
+  const map = new Map<number, number>();
+  const walk = (n: CDPDomNode): void => {
+    const attrs = n.attributes ?? [];
+    for (let i = 0; i < attrs.length; i += 2) {
+      if (attrs[i] === "data-vtx-ax" && n.backendNodeId !== undefined) {
+        map.set(Number(attrs[i + 1]), n.backendNodeId);
+      }
+    }
+    for (const c of n.children ?? []) walk(c);
+    for (const s of n.shadowRoots ?? []) walk(s);
+    // 不递归 contentDocument:v1 仅主 frame
+  };
+  walk(root);
+  return map;
+}
+
+/** applyOverlay 原地改写所需的最小元素形(ScannedElement 的结构子集)。 */
+export interface OverlayableElement {
+  role: string; name: string;
+  state?: Record<string, unknown>;
+  valueNow?: string;
+  reactClickable?: true;
+  nameSource?: string;
+  compound?: unknown;
+  controls?: number[]; owns?: number[]; errorMessage?: string; description?: string;
+  tag?: string;
+}
+
+/**
+ * 对主 frame 已扫元素原地应用 AX 覆盖。
+ * indexToBackend: data-vtx-ax 下标→backendDOMNodeId; axByBackend: backendId→CDPAXNode;
+ * axByNodeId: nodeId→CDPAXNode(compound 子树)。controls/owns 的 backendId 就地 remap 成
+ * frame-local 下标(主 frame frameBase=0,即全局 index)。漏命中→nameSource="heuristic",
+ * 其余保留启发式,不抛。
+ */
+export function applyOverlay(
+  elements: OverlayableElement[],
+  indexToBackend: Map<number, number>,
+  axByBackend: Map<number, CDPAXNode>,
+  axByNodeId: Map<string, CDPAXNode>,
+): void {
+  const backendToIndex = new Map<number, number>();
+  for (const [idx, bid] of indexToBackend) backendToIndex.set(bid, idx);
+  for (let i = 0; i < elements.length; i++) {
+    const el = elements[i];
+    const backendId = indexToBackend.get(i);
+    const node = backendId !== undefined ? axByBackend.get(backendId) : undefined;
+    if (!node) { el.nameSource = "heuristic"; continue; }
+    const ov = computeAXOverlay(
+      { backendId: backendId!, role: el.role, name: el.name, heuristicInteractive: el.reactClickable === true },
+      node,
+    );
+    if (ov.role) el.role = ov.role;
+    if (ov.name) el.name = ov.name;
+    el.nameSource = ov.nameSource ?? "heuristic";
+    if (ov.state) el.state = { ...(el.state ?? {}), ...ov.state };
+    if (ov.valueNow !== undefined) el.valueNow = ov.valueNow;
+    if (ov.controls) {
+      const idxs = ov.controls.map((b) => backendToIndex.get(b)).filter((x): x is number => x != null);
+      if (idxs.length) el.controls = idxs;
+    }
+    if (ov.owns) {
+      const idxs = ov.owns.map((b) => backendToIndex.get(b)).filter((x): x is number => x != null);
+      if (idxs.length) el.owns = idxs;
+    }
+    if (ov.errorMessage) el.errorMessage = ov.errorMessage;
+    if (ov.description) el.description = ov.description;
+    const compound = extractCompound(node, axByNodeId);
+    if (compound) el.compound = compound;
+  }
+}
+
 const COMPOUND_TRIGGER_ROLES = new Set(["combobox", "listbox", "select", "slider", "spinbutton"]);
 
 /** 复合控件展开:从 AX 子树取 listbox 选项样本 / 范围。byNodeId 是 nodeId→CDPAXNode 全量索引。 */

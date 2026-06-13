@@ -9,6 +9,8 @@ import {
   setSnapshot,
   type SnapshotElement,
 } from "../lib/snapshot-store.js";
+import { captureAXNodeMap } from "../reasoning/ax-snapshot.js";
+import { buildIndexToBackend, applyOverlay, type OverlayableElement } from "./observe-ax-overlay.js";
 
 type FramesParam =
   | "main"
@@ -2122,6 +2124,45 @@ export function registerObserveHandlers(router: ActionRouter, debuggerMgr: Debug
               }
             }
           }
+        }
+      }
+
+      // AX 语义覆盖层(v1 仅主 frame frameId 0):采 AX tree + DOM.getDocument 关联 →
+      // 原地覆盖 role/name/state/value/关系。任一步失败该 frame 优雅回退纯启发式(不报错)。
+      if (includeAX) {
+        const mainScan = scans.find((s) => s.frameId === 0);
+        if (mainScan?.page && mainScan.page.elements.length > 0) {
+          try {
+            const { byBackend, byNodeId } = await captureAXNodeMap(debuggerMgr, tid, 0);
+            const doc = (await debuggerMgr.sendCommand(tid, "DOM.getDocument", {
+              depth: -1,
+              pierce: true,
+            })) as { root?: unknown };
+            if (doc?.root) {
+              const indexToBackend = buildIndexToBackend(doc.root as never);
+              applyOverlay(
+                mainScan.page.elements as unknown as OverlayableElement[],
+                indexToBackend,
+                byBackend,
+                byNodeId,
+              );
+            }
+          } catch (err) {
+            console.warn(
+              `[vortex.observe] AX overlay skipped fid=0: ${err instanceof Error ? err.message : String(err)}`,
+            );
+          }
+        }
+        // marker 清理:一次 executeScript 清所有 frame 的 data-vtx-ax
+        try {
+          await chrome.scripting.executeScript({
+            target: { tabId: tid, allFrames: true },
+            func: () => {
+              for (const el of document.querySelectorAll("[data-vtx-ax]")) el.removeAttribute("data-vtx-ax");
+            },
+          });
+        } catch {
+          /* 清理失败不致命:标记仅 observe 内部用,下轮 scan 覆盖 */
         }
       }
 
