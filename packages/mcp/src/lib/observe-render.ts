@@ -5,7 +5,7 @@ export interface CompactElement {
   tag: string;
   role: string;
   name: string;
-  state?: { checked?: boolean; selected?: boolean; active?: boolean; disabled?: boolean; required?: boolean; expanded?: boolean; current?: boolean; invalid?: boolean; sort?: "ascending" | "descending" | "none"; haspopup?: string };
+  state?: { checked?: boolean | "mixed"; selected?: boolean; active?: boolean; disabled?: boolean; required?: boolean; expanded?: boolean; current?: boolean; invalid?: boolean; sort?: "ascending" | "descending" | "none"; haspopup?: string };
   // 值域控件(slider/spinbutton/progressbar/meter 等)的当前值,如 "30" / "30/100"。
   valueNow?: string;
   frameId: number;
@@ -20,6 +20,18 @@ export interface CompactElement {
   reactClickable?: true;
   /** role=link 的 href，渲染 /url: 属性行。@since a11y-tree */
   href?: string;
+  /** AX nameSource：名称来源(label/placeholder/title/heuristic 等)。@since ax-overlay */
+  nameSource?: string;
+  /** aria-controls 指向的全局元素下标列表。@since ax-overlay */
+  controls?: number[];
+  /** aria-owns 指向的全局元素下标列表。@since ax-overlay */
+  owns?: number[];
+  /** aria-errormessage 关联文本。@since ax-overlay */
+  errorMessage?: string;
+  /** aria-describedby 关联描述文本。@since ax-overlay */
+  description?: string;
+  /** 复合控件元数据(combobox/listbox 等)。@since ax-overlay */
+  compound?: { role: string; count?: number; options?: string[]; formatHint?: string };
 }
 
 interface CompactFrame {
@@ -50,7 +62,8 @@ export function refOf(e: CompactElement, snapshotHash: string | null): string {
 function stateFlags(state?: CompactElement["state"]): string {
   if (!state) return "";
   const flags: string[] = [];
-  if (state.checked) flags.push("checked");
+  if (state.checked === "mixed") flags.push("checked:mixed");
+  else if (state.checked) flags.push("checked");
   if (state.selected) flags.push("selected");
   if (state.active) flags.push("active");
   if (state.disabled) flags.push("disabled");
@@ -197,8 +210,17 @@ export function renderObserveTree(
     const kids = childrenOf.get(e.index) ?? [];
     const hasUrl = e.role === "link" && !!e.href;
     const hasChildren = kids.length > 0 || hasUrl;
+    const weak = e.nameSource === "placeholder" || e.nameSource === "title" ? " [weakname]" : "";
+    const comp = e.compound
+      ? ` compound=(${e.compound.role}${e.compound.count != null ? ` count=${e.compound.count}` : ""}${e.compound.options?.length ? ` options=${e.compound.options.join("|")}` : ""})`
+      : "";
+    const err = e.errorMessage ? ` error=${JSON.stringify(e.errorMessage)}` : "";
+    const ctrl = e.controls?.length
+      ? ` controls=${e.controls.map((i) => refOf({ ...e, index: i }, snapshotHash)).join(",")}`
+      : "";
+    const desc = e.description ? ` desc=${JSON.stringify(e.description.slice(0, 60))}` : "";
     lines.push(
-      `${indent}- ${e.role}${name}${ref}${stateFlags(e.state)}${cursor}${valueSeg}${bboxSeg}${hasChildren ? ":" : ""}`,
+      `${indent}- ${e.role}${name}${ref}${stateFlags(e.state)}${weak}${cursor}${valueSeg}${comp}${err}${ctrl}${desc}${bboxSeg}${hasChildren ? ":" : ""}`,
     );
     if (hasUrl) lines.push(`${indent}  - /url: ${e.href}`);
     for (const k of kids) emit(k, depth + 1);

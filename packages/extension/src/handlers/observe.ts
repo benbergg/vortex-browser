@@ -93,7 +93,7 @@ interface ScannedElement {
   occludedBy?: string;
   attrs: Record<string, string>;
   /** Framework UI state derived from class / aria. @since 0.4.0 (O-8) */
-  state?: { checked?: boolean; selected?: boolean; active?: boolean; disabled?: boolean; expanded?: boolean; required?: boolean; current?: boolean; invalid?: boolean; sort?: "ascending" | "descending" | "none"; haspopup?: string };
+  state?: { checked?: boolean | "mixed"; selected?: boolean; active?: boolean; disabled?: boolean; expanded?: boolean; required?: boolean; current?: boolean; invalid?: boolean; sort?: "ascending" | "descending" | "none"; haspopup?: string };
   /** 值域控件(slider/spinbutton/progressbar/meter 及原生 range/number/progress)的当前值,如 "30" 或 "30/100"。@since dogfood 2026-06-02 */
   valueNow?: string;
   /** BUG-010 N0060 京东评测: el 含 onClick 桩 / cursor:pointer 时标 true,
@@ -106,6 +106,20 @@ interface ScannedElement {
   parentIndex?: number;
   /** role=link 的 href，供 compact 树渲染 /url。@since a11y-tree */
   href?: string;
+  /** 离屏但可交互(visually hidden actionable)标记。@since v0.7 */
+  offScreenActionable?: boolean;
+  /** AX nameSource：名称来源(label/placeholder/title/heuristic 等)。@since ax-overlay */
+  nameSource?: string;
+  /** aria-controls 指向的 frame-local 元素下标列表。@since ax-overlay */
+  controls?: number[];
+  /** aria-owns 指向的 frame-local 元素下标列表。@since ax-overlay */
+  owns?: number[];
+  /** aria-errormessage 或 aria-describedby(错误)关联文本。@since ax-overlay */
+  errorMessage?: string;
+  /** aria-describedby 关联描述文本。@since ax-overlay */
+  description?: string;
+  /** 复合控件元数据(combobox/listbox 等)。@since ax-overlay */
+  compound?: { role: string; count?: number; options?: string[]; formatHint?: string };
   _sel: string;
 }
 
@@ -2166,6 +2180,13 @@ export function registerObserveHandlers(router: ActionRouter, debuggerMgr: Debug
         }
       }
 
+      // password 防护:type=password 的 valueNow 剥除,防敏感值泄露进下一个 prompt。
+      for (const s of scans) {
+        for (const e of s.page?.elements ?? []) {
+          if ((e.attrs?.type ?? "").toLowerCase() === "password") e.valueNow = undefined;
+        }
+      }
+
       // 分配跨 frame 全局 index（按 frameTargets 顺序）
       // 每个元素附加 suggestedUsage：给 LLM 直接可用的下一步命令，避免再自行推断应传 frameId。
       type CompactElementOut = {
@@ -2173,7 +2194,7 @@ export function registerObserveHandlers(router: ActionRouter, debuggerMgr: Debug
         tag: string;
         role: string;
         name: string;
-        state?: { checked?: boolean; selected?: boolean; active?: boolean; disabled?: boolean; expanded?: boolean; required?: boolean; current?: boolean; invalid?: boolean; sort?: "ascending" | "descending" | "none"; haspopup?: string };
+        state?: { checked?: boolean | "mixed"; selected?: boolean; active?: boolean; disabled?: boolean; expanded?: boolean; required?: boolean; current?: boolean; invalid?: boolean; sort?: "ascending" | "descending" | "none"; haspopup?: string };
         /** 值域控件当前值,如 "30" 或 "30/100"(getValueInfo 严格限定值域控件)。 */
         valueNow?: string;
         /** BUG-010 N0060 京东评测: onClick 桩 / cursor:pointer 命中 (compact 也透传) */
@@ -2184,6 +2205,13 @@ export function registerObserveHandlers(router: ActionRouter, debuggerMgr: Debug
         bbox?: [number, number, number, number];
         parentIndex?: number;
         href?: string;
+        offScreenActionable?: boolean;
+        nameSource?: string;
+        controls?: number[];
+        owns?: number[];
+        errorMessage?: string;
+        description?: string;
+        compound?: { role: string; count?: number; options?: string[]; formatHint?: string };
       };
       type FullElementOut = Omit<ScannedElement, "_sel"> & {
         frameId: number;
@@ -2268,6 +2296,12 @@ export function registerObserveHandlers(router: ActionRouter, debuggerMgr: Debug
               // a11y-tree: 全局重映射后的父指针 + href（link 元素）。
               ...(globalParentIndex !== undefined ? { parentIndex: globalParentIndex } : {}),
               ...(e.href ? { href: e.href } : {}),
+              ...(e.nameSource ? { nameSource: e.nameSource } : {}),
+              ...(e.controls ? { controls: e.controls } : {}),
+              ...(e.owns ? { owns: e.owns } : {}),
+              ...(e.errorMessage ? { errorMessage: e.errorMessage } : {}),
+              ...(e.description ? { description: e.description } : {}),
+              ...(e.compound ? { compound: e.compound } : {}),
               frameId: s.frameId,
               ...(bboxTuple ? { bbox: bboxTuple } : {}),
             });
@@ -2301,6 +2335,12 @@ export function registerObserveHandlers(router: ActionRouter, debuggerMgr: Debug
               // a11y-tree: 全局重映射后的父指针 + href（link 元素）。
               ...(globalParentIndex !== undefined ? { parentIndex: globalParentIndex } : {}),
               ...(e.href ? { href: e.href } : {}),
+              ...(e.nameSource ? { nameSource: e.nameSource } : {}),
+              ...(e.controls ? { controls: e.controls } : {}),
+              ...(e.owns ? { owns: e.owns } : {}),
+              ...(e.errorMessage ? { errorMessage: e.errorMessage } : {}),
+              ...(e.description ? { description: e.description } : {}),
+              ...(e.compound ? { compound: e.compound } : {}),
               frameId: s.frameId,
               ref,
               suggestedUsage: {
