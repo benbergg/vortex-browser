@@ -139,6 +139,11 @@ export const QueryActions = {
   QUERY_PAGE: "query.queryPage",
 } as const;
 
+export const VerifyActions = {
+  /** 走 observe AX 树比对的断言工具(testing cap opt-in)。@since tool-horizontal-opt */
+  ASSERT: "verify.assert",
+} as const;
+
 export type ActionString =
   | (typeof TabActions)[keyof typeof TabActions]
   | (typeof PageActions)[keyof typeof PageActions]
@@ -156,4 +161,5 @@ export type ActionString =
   | (typeof ObserveActions)[keyof typeof ObserveActions]
   | (typeof EventsActions)[keyof typeof EventsActions]
   | (typeof DiagnosticsActions)[keyof typeof DiagnosticsActions]
-  | (typeof QueryActions)[keyof typeof QueryActions];
+  | (typeof QueryActions)[keyof typeof QueryActions]
+  | (typeof VerifyActions)[keyof typeof VerifyActions];

@@ -60,9 +60,9 @@
 // attr/includeText/maxResults 字段,payload 实测 7417B,
 // cap +400 至 7500 留 83B 余量。沿用"加能力微调 cap 不压缩字符"惯例。
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, afterEach } from "vitest";
 import { COMMIT_KINDS } from "@vortex-browser/shared";
-import { getToolDefs, getInternalToolDef } from "../../src/tools/registry.js";
+import { getToolDefs, getInternalToolDef, setEnabledCaps } from "../../src/tools/registry.js";
 
 describe("I15: tools/list budget + count + internalized grep", () => {
   const defs = getToolDefs();
@@ -252,5 +252,25 @@ describe("Bug F regression: vortex_observe surface must expose frames", () => {
   // discoverability silently regresses — Bug F all over again.
   it("description hints frames usage for iframe contexts", () => {
     expect(observe.description).toMatch(/frames/);
+  });
+});
+
+// caps opt-in：默认面 verify 不进 tools/list；--caps=testing 时提升进公开面（21）。
+// 守住「cap 工具默认零回归 + opt-in 后可见」双向不变量。
+describe("I15-caps: vortex_verify 仅在 --caps=testing 时进 tools/list", () => {
+  afterEach(() => setEnabledCaps([]));
+
+  it("默认面仍 20，不含 vortex_verify", () => {
+    setEnabledCaps([]);
+    const defs = getToolDefs();
+    expect(defs.length).toBe(20);
+    expect(defs.map((d) => d.name)).not.toContain("vortex_verify");
+  });
+
+  it("--caps=testing 时公开面 = 21 且含 vortex_verify", () => {
+    setEnabledCaps(["testing"]);
+    const names = getToolDefs().map((d) => d.name);
+    expect(getToolDefs().length).toBe(21);
+    expect(names).toContain("vortex_verify");
   });
 });

@@ -21,6 +21,7 @@ import { registerMutationHandlers } from "./handlers/mutations.js";
 import { registerEventHandlers } from "./handlers/events.js";
 import { registerDiagnosticsHandlers } from "./handlers/diagnostics.js";
 import { registerQueryHandlers } from "./handlers/query.js";
+import { registerVerifyHandlers } from "./handlers/verify.js";
 import { EventDispatcher, registerEventSources } from "./events/dispatcher.js";
 
 const router = new ActionRouter();
@@ -39,6 +40,8 @@ registerObserveHandlers(router, debuggerMgr);
 registerMutationHandlers(router);
 registerDiagnosticsHandlers(router);
 registerQueryHandlers(router);
+// testing cap opt-in 工具：verify handler 通过 router.dispatch 复用 observe AX 管线
+registerVerifyHandlers(router);
 
 // NM 客户端
 const nm = new NativeMessagingClient(

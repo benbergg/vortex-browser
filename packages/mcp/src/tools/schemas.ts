@@ -775,6 +775,50 @@ function framesTools(): ToolDef[] {
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
+// Verify（1 个，cap:"testing" opt-in）
+// ──────────────────────────────────────────────────────────────────────────────
+
+function verifyTools(): ToolDef[] {
+  return [
+    {
+      name: "vortex_verify",
+      action: "verify.assert",
+      // testing cap 工具：经 --caps=testing 提升进 public。断言走 observe AX 树
+      // 比对，绝不旁路 evaluate 做 DOM 查询。失败返回 {ok:false,expected,actual}。
+      description:
+        "Assert page state via the observe a11y tree (testing cap). " +
+        "mode=visible(role+name exists & visible) / value(target==value) / " +
+        "text(page or target contains text) / list(all items present). " +
+        "Returns {ok:true} or {ok:false,expected,actual}.",
+      cap: "testing",
+      schema: {
+        type: "object",
+        properties: {
+          mode: {
+            type: "string",
+            enum: ["visible", "value", "text", "list"],
+            description: "Assertion mode.",
+          },
+          role: { type: "string", description: "ARIA role to match (visible mode)." },
+          name: { type: "string", description: "Accessible name to match (visible mode)." },
+          target: { type: "string", description: "@<hash>:eN ref to scope value/text assertions." },
+          value: { description: "Expected value (value mode)." },
+          text: { type: "string", description: "Expected substring (text mode)." },
+          items: {
+            type: "array",
+            items: { type: "object", properties: { role: { type: "string" }, name: { type: "string" } }, required: ["name"] },
+            description: "List of {role?,name} to all assert present (list mode).",
+          },
+          ...optionalTabId,
+          ...optionalFrameId,
+        },
+        required: ["mode"],
+      },
+    },
+  ];
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
 // 导出
 // ──────────────────────────────────────────────────────────────────────────────
 
@@ -795,5 +839,6 @@ export function getAllToolDefs(): ToolDef[] {
     ...storageTools(),
     ...fileTools(),
     ...framesTools(),
+    ...verifyTools(),
   ];
 }
