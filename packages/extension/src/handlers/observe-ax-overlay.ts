@@ -72,6 +72,14 @@ export function computeAXOverlay(
   return out;
 }
 
+/** marker 真源(单测用)。observe.ts 注入体内联同语义副本——改一处须同步。 */
+export function STAMP_MARKERS(els: Element[]): void {
+  for (let i = 0; i < els.length; i++) els[i].setAttribute("data-vtx-ax", String(i));
+}
+export function CLEAR_MARKERS(doc: Document): void {
+  for (const el of doc.querySelectorAll("[data-vtx-ax]")) el.removeAttribute("data-vtx-ax");
+}
+
 const COMPOUND_TRIGGER_ROLES = new Set(["combobox", "listbox", "select", "slider", "spinbutton"]);
 
 /** 复合控件展开:从 AX 子树取 listbox 选项样本 / 范围。byNodeId 是 nodeId→CDPAXNode 全量索引。 */

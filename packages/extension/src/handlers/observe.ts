@@ -1937,6 +1937,12 @@ async function scanOneFrame(
           }
         }
 
+        // AX-overlay: 给每个收集元素打 frame-local 下标标记,供扩展侧 DOM.getDocument
+        // 关联到 backendDOMNodeId。与 observe-ax-overlay.ts STAMP_MARKERS 同语义(内联副本)。
+        for (let i = 0; i < collectedEls.length; i++) {
+          collectedEls[i].setAttribute("data-vtx-ax", String(i));
+        }
+
         return {
           url: location.href,
           title: document.title,
