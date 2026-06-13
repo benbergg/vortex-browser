@@ -104,6 +104,8 @@ export const MouseActions = {
   DOUBLE_CLICK: "mouse.doubleClick",
   MOVE: "mouse.move",
   DRAG: "mouse.drag",
+  /** 元素级 DnD：两个 ref 各取 getBoundingClientRect 中心，走 CDP trusted pointer 序列。@since v0.9 */
+  DRAG_ELEMENT: "mouse.dragElement",
 } as const;
 
 export const FramesActions = {

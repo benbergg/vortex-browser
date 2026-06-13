@@ -297,6 +297,23 @@ export const PUBLIC_TOOLS: ToolDef[] = [
     annotations: { destructiveHint: true, openWorldHint: true },
   },
   {
+    // v0.9: 元素级 DnD。两个 ref 各取 getBoundingClientRect 中心，走 CDP trusted pointer 序列+actionability 门。
+    // vortex_mouse_drag 保留（canvas/地图等无 ref 场景仍需坐标 drag）。
+    name: "vortex_drag",
+    action: "mouse.dragElement",
+    description: "Ref-based DnD: startRef→center→CDP trusted drag→endRef. Actionability-gated.",
+    schema: {
+      type: "object",
+      properties: {
+        startRef: { type: "string" as const },
+        endRef: { type: "string" as const },
+        steps: { type: "number" as const },
+        ...tabFields,
+      },
+      required: ["startRef", "endRef"],
+    },
+  },
+  {
     name: "vortex_mouse_drag",
     action: "mouse.drag",
     description: "CDP drag (fromX,fromY)→(toX,toY). steps default 10.",

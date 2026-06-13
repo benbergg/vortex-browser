@@ -61,23 +61,25 @@ describe("I15: tools/list budget + count + internalized grep", () => {
     defs.map(d => ({ name: d.name, description: d.description, inputSchema: d.schema })),
   );
 
-  it("tools/list 字节 ≤ 6100 B (T4 prevSnapshotId +16B，实测 6016 留 84B buffer)", () => {
+  it("tools/list 字节 ≤ 6500 B (T6 vortex_drag 元素级 DnD 工具, 实测 6348 留 152B buffer)", () => {
     // V2 P0 修复 D16: filter 子字段 description 是必要的文档化豁免
     // (handler 已实现 console.ts:160 level / network.ts:305-321 pattern+statusMin/Max),
     // 移除豁免会触发 V2 D16 真发现复发 (LLM 不知可用子字段)。
-    // 上限 6100 = 5918 (T4前基线) + 16 (prevSnapshotId 字段) + 84 (余量 buffer)。
-    expect(toolsListPayload.length).toBeLessThanOrEqual(6100);
+    // 上限 6500 = 6100 (T4基线) + ~332 (vortex_drag schema+description) + 余量 buffer。
+    // 工具横向优化批后续 T7 fill_form / T9 query 还会涨, 最终默认面 20 工具 ~6900。
+    expect(toolsListPayload.length).toBeLessThanOrEqual(6500);
   });
 
-  it("公开工具数量 = 17（v2.1 PR-A: v0.8 15 + tab_list + history）", () => {
-    expect(defs.length).toBe(17);
+  it("公开工具数量 = 18（工具横向优化 T6: 17 + vortex_drag 元素级 DnD）", () => {
+    expect(defs.length).toBe(18);
   });
 
-  it("17 个公开工具名匹配 spec L4 §1.1+§1.2 + v2.1 PR-A (v2.1)", () => {
+  it("18 个公开工具名匹配 spec L4 §1.1+§1.2 + 工具横向优化 T6", () => {
     const names = defs.map(d => d.name).sort();
     expect(names).toEqual([
       "vortex_act",
       "vortex_debug_read",
+      "vortex_drag",
       "vortex_evaluate",
       "vortex_extract",
       "vortex_file_upload",
@@ -101,10 +103,12 @@ describe("I15: tools/list budget + count + internalized grep", () => {
     // v0.8: vortex_fill / vortex_evaluate / vortex_mouse_drag / vortex_file_upload
     // 已从内部化回到公开（v0.7.x backlog promotion）。
     // v2.1 PR-A: vortex_tab_list / vortex_history 也从内部化回到公开。
+    // 工具横向优化 T6: vortex_drag 提升为公开(元素级 DnD, action=mouse.dragElement,
+    // 与坐标版 vortex_mouse_drag/mouse.drag 并存),从本内部化名单移除。
     const internalized = [
       // 写操作 → act
       "vortex_click", "vortex_type", "vortex_select",
-      "vortex_scroll", "vortex_hover", "vortex_drag",
+      "vortex_scroll", "vortex_hover",
       // 读 → extract / observe
       "vortex_get_text", "vortex_get_html",
       "vortex_frames_list",

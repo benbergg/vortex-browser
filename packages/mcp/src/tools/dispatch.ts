@@ -337,6 +337,12 @@ export function dispatchNewTool(
       return null;
     }
 
+    case "vortex_drag": {
+      // startRef/endRef 已由 server.ts 翻成 startSelector/endSelector（或 index 变体），
+      // 无需在 dispatch 层再 reshape；透传即可。
+      return null;
+    }
+
     default:
       return null;
   }

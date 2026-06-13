@@ -421,6 +421,32 @@ export async function handleCallTool(
     }
   }
 
+  // vortex_drag 双 ref 翻译：startRef/endRef 各翻成 startSelector/endSelector（或 index 变体）。
+  // 设计：各 ref 独立翻译，结果字段加前缀（startSelector、endSelector / startIndex+startSnapshotId+startFrameId 等）。
+  // handler(mouse.dragElement) 读 startSelector/endSelector (经 resolveTarget) 取元素。
+  if (toolDef.name === "vortex_drag") {
+    const { resolveTargetParam } = await import("./lib/ref-parser.js");
+    const currentTabId = typeof params.tabId === "number" ? params.tabId : null;
+    for (const side of ["start", "end"] as const) {
+      const refField = `${side}Ref` as "startRef" | "endRef";
+      const raw = params[refField] as string | undefined;
+      if (!raw) continue;
+      try {
+        const resolved = resolveTargetParam(raw, activeSnapshotId, activeSnapshotHash, activeSnapshotTabId, currentTabId);
+        delete params[refField];
+        if (resolved.selector) {
+          params[`${side}Selector`] = resolved.selector;
+        } else if (resolved.index != null) {
+          params[`${side}Index`] = resolved.index;
+          params[`${side}SnapshotId`] = resolved.snapshotId;
+          if (resolved.frameId && resolved.frameId !== 0) params[`${side}FrameId`] = resolved.frameId;
+        }
+      } catch (err) {
+        return { isError: true, content: [{ type: "text" as const, text: formatError(err) }] };
+      }
+    }
+  }
+
   // frameRef 翻译：@fN → frameId
   const frameRef = params.frameRef as string | undefined;
   if (frameRef) {
