@@ -183,3 +183,40 @@ export async function captureAXSnapshot(
     nodes,
   };
 }
+
+/**
+ * 采集 frame 的 AX tree,返回两份索引:byBackend(backendDOMNodeId→CDPAXNode,无 backendId
+ * 的节点跳过,因无法关联 DOM)和 byNodeId(nodeId→CDPAXNode,供 compound 走子树)。不过滤。
+ * 跨域 iframe / A11Y 不可用时抛 vtxError,由调用方回退纯启发式。
+ */
+export async function captureAXNodeMap(
+  debuggerMgr: DebuggerLike,
+  tabId: number,
+  frameId = 0,
+): Promise<{ byBackend: Map<number, CDPAXNode>; byNodeId: Map<string, CDPAXNode> }> {
+  await debuggerMgr.enableDomain(tabId, "Accessibility");
+  await debuggerMgr.enableDomain(tabId, "DOM");
+  let raw: { nodes?: CDPAXNode[] };
+  try {
+    raw = (await debuggerMgr.sendCommand(
+      tabId,
+      "Accessibility.getFullAXTree",
+      frameId === 0 ? undefined : { frameId },
+    )) as { nodes?: CDPAXNode[] };
+  } catch (err) {
+    if (isCrossOriginErr(err)) {
+      throw vtxError(VtxErrorCode.CROSS_ORIGIN_IFRAME,
+        `Cannot access cross-origin iframe (frameId=${frameId})`, { extras: { frameId } });
+    }
+    throw vtxError(VtxErrorCode.A11Y_UNAVAILABLE,
+      `Accessibility.getFullAXTree failed: ${err instanceof Error ? err.message : String(err)}`,
+      { extras: { frameId } });
+  }
+  const byBackend = new Map<number, CDPAXNode>();
+  const byNodeId = new Map<string, CDPAXNode>();
+  for (const n of raw?.nodes ?? []) {
+    byNodeId.set(n.nodeId, n);
+    if (n.backendDOMNodeId !== undefined) byBackend.set(n.backendDOMNodeId, n);
+  }
+  return { byBackend, byNodeId };
+}

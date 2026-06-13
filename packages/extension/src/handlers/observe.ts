@@ -1,5 +1,6 @@
 import { ObserveActions, VtxErrorCode, vtxError } from "@vortex-browser/shared";
 import type { ActionRouter } from "../lib/router.js";
+import type { DebuggerManager } from "../lib/debugger-manager.js";
 import { getActiveTabId, buildExecuteTarget, ensureFrameAttached } from "../lib/tab-utils.js";
 import { getIframeOffset } from "../lib/iframe-offset.js";
 import {
@@ -8,6 +9,8 @@ import {
   setSnapshot,
   type SnapshotElement,
 } from "../lib/snapshot-store.js";
+import { captureAXNodeMap } from "../reasoning/ax-snapshot.js";
+import { buildIndexToBackend, applyOverlay, type OverlayableElement } from "./observe-ax-overlay.js";
 
 type FramesParam =
   | "main"
@@ -90,7 +93,7 @@ interface ScannedElement {
   occludedBy?: string;
   attrs: Record<string, string>;
   /** Framework UI state derived from class / aria. @since 0.4.0 (O-8) */
-  state?: { checked?: boolean; selected?: boolean; active?: boolean; disabled?: boolean; expanded?: boolean; required?: boolean; current?: boolean; invalid?: boolean; sort?: "ascending" | "descending" | "none"; haspopup?: string };
+  state?: { checked?: boolean | "mixed"; selected?: boolean; active?: boolean; disabled?: boolean; expanded?: boolean; required?: boolean; current?: boolean; invalid?: boolean; sort?: "ascending" | "descending" | "none"; haspopup?: string; readonly?: boolean };
   /** 值域控件(slider/spinbutton/progressbar/meter 及原生 range/number/progress)的当前值,如 "30" 或 "30/100"。@since dogfood 2026-06-02 */
   valueNow?: string;
   /** BUG-010 N0060 京东评测: el 含 onClick 桩 / cursor:pointer 时标 true,
@@ -103,6 +106,20 @@ interface ScannedElement {
   parentIndex?: number;
   /** role=link 的 href，供 compact 树渲染 /url。@since a11y-tree */
   href?: string;
+  /** 离屏但可交互(visually hidden actionable)标记。@since v0.7 */
+  offScreenActionable?: boolean;
+  /** AX nameSource：名称来源(label/placeholder/title/heuristic 等)。@since ax-overlay */
+  nameSource?: string;
+  /** aria-controls 指向的 frame-local 元素下标列表。@since ax-overlay */
+  controls?: number[];
+  /** aria-owns 指向的 frame-local 元素下标列表。@since ax-overlay */
+  owns?: number[];
+  /** aria-errormessage 或 aria-describedby(错误)关联文本。@since ax-overlay */
+  errorMessage?: string;
+  /** aria-describedby 关联描述文本。@since ax-overlay */
+  description?: string;
+  /** 复合控件元数据(combobox/listbox 等)。@since ax-overlay */
+  compound?: { role: string; count?: number; options?: string[]; formatHint?: string };
   _sel: string;
 }
 
@@ -1936,6 +1953,12 @@ async function scanOneFrame(
           }
         }
 
+        // AX-overlay: 给每个收集元素打 frame-local 下标标记,供扩展侧 DOM.getDocument
+        // 关联到 backendDOMNodeId。与 observe-ax-overlay.ts STAMP_MARKERS 同语义(内联副本)。
+        for (let i = 0; i < collectedEls.length; i++) {
+          collectedEls[i].setAttribute("data-vtx-ax", String(i));
+        }
+
         return {
           url: location.href,
           title: document.title,
@@ -1961,7 +1984,8 @@ async function scanOneFrame(
   }
 }
 
-export function registerObserveHandlers(router: ActionRouter): void {
+export function registerObserveHandlers(router: ActionRouter, debuggerMgr: DebuggerManager): void {
+  void debuggerMgr; // 后续 AX pass 使用
   router.registerAll({
     [ObserveActions.SNAPSHOT]: async (args, tabId) => {
       gcSnapshots();
@@ -2117,6 +2141,53 @@ export function registerObserveHandlers(router: ActionRouter): void {
         }
       }
 
+      // AX 语义覆盖层(v1 仅主 frame frameId 0):采 AX tree + DOM.getDocument 关联 →
+      // 原地覆盖 role/name/state/value/关系。任一步失败该 frame 优雅回退纯启发式(不报错)。
+      if (includeAX) {
+        const mainScan = scans.find((s) => s.frameId === 0);
+        if (mainScan?.page && mainScan.page.elements.length > 0) {
+          try {
+            const { byBackend, byNodeId } = await captureAXNodeMap(debuggerMgr, tid, 0);
+            const doc = (await debuggerMgr.sendCommand(tid, "DOM.getDocument", {
+              depth: -1,
+              pierce: true,
+            })) as { root?: unknown };
+            if (doc?.root) {
+              const indexToBackend = buildIndexToBackend(doc.root as never);
+              applyOverlay(
+                mainScan.page.elements as unknown as OverlayableElement[],
+                indexToBackend,
+                byBackend,
+                byNodeId,
+              );
+            }
+          } catch (err) {
+            console.warn(
+              `[vortex.observe] AX overlay skipped fid=0: ${err instanceof Error ? err.message : String(err)}`,
+            );
+          }
+        }
+      }
+      // marker 清理(无条件):page-side stamping 无条件,故清理也须无条件,
+      // 防 includeAX:false 时标记被打上却永不清除(终审 Issue 1)。清理失败不致命。
+      try {
+        await chrome.scripting.executeScript({
+          target: { tabId: tid, allFrames: true },
+          func: () => {
+            for (const el of document.querySelectorAll("[data-vtx-ax]")) el.removeAttribute("data-vtx-ax");
+          },
+        });
+      } catch {
+        /* 标记仅 observe 内部用,下轮 scan 覆盖 */
+      }
+
+      // password 防护:type=password 的 valueNow 剥除,防敏感值泄露进下一个 prompt。
+      for (const s of scans) {
+        for (const e of s.page?.elements ?? []) {
+          if ((e.attrs?.type ?? "").toLowerCase() === "password") e.valueNow = undefined;
+        }
+      }
+
       // 分配跨 frame 全局 index（按 frameTargets 顺序）
       // 每个元素附加 suggestedUsage：给 LLM 直接可用的下一步命令，避免再自行推断应传 frameId。
       type CompactElementOut = {
@@ -2124,7 +2195,7 @@ export function registerObserveHandlers(router: ActionRouter): void {
         tag: string;
         role: string;
         name: string;
-        state?: { checked?: boolean; selected?: boolean; active?: boolean; disabled?: boolean; expanded?: boolean; required?: boolean; current?: boolean; invalid?: boolean; sort?: "ascending" | "descending" | "none"; haspopup?: string };
+        state?: { checked?: boolean | "mixed"; selected?: boolean; active?: boolean; disabled?: boolean; expanded?: boolean; required?: boolean; current?: boolean; invalid?: boolean; sort?: "ascending" | "descending" | "none"; haspopup?: string; readonly?: boolean };
         /** 值域控件当前值,如 "30" 或 "30/100"(getValueInfo 严格限定值域控件)。 */
         valueNow?: string;
         /** BUG-010 N0060 京东评测: onClick 桩 / cursor:pointer 命中 (compact 也透传) */
@@ -2135,6 +2206,13 @@ export function registerObserveHandlers(router: ActionRouter): void {
         bbox?: [number, number, number, number];
         parentIndex?: number;
         href?: string;
+        offScreenActionable?: boolean;
+        nameSource?: string;
+        controls?: number[];
+        owns?: number[];
+        errorMessage?: string;
+        description?: string;
+        compound?: { role: string; count?: number; options?: string[]; formatHint?: string };
       };
       type FullElementOut = Omit<ScannedElement, "_sel"> & {
         frameId: number;
@@ -2219,6 +2297,12 @@ export function registerObserveHandlers(router: ActionRouter): void {
               // a11y-tree: 全局重映射后的父指针 + href（link 元素）。
               ...(globalParentIndex !== undefined ? { parentIndex: globalParentIndex } : {}),
               ...(e.href ? { href: e.href } : {}),
+              ...(e.nameSource ? { nameSource: e.nameSource } : {}),
+              ...(e.controls ? { controls: e.controls } : {}),
+              ...(e.owns ? { owns: e.owns } : {}),
+              ...(e.errorMessage ? { errorMessage: e.errorMessage } : {}),
+              ...(e.description ? { description: e.description } : {}),
+              ...(e.compound ? { compound: e.compound } : {}),
               frameId: s.frameId,
               ...(bboxTuple ? { bbox: bboxTuple } : {}),
             });
@@ -2252,6 +2336,12 @@ export function registerObserveHandlers(router: ActionRouter): void {
               // a11y-tree: 全局重映射后的父指针 + href（link 元素）。
               ...(globalParentIndex !== undefined ? { parentIndex: globalParentIndex } : {}),
               ...(e.href ? { href: e.href } : {}),
+              ...(e.nameSource ? { nameSource: e.nameSource } : {}),
+              ...(e.controls ? { controls: e.controls } : {}),
+              ...(e.owns ? { owns: e.owns } : {}),
+              ...(e.errorMessage ? { errorMessage: e.errorMessage } : {}),
+              ...(e.description ? { description: e.description } : {}),
+              ...(e.compound ? { compound: e.compound } : {}),
               frameId: s.frameId,
               ref,
               suggestedUsage: {

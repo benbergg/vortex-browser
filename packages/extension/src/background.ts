@@ -34,7 +34,7 @@ registerDomHandlers(router, debuggerMgr);
 registerContentHandlers(router);
 registerStorageHandlers(router);
 registerCaptureHandlers(router, debuggerMgr);
-registerObserveHandlers(router);
+registerObserveHandlers(router, debuggerMgr);
 registerMutationHandlers(router);
 registerDiagnosticsHandlers(router);
 
