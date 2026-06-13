@@ -30,9 +30,9 @@ describe("click-effect page-side module (__vortexClickEffect)", () => {
     };
   }
 
-  it("挂载 __vortexClickEffect(version=2, begin/end 函数)", async () => {
+  it("挂载 __vortexClickEffect(version=3, begin/end 函数)", async () => {
     const ns = await load();
-    expect(ns.version).toBe(2);
+    expect(ns.version).toBe(3);
     expect(typeof ns.begin).toBe("function");
     expect(typeof ns.end).toBe("function");
   });
