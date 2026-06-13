@@ -19,8 +19,6 @@ export const TOAST_SELECTORS = [
   ".toast",
   "[role='alert']",
   "[role='status']",
-  "[aria-live='polite']",
-  "[aria-live='assertive']",
 ] as const;
 
 export const DIALOG_SELECTORS = [

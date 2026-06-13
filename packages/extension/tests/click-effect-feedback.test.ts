@@ -41,3 +41,18 @@ describe("选择器覆盖", () => {
     expect([...DIALOG_SELECTORS].join(" ")).toMatch(/\.el-dialog|\.ant-modal|\.bn-drawer/);
   });
 });
+
+describe("TOAST_SELECTORS 不含常驻 [aria-live] 包裹（antd Spin 假阳回归 A5/A6）", () => {
+  it("不含裸 [aria-live='polite'] / [aria-live='assertive']", () => {
+    const arr = [...TOAST_SELECTORS] as string[];
+    expect(arr).not.toContain("[aria-live='polite']");
+    expect(arr).not.toContain("[aria-live='assertive']");
+  });
+  it("仍保留 role=status/alert + 框架专属 toast 类（防过度删除漏掉真 toast）", () => {
+    const arr = [...TOAST_SELECTORS] as string[];
+    expect(arr).toContain("[role='status']");
+    expect(arr).toContain("[role='alert']");
+    expect(arr).toContain(".ant-message");
+    expect(arr).toContain(".el-message");
+  });
+});
