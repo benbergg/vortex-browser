@@ -18,6 +18,41 @@ describe("computeAXOverlay", () => {
     expect(r.state?.checked).toBe("mixed");
   });
 
+  // B1 回归(2026-06-14 reactflow.dev dogfood):CDP checked 是 tristate 字符串
+  // "true"/"false"/"mixed"。旧判据 `checked != null && checked !== false` 对字符串
+  // "false" 漏判(字符串 ≠ 布尔 false)→ state.checked = "false"(truthy)→ 渲染层
+  // `else if (state.checked)` 误发 [checked]。Radix/Ant/MUI 风格 role=radio/checkbox
+  // 的未选中项全中招,agent 误以为全选中。原生 input 走 page-side .checked IDL 不受影响。
+  it("AX checked=false(tristate 字符串)不标 checked (B1)", () => {
+    const node = ax({
+      role: { value: "radio" },
+      name: { value: "pyramid" },
+      properties: [{ name: "checked", value: { value: "false" } }],
+    });
+    const r = computeAXOverlay({ backendId: 20, role: "radio", name: "pyramid" }, node);
+    expect(r.state?.checked).toBeUndefined();
+  });
+
+  it("AX checked=true(tristate 字符串)标 checked=true (B1 正向不回归)", () => {
+    const node = ax({
+      role: { value: "radio" },
+      name: { value: "cube" },
+      properties: [{ name: "checked", value: { value: "true" } }],
+    });
+    const r = computeAXOverlay({ backendId: 21, role: "radio", name: "cube" }, node);
+    expect(r.state?.checked).toBe(true);
+  });
+
+  it("AX checked=true(布尔)仍标 checked=true (兼容布尔形态)", () => {
+    const node = ax({
+      role: { value: "checkbox" },
+      name: { value: "opt" },
+      properties: [{ name: "checked", value: { value: true } }],
+    });
+    const r = computeAXOverlay({ backendId: 22, role: "checkbox", name: "opt" }, node);
+    expect(r.state?.checked).toBe(true);
+  });
+
   it("AX role=generic 不夺启发式交互 role(信召回)", () => {
     const node = ax({ role: { value: "generic" }, name: { value: "更多" } });
     const r = computeAXOverlay({ backendId: 11, role: "button", name: "更多" }, node);

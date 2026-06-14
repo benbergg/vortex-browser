@@ -95,3 +95,15 @@ describe("评审修复 — el-select 共享超时 deadline + verify 口径对齐
     expect(SEL_SRC).toMatch(/displayed\.includes\(norm\(l\)\)/);
   });
 });
+
+describe("B3 — kind=select 命中原生 <select> 给友好指引(2026-06-14 selenium dogfood)", () => {
+  it("识别原生 select(isNativeSelect:tagName/closest/querySelector)", () => {
+    expect(SEL_SRC).toMatch(/isNativeSelect/);
+    expect(SEL_SRC).toMatch(/target\.tagName === "SELECT"/);
+  });
+  it("原生 select 报指引用 action select / fill_form 不带 kind,而非 .el-select 不匹配", () => {
+    expect(SEL_SRC).toMatch(/native <select>/);
+    expect(SEL_SRC).toMatch(/action "select"/);
+    expect(SEL_SRC).toMatch(/without kind/);
+  });
+});

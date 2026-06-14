@@ -48,8 +48,13 @@ export function computeAXOverlay(
   }
 
   const state: NonNullable<AXOverlayInfo["state"]> = {};
+  // CDP checked 是 tristate:value 为字符串 "true"/"false"/"mixed"(亦可能布尔 true)。
+  // 旧判据 `checked !== false` 只排除布尔 false,放过字符串 "false" → state.checked="false"
+  // (truthy)→ 渲染层误发 [checked]。Radix/Ant/MUI 风格 role=radio/checkbox 未选中项全
+  // 中招(2026-06-14 reactflow.dev dogfood B1)。须按 tristate token 精确判定。
   const checked = getProp(node, "checked");
-  if (checked != null && checked !== false) state.checked = checked as boolean | "mixed";
+  if (checked === "mixed") state.checked = "mixed";
+  else if (checked === true || checked === "true") state.checked = true;
   if (getProp(node, "selected") === true) state.selected = true;
   if (getProp(node, "disabled") === true) state.disabled = true;
   if (getProp(node, "expanded") != null) state.expanded = getProp(node, "expanded") === true;

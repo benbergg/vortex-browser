@@ -132,7 +132,7 @@ describe("cdpClickElement force option — runtime (Case 7, anti-brittleness)", 
     vi.restoreAllMocks();
   });
 
-  async function setupDom(): Promise<JSDOM> {
+  async function setupDom(rectOverride?: Partial<DOMRect>): Promise<JSDOM> {
     const html = `<!DOCTYPE html><html><body>
       <button id="t">T</button>
       <div id="blocker" style="position:absolute;left:0;top:0;width:200px;height:50px"></div>
@@ -165,6 +165,7 @@ describe("cdpClickElement force option — runtime (Case 7, anti-brittleness)", 
     const rect: DOMRect = {
       x: 10, y: 10, width: 100, height: 30,
       top: 10, left: 10, right: 110, bottom: 40, toJSON: () => ({}),
+      ...rectOverride,
     } as DOMRect;
     target.getBoundingClientRect = (() => rect) as typeof target.getBoundingClientRect;
     // scrollIntoView is a no-op in jsdom anyway; stub to be safe.
@@ -234,5 +235,47 @@ describe("cdpClickElement force option — runtime (Case 7, anti-brittleness)", 
     // Verify the args were forwarded correctly.
     expect(captured).not.toBeNull();
     expect(capturedArgs).toEqual(["#t", true]);
+  });
+
+  // B2(2026-06-14 reactflow.dev dogfood):scrollIntoView({block:center}) 把已完全
+  // 可见的元素强行滚到几何中心,在「内部 overflow/transform 容器 + JS 监听并弹回」的
+  // 动态画布(React Flow)上触发容器临时滚动 → act 同步缓存坐标后容器 ~50ms 弹回 →
+  // CDP 异步 dispatchMouse 坐标已失效 → 点中相邻元素(pyramid radio 被点成 cube)。
+  // 修复:元素完全在视口内则跳过 scrollIntoView。jsdom 默认 viewport 1024x768。
+  it("B2: 完全在视口的元素跳过 scrollIntoView(避免动态画布弹回点偏)", async () => {
+    const dom = await setupDom(); // 默认 rect top:10 bottom:40 right:110 完全在 1024x768 内
+    const target = dom.window.document.getElementById("t") as HTMLElement;
+    const scrollSpy = vi.fn();
+    target.scrollIntoView = scrollSpy as typeof target.scrollIntoView;
+    mockPageQuery.mockImplementation(
+      async (_t: number, _f: number | undefined, fn: (...a: unknown[]) => unknown, args: unknown[]) =>
+        fn(...(args as [])),
+    );
+    const { cdpClickElement } = await import("../src/adapter/cdp.js");
+    const debuggerMgr = {
+      attach: vi.fn().mockResolvedValue(undefined),
+      sendCommand: vi.fn().mockResolvedValue(undefined),
+    } as any;
+    await cdpClickElement(debuggerMgr, 1, undefined, "#t", { force: true });
+    expect(scrollSpy).not.toHaveBeenCalled();
+  });
+
+  it("B2: 未完全在视口的元素仍 scrollIntoView 滚入(必要滚动不受影响)", async () => {
+    // bottom 930 > innerHeight 768 → 未完全可见 → 必须滚入
+    const dom = await setupDom({ y: 900, top: 900, bottom: 930 });
+    const target = dom.window.document.getElementById("t") as HTMLElement;
+    const scrollSpy = vi.fn();
+    target.scrollIntoView = scrollSpy as typeof target.scrollIntoView;
+    mockPageQuery.mockImplementation(
+      async (_t: number, _f: number | undefined, fn: (...a: unknown[]) => unknown, args: unknown[]) =>
+        fn(...(args as [])),
+    );
+    const { cdpClickElement } = await import("../src/adapter/cdp.js");
+    const debuggerMgr = {
+      attach: vi.fn().mockResolvedValue(undefined),
+      sendCommand: vi.fn().mockResolvedValue(undefined),
+    } as any;
+    await cdpClickElement(debuggerMgr, 1, undefined, "#t", { force: true });
+    expect(scrollSpy).toHaveBeenCalled();
   });
 });

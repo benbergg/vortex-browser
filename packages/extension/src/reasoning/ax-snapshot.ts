@@ -68,8 +68,12 @@ async function toAXNode(n: CDPAXNode, index: number): Promise<AXNode> {
   const properties: AXNode["properties"] = {};
   const focused = getProp(n, "focused");
   if (focused === true) properties.focused = true;
+  // checked 是 tristate token(字符串 "true"/"false"/"mixed",亦可能布尔 true)。
+  // `!= null` 会把未选中的 "false" 也存成 truthy 字符串 → 下游 reasoning 误判已选中。
+  // 与 observe-ax-overlay 同源,按 token 精确判定(2026-06-14 dogfood B1)。
   const checked = getProp(n, "checked");
-  if (checked != null) properties.checked = checked as boolean | "mixed";
+  if (checked === "mixed") properties.checked = "mixed";
+  else if (checked === true || checked === "true") properties.checked = true;
   const disabled = getProp(n, "disabled");
   if (disabled === true) properties.disabled = true;
   const expanded = getProp(n, "expanded");

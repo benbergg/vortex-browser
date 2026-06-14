@@ -282,8 +282,16 @@ export function registerDomHandlers(
                 error: `Element ${sel} is outside the viewport`,
               };
             }
-            // 滚入视口后做 occlusion 检查
-            el.scrollIntoView({ block: "center", inline: "center" });
+            // 元素已完全在视口内 → 跳过 scrollIntoView(同 cdp.ts useRealMouse / mouse.ts
+            // drag 守卫):无谓 block:center 在动态画布上触发容器滚动+弹回,使 occlusion
+            // 检查坐标失效误判(2026-06-14 dogfood B2)。未完全可见才滚(必要)。
+            const __vw = window.innerWidth, __vh = window.innerHeight;
+            const __fullyInView =
+              rect0.top >= 0 && rect0.left >= 0 &&
+              rect0.bottom <= __vh && rect0.right <= __vw;
+            if (!__fullyInView) {
+              el.scrollIntoView({ block: "center", inline: "center" });
+            }
             const rect = el.getBoundingClientRect();
             const cx = rect.left + rect.width / 2;
             const cy = rect.top + rect.height / 2;

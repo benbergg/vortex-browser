@@ -75,12 +75,26 @@
     const target = els[0] as HTMLElement;
     const root = (target.closest(closestSelector) ??
       target.querySelector(closestSelector)) as HTMLElement | null;
-    if (!root)
+    if (!root) {
+      // 原生 <select> 不属于本 driver——kind="select" 专供组件库 widget(Element Plus
+      // el-select)。旧消息只报 ".el-select 不匹配",暴露内部实现且不指引正道,调用方
+      // 不知道原生 select 该怎么填(2026-06-14 selenium web-form dogfood B3)。
+      const isNativeSelect =
+        target.tagName === "SELECT" ||
+        !!target.closest("select") ||
+        !!target.querySelector("select");
+      if (isNativeSelect)
+        return {
+          error: `Target is a native <select>; kind="select" is for component-library widgets (e.g. Element Plus el-select). Use action "select" (vortex_act) or vortex_fill_form without kind.`,
+          errorCode: "UNSUPPORTED_TARGET",
+          extras: { driverId: "element-plus-select", nativeSelect: true },
+        };
       return {
         error: `Target does not match driver closestSelector "${closestSelector}" (neither ancestor nor descendant)`,
         errorCode: "UNSUPPORTED_TARGET",
         extras: { driverId: "element-plus-select" },
       };
+    }
 
     // -------- Element Plus el-select driver --------
     const labels = Array.isArray(val)
