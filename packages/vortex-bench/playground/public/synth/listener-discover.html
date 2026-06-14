@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="zh"><head><meta charset="utf-8"><title>listener discovery</title></head>
+<body>
+<h1>纯 addEventListener 发现(observe pre-scan getEventListeners)</h1>
+<!--
+  T3 discovery 回归护栏:#vanilla 是裸 div(cursor:default、无 role、无框架 onClick),
+  仅靠 addEventListener('click') 绑定 —— observe 现有 cursor:pointer/hasFrameworkClick
+  启发式都漏它,只有 pre-scan CDP getEventListeners 真值信号能发现并打 [listener]。
+  #deco 结构同构但**无监听器**,作对照:不得被收集(证明靠监听器信号而非文本/结构)。
+-->
+<div id="vanilla" style="cursor:default;padding:8px">vanilla 监听器按钮</div>
+<div id="deco" style="cursor:default;padding:8px">无监听器装饰块</div>
+<p data-testid="result">idle</p>
+<script>
+  // 纯 addEventListener:非内联 onclick、非 React/Vue,启发式不可见,仅 getEventListeners 可见。
+  document.getElementById("vanilla").addEventListener("click", () => {
+    document.querySelector("[data-testid=result]").textContent = "vanilla-clicked";
+  });
+  // #deco 故意不绑任何监听器。
+</script>
+</body></html>

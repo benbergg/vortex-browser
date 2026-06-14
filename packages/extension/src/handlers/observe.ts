@@ -11,7 +11,7 @@ import {
 } from "../lib/snapshot-store.js";
 import { captureAXNodeMap } from "../reasoning/ax-snapshot.js";
 import { buildIndexToBackend, applyOverlay, type OverlayableElement } from "./observe-ax-overlay.js";
-import { collectJsListenerIndices, applyListenerSignal } from "./observe-js-listener.js";
+import { markListenerElements } from "./observe-js-listener.js";
 
 type FramesParam =
   | "main"
@@ -1575,23 +1575,30 @@ async function scanOneFrame(
           // 真漏「查看全部评价」「切换大图模式」)。下游 require-name + 含交互后代/祖先
           // skip + 择叶 全部复用,噪声治理不变。
           if (getComputedStyle(htmlEl).cursor !== "pointer") {
-            if (!hasFrameworkClick(el)) continue;
-            // framework onClick 常挂在事件委托的**容器**层;若其内部已有更细的
-            // cursor:pointer 子项(如多个 SKU 选项),让位给子项各自入池——否则下方
-            // 择叶会因容器文字最长而保留容器,把多个真选项合并成一个不可操作的大块
-            // (2026-06-04 淘宝 SKU 选择区回归)。仅加严 framework-onClick 路径,
-            // cursor:pointer 入池路径不变。
-            const finerDesc = el.querySelectorAll("*");
-            let hasFinerPointer = false;
-            for (let di = 0; di < finerDesc.length && di < 200; di++) {
-              if (getComputedStyle(finerDesc[di] as HTMLElement).cursor === "pointer") {
-                hasFinerPointer = true;
-                break;
+            // 入池信号(cursor!=pointer 时):① framework onClick(React/Vue 委托,读
+            // __reactProps$/_vei) ② data-vtx-listener(pre-scan CDP getEventListeners
+            // 标记的纯 addEventListener 元素,vanilla/jQuery 直绑——见 observe-js-listener.ts)。
+            // 二者并集:framework 覆盖委托型、listener 覆盖直绑型,互补无盲区(T3 discovery)。
+            const __hasDirectListener = el.hasAttribute("data-vtx-listener");
+            if (!hasFrameworkClick(el) && !__hasDirectListener) continue;
+            // framework onClick 常挂事件委托的**容器**层;若内部已有更细 cursor:pointer
+            // 子项(如多个 SKU 选项),让位给子项各自入池——否则下方择叶因容器文字最长
+            // 保留容器,把多真选项合并成一个不可操作大块(2026-06-04 淘宝 SKU 区回归)。
+            // **direct listener 不让位**:addEventListener 绑在元素自身,它就是精确点击
+            // 目标(非委托容器),不该让位给装饰性 pointer 子项。仅 framework 委托路径让位。
+            if (!__hasDirectListener) {
+              const finerDesc = el.querySelectorAll("*");
+              let hasFinerPointer = false;
+              for (let di = 0; di < finerDesc.length && di < 200; di++) {
+                if (getComputedStyle(finerDesc[di] as HTMLElement).cursor === "pointer") {
+                  hasFinerPointer = true;
+                  break;
+                }
               }
+              // 内容卡不让位——评价卡 li.item 自身有 onClick + 评价正文,内部
+              // cursor:pointer 标签是附属,不该让位给标签(SKU 容器无自有文本仍让位)。
+              if (hasFinerPointer && !isClickableContentCard(el)) continue;
             }
-            // 内容卡不让位——评价卡 li.item 自身有 onClick + 评价正文,内部
-            // cursor:pointer 标签是附属,不该让位给标签(SKU 容器无自有文本仍让位)。
-            if (hasFinerPointer && !isClickableContentCard(el)) continue;
           }
           // Use textContent for the gate check — innerText forces layout
           // and we only need the gate decision here. The accessible name
@@ -2018,6 +2025,9 @@ async function scanOneFrame(
             ...(reactMarker
               ? { reactClickable: true as const, clickHint: reactMarker.clickHint }
               : {}),
+            // T3 discovery: pre-scan CDP getEventListeners 标记的纯 addEventListener
+            // 元素带 data-vtx-listener → 渲染 [listener] 真值信号(此处属性尚存,清理在后)。
+            ...(htmlEl.hasAttribute("data-vtx-listener") ? { listenerInteractive: true as const } : {}),
             ...(__href !== undefined ? { href: __href } : {}),
             ...(__inputCompound !== undefined ? { compound: __inputCompound } : {}),
             _sel: buildSelector(htmlEl),
@@ -2132,6 +2142,15 @@ export function registerObserveHandlers(router: ActionRouter, debuggerMgr: Debug
         offset: { x: number; y: number };
         page: FramePageResult | null;
       }> = [];
+      // T3 discovery(pre-scan):CDP getEventListeners 给主 frame 内纯 addEventListener
+      // 点击元素打 data-vtx-listener,随后 scanOneFrame 把它当入池信号 → DISCOVER 漏网
+      // vanilla/jQuery div(无 cursor:pointer/role/框架 prop)。召回零回退:失败标 0 个,
+      // scan 退回现有启发式。属性在 scan 后随 data-vtx-ax 一并清理。
+      try {
+        await markListenerElements(debuggerMgr, tid);
+      } catch {
+        /* markListenerElements 内置兜底,理论不抛;防御性吞掉不阻断 observe */
+      }
       for (const f of frameTargets) {
         const offset = await getIframeOffset(tid, f.frameId);
         const page = await scanOneFrame(
@@ -2263,30 +2282,19 @@ export function registerObserveHandlers(router: ActionRouter, debuggerMgr: Debug
           }
         }
       }
-      // JS 监听器真值信号层(T3)：CDP getEventListeners 对主 frame 已扫元素打
-      // listenerInteractive 标记。须在 AX overlay pass 之后（data-vtx-ax 已打）、
-      // marker 清理之前（data-vtx-ax 尚存）运行。
-      // 召回零回退：只新增 listenerInteractive，不删除任何元素；CDP 失败 → 空集
-      // → applyListenerSignal no-op，observe 整轮不崩。
-      if (includeAX) {
-        const mainScan = scans.find((s) => s.frameId === 0);
-        if (mainScan?.page && mainScan.page.elements.length > 0) {
-          // collectJsListenerIndices 内置 try-catch，失败返回空集，不抛
-          const listenerIndices = await collectJsListenerIndices(debuggerMgr, tid, 0);
-          applyListenerSignal(
-            mainScan.page.elements as unknown as { listenerInteractive?: true; [k: string]: unknown }[],
-            listenerIndices,
-          );
-        }
-      }
+      // 注:JS 监听器真值信号已迁移到 pre-scan discovery(markListenerElements,
+      // 见上方 frame 循环前)——listenerInteractive 在 scan 输出构造时由
+      // data-vtx-listener 属性直接生成,不再需要事后 CDP pass。
 
-      // marker 清理(无条件):page-side stamping 无条件,故清理也须无条件,
-      // 防 includeAX:false 时标记被打上却永不清除(终审 Issue 1)。清理失败不致命。
+      // marker 清理(无条件):data-vtx-ax(scan stamping)+ data-vtx-listener
+      // (pre-scan discovery)。两者无条件打,故清理也须无条件,防标记残留。清理失败不致命。
       try {
         await chrome.scripting.executeScript({
           target: { tabId: tid, allFrames: true },
           func: () => {
             for (const el of document.querySelectorAll("[data-vtx-ax]")) el.removeAttribute("data-vtx-ax");
+            for (const el of document.querySelectorAll("[data-vtx-listener]"))
+              el.removeAttribute("data-vtx-listener");
           },
         });
       } catch {
