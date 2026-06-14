@@ -77,6 +77,24 @@ describe("js.evaluate CSP unsafe-eval → CDP Runtime.evaluate 回退 (github do
     );
   });
 
+  it("CDP Runtime.evaluate 的 timeout 必须是 number 毫秒(真实 CDP 契约,非 boolean)", async () => {
+    // 真实站 dogfood 2026-06-14:CDP `Runtime.evaluate.timeout` 是 TimeDelta(number, ms)。
+    // 旧实现(b156687)传 `timeout: true` + 自造 `timeoutMs` 字段 → 真 CDP 报
+    // "Failed to deserialize params.timeout - double value expected",CSP 站 evaluate 100% 崩。
+    // mock 不校验真实 CDP 语义,objectContaining 又没断言 timeout,故旧 bug 一路绿灯。
+    executeScript.mockResolvedValue([{ result: { error: UNSAFE_EVAL_MSG } }]);
+    dbg.sendCommand.mockResolvedValue({ result: { value: 1 } });
+
+    await router.dispatch(mkReq("js.evaluate", { code: "1", timeout: 4321 }));
+
+    const params = dbg.sendCommand.mock.calls[0][2] as Record<string, unknown>;
+    // timeout 必须是真实毫秒数(CDP 期望 double),不能是 boolean true
+    expect(typeof params.timeout).toBe("number");
+    expect(params.timeout).toBe(4321);
+    // 不得带 CDP 不认识的自造字段 timeoutMs
+    expect(params).not.toHaveProperty("timeoutMs");
+  });
+
   it("不主动 detach(与 bare-attach mouse/dom 一致,避免误 detach 对方在途会话)", async () => {
     executeScript.mockResolvedValue([{ result: { error: UNSAFE_EVAL_MSG } }]);
     dbg.sendCommand.mockResolvedValue({ result: { value: 1 } });

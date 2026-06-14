@@ -87,8 +87,8 @@ export function buildAsyncSrc(c: string): string {
  * 零竞态、零新横幅成本。returnByValue 与 executeScript 序列化语义一致;awaitPromise
  * 兼容同步值与 Promise。抛 Error(由调用方包成 vtxError)。
  *
- * v3.4 BUG-003:加 `timeoutMs` 参数(默认 5000),Chrome 走 `Runtime.evaluate { timeout:true,
- * timeoutMs }` 原生 abort page-side 死循环。这是 CDP 层的真 kill(不像 page-side 路径
+ * v3.4 BUG-003:加 `timeoutMs` 参数(默认 5000),Chrome 走 `Runtime.evaluate { timeout: <ms> }`
+ * (CDP TimeDelta=毫秒数)原生 abort page-side 死循环。这是 CDP 层的真 kill(不像 page-side 路径
  * 只能 race Promise)。handler 收到的错(error 包含 "Script execution timed out")由调用
  * 方按 isTimeoutError 识别后包装为 TIMEOUT 错。
  */
@@ -104,8 +104,11 @@ async function cdpEvaluate(
     returnByValue: true,
     awaitPromise: true,
     userGesture: false,
-    timeout: true,             // BUG-003: enable CDP timeout
-    timeoutMs,                // BUG-003: 实际超时毫秒
+    // CDP `Runtime.evaluate.timeout` 是 TimeDelta(number 毫秒)。旧实现(b156687)传
+    // `timeout: true` + 自造 `timeoutMs` 字段是错误形态——真 CDP 报 "params.timeout
+    // double value expected",CSP 站(unsafe-eval 禁)回退此路径时 evaluate 100% 崩。
+    // 直接传毫秒数即 native abort page-side 死循环。
+    timeout: timeoutMs,
   })) as {
     result?: { value?: unknown };
     exceptionDetails?: { exception?: { description?: string }; text?: string };
