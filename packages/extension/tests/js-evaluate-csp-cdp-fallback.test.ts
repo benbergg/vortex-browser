@@ -90,9 +90,37 @@ describe("js.evaluate CSP unsafe-eval → CDP Runtime.evaluate 回退 (github do
     const params = dbg.sendCommand.mock.calls[0][2] as Record<string, unknown>;
     // timeout 必须是真实毫秒数(CDP 期望 double),不能是 boolean true
     expect(typeof params.timeout).toBe("number");
-    expect(params.timeout).toBe(4321);
+    // CDP native timeout = 请求 timeout + 渲染器强杀 backstop(2000ms);客户端 withTimeout
+    // 才是主超时(见下方两测试),CDP native 仅作同步死循环的渲染器兜底强杀、设长一点确保
+    // 客户端计时器先触发→干净 TIMEOUT,-32603 永不抢先。
+    expect(params.timeout).toBe(4321 + 2000);
     // 不得带 CDP 不认识的自造字段 timeoutMs
     expect(params).not.toHaveProperty("timeoutMs");
+  });
+
+  it("CDP 回退 evaluate sendCommand 不 settle(同步死循环阻塞 / 异步 pending)→ 干净 TIMEOUT", async () => {
+    // 真实站 dogfood 2026-06-14:CDP `Runtime.evaluate.timeout` 只终止**同步**执行,不覆盖
+    // awaitPromise 的异步等待(live:setTimeout(10s) 在 timeout=1.5s 下不被 CDP 中止 → 挂死
+    // 到 MCP 层 "no response");且同步死循环被 CDP 终止时以泛化 -32603 reject、isTimeoutError
+    // 抓不到。修:cdpEvaluate 用客户端 withTimeout(SW 计时器独立于被阻塞渲染器)统一兜底。
+    executeScript.mockResolvedValue([{ result: { error: UNSAFE_EVAL_MSG } }]);
+    dbg.sendCommand.mockReturnValue(new Promise(() => {})); // 永不 settle
+    const out = (await router.dispatch(
+      mkReq("js.evaluate", { code: "while(1){}", timeout: 80 }),
+    )) as Resp;
+    expect(out.error?.code).toBe("TIMEOUT");
+    expect(out.error?.message).toMatch(/timed out/i);
+  }, 3000);
+
+  it("CDP 回退 evaluate 早于超时的真错(reject)→ JS_EXECUTION_ERROR,不误判 TIMEOUT", async () => {
+    // 守卫:detached target / 协议错等会**立即** reject(elapsed << timeout),不得被当超时。
+    executeScript.mockResolvedValue([{ result: { error: UNSAFE_EVAL_MSG } }]);
+    dbg.sendCommand.mockRejectedValue(new Error("Target closed unexpectedly"));
+    const out = (await router.dispatch(
+      mkReq("js.evaluate", { code: "1", timeout: 5000 }),
+    )) as Resp;
+    expect(out.error?.code).toBe("JS_EXECUTION_ERROR");
+    expect(out.error?.message).toMatch(/Target closed/);
   });
 
   it("不主动 detach(与 bare-attach mouse/dom 一致,避免误 detach 对方在途会话)", async () => {

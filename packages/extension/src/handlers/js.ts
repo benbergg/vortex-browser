@@ -1,4 +1,4 @@
-import { JsActions, VtxErrorCode, vtxError } from "@vortex-browser/shared";
+import { JsActions, VtxError, VtxErrorCode, vtxError } from "@vortex-browser/shared";
 import type { ActionRouter } from "../lib/router.js";
 import type { DebuggerManager } from "../lib/debugger-manager.js";
 import { getActiveTabId, buildExecuteTarget, ensureFrameAttached } from "../lib/tab-utils.js";
@@ -39,6 +39,13 @@ function jsTimeoutError(timeoutMs: number): ReturnType<typeof vtxError> {
     undefined,
     { hint: "Avoid infinite loops or long-running operations. Set shorter timeout, simplify code, or split into multiple calls." });
 }
+
+/**
+ * cdpEvaluate 的 CDP native `timeout` 在请求 timeout 之上再加的渲染器强杀兜底余量。
+ * 客户端 withTimeout(SW 计时器,见 cdpEvaluate)才是主超时;CDP native timeout 设长一点,
+ * 确保客户端计时器先触发→干净 TIMEOUT,同步死循环的泛化 `-32603` reject 永不抢先暴露。
+ */
+const CDP_KILL_BACKSTOP_MS = 2000;
 
 /**
  * 页面 CSP 禁 `unsafe-eval`(GitHub / Twitter / Shopify / 多数银行 SaaS 普遍)时,
@@ -87,10 +94,10 @@ export function buildAsyncSrc(c: string): string {
  * 零竞态、零新横幅成本。returnByValue 与 executeScript 序列化语义一致;awaitPromise
  * 兼容同步值与 Promise。抛 Error(由调用方包成 vtxError)。
  *
- * v3.4 BUG-003:加 `timeoutMs` 参数(默认 5000),Chrome 走 `Runtime.evaluate { timeout: <ms> }`
- * (CDP TimeDelta=毫秒数)原生 abort page-side 死循环。这是 CDP 层的真 kill(不像 page-side 路径
- * 只能 race Promise)。handler 收到的错(error 包含 "Script execution timed out")由调用
- * 方按 isTimeoutError 识别后包装为 TIMEOUT 错。
+ * v3.4 BUG-003:加 `timeoutMs` 参数(默认 5000)。CDP `Runtime.evaluate { timeout }` 只 native
+ * abort **同步**死循环(渲染器强杀),不覆盖 awaitPromise 异步等待;故 cdpEvaluate 内用客户端
+ * withTimeout 作主超时统一兜底(见函数体),超时抛 jsTimeoutError("Script execution timed out"),
+ * 调用方按 isTimeoutError 识别为 TIMEOUT 错。
  */
 async function cdpEvaluate(
   debuggerMgr: DebuggerManager,
@@ -99,20 +106,41 @@ async function cdpEvaluate(
   timeoutMs: number = 5000,
 ): Promise<unknown> {
   await debuggerMgr.attach(tabId);
-  const res = (await debuggerMgr.sendCommand(tabId, "Runtime.evaluate", {
+  // CDP `Runtime.evaluate.timeout` 是 TimeDelta(number 毫秒)。旧实现(b156687)传
+  // `timeout: true` + 自造 `timeoutMs` 字段是错误形态——真 CDP 报 "params.timeout
+  // double value expected",CSP 站回退此路径时 evaluate 100% 崩(已修为传毫秒数)。
+  //
+  // 超时处理(2026-06-14 真实站 dogfood):CDP native timeout 只终止**同步**执行(死循环),
+  // **不覆盖** awaitPromise 的异步等待(live 实证:页面 setTimeout(10s) 在 timeout=1.5s 下
+  // 不被 CDP 中止 → cdpEvaluate 挂死到 MCP 层 "no response");且同步死循环被 CDP 终止时
+  // 渲染器强杀、sendCommand 以泛化 `-32603 "Internal error"` reject(非干净 exceptionDetails,
+  // isTimeoutError 抓不到)。故用**客户端 withTimeout**(SW 计时器独立于被阻塞渲染器)作主
+  // 超时,统一兜住同步死循环 + 异步 pending;CDP native timeout 设为 timeoutMs+backstop 仅作
+  // 渲染器强杀兜底,确保客户端计时器先触发→干净 TIMEOUT、-32603 永不抢先暴露。
+  const inner = debuggerMgr.sendCommand(tabId, "Runtime.evaluate", {
     expression,
     returnByValue: true,
     awaitPromise: true,
     userGesture: false,
-    // CDP `Runtime.evaluate.timeout` 是 TimeDelta(number 毫秒)。旧实现(b156687)传
-    // `timeout: true` + 自造 `timeoutMs` 字段是错误形态——真 CDP 报 "params.timeout
-    // double value expected",CSP 站(unsafe-eval 禁)回退此路径时 evaluate 100% 崩。
-    // 直接传毫秒数即 native abort page-side 死循环。
-    timeout: timeoutMs,
-  })) as {
+    timeout: timeoutMs + CDP_KILL_BACKSTOP_MS,
+  }) as Promise<{
     result?: { value?: unknown };
     exceptionDetails?: { exception?: { description?: string }; text?: string };
-  };
+  }>;
+  // withTimeout 胜出后,inner 迟到的 reject(CDP backstop -32603)需被吞掉防 unhandledrejection。
+  inner.catch(() => {});
+  let res: Awaited<typeof inner>;
+  try {
+    res = await withTimeout(inner, timeoutMs, "evaluate");
+  } catch (e) {
+    // withTimeout 到期抛 TIMEOUT vtxError → 规范化为 jsTimeoutError("Script execution timed
+    // out"),外层 isTimeoutError 据此映射为干净 TIMEOUT(同步死循环 + 异步 pending 统一走此路)。
+    // 非超时的真错(早于 timeout 的 reject:detached/协议错)原样抛 → 外层 jsExecutionError。
+    if (e instanceof VtxError && e.code === VtxErrorCode.TIMEOUT) {
+      throw jsTimeoutError(timeoutMs);
+    }
+    throw e;
+  }
   if (res.exceptionDetails) {
     // 用 vtxError 包装满足 I19 no-bare-throw invariant;调用方(isUnsafeEvalBlocked
     // 分支的 catch)按 e.message 重包成 jsExecutionError,VtxError.message 即裸消息,
@@ -467,7 +495,10 @@ export function registerJsHandlers(
               try {
                 return await cdpEvaluate(debuggerMgr, tid, `(async () => { ${code} })()`, timeout);
               } catch (e2) {
-                throw jsExecutionError(e2 instanceof Error ? e2.message : String(e2));
+                const m2 = e2 instanceof Error ? e2.message : String(e2);
+                // 函数体重试若超时,保留 TIMEOUT 分类(否则被降级为 JS_EXECUTION_ERROR)。
+                if (isTimeoutError(m2)) throw jsTimeoutError(timeout);
+                throw jsExecutionError(m2);
               }
             }
             if (isTimeoutError(m)) {
