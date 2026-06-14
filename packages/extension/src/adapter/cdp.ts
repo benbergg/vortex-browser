@@ -144,7 +144,11 @@ export async function cdpClickElement(
         // 弹回,CDP 异步 dispatchMouse 时坐标已失效 → 点中相邻元素(2026-06-14
         // reactflow.dev dogfood B2:pyramid radio 被点成 cube)。仅当元素未完全可见才
         // 滚动(此时滚动必要),保留居中避遮挡;视口内被遮挡由下方 occlusion 检查兜底。
-        // 同源守卫见 dom.ts CLICK 同步路径 / mouse.ts drag(注入闭包不能引模块级 helper)。
+        // 同源守卫见 dom.ts CLICK 同步路径(注入闭包不能引模块级 helper);mouse.ts drag
+        // 用 scrollIntoView({block:"nearest"})对完全可见元素天然不滚,无需此守卫。
+        // 已知 trade-off:完全可见但被 sticky/fixed 居中遮挡的元素,旧 block:center 会滚到
+        // 中心脱离遮挡,跳过后可能命中下方 occlusion 检查报 ELEMENT_OCCLUDED——可接受,因
+        // loud 的 OCCLUDED 报错优于 silent 点错相邻元素,caller 可 force=true 兜底。
         const __vw = window.innerWidth, __vh = window.innerHeight;
         const __fullyInView =
           rect0.top >= 0 && rect0.left >= 0 &&

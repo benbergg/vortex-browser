@@ -79,10 +79,11 @@
       // 原生 <select> 不属于本 driver——kind="select" 专供组件库 widget(Element Plus
       // el-select)。旧消息只报 ".el-select 不匹配",暴露内部实现且不指引正道,调用方
       // 不知道原生 select 该怎么填(2026-06-14 selenium web-form dogfood B3)。
+      // 仅认 target 自身是 <select> 或落在 <select> 内(closest)。不用 querySelector
+      // 下钻——组件库 widget(ant-select 等)常内藏隐藏原生 select 做 a11y 后备,下钻会
+      // 把它们误判为 native select 并错误指引用 action select(实际该用 kind=aria-select)。
       const isNativeSelect =
-        target.tagName === "SELECT" ||
-        !!target.closest("select") ||
-        !!target.querySelector("select");
+        target.tagName === "SELECT" || !!target.closest("select");
       if (isNativeSelect)
         return {
           error: `Target is a native <select>; kind="select" is for component-library widgets (e.g. Element Plus el-select). Use action "select" (vortex_act) or vortex_fill_form without kind.`,

@@ -278,4 +278,30 @@ describe("cdpClickElement force option — runtime (Case 7, anti-brittleness)", 
     await cdpClickElement(debuggerMgr, 1, undefined, "#t", { force: true });
     expect(scrollSpy).toHaveBeenCalled();
   });
+
+  // B2 已知 trade-off(code review MEDIUM):完全在视口但被 sticky/fixed 居中遮挡的
+  // 元素,跳过 scrollIntoView 后 occlusion 检查仍命中遮挡物 → ELEMENT_OCCLUDED。这是
+  // 有意取舍:loud 的 OCCLUDED 报错优于 silent 点错相邻元素(B2 画布弹回),caller 可
+  // force=true 兜底。本 case 锁定该行为:完全可见(默认 rect)+ 遮挡(deepElementFromPoint
+  // 返回 blocker)+ force=false → 既不滚动又报 OCCLUDED。
+  it("B2 trade-off: 完全可见被遮挡元素跳过 scrollIntoView 但仍报 OCCLUDED", async () => {
+    const dom = await setupDom(); // 默认 rect 完全在视口;deepElementFromPoint→blocker(遮挡)
+    const target = dom.window.document.getElementById("t") as HTMLElement;
+    const scrollSpy = vi.fn();
+    target.scrollIntoView = scrollSpy as typeof target.scrollIntoView;
+    mockPageQuery.mockImplementation(
+      async (_t: number, _f: number | undefined, fn: (...a: unknown[]) => unknown, args: unknown[]) =>
+        fn(...(args as [])),
+    );
+    const { cdpClickElement } = await import("../src/adapter/cdp.js");
+    const debuggerMgr = {
+      attach: vi.fn().mockResolvedValue(undefined),
+      sendCommand: vi.fn().mockResolvedValue(undefined),
+    } as any;
+    // force 默认 false → occlusion 检查生效
+    await expect(
+      cdpClickElement(debuggerMgr, 1, undefined, "#t"),
+    ).rejects.toThrow(/occluded|covered/i);
+    expect(scrollSpy).not.toHaveBeenCalled(); // 完全可见 → 跳过滚动(trade-off 来源)
+  });
 });
