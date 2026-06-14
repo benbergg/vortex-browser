@@ -1,8 +1,11 @@
 import { MouseActions, VtxErrorCode, vtxError } from "@vortex-browser/shared";
 import type { ActionRouter } from "../lib/router.js";
 import type { DebuggerManager } from "../lib/debugger-manager.js";
-import { getActiveTabId, ensureFrameAttached } from "../lib/tab-utils.js";
+import { getActiveTabId, ensureFrameAttached, buildExecuteTarget } from "../lib/tab-utils.js";
 import { getIframeOffset } from "../lib/iframe-offset.js";
+import { resolveTarget } from "../lib/resolve-target.js";
+import { waitActionable } from "../action/auto-wait.js";
+import { loadPageSideModule } from "../adapter/page-side-loader.js";
 
 type CoordSpace = "frame" | "viewport";
 
@@ -190,6 +193,130 @@ export function registerMouseHandlers(
         steps,
         coordSpace,
         frameId: frameId ?? null,
+      };
+    },
+
+    // ── vortex_drag: 元素级 DnD ────────────────────────────────────────────
+    // 两个 ref→selector 各取 getBoundingClientRect 中心，走 CDP trusted pointer 序列。
+    // actionability: start=visible+enabled，end=visible(只需可见作落点)。
+    // 教训(memory vortex_0006): 必须用 getBoundingClientRect 拿真实视口坐标，非 transform。
+    [MouseActions.DRAG_ELEMENT]: async (args, tabId) => {
+      const startTarget = resolveTarget({
+        selector: args.startSelector,
+        index: args.startIndex,
+        snapshotId: args.startSnapshotId,
+      });
+      const endTarget = resolveTarget({
+        selector: args.endSelector,
+        index: args.endIndex,
+        snapshotId: args.endSnapshotId,
+      });
+
+      const tid = await getActiveTabId(
+        startTarget.boundTabId ?? (args.tabId as number | undefined) ?? tabId,
+      );
+      const startFrameId = startTarget.boundFrameId ?? (args.frameId as number | undefined);
+      const endFrameId = endTarget.boundFrameId ?? (args.frameId as number | undefined);
+
+      if (startFrameId != null && startFrameId !== 0) await ensureFrameAttached(tid, startFrameId);
+      if (endFrameId != null && endFrameId !== 0 && endFrameId !== startFrameId) {
+        await ensureFrameAttached(tid, endFrameId);
+      }
+
+      // actionability 门 ─ start: visible+enabled（完整门）。
+      // waitActionable 返回 rect，但我们之后还要取 scrollIntoView 后的真实 bbox，
+      // 所以此处只过门，不复用 rect（避免滚动后坐标漂移）。
+      await waitActionable(tid, startFrameId, startTarget.selector, {
+        timeout: args.timeout as number | undefined,
+      });
+      // actionability 门 ─ end: 只要可见（不要求 enabled/editable，只是落点）。
+      // 复用 waitActionable，needsEditable=false，force=false → 依然检 NOT_VISIBLE/NOT_STABLE。
+      await waitActionable(tid, endFrameId, endTarget.selector, {
+        timeout: args.timeout as number | undefined,
+      });
+
+      // 预加载 dom-resolve，使 page-side inline func 能穿 open shadow 解析 selector。
+      await loadPageSideModule(tid, startFrameId, "dom-resolve");
+
+      // page-side 取两元素的 getBoundingClientRect 中心坐标（视口坐标）。
+      // 注：若 start/end 在不同 frame，各自独立 executeScript 取各自 frame 坐标；
+      //      当前阶段假设同一 frame（v0.9 场景），跨 frame 中心留 v1.0 扩展。
+      const getBbox = async (
+        frameId: number | undefined,
+        selector: string,
+      ): Promise<{ cx: number; cy: number }> => {
+        const results = await chrome.scripting.executeScript({
+          target: buildExecuteTarget(tid, frameId),
+          world: "MAIN",
+          func: (sel: string) => {
+            // 优先走 dom-resolve 穿 shadow，回退到 light-DOM。
+            const resolve = (window as any).__vortexDomResolve;
+            const el: HTMLElement | null = resolve
+              ? (resolve.queryAllDeep(sel) as HTMLElement[])[0] ?? null
+              : document.querySelector<HTMLElement>(sel);
+            if (!el) return { ok: false as const, reason: "ELEMENT_NOT_FOUND" as const };
+            // scrollIntoView 确保元素在视口内再取坐标，避免视口外 getBCR 给出屏外坐标。
+            el.scrollIntoView({ block: "nearest", inline: "nearest" });
+            const r = el.getBoundingClientRect();
+            if (r.width === 0 || r.height === 0) {
+              return { ok: false as const, reason: "NOT_VISIBLE" as const };
+            }
+            return {
+              ok: true as const,
+              cx: r.left + r.width / 2,
+              cy: r.top + r.height / 2,
+            };
+          },
+          args: [selector],
+        });
+        const res = results[0]?.result as
+          | { ok: true; cx: number; cy: number }
+          | { ok: false; reason: string }
+          | undefined;
+        if (!res?.ok) {
+          const reason = (!res || !res.ok) ? (res as { ok: false; reason: string } | undefined)?.reason ?? "ELEMENT_NOT_FOUND" : "ELEMENT_NOT_FOUND";
+          if (reason === "ELEMENT_NOT_FOUND") {
+            throw vtxError(VtxErrorCode.ELEMENT_NOT_FOUND, `Element not found: ${selector}`);
+          }
+          throw vtxError(VtxErrorCode.NOT_VISIBLE, `Element not visible: ${selector}`);
+        }
+        return { cx: res.cx, cy: res.cy };
+      };
+
+      const from = await getBbox(startFrameId, startTarget.selector);
+      // end element も預加載 dom-resolve（若 end frame 不同時）
+      if (endFrameId !== startFrameId) {
+        await loadPageSideModule(tid, endFrameId, "dom-resolve");
+      }
+      const to = await getBbox(endFrameId, endTarget.selector);
+
+      const steps = (args.steps as number | undefined) ?? 10;
+
+      await debuggerMgr.attach(tid);
+      // CDP trusted pointer 序列:
+      // 1. hover 到起点(buttons=0) → 不触发 drag
+      // 2. mousePressed(buttons=1)  → 按下左键
+      // 3. 分 steps 次 drag-move 到终点(buttons=1) → DnD drag-move 识别关键
+      // 4. mouseReleased(buttons=0) → 松开
+      await dispatchMouse(debuggerMgr, tid, "mouseMoved", from.cx, from.cy);
+      await dispatchMouse(debuggerMgr, tid, "mousePressed", from.cx, from.cy, "left", 1, 1);
+
+      const moves: Promise<void>[] = [];
+      for (let i = 1; i <= steps; i++) {
+        const t = i / steps;
+        const xi = from.cx + (to.cx - from.cx) * t;
+        const yi = from.cy + (to.cy - from.cy) * t;
+        moves.push(dispatchMouse(debuggerMgr, tid, "mouseMoved", xi, yi, "left", 1, 1));
+      }
+      await Promise.all(moves);
+
+      await dispatchMouse(debuggerMgr, tid, "mouseReleased", to.cx, to.cy, "left", 1, 0);
+
+      return {
+        success: true,
+        from: { x: from.cx, y: from.cy },
+        to: { x: to.cx, y: to.cy },
+        steps,
       };
     },
 

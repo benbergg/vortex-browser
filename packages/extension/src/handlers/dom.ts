@@ -199,19 +199,39 @@ export function registerDomHandlers(
         args.force as boolean | undefined,
       );
 
+      // 把 page-side 返回的 raw dialogs 数组转成对外 dialogHandled 字段 + 默认 dismiss 的 warning。
+      // 定义前置(原在 deferToCdp 段下方)——使下方 useRealMouse/trustedMode 早返回分支也能套用。
+      // 否则 trusted 模式(Chrome 带 flag,click 默认走 CDP)下该分支返回 raw dialogs 无
+      // dialogHandled,a05536b 漏覆盖此路径。(2026-06-13 antd Pro dogfood bench 副产)
+      const attachDialogHandled = (r: unknown): unknown => {
+        const obj = r as { dialogs?: Array<{ type: string; message: string }> } | undefined;
+        if (!obj?.dialogs?.length) return r;
+        const first = obj.dialogs[0];
+        const policy = (args.onDialog as string) === "accept" ? "accepted" : "dismissed";
+        const needsWarn = !explicitOnDialog && (first.type === "confirm" || first.type === "prompt");
+        const { dialogs, ...restResult } = obj;
+        return {
+          ...restResult,
+          dialogHandled: {
+            type: first.type, message: first.message, policy,
+            ...(needsWarn ? { warning: "未设 onDialog,已默认 dismiss;若本意是确认请带 onDialog:accept 重试" } : {}),
+          },
+        };
+      };
+
       if (useRealMouse || trustedMode) {
         // 预加载 dom-resolve,使 cdpClickElement 的 page-side 探测能经
         // __vortexDomResolve 穿 open shadow + 走门同款 isEnabled——与同步路径一致,
         // 堵 shadow-internal ref 假阴 ELEMENT_NOT_FOUND(#14)。
         await loadPageSideModule(tid, frameId, "dom-resolve");
         if (observeEffect) await loadPageSideModule(tid, frameId, "click-effect");
-        return await cdpClickElement(debuggerMgr, tid, frameId, selector, {
+        return attachDialogHandled(await cdpClickElement(debuggerMgr, tid, frameId, selector, {
           force: args.force as boolean | undefined,
           observeEffect,
           windowMs,
           onDialog: args.onDialog as string | undefined,
           promptText: (args.promptText as string | undefined) ?? null,
-        });
+        }));
       }
 
       // 普通 element.click() 路径（含失败探测）
@@ -492,22 +512,6 @@ export function registerDomHandlers(
                 : VtxErrorCode.JS_EXECUTION_ERROR;
           throw vtxError(code, r.error, { selector, extras: r.extras });
         }
-      };
-      // 把 page-side 返回的 raw dialogs 数组转成对外 dialogHandled 字段 + 默认 dismiss 的 warning。
-      const attachDialogHandled = (r: unknown): unknown => {
-        const obj = r as { dialogs?: Array<{ type: string; message: string }> } | undefined;
-        if (!obj?.dialogs?.length) return r;
-        const first = obj.dialogs[0];
-        const policy = (args.onDialog as string) === "accept" ? "accepted" : "dismissed";
-        const needsWarn = !explicitOnDialog && (first.type === "confirm" || first.type === "prompt");
-        const { dialogs, ...restResult } = obj;
-        return {
-          ...restResult,
-          dialogHandled: {
-            type: first.type, message: first.message, policy,
-            ...(needsWarn ? { warning: "未设 onDialog,已默认 dismiss;若本意是确认请带 onDialog:accept 重试" } : {}),
-          },
-        };
       };
       // 首跑:cdpAvailable=!!debuggerMgr。submit-intent 会返回 deferToCdp(未点击)。
       let res = await runSyntheticClick(!!debuggerMgr);

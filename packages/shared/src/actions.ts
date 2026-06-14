@@ -70,6 +70,8 @@ export const NetworkActions = {
   FILTER: "network.filter",
   CLEAR: "network.clear",
   GET_RESPONSE_BODY: "network.getResponseBody",
+  /** 按 requestId 返回单请求的 status+statusText+headers+body。@since 0.9 */
+  GET_REQUEST_DETAIL: "network.getRequestDetail",
 } as const;
 
 export const CaptureActions = {
@@ -102,6 +104,8 @@ export const MouseActions = {
   DOUBLE_CLICK: "mouse.doubleClick",
   MOVE: "mouse.move",
   DRAG: "mouse.drag",
+  /** 元素级 DnD：两个 ref 各取 getBoundingClientRect 中心，走 CDP trusted pointer 序列。@since v0.9 */
+  DRAG_ELEMENT: "mouse.dragElement",
 } as const;
 
 export const FramesActions = {
@@ -130,6 +134,16 @@ export const DiagnosticsActions = {
   VERSION: "diagnostics.version",
 } as const;
 
+export const QueryActions = {
+  /** 零 LLM 探测:text grep 页面可见文本 / css 查询元素。@since 0.9.x */
+  QUERY_PAGE: "query.queryPage",
+} as const;
+
+export const VerifyActions = {
+  /** 走 observe AX 树比对的断言工具(testing cap opt-in)。@since tool-horizontal-opt */
+  ASSERT: "verify.assert",
+} as const;
+
 export type ActionString =
   | (typeof TabActions)[keyof typeof TabActions]
   | (typeof PageActions)[keyof typeof PageActions]
@@ -146,4 +160,6 @@ export type ActionString =
   | (typeof FileActions)[keyof typeof FileActions]
   | (typeof ObserveActions)[keyof typeof ObserveActions]
   | (typeof EventsActions)[keyof typeof EventsActions]
-  | (typeof DiagnosticsActions)[keyof typeof DiagnosticsActions];
+  | (typeof DiagnosticsActions)[keyof typeof DiagnosticsActions]
+  | (typeof QueryActions)[keyof typeof QueryActions]
+  | (typeof VerifyActions)[keyof typeof VerifyActions];

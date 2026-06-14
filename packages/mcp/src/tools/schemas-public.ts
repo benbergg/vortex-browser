@@ -81,6 +81,7 @@ export const PUBLIC_TOOLS: ToolDef[] = [
         filter: { enum: ["interactive", "all"] },
         frames: { enum: ["main", "all-same-origin", "all-permitted", "all"] },
         includeBoxes: { type: "boolean" },
+        prevSnapshotId: { type: "string" },
         ...tabFields,
       },
     },
@@ -201,11 +202,14 @@ export const PUBLIC_TOOLS: ToolDef[] = [
   {
     name: "vortex_debug_read",
     action: "L4.debug_read",
-    description: "Network pattern REQUIRED. filter={level|pattern}",
+    // request: 用 network 列表里的 reqid 取单请求 status+body（确定性判定）
+    description: "Network pattern REQUIRED. request:reqid→status+body. filter={level|pattern}",
     schema: {
       type: "object",
       properties: {
-        source: { enum: ["console", "network"] },
+        source: { enum: ["console", "network", "request"] },
+        // request 模式：reqid 来自 source=network 返回列表里的 requestId 字段
+        reqid: { type: "string" },
         // V2 P0 修复 D16: filter 子字段文档化 (handler 已实现, LLM 此前不知可用)
         // console: { level: 'error'|'warn'|'all' }
         // network: { pattern: '<substr>', statusMin, statusMax }
@@ -293,6 +297,23 @@ export const PUBLIC_TOOLS: ToolDef[] = [
     annotations: { destructiveHint: true, openWorldHint: true },
   },
   {
+    // v0.9: 元素级 DnD。两个 ref 各取 getBoundingClientRect 中心，走 CDP trusted pointer 序列+actionability 门。
+    // vortex_mouse_drag 保留（canvas/地图等无 ref 场景仍需坐标 drag）。
+    name: "vortex_drag",
+    action: "mouse.dragElement",
+    description: "Ref-based DnD: startRef→center→CDP trusted drag→endRef. Actionability-gated.",
+    schema: {
+      type: "object",
+      properties: {
+        startRef: { type: "string" as const },
+        endRef: { type: "string" as const },
+        steps: { type: "number" as const },
+        ...tabFields,
+      },
+      required: ["startRef", "endRef"],
+    },
+  },
+  {
     name: "vortex_mouse_drag",
     action: "mouse.drag",
     description: "CDP drag (fromX,fromY)→(toX,toY). steps default 10.",
@@ -344,6 +365,54 @@ export const PUBLIC_TOOLS: ToolDef[] = [
         ...tabFields,
       },
       required: ["target", "value"],
+    },
+  },
+  {
+    // 零 LLM 探测:text grep 可见文本 / css 计数+取属性。一次 executeScript 即时返回。
+    name: "vortex_query",
+    action: "query.queryPage",
+    description: "Zero-LLM page probe: mode=text greps visible text; mode=css finds elements by selector (attr for attributes, e.g. href).",
+    schema: {
+      type: "object",
+      properties: {
+        mode: { enum: ["text", "css"] },
+        pattern: { type: "string" },
+        isRegex: { type: "boolean" },
+        caseSensitive: { type: "boolean" },
+        contextChars: { type: "number" },
+        attr: { type: "string" },
+        includeText: { type: "boolean" },
+        maxResults: { type: "number" },
+        ...tabFields,
+      },
+      required: ["mode", "pattern"],
+    },
+  },
+  {
+    // 工具横向优化 T7: 批量填表，fields[] 循环复用 fill/dom.commit 分流，部分成功语义。
+    // 内部由 server.ts 特殊处理（逐 field 串行调 L4.fill/dom.commit），不走单次 sendRequest。
+    name: "vortex_fill_form",
+    action: "L4.fill_form",
+    description: "Batch-fill multiple fields; partial-success per field. kind=cascader/select/daterange for widgets.",
+    schema: {
+      type: "object",
+      properties: {
+        fields: {
+          type: "array" as const,
+          items: {
+            type: "object" as const,
+            properties: {
+              target: TargetRequired,
+              value: {},
+              kind: { enum: [...COMMIT_KINDS] },
+              force: { type: "boolean" as const },
+            },
+            required: ["target", "value"],
+          },
+        },
+        ...tabFields,
+      },
+      required: ["fields"],
     },
   },
 ];

@@ -48,16 +48,55 @@ export interface RefEntry {
   lastValid: number;
 }
 
+export interface AXValueSource {
+  type: string; // attribute | contents | placeholder | relatedElement | ...
+  attribute?: string;
+  value?: { value: unknown };
+}
+
 // CDP raw shape from Accessibility.getFullAXTree
 export interface CDPAXNode {
   nodeId: string;
   parentId?: string;
   childIds?: string[];
   role?: { value: string };
-  name?: { value: string };
+  name?: { value: string; sources?: AXValueSource[] };
   description?: { value: string };
   value?: { value: string };
-  properties?: Array<{ name: string; value: { value: unknown } }>;
+  // properties 值可能携带 relatedNodes(controls/owns/errormessage 等关系)
+  properties?: Array<{
+    name: string;
+    value: { value?: unknown; relatedNodes?: Array<{ backendDOMNodeId?: number; text?: string }> };
+  }>;
   ignored?: boolean;
   backendDOMNodeId?: number;
+}
+
+// overlay 写回 ScannedElement 的语义增量
+export interface AXOverlayInfo {
+  role?: string;
+  name?: string;
+  nameSource?: "aria-label" | "aria-labelledby" | "label" | "contents" | "placeholder" | "title" | "heuristic";
+  state?: {
+    checked?: boolean | "mixed"; selected?: boolean; disabled?: boolean;
+    expanded?: boolean; required?: boolean; readonly?: boolean; invalid?: boolean;
+  };
+  valueNow?: string;
+  controls?: number[];      // 目标 backendDOMNodeId(后续 remap 到 index)
+  owns?: number[];
+  errorMessage?: string;
+  description?: string;
+  compound?: {
+    role: string;
+    count?: number;
+    options?: string[];
+    /** date/time 格式串(如 YYYY-MM-DD)或 file input 当前文件名/None */
+    formatHint?: string;
+    /** range/number input 的最小值约束 */
+    min?: string;
+    /** range/number input 的最大值约束 */
+    max?: string;
+    /** range/number input 的步长约束 */
+    step?: string;
+  };
 }

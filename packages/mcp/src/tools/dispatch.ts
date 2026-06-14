@@ -266,8 +266,19 @@ export function dispatchNewTool(
       }
     }
     case "vortex_debug_read": {
-      const { source, filter, tail, ...rest } = params;
+      const { source, filter, tail, reqid, ...rest } = params;
       const next: Record<string, unknown> = { ...rest };
+      // source=request: 按 reqid 取单请求 status+body（确定性判定）
+      if (source === "request") {
+        if (!reqid || typeof reqid !== "string" || !reqid.trim()) {
+          throw vtxError(
+            VtxErrorCode.INVALID_PARAMS,
+            "vortex_debug_read source=request: reqid is required. " +
+              "Use source=network first to list requests and obtain a reqid.",
+          );
+        }
+        return { action: "network.getRequestDetail", params: { requestId: reqid.trim(), ...rest } };
+      }
       // B3-8: network source 必须有 pattern (top-level 或 filter.pattern), 避免 5000 条 dump
       // console source 不受约束 (console.getLogs 无 pattern 概念)
       if (source === "network") {
@@ -323,6 +334,18 @@ export function dispatchNewTool(
     }
     case "vortex_press": {
       // schema 暴露 `key`（与 v0.5 + handler 一致），无需 reshape；这里 case 留空走 toolDef.action 即可
+      return null;
+    }
+
+    case "vortex_drag": {
+      // startRef/endRef 已由 server.ts 翻成 startSelector/endSelector（或 index 变体），
+      // 无需在 dispatch 层再 reshape；透传即可。
+      return null;
+    }
+
+    case "vortex_fill_form": {
+      // 批量填表由 server.ts 特殊分支处理（逐 field 串行调 fill/dom.commit），
+      // dispatch 层无需 reshape，返回 null 透传 toolDef.action。
       return null;
     }
 

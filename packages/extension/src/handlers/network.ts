@@ -440,5 +440,78 @@ export function registerNetworkHandlers(
         { hint: "Network subscription was just auto-activated; trigger the request and retry. If the requestId came from an earlier session, it has been evicted." },
       );
     },
+
+    /**
+     * 按 requestId 返回单请求的 status+statusText+headers+body（合并视图）。
+     * status/statusText/headers 来自 responseReceived 事件缓存的 NetworkEntry；
+     * body 来自 responseBodies 缓存（loadingFinished 后异步写入）或实时 CDP 调用。
+     * body 超过 maxLength（默认 10240）时截断并标注 truncated:true。
+     *
+     * 前置依赖：此 handler 依赖 tab 已通过 source=network 查询而被订阅；
+     * 若 tab 从未订阅，所有 entry 均为空（届时返回 not found 错误，
+     * hint 引导调用方先调 source=network）。
+     */
+    [NetworkActions.GET_REQUEST_DETAIL]: async (args, tabId) => {
+      const requestId = args.requestId as string | undefined;
+      if (!requestId) {
+        throw vtxError(VtxErrorCode.INVALID_PARAMS, "requestId is required for source=request");
+      }
+      const maxLength = (args.maxLength as number | undefined) ?? 10240;
+      const tid = await getActiveTabId((args.tabId as number | undefined) ?? tabId);
+
+      // 从 apiLogs 或 resourceLogs 中查找对应条目（携带 status/headers 元数据）
+      const allEntries = [
+        ...(apiLogs.get(tid) ?? []),
+        ...(resourceLogs.get(tid) ?? []),
+      ];
+      const entry = allEntries.find((e) => e.requestId === requestId);
+      if (!entry) {
+        throw vtxError(
+          VtxErrorCode.INTERNAL_ERROR,
+          `Request not found: ${requestId}`,
+          { extras: { requestId } },
+          {
+            hint:
+              "The requestId was not found in the network log. " +
+              "Use vortex_debug_read(source=network) to list requests and obtain a valid requestId. " +
+              "Entries are evicted after the tab is closed or the log is cleared.",
+          },
+        );
+      }
+
+      // 获取 body：优先从 FIFO 缓存取，否则实时 CDP 调用
+      let bodyRaw = "";
+      const cachedBody = responseBodies.get(requestId);
+      if (cachedBody) {
+        bodyRaw = cachedBody.body;
+      } else if (debuggerMgr.isAttached(tid)) {
+        try {
+          const result = await debuggerMgr.sendCommand(
+            tid,
+            "Network.getResponseBody",
+            { requestId },
+          ) as any;
+          bodyRaw = result.body ?? "";
+        } catch {
+          // 204/重定向/body 已淘汰时静默回退空字符串
+          bodyRaw = "";
+        }
+      }
+
+      // body 截断
+      const truncated = bodyRaw.length > maxLength;
+      const body = truncated ? bodyRaw.slice(0, maxLength) : bodyRaw;
+
+      return {
+        requestId,
+        url: entry.url,
+        method: entry.method,
+        status: entry.status ?? null,
+        statusText: entry.statusText ?? null,
+        headers: entry.responseHeaders ?? {},
+        body,
+        truncated,
+      };
+    },
   });
 }

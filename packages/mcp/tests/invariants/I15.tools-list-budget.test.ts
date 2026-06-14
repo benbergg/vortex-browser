@@ -49,11 +49,20 @@
 // + click observeEffect→effect signals),并追加 onDialog clause。
 // 恢复后 description 174 char,schema 字段 +84B,payload 实测 5918B。
 // cap +200 至 6000,留 82B 余量。description 长度上限同步放宽 120 → 180
-// (沿用"加能力微调 cap 不压缩字符"惯例；174 char = 120 原始 + 54 onDialog子句)。
+// (沿用"加能力微调 cap 不压缩字符"惯例；174 char = 120 原始 + 54 onDialog子句)
+//
+// 工具横向优化 T7: 6500 → 7100 B。vortex_fill_form 新增(fields[] 批量填表,
+// 部分成功语义)。schema 含 fields.items.properties 结构,payload 实测 6880B,
+// cap +600 至 7100 留 220B 余量。沿用"加能力微调 cap 不压缩字符"惯例。
+//
+// 工具横向优化 vortex_query: 7100 → 7500 B。vortex_query 零 LLM 探测工具新增
+// (text grep + css find),schema 含 mode/pattern/isRegex/caseSensitive/contextChars/
+// attr/includeText/maxResults 字段,payload 实测 7417B,
+// cap +400 至 7500 留 83B 余量。沿用"加能力微调 cap 不压缩字符"惯例。
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, afterEach } from "vitest";
 import { COMMIT_KINDS } from "@vortex-browser/shared";
-import { getToolDefs, getInternalToolDef } from "../../src/tools/registry.js";
+import { getToolDefs, getInternalToolDef, setEnabledCaps } from "../../src/tools/registry.js";
 
 describe("I15: tools/list budget + count + internalized grep", () => {
   const defs = getToolDefs();
@@ -61,33 +70,35 @@ describe("I15: tools/list budget + count + internalized grep", () => {
     defs.map(d => ({ name: d.name, description: d.description, inputSchema: d.schema })),
   );
 
-  it("tools/list 字节 ≤ 6000 B (dialog-handling onDialog/promptText +84B schema + 恢复 vortex_act description, 实测 5918 留 82B buffer)", () => {
+  it("tools/list 字节 ≤ 7500 B (vortex_query 零 LLM 探测工具, 实测 7417 留 83B buffer)", () => {
     // V2 P0 修复 D16: filter 子字段 description 是必要的文档化豁免
     // (handler 已实现 console.ts:160 level / network.ts:305-321 pattern+statusMin/Max),
     // 移除豁免会触发 V2 D16 真发现复发 (LLM 不知可用子字段)。
-    // 上限 6000 = 5800 (上轮基线) + 200 (onDialog/promptText 真新增能力豁免
-    // + vortex_act description 恢复载荷性 hint，实测 5918B，留 82B 余量)。
-    expect(toolsListPayload.length).toBeLessThanOrEqual(6000);
+    // 上限 7500 = 7100 (T7基线) + ~317 (vortex_query schema+description) + 余量 buffer。
+    expect(toolsListPayload.length).toBeLessThanOrEqual(7500);
   });
 
-  it("公开工具数量 = 17（v2.1 PR-A: v0.8 15 + tab_list + history）", () => {
-    expect(defs.length).toBe(17);
+  it("公开工具数量 = 20（vortex_query 零 LLM 探测: 19 + vortex_query）", () => {
+    expect(defs.length).toBe(20);
   });
 
-  it("17 个公开工具名匹配 spec L4 §1.1+§1.2 + v2.1 PR-A (v2.1)", () => {
+  it("20 个公开工具名匹配 spec L4 §1.1+§1.2 + 工具横向优化 T6+T7+vortex_query", () => {
     const names = defs.map(d => d.name).sort();
     expect(names).toEqual([
       "vortex_act",
       "vortex_debug_read",
+      "vortex_drag",
       "vortex_evaluate",
       "vortex_extract",
       "vortex_file_upload",
       "vortex_fill",
+      "vortex_fill_form",
       "vortex_history",
       "vortex_mouse_drag",
       "vortex_navigate",
       "vortex_observe",
       "vortex_press",
+      "vortex_query",
       "vortex_screenshot",
       "vortex_storage",
       "vortex_tab_close",
@@ -102,10 +113,12 @@ describe("I15: tools/list budget + count + internalized grep", () => {
     // v0.8: vortex_fill / vortex_evaluate / vortex_mouse_drag / vortex_file_upload
     // 已从内部化回到公开（v0.7.x backlog promotion）。
     // v2.1 PR-A: vortex_tab_list / vortex_history 也从内部化回到公开。
+    // 工具横向优化 T6: vortex_drag 提升为公开(元素级 DnD, action=mouse.dragElement,
+    // 与坐标版 vortex_mouse_drag/mouse.drag 并存),从本内部化名单移除。
     const internalized = [
       // 写操作 → act
       "vortex_click", "vortex_type", "vortex_select",
-      "vortex_scroll", "vortex_hover", "vortex_drag",
+      "vortex_scroll", "vortex_hover",
       // 读 → extract / observe
       "vortex_get_text", "vortex_get_html",
       "vortex_frames_list",
@@ -239,5 +252,25 @@ describe("Bug F regression: vortex_observe surface must expose frames", () => {
   // discoverability silently regresses — Bug F all over again.
   it("description hints frames usage for iframe contexts", () => {
     expect(observe.description).toMatch(/frames/);
+  });
+});
+
+// caps opt-in：默认面 verify 不进 tools/list；--caps=testing 时提升进公开面（21）。
+// 守住「cap 工具默认零回归 + opt-in 后可见」双向不变量。
+describe("I15-caps: vortex_verify 仅在 --caps=testing 时进 tools/list", () => {
+  afterEach(() => setEnabledCaps([]));
+
+  it("默认面仍 20，不含 vortex_verify", () => {
+    setEnabledCaps([]);
+    const defs = getToolDefs();
+    expect(defs.length).toBe(20);
+    expect(defs.map((d) => d.name)).not.toContain("vortex_verify");
+  });
+
+  it("--caps=testing 时公开面 = 21 且含 vortex_verify", () => {
+    setEnabledCaps(["testing"]);
+    const names = getToolDefs().map((d) => d.name);
+    expect(getToolDefs().length).toBe(21);
+    expect(names).toContain("vortex_verify");
   });
 });

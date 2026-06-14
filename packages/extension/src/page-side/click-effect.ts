@@ -14,6 +14,17 @@
 // 两路单一真源（防族H 漂移）：合成路径与 CDP 路径都经 window.__vortexClickEffect
 // 调用，禁止任一路 inline 复制本逻辑。由 loadPageSideModule(tid, frameId, "click-effect")
 // 预注入（同 MAIN world，与 __vortexDomResolve 可见）。命名空间 + version 守卫。
+//
+// userFeedback 是 V2 增强（Task V-2）：导入 shared 的常量与 classifyFeedback，
+// 区分"页面有 toast/dialog 反馈" vs "纯 DOM mutation 噪声" vs "完全无反馈"。
+// isVisible 必须在 IIFE 内本地实现，不引入运行时副作用依赖。
+
+import {
+  classifyFeedback,
+  TOAST_SELECTORS,
+  DIALOG_SELECTORS,
+  type UserFeedback,
+} from "@vortex-browser/shared";
 
 /** CLICK 效果信号（非判定性证据，success 不因此翻转）。 */
 export interface ClickEffect {
@@ -38,6 +49,12 @@ export interface ClickEffect {
   windowMs: number;
   /** 请求的 windowMs 超过硬上限 WINDOW_MAX_MS 被钳制时为 true（调用方传值被改写的显式提示）。 */
   clamped: boolean;
+  /** 用户反馈分类：dialog > toast > mutation > none。区分"有可见反馈 vs 纯 SPA 噪声 vs 无反馈"。 */
+  userFeedback: UserFeedback;
+  /** click 派发后窗口内可见的 toast 选择器命中集合（去重后）。空 = 无 toast 反馈。 */
+  toastHit: string[];
+  /** click 派发后窗口内可见的 dialog/drawer/modal 选择器命中集合（去重后）。空 = 无对话框反馈。 */
+  dialogHit: string[];
 }
 
 interface PendingEntry {
@@ -58,9 +75,11 @@ interface PendingEntry {
 }
 
 (function () {
-  // version 2（#43 自适应窗口）：bump 自 1，使旧 v1 模块在已加载页被新注入覆盖——
-  // 否则扩展 reload 后未硬刷新的页面仍跑旧固定钳制逻辑（活验证 2026-06-11 实测踩到）。
-  if ((window as unknown as { __vortexClickEffect?: { version?: number } }).__vortexClickEffect?.version === 2) {
+  // version 3（Task V-2）：bump 自 2，使旧 v2 模块在已加载页被新注入覆盖——本版新增
+  // userFeedback/toastHit/dialogHit 字段,旧模块缺这三个字段,若不 bump,扩展 reload 后
+  // 未硬刷新的页面会读到旧 signature(可能直接把 userFeedback 当 undefined 报 silent-fail
+  // 误判,见计划 Task V-2)。命名空间 + version 守卫,与 actionability / dom-resolve 约定一致。
+  if ((window as unknown as { __vortexClickEffect?: { version?: number } }).__vortexClickEffect?.version === 3) {
     return;
   }
 
@@ -109,6 +128,72 @@ interface PendingEntry {
   const NET_SAMPLE_MAX = 5;
   const NET_URL_MAX = 80;
 
+  // isVisible 必须内联在此 IIFE 内(不能从 shared 拉),避免引入运行时副作用依赖——按
+  // 计划 Task V-2 硬约束:page-side 虽可 import shared 编译期常量,可见性判断保持内联。
+  // 风格与 actionability.ts 同(checkVisibility 优先,fallback getComputedStyle,要求
+  // non-zero rect),保证 toast/dialog 选择器命中 = 元素在文档内且真有视觉呈现。
+  function isVisible(el: Element): boolean {
+    if (typeof (el as unknown as { checkVisibility?: (opts: Record<string, boolean>) => boolean }).checkVisibility === "function") {
+      if (
+        !(el as unknown as { checkVisibility: (opts: Record<string, boolean>) => boolean }).checkVisibility({
+          checkOpacity: false,
+          checkVisibilityCSS: true,
+          contentVisibilityAuto: true,
+          opacityProperty: false,
+          visibilityProperty: true,
+        })
+      ) {
+        return false;
+      }
+    } else if (el instanceof HTMLElement) {
+      const style = getComputedStyle(el);
+      if (style.visibility !== "visible") return false;
+    }
+    const r = el.getBoundingClientRect();
+    if (r.width === 0 || r.height === 0) return false;
+    return true;
+  }
+
+  // 嗅探 click 派发后窗口内可见的 toast / dialog 选择器命中集合(去重),并经 shared 的
+  // classifyFeedback 给出 userFeedback 桶(优先级 dialog > toast > mutation > none)。
+  // 与 collectNetwork 一样是纯 page-side,无 CDP debugger 依赖,合成/CDP 两路皆可用。
+  // 失败时(try 抛错)降级返回空数组 + 'none',保留其他信号。
+  function collectFeedback(domMutations: number): {
+    userFeedback: UserFeedback;
+    toastHit: string[];
+    dialogHit: string[];
+  } {
+    const toastHit: string[] = [];
+    const dialogHit: string[] = [];
+    try {
+      for (const sel of TOAST_SELECTORS) {
+        const nodes = document.querySelectorAll(sel);
+        for (const n of Array.from(nodes)) {
+          if (isVisible(n)) {
+            toastHit.push(sel);
+            break;
+          }
+        }
+      }
+      for (const sel of DIALOG_SELECTORS) {
+        const nodes = document.querySelectorAll(sel);
+        for (const n of Array.from(nodes)) {
+          if (isVisible(n)) {
+            dialogHit.push(sel);
+            break;
+          }
+        }
+      }
+    } catch {
+      return { userFeedback: classifyFeedback(false, false, domMutations), toastHit, dialogHit };
+    }
+    return {
+      userFeedback: classifyFeedback(dialogHit.length > 0, toastHit.length > 0, domMutations),
+      toastHit,
+      dialogHit,
+    };
+  }
+
   // 经 Resource Timing(performance.getEntriesByType('resource'))统计 perfStart 之后发起的
   // XHR/fetch/beacon 请求——纯 page-side, 无需 CDP debugger, 合成/CDP 两路皆可用。
   // 跨源无 TAO 的资源仍有 name(URL)+initiatorType, 足够辨识端点(timing 被遮无所谓)。
@@ -153,7 +238,7 @@ interface PendingEntry {
   };
 
   (window as unknown as { __vortexClickEffect: unknown }).__vortexClickEffect = {
-    version: 2,
+    version: 3,
 
     /** 派发前调用：snapshot（url/activeElement/target aria）+ 启动 document 根 observer。返回 token。 */
     begin(sel: string, windowMs: number): string {
@@ -217,6 +302,9 @@ interface PendingEntry {
           observed: false,
           windowMs: 0,
           clamped: false,
+          userFeedback: "none",
+          toastHit: [],
+          dialogHit: [],
         });
       }
       // 取消 begin 的 TTL 看门狗；下面用本地 pollTimer 自管。
@@ -258,6 +346,7 @@ interface PendingEntry {
             observed = false;
           }
           const net = collectNetwork(entry.perfStart);
+          const fb = collectFeedback(entry.count);
           resolve({
             domMutations: entry.count,
             urlChanged,
@@ -268,6 +357,9 @@ interface PendingEntry {
             observed,
             windowMs: elapsed,
             clamped,
+            userFeedback: fb.userFeedback,
+            toastHit: fb.toastHit,
+            dialogHit: fb.dialogHit,
           });
         };
         const step = (): void => {

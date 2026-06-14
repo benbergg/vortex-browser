@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>vortex_press text-insert fixture</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; padding: 24px; max-width: 640px; }
+    input#text-target {
+      width: 100%;
+      padding: 8px 12px;
+      font-size: 14px;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+    }
+    .external-display { margin-top: 20px; font-family: monospace; }
+  </style>
+</head>
+<body>
+  <h1>vortex_press 文本插入 fixture</h1>
+  <p>聚焦输入框后用 <code>vortex_press</code> 逐字符按可打印键,
+     <code>input</code> 事件把当前 value 反射到结果区。只有按键真正插入字符
+     (keyDown 带 text)才会触发 input 事件 → 验证 A3 修复。</p>
+  <input id="text-target" type="text" placeholder="press target" />
+  <div class="external-display">value=<span data-testid="result">(empty)</span></div>
+  <script>
+    const input = document.getElementById("text-target");
+    const result = document.querySelector('[data-testid="result"]');
+    // 只在真正发生文本输入(input 事件)时更新结果区。纯 keydown(无 text)
+    // 不会触发 input 事件 → result 保持 (empty) → 回归被捕获。
+    input.addEventListener("input", () => {
+      result.textContent = input.value === "" ? "(empty)" : input.value;
+    });
+  </script>
+</body>
+</html>

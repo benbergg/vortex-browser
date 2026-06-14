@@ -1,5 +1,6 @@
 import { ObserveActions, VtxErrorCode, vtxError } from "@vortex-browser/shared";
 import type { ActionRouter } from "../lib/router.js";
+import type { DebuggerManager } from "../lib/debugger-manager.js";
 import { getActiveTabId, buildExecuteTarget, ensureFrameAttached } from "../lib/tab-utils.js";
 import { getIframeOffset } from "../lib/iframe-offset.js";
 import {
@@ -8,6 +9,9 @@ import {
   setSnapshot,
   type SnapshotElement,
 } from "../lib/snapshot-store.js";
+import { captureAXNodeMap } from "../reasoning/ax-snapshot.js";
+import { buildIndexToBackend, applyOverlay, type OverlayableElement } from "./observe-ax-overlay.js";
+import { markListenerElements } from "./observe-js-listener.js";
 
 type FramesParam =
   | "main"
@@ -90,7 +94,7 @@ interface ScannedElement {
   occludedBy?: string;
   attrs: Record<string, string>;
   /** Framework UI state derived from class / aria. @since 0.4.0 (O-8) */
-  state?: { checked?: boolean; selected?: boolean; active?: boolean; disabled?: boolean; expanded?: boolean; required?: boolean; current?: boolean; invalid?: boolean; sort?: "ascending" | "descending" | "none"; haspopup?: string };
+  state?: { checked?: boolean | "mixed"; selected?: boolean; active?: boolean; disabled?: boolean; expanded?: boolean; required?: boolean; current?: boolean; invalid?: boolean; sort?: "ascending" | "descending" | "none"; haspopup?: string; readonly?: boolean };
   /** 值域控件(slider/spinbutton/progressbar/meter 及原生 range/number/progress)的当前值,如 "30" 或 "30/100"。@since dogfood 2026-06-02 */
   valueNow?: string;
   /** BUG-010 N0060 京东评测: el 含 onClick 桩 / cursor:pointer 时标 true,
@@ -99,10 +103,39 @@ interface ScannedElement {
   reactClickable?: true;
   /** reactClickable=true 时给 LLM 的可读提示, 含具体兜底命令名。 */
   clickHint?: string;
+  /** CDP getEventListeners 确认有 click/mousedown/pointerdown 监听器。
+   * 高优先交互判定信号（优先级高于 cursor:pointer 启发），并集增强不删元素。@since T3 */
+  listenerInteractive?: true;
   /** 最近的已收集祖先的 frame-local index；根节点 undefined。@since a11y-tree */
   parentIndex?: number;
   /** role=link 的 href，供 compact 树渲染 /url。@since a11y-tree */
   href?: string;
+  /** 离屏但可交互(visually hidden actionable)标记。@since v0.7 */
+  offScreenActionable?: boolean;
+  /** AX nameSource：名称来源(label/placeholder/title/heuristic 等)。@since ax-overlay */
+  nameSource?: string;
+  /** aria-controls 指向的 frame-local 元素下标列表。@since ax-overlay */
+  controls?: number[];
+  /** aria-owns 指向的 frame-local 元素下标列表。@since ax-overlay */
+  owns?: number[];
+  /** aria-errormessage 或 aria-describedby(错误)关联文本。@since ax-overlay */
+  errorMessage?: string;
+  /** aria-describedby 关联描述文本。@since ax-overlay */
+  description?: string;
+  /** 复合控件元数据(combobox/listbox/date-input/file-input/range-input 等)。@since ax-overlay */
+  compound?: {
+    role: string;
+    count?: number;
+    options?: string[];
+    /** date/time 格式串或 file input 当前文件名/None */
+    formatHint?: string;
+    /** range/number input 最小值约束 */
+    min?: string;
+    /** range/number input 最大值约束 */
+    max?: string;
+    /** range/number input 步长约束 */
+    step?: string;
+  };
   _sel: string;
 }
 
@@ -899,12 +932,23 @@ async function scanOneFrame(
             // 多命中则 SELECTOR_AMBIGUOUS）。
             return el.tagName.toLowerCase();
           }
-          if (el.id && /^[a-zA-Z][\w-]*$/.test(el.id)) return `#${CSS.escape(el.id)}`;
+          // id 唯一才用 #id —— 重复 id(无效 HTML 但 Modal/Drawer 覆盖同结构表单时
+          // 常见,如 antd Pro 页面 search 与 Modal 均渲染 #name)会让下游 querySelector
+          // 命中第一个(弹层背后被 mask 遮挡)元素 → actionability OBSCURED。歧义时
+          // fall through 到路径/rid 分支保 1:1。(2026-06-13 antd Pro dogfood A1)
+          if (
+            el.id &&
+            /^[a-zA-Z][\w-]*$/.test(el.id) &&
+            document.querySelectorAll(`#${CSS.escape(el.id)}`).length === 1
+          )
+            return `#${CSS.escape(el.id)}`;
           const testId =
             el.getAttribute("data-testid") || el.getAttribute("data-test");
           if (testId) {
             const attr = el.getAttribute("data-testid") ? "data-testid" : "data-test";
-            return `[${attr}="${testId.replace(/"/g, '\\"')}"]`;
+            const testSel = `[${attr}="${testId.replace(/"/g, '\\"')}"]`;
+            // 同 id:testid 也可能重复(列表项复用),唯一才用,否则 fall through。
+            if (document.querySelectorAll(testSel).length === 1) return testSel;
           }
           // aria-label is the next-most-stable anchor for actionable widgets
           // (button / link / form control). It survives React re-renders that
@@ -1169,16 +1213,23 @@ async function scanOneFrame(
           return Object.keys(s).length > 0 ? s : undefined;
         }
 
-        // 值域控件的当前值:slider / spinbutton / progressbar / scrollbar / meter
-        // 及原生 <input type=range|number> / <progress> / <meter>。observe 原本
-        // 只给出控件名(如 "[slider] 音量"),agent 看得到滑块却不知设到几——调它
-        // 需要先知道当前值。**严格限定值域 role/控件**,绝不对普通文本输入暴露
-        // value(那是 extract 的职责,且 password/email 等值不应进 observe)。
+        // 值域控件の当前值:slider / spinbutton / progressbar / scrollbar / meter
+        // 及原生 <input type=range|number> / <progress> / <meter>。
+        // 同时暴露文本控件(text/email/search/tel/url/textarea/contenteditable)的
+        // IDL 当前值(el.value)，使 fill→verify value 闭环成立。
+        // password 类型**严格排除**：由 password 防护层(observe 后处理)统一剥除，
+        // 绝不进 LLM 上下文。
         // 优先 aria-valuetext(人类可读,如 "中" / "$50"),否则 valuenow,并在
         // 有 valuemax 时拼成 "now/max"(进度/百分比靠 max 才有意义)。返回字符串
         // 或 undefined(2026-06-02 dogfood)。
         const VALUE_ROLES = new Set([
           "slider", "spinbutton", "progressbar", "scrollbar", "meter",
+        ]);
+        // 文本输入控件:这些类型的 IDL el.value 反映用户当前输入值，
+        // 需暴露给 verify value mode 校验(fill 后 HTML 属性值不更新)。
+        // password 不含：其 IDL value 不应进 LLM 上下文，由密码防护层剥除。
+        const TEXT_INPUT_TYPES = new Set([
+          "text", "email", "search", "tel", "url", "",
         ]);
         function getValueInfo(el: HTMLElement, role: string): string | undefined {
           const tag = el.tagName.toLowerCase();
@@ -1194,6 +1245,21 @@ async function scanOneFrame(
           }
           const inputType =
             tag === "input" ? (el as HTMLInputElement).type : "";
+          // 文本控件 IDL 当前值:text/email/search/tel/url 及 type 未设(""=text)。
+          // password 严格排除——由 observe 后处理密码防护层剥除 valueNow。
+          // 截断至 200 字符，避免大型 textarea 撑爆输出。
+          if (tag === "input" && TEXT_INPUT_TYPES.has(inputType)) {
+            const v = (el as HTMLInputElement).value;
+            return v !== "" ? v.slice(0, 200) : undefined;
+          }
+          if (tag === "textarea") {
+            const v = (el as HTMLTextAreaElement).value;
+            return v !== "" ? v.slice(0, 200) : undefined;
+          }
+          if ((el as HTMLElement).isContentEditable) {
+            const v = (el as HTMLElement).textContent ?? "";
+            return v !== "" ? v.replace(/\s+/g, " ").trim().slice(0, 200) : undefined;
+          }
           const isNativeValue =
             (tag === "input" && (inputType === "range" || inputType === "number")) ||
             tag === "progress" ||
@@ -1219,6 +1285,60 @@ async function scanOneFrame(
           }
           if (now == null || now === "") return undefined;
           return max != null && max !== "" ? `${now}/${max}` : `${now}`;
+        }
+
+        /**
+         * 为特殊 input 类型构建 compound 元数据对象。
+         * - date/time/datetime-local/month/week:注入格式串 formatHint。
+         * - file:读 element.files 当前文件名(多文件给计数),未选显 None。
+         * - range/number:读 min/max/step 属性(缺省不填)。
+         * 非目标类型返回 undefined,不干扰其他控件。
+         */
+        function buildInputCompound(el: HTMLElement): {
+          role: string; formatHint?: string;
+          min?: string; max?: string; step?: string;
+        } | undefined {
+          if (el.tagName !== "INPUT") return undefined;
+          const inputEl = el as HTMLInputElement;
+          const t = inputEl.type;
+          // date/time 格式族:按 type 注入对应格式串供 LLM fill 参考
+          const DATE_FORMAT_MAP: Record<string, string> = {
+            "date": "YYYY-MM-DD",
+            "time": "HH:mm",
+            "datetime-local": "YYYY-MM-DDTHH:mm",
+            "month": "YYYY-MM",
+            "week": "YYYY-Www",
+          };
+          if (t in DATE_FORMAT_MAP) {
+            return { role: "date-input", formatHint: DATE_FORMAT_MAP[t] };
+          }
+          // file input:显示当前选中文件名;多文件计数;未选显 None
+          if (t === "file") {
+            const files = inputEl.files;
+            let hint = "None";
+            if (files && files.length > 0) {
+              hint = files.length === 1
+                ? files[0].name
+                : `${files.length} files`;
+            }
+            return { role: "file-input", formatHint: hint };
+          }
+          // range/number:读 min/max/step 属性(缺省不显)
+          if (t === "range" || t === "number") {
+            const roleStr = t === "range" ? "range-input" : "number-input";
+            const minV = el.getAttribute("min") ?? undefined;
+            const maxV = el.getAttribute("max") ?? undefined;
+            const stepV = el.getAttribute("step") ?? undefined;
+            // 三属性均无时不生成 compound(避免噪声)
+            if (!minV && !maxV && !stepV) return undefined;
+            return {
+              role: roleStr,
+              ...(minV !== undefined ? { min: minV } : {}),
+              ...(maxV !== undefined ? { max: maxV } : {}),
+              ...(stepV !== undefined ? { step: stepV } : {}),
+            };
+          }
+          return undefined;
         }
 
         // BUG-2: filter='all' previously was a dead parameter — server.ts
@@ -1455,23 +1575,30 @@ async function scanOneFrame(
           // 真漏「查看全部评价」「切换大图模式」)。下游 require-name + 含交互后代/祖先
           // skip + 择叶 全部复用,噪声治理不变。
           if (getComputedStyle(htmlEl).cursor !== "pointer") {
-            if (!hasFrameworkClick(el)) continue;
-            // framework onClick 常挂在事件委托的**容器**层;若其内部已有更细的
-            // cursor:pointer 子项(如多个 SKU 选项),让位给子项各自入池——否则下方
-            // 择叶会因容器文字最长而保留容器,把多个真选项合并成一个不可操作的大块
-            // (2026-06-04 淘宝 SKU 选择区回归)。仅加严 framework-onClick 路径,
-            // cursor:pointer 入池路径不变。
-            const finerDesc = el.querySelectorAll("*");
-            let hasFinerPointer = false;
-            for (let di = 0; di < finerDesc.length && di < 200; di++) {
-              if (getComputedStyle(finerDesc[di] as HTMLElement).cursor === "pointer") {
-                hasFinerPointer = true;
-                break;
+            // 入池信号(cursor!=pointer 时):① framework onClick(React/Vue 委托,读
+            // __reactProps$/_vei) ② data-vtx-listener(pre-scan CDP getEventListeners
+            // 标记的纯 addEventListener 元素,vanilla/jQuery 直绑——见 observe-js-listener.ts)。
+            // 二者并集:framework 覆盖委托型、listener 覆盖直绑型,互补无盲区(T3 discovery)。
+            const __hasDirectListener = el.hasAttribute("data-vtx-listener");
+            if (!hasFrameworkClick(el) && !__hasDirectListener) continue;
+            // framework onClick 常挂事件委托的**容器**层;若内部已有更细 cursor:pointer
+            // 子项(如多个 SKU 选项),让位给子项各自入池——否则下方择叶因容器文字最长
+            // 保留容器,把多真选项合并成一个不可操作大块(2026-06-04 淘宝 SKU 区回归)。
+            // **direct listener 不让位**:addEventListener 绑在元素自身,它就是精确点击
+            // 目标(非委托容器),不该让位给装饰性 pointer 子项。仅 framework 委托路径让位。
+            if (!__hasDirectListener) {
+              const finerDesc = el.querySelectorAll("*");
+              let hasFinerPointer = false;
+              for (let di = 0; di < finerDesc.length && di < 200; di++) {
+                if (getComputedStyle(finerDesc[di] as HTMLElement).cursor === "pointer") {
+                  hasFinerPointer = true;
+                  break;
+                }
               }
+              // 内容卡不让位——评价卡 li.item 自身有 onClick + 评价正文,内部
+              // cursor:pointer 标签是附属,不该让位给标签(SKU 容器无自有文本仍让位)。
+              if (hasFinerPointer && !isClickableContentCard(el)) continue;
             }
-            // 内容卡不让位——评价卡 li.item 自身有 onClick + 评价正文,内部
-            // cursor:pointer 标签是附属,不该让位给标签(SKU 容器无自有文本仍让位)。
-            if (hasFinerPointer && !isClickableContentCard(el)) continue;
           }
           // Use textContent for the gate check — innerText forces layout
           // and we only need the gate decision here. The accessible name
@@ -1875,6 +2002,8 @@ async function scanOneFrame(
           // 可能 continue 之后、elements.push 之前的唯一 push 点）。
           collectedEls.push(htmlEl);
           const __href = role === "link" ? (htmlEl.getAttribute("href") || undefined) : undefined;
+          // T5: date/time/file/range/number input 注入 compound 元数据,供 LLM fill 参考格式/约束
+          const __inputCompound = buildInputCompound(htmlEl);
           elements.push({
             index: elements.length,
             tag: htmlEl.tagName.toLowerCase(),
@@ -1896,7 +2025,11 @@ async function scanOneFrame(
             ...(reactMarker
               ? { reactClickable: true as const, clickHint: reactMarker.clickHint }
               : {}),
+            // T3 discovery: pre-scan CDP getEventListeners 标记的纯 addEventListener
+            // 元素带 data-vtx-listener → 渲染 [listener] 真值信号(此处属性尚存,清理在后)。
+            ...(htmlEl.hasAttribute("data-vtx-listener") ? { listenerInteractive: true as const } : {}),
             ...(__href !== undefined ? { href: __href } : {}),
+            ...(__inputCompound !== undefined ? { compound: __inputCompound } : {}),
             _sel: buildSelector(htmlEl),
           });
         }
@@ -1925,6 +2058,12 @@ async function scanOneFrame(
           }
         }
 
+        // AX-overlay: 给每个收集元素打 frame-local 下标标记,供扩展侧 DOM.getDocument
+        // 关联到 backendDOMNodeId。与 observe-ax-overlay.ts STAMP_MARKERS 同语义(内联副本)。
+        for (let i = 0; i < collectedEls.length; i++) {
+          collectedEls[i].setAttribute("data-vtx-ax", String(i));
+        }
+
         return {
           url: location.href,
           title: document.title,
@@ -1950,7 +2089,8 @@ async function scanOneFrame(
   }
 }
 
-export function registerObserveHandlers(router: ActionRouter): void {
+export function registerObserveHandlers(router: ActionRouter, debuggerMgr: DebuggerManager): void {
+  // debuggerMgr 用于 AX overlay pass + JS listener 信号（T3）
   router.registerAll({
     [ObserveActions.SNAPSHOT]: async (args, tabId) => {
       gcSnapshots();
@@ -2002,6 +2142,15 @@ export function registerObserveHandlers(router: ActionRouter): void {
         offset: { x: number; y: number };
         page: FramePageResult | null;
       }> = [];
+      // T3 discovery(pre-scan):CDP getEventListeners 给主 frame 内纯 addEventListener
+      // 点击元素打 data-vtx-listener,随后 scanOneFrame 把它当入池信号 → DISCOVER 漏网
+      // vanilla/jQuery div(无 cursor:pointer/role/框架 prop)。召回零回退:失败标 0 个,
+      // scan 退回现有启发式。属性在 scan 后随 data-vtx-ax 一并清理。
+      try {
+        await markListenerElements(debuggerMgr, tid);
+      } catch {
+        /* markListenerElements 内置兜底,理论不抛;防御性吞掉不阻断 observe */
+      }
       for (const f of frameTargets) {
         const offset = await getIframeOffset(tid, f.frameId);
         const page = await scanOneFrame(
@@ -2106,6 +2255,59 @@ export function registerObserveHandlers(router: ActionRouter): void {
         }
       }
 
+      // AX 语义覆盖层(v1 仅主 frame frameId 0):采 AX tree + DOM.getDocument 关联 →
+      // 原地覆盖 role/name/state/value/关系。任一步失败该 frame 优雅回退纯启发式(不报错)。
+      if (includeAX) {
+        const mainScan = scans.find((s) => s.frameId === 0);
+        if (mainScan?.page && mainScan.page.elements.length > 0) {
+          try {
+            const { byBackend, byNodeId } = await captureAXNodeMap(debuggerMgr, tid, 0);
+            const doc = (await debuggerMgr.sendCommand(tid, "DOM.getDocument", {
+              depth: -1,
+              pierce: true,
+            })) as { root?: unknown };
+            if (doc?.root) {
+              const indexToBackend = buildIndexToBackend(doc.root as never);
+              applyOverlay(
+                mainScan.page.elements as unknown as OverlayableElement[],
+                indexToBackend,
+                byBackend,
+                byNodeId,
+              );
+            }
+          } catch (err) {
+            console.warn(
+              `[vortex.observe] AX overlay skipped fid=0: ${err instanceof Error ? err.message : String(err)}`,
+            );
+          }
+        }
+      }
+      // 注:JS 监听器真值信号已迁移到 pre-scan discovery(markListenerElements,
+      // 见上方 frame 循环前)——listenerInteractive 在 scan 输出构造时由
+      // data-vtx-listener 属性直接生成,不再需要事后 CDP pass。
+
+      // marker 清理(无条件):data-vtx-ax(scan stamping)+ data-vtx-listener
+      // (pre-scan discovery)。两者无条件打,故清理也须无条件,防标记残留。清理失败不致命。
+      try {
+        await chrome.scripting.executeScript({
+          target: { tabId: tid, allFrames: true },
+          func: () => {
+            for (const el of document.querySelectorAll("[data-vtx-ax]")) el.removeAttribute("data-vtx-ax");
+            for (const el of document.querySelectorAll("[data-vtx-listener]"))
+              el.removeAttribute("data-vtx-listener");
+          },
+        });
+      } catch {
+        /* 标记仅 observe 内部用,下轮 scan 覆盖 */
+      }
+
+      // password 防护:type=password 的 valueNow 剥除,防敏感值泄露进下一个 prompt。
+      for (const s of scans) {
+        for (const e of s.page?.elements ?? []) {
+          if ((e.attrs?.type ?? "").toLowerCase() === "password") e.valueNow = undefined;
+        }
+      }
+
       // 分配跨 frame 全局 index（按 frameTargets 顺序）
       // 每个元素附加 suggestedUsage：给 LLM 直接可用的下一步命令，避免再自行推断应传 frameId。
       type CompactElementOut = {
@@ -2113,17 +2315,34 @@ export function registerObserveHandlers(router: ActionRouter): void {
         tag: string;
         role: string;
         name: string;
-        state?: { checked?: boolean; selected?: boolean; active?: boolean; disabled?: boolean; expanded?: boolean; required?: boolean; current?: boolean; invalid?: boolean; sort?: "ascending" | "descending" | "none"; haspopup?: string };
+        state?: { checked?: boolean | "mixed"; selected?: boolean; active?: boolean; disabled?: boolean; expanded?: boolean; required?: boolean; current?: boolean; invalid?: boolean; sort?: "ascending" | "descending" | "none"; haspopup?: string; readonly?: boolean };
         /** 值域控件当前值,如 "30" 或 "30/100"(getValueInfo 严格限定值域控件)。 */
         valueNow?: string;
         /** BUG-010 N0060 京东评测: onClick 桩 / cursor:pointer 命中 (compact 也透传) */
         reactClickable?: true;
         clickHint?: string;
+        /** CDP getEventListeners 真值信号，透传渲染层。@since T3 */
+        listenerInteractive?: true;
         frameId: number;
         // Issue #21 — populated only when input.includeBoxes && e.inViewport (T4).
         bbox?: [number, number, number, number];
         parentIndex?: number;
         href?: string;
+        offScreenActionable?: boolean;
+        nameSource?: string;
+        controls?: number[];
+        owns?: number[];
+        errorMessage?: string;
+        description?: string;
+        compound?: {
+          role: string;
+          count?: number;
+          options?: string[];
+          formatHint?: string;
+          min?: string;
+          max?: string;
+          step?: string;
+        };
       };
       type FullElementOut = Omit<ScannedElement, "_sel"> & {
         frameId: number;
@@ -2205,9 +2424,17 @@ export function registerObserveHandlers(router: ActionRouter): void {
               ...(e.reactClickable
                 ? { reactClickable: true as const, clickHint: e.clickHint! }
                 : {}),
+              // T3: CDP getEventListeners 真值信号透传渲染层（并集增强）。
+              ...(e.listenerInteractive ? { listenerInteractive: true as const } : {}),
               // a11y-tree: 全局重映射后的父指针 + href（link 元素）。
               ...(globalParentIndex !== undefined ? { parentIndex: globalParentIndex } : {}),
               ...(e.href ? { href: e.href } : {}),
+              ...(e.nameSource ? { nameSource: e.nameSource } : {}),
+              ...(e.controls ? { controls: e.controls } : {}),
+              ...(e.owns ? { owns: e.owns } : {}),
+              ...(e.errorMessage ? { errorMessage: e.errorMessage } : {}),
+              ...(e.description ? { description: e.description } : {}),
+              ...(e.compound ? { compound: e.compound } : {}),
               frameId: s.frameId,
               ...(bboxTuple ? { bbox: bboxTuple } : {}),
             });
@@ -2238,9 +2465,17 @@ export function registerObserveHandlers(router: ActionRouter): void {
               ...(e.reactClickable
                 ? { reactClickable: true as const, clickHint: e.clickHint! }
                 : {}),
+              // T3: CDP getEventListeners 真值信号透传渲染层（并集增强）。
+              ...(e.listenerInteractive ? { listenerInteractive: true as const } : {}),
               // a11y-tree: 全局重映射后的父指针 + href（link 元素）。
               ...(globalParentIndex !== undefined ? { parentIndex: globalParentIndex } : {}),
               ...(e.href ? { href: e.href } : {}),
+              ...(e.nameSource ? { nameSource: e.nameSource } : {}),
+              ...(e.controls ? { controls: e.controls } : {}),
+              ...(e.owns ? { owns: e.owns } : {}),
+              ...(e.errorMessage ? { errorMessage: e.errorMessage } : {}),
+              ...(e.description ? { description: e.description } : {}),
+              ...(e.compound ? { compound: e.compound } : {}),
               frameId: s.frameId,
               ref,
               suggestedUsage: {

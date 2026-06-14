@@ -13,7 +13,7 @@ import {
   CallToolRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { sendRequest } from "./client.js";
-import { getToolDefs, getToolDef } from "./tools/registry.js";
+import { getToolDefs, getToolDef, setEnabledCaps } from "./tools/registry.js";
 import { dispatchNewTool } from "./tools/dispatch.js";
 import { computeTransportTimeout } from "./lib/timeout.js";
 import { liftWaitForRefToTarget } from "./lib/wait-for-ref.js";
@@ -366,7 +366,12 @@ export async function handleCallTool(
       const { renderObserveTree } = await import("./lib/observe-render.js");
       // a11y-tree: compact 输出升级为嵌套树（设计 20260610）。includeBoxes 透传。
       const includeBoxes = params.includeBoxes === true;
-      const text = renderObserveTree(resp.result as any, activeSnapshotHash, includeBoxes);
+      // T4-diff: 把 LLM 传入的 prevSnapshotId 合并进 result，渲染层负责 diff 计算。
+      const prevSnapshotId = typeof params.prevSnapshotId === "string" ? params.prevSnapshotId : undefined;
+      const resultWithDiff = prevSnapshotId
+        ? { ...(resp.result as object), prevSnapshotId }
+        : resp.result;
+      const text = renderObserveTree(resultWithDiff as any, activeSnapshotHash, includeBoxes);
       return withEvents([{ type: "text" as const, text }]);
     }
     // detail=full：原 JSON pretty（与 v0.4 行为一致）
@@ -378,6 +383,123 @@ export async function handleCallTool(
     // 渲染成 "undefined"、null 渲染成 "null";falsy 值(0/false/"")不受影响。见已关闭 #35。
     const resultText = JSON.stringify(resp.result, null, 2) ?? "undefined";
     return withEvents([{ type: "text" as const, text: resultText }]);
+  }
+
+  // 特殊 tool: vortex_fill_form（批量填表，部分成功语义）
+  // 逐 field 串行执行，失败不中断后续，收集 results[] 返回。
+  if (toolDef.name === "vortex_fill_form") {
+    const fields = params.fields as Array<{
+      target: string;
+      value: unknown;
+      kind?: string;
+      force?: boolean;
+    }>;
+    const tabId = params.tabId as number | undefined;
+    const currentTabId = typeof tabId === "number" ? tabId : null;
+
+    // 空 fields 列表：报 INVALID_PARAMS
+    if (!Array.isArray(fields) || fields.length === 0) {
+      return {
+        isError: true,
+        content: [{
+          type: "text" as const,
+          text: "Error [INVALID_PARAMS]: vortex_fill_form: fields must be a non-empty array.",
+        }],
+      };
+    }
+
+    const { resolveTargetParam } = await import("./lib/ref-parser.js");
+    const results: Array<{ index: number; target: string; ok: boolean; error?: string }> = [];
+
+    for (let i = 0; i < fields.length; i++) {
+      const field = fields[i];
+      const rawTarget = field.target;
+
+      // 解析 target ref → selector / index+snapshotId（复用单工具路径相同逻辑）
+      let fieldParams: Record<string, unknown> = {};
+      try {
+        const resolved = resolveTargetParam(
+          rawTarget,
+          activeSnapshotId,
+          activeSnapshotHash,
+          activeSnapshotTabId,
+          currentTabId,
+        );
+        if (resolved.selector) fieldParams.selector = resolved.selector;
+        if (resolved.index != null) {
+          fieldParams.index = resolved.index;
+          fieldParams.snapshotId = resolved.snapshotId;
+          if (resolved.frameId && resolved.frameId !== 0) fieldParams.frameId = resolved.frameId;
+        }
+      } catch (err) {
+        // target 解析失败：记录错误，继续下一字段
+        results.push({
+          index: i,
+          target: rawTarget,
+          ok: false,
+          error: formatError(err),
+        });
+        continue;
+      }
+
+      // 复用 vortex_fill dispatch 逻辑：kind 存在 → dom.commit；否则 → dom.fill
+      let action: string;
+      if (!field.kind) {
+        action = "dom.fill";
+        fieldParams.value = field.value;
+      } else {
+        action = "dom.commit";
+        fieldParams.kind = field.kind;
+        // 结构化 value 可能被 client 序列化为 JSON 字符串，还原
+        const raw = field.value;
+        if (typeof raw === "string") {
+          try {
+            const parsed: unknown = JSON.parse(raw);
+            fieldParams.value = parsed !== null && typeof parsed === "object" ? parsed : raw;
+          } catch {
+            fieldParams.value = raw;
+          }
+        } else {
+          fieldParams.value = raw;
+        }
+      }
+      if (field.force !== undefined) fieldParams.force = field.force;
+
+      // 发请求
+      try {
+        const resp = await sendRequest(action, fieldParams, PORT, tabId, DEFAULT_TIMEOUT);
+        if (resp.error) {
+          results.push({
+            index: i,
+            target: rawTarget,
+            ok: false,
+            error: `[${resp.error.code}]: ${resp.error.message}`,
+          });
+        } else {
+          results.push({ index: i, target: rawTarget, ok: true });
+        }
+      } catch (err) {
+        results.push({
+          index: i,
+          target: rawTarget,
+          ok: false,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+
+    const successCount = results.filter((r) => r.ok).length;
+    const failed = results.filter((r) => !r.ok);
+    const summary = {
+      total: fields.length,
+      success: successCount,
+      failed: failed.length,
+      results,
+    };
+    return withEvents([{
+      type: "text" as const,
+      text: JSON.stringify(summary, null, 2),
+    }]);
   }
 
   // BUG-002 (N0063): wait_for(mode=element) 的 @ref 经 value 字段传入,这里抬成 target,
@@ -413,6 +535,32 @@ export async function handleCallTool(
         isError: true,
         content: [{ type: "text" as const, text: formatError(err) }],
       };
+    }
+  }
+
+  // vortex_drag 双 ref 翻译：startRef/endRef 各翻成 startSelector/endSelector（或 index 变体）。
+  // 设计：各 ref 独立翻译，结果字段加前缀（startSelector、endSelector / startIndex+startSnapshotId+startFrameId 等）。
+  // handler(mouse.dragElement) 读 startSelector/endSelector (经 resolveTarget) 取元素。
+  if (toolDef.name === "vortex_drag") {
+    const { resolveTargetParam } = await import("./lib/ref-parser.js");
+    const currentTabId = typeof params.tabId === "number" ? params.tabId : null;
+    for (const side of ["start", "end"] as const) {
+      const refField = `${side}Ref` as "startRef" | "endRef";
+      const raw = params[refField] as string | undefined;
+      if (!raw) continue;
+      try {
+        const resolved = resolveTargetParam(raw, activeSnapshotId, activeSnapshotHash, activeSnapshotTabId, currentTabId);
+        delete params[refField];
+        if (resolved.selector) {
+          params[`${side}Selector`] = resolved.selector;
+        } else if (resolved.index != null) {
+          params[`${side}Index`] = resolved.index;
+          params[`${side}SnapshotId`] = resolved.snapshotId;
+          if (resolved.frameId && resolved.frameId !== 0) params[`${side}FrameId`] = resolved.frameId;
+        }
+      } catch (err) {
+        return { isError: true, content: [{ type: "text" as const, text: formatError(err) }] };
+      }
     }
   }
 
@@ -581,7 +729,39 @@ export async function handleCallTool(
   }
 }
 
+/**
+ * 从 process.argv 解析 `--caps=<csv>`（caps opt-in 机制）。
+ *
+ * 健壮性：
+ * - 无 `--caps` → 返回空数组（默认面 20 工具，零回归）。
+ * - `--caps=` 空值 / 全逗号 → trim 后丢空段，返回空数组。
+ * - 多个 `--caps=a` `--caps=b,c` → 合并去重。
+ * - 同时支持 `--caps=a,b`（等号形式）和 `--caps a,b`（空格形式）。
+ * 未知 cap 不在此过滤（registry 提升时若无对应工具自然 no-op），保持解析纯净。
+ */
+export function parseCapsArg(argv: string[]): string[] {
+  const caps = new Set<string>();
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    let raw: string | undefined;
+    if (a.startsWith("--caps=")) {
+      raw = a.slice("--caps=".length);
+    } else if (a === "--caps") {
+      raw = argv[i + 1];
+      i++; // 跳过被消费的值
+    }
+    if (raw === undefined) continue;
+    for (const part of raw.split(",")) {
+      const t = part.trim();
+      if (t) caps.add(t);
+    }
+  }
+  return [...caps];
+}
+
 async function main(): Promise<void> {
+  // caps opt-in：启动期解析 --caps=<csv>，提升对应 internal 工具进 public 面。
+  setEnabledCaps(parseCapsArg(process.argv.slice(2)));
   installAutoRestart();
   const transport = new StdioServerTransport();
   await server.connect(transport);

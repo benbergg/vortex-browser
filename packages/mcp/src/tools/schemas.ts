@@ -27,6 +27,13 @@ export interface ToolDef {
   schema: object;
   returnsImage?: boolean;
   annotations?: ToolAnnotations;
+  /**
+   * caps opt-in 标记。带 cap 的工具默认**不**进 public 面（不在 tools/list），
+   * 仅当 server 启动时经 `--caps=<cap>` 显式启用、且 cap ∈ enabledCaps 时，
+   * 才被 registry 提升进 getToolDefs/getToolDef 返回结果。
+   * 例：vortex_verify cap:"testing" —— 仅 `--caps=testing` 时对外可见。
+   */
+  cap?: string;
 }
 
 const optionalTabId = {
@@ -768,6 +775,51 @@ function framesTools(): ToolDef[] {
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
+// Verify（1 个，cap:"testing" opt-in）
+// ──────────────────────────────────────────────────────────────────────────────
+
+function verifyTools(): ToolDef[] {
+  return [
+    {
+      name: "vortex_verify",
+      action: "verify.assert",
+      // testing cap 工具：经 --caps=testing 提升进 public。断言走 observe AX 树
+      // 比对，绝不旁路 evaluate 做 DOM 查询。失败返回 {ok:false,expected,actual}。
+      description:
+        "Assert page state via the observe a11y tree (testing cap). " +
+        "mode=visible(role+name exists & visible) / value(element value equals expected) / " +
+        "text(element name contains substring) / list(all items present). " +
+        "Pass target=@ref to scope value/text assertions to a specific element. " +
+        "Returns {ok:true} or {ok:false,expected,actual}.",
+      cap: "testing",
+      schema: {
+        type: "object",
+        properties: {
+          mode: {
+            type: "string",
+            enum: ["visible", "value", "text", "list"],
+            description: "Assertion mode.",
+          },
+          role: { type: "string", description: "ARIA role to match (visible/value mode)." },
+          name: { type: "string", description: "Accessible name to match (visible/value mode)." },
+          target: { type: "string", description: "@<hash>:eN ref to scope value/text assertions to the specific element identified by the ref." },
+          value: { description: "Expected value (value mode). For text inputs reflects the current IDL value after fill." },
+          text: { type: "string", description: "Expected substring to find in element name(s) (text mode). Pass target to restrict search to a specific element." },
+          items: {
+            type: "array",
+            items: { type: "object", properties: { role: { type: "string" }, name: { type: "string" } }, required: ["name"] },
+            description: "List of {role?,name} to all assert present (list mode).",
+          },
+          ...optionalTabId,
+          ...optionalFrameId,
+        },
+        required: ["mode"],
+      },
+    },
+  ];
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
 // 导出
 // ──────────────────────────────────────────────────────────────────────────────
 
@@ -788,5 +840,6 @@ export function getAllToolDefs(): ToolDef[] {
     ...storageTools(),
     ...fileTools(),
     ...framesTools(),
+    ...verifyTools(),
   ];
 }

@@ -84,8 +84,9 @@ describe("vortex_debug_read description 文档化 (B3-8, v3.1)", () => {
     expect(desc).toMatch(/pattern.*required|required.*pattern/i);
   });
 
-  it("description 总长度 ≤ 60 char (I15 invariant 约束)", () => {
+  it("description 总长度 ≤ 180 char (I15 invariant 约束, source=request 能力追加后放宽至 v5.0 上限)", () => {
     const desc = getDebugReadDescription();
-    expect(desc.length).toBeLessThanOrEqual(60);
+    // I15 v5.0 全局上限 180 char; source=request 新能力将 description 扩至 ~76 char
+    expect(desc.length).toBeLessThanOrEqual(180);
   });
 });
