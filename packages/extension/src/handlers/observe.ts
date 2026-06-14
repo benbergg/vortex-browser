@@ -428,6 +428,14 @@ async function scanOneFrame(
           // bind via @click in the framework runtime (no [onclick] attribute),
           // so this selector is a pure additive on legacy surface.
           "[onclick]",
+          // 原生 HTML5 draggable 容器:<div draggable="true"> 是可拖拽控件(看板/文件
+          // 管理器/sortable 列表海量使用),但常无 role/tabindex/[onclick]/cursor:pointer,
+          // 既有白名单与 cursor:pointer fallback 全漏 → observe 暴露 0 ref,断掉标志性的
+          // observe→ref→vortex_drag 流(drag 工具本身用裸 selector 可拖,只是 agent 凭
+          // observe 发现不了目标)。draggable 是枚举属性(非布尔),仅显式 "true" 可拖,
+          // 故 [draggable=true] 精确匹配——draggable=""/"false" 不收(2026-06-14 真实站
+          // 评测 the-internet/drag_and_drop)。原生 img/a 默认可拖但已被 a[href] 覆盖。
+          "[draggable=true]",
         ].join(",");
 
         const COLLECTED_ATTRS = [

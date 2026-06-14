@@ -20,7 +20,7 @@ import { getActiveTabId, buildExecuteTarget, ensureFrameAttached } from "../lib/
  * 参数通过 args: [pattern, isRegex, caseSensitive, contextChars, maxResults] 注入。
  * 返回 { matches, total, has_more } 或 { error, matches: [], total: 0 }。
  */
-const textSearchFunc = (
+export const textSearchFunc = (
   pattern: string,
   isRegex: boolean,
   caseSensitive: boolean,
@@ -28,8 +28,24 @@ const textSearchFunc = (
   maxResults: number,
 ): { matches: Array<{ match_text: string; context: string; element_path: string; char_position: number }>; total: number; has_more: boolean } | { error: string; matches: never[]; total: number } => {
   try {
-    // 获取 DOM 中所有可见文本节点(遍历 body 下全部 text node,连接成一段大字符串)
-    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    // 获取 DOM 中所有**可见**文本节点(遍历 body 下 text node,连接成一段大字符串)。
+    // 裸 SHOW_TEXT 会把 <script>/<style>/<noscript>/<template> 的源码文本与 display:none
+    // 隐藏元素的文本一并计入,违背 mode=text 的 "visible text" 契约 → 对内联 <script> 等
+    // 产生假匹配(2026-06-14 真实站评测 the-internet/javascript_alerts)。acceptNode 过滤:
+    //  ① 标记型不可见容器(script/style/noscript/template)的文本一律剔除;
+    //  ② display:none / visibility:hidden / 祖先隐藏 由 Element.checkVisibility() 兜底
+    //     (Chrome 105+);老环境无此 API 时跳过该判定,保持向后兼容(不误杀可见文本)。
+    const SKIP_TEXT_TAGS = new Set(["SCRIPT", "STYLE", "NOSCRIPT", "TEMPLATE"]);
+    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {
+      acceptNode(n: Node): number {
+        const parent = (n as Text).parentElement;
+        if (!parent) return NodeFilter.FILTER_REJECT;
+        if (SKIP_TEXT_TAGS.has(parent.tagName)) return NodeFilter.FILTER_REJECT;
+        const cv = (parent as unknown as { checkVisibility?: () => boolean }).checkVisibility;
+        if (typeof cv === "function" && !cv.call(parent)) return NodeFilter.FILTER_REJECT;
+        return NodeFilter.FILTER_ACCEPT;
+      },
+    });
     let fullText = "";
     const nodeOffsets: Array<{ offset: number; length: number; node: Node }> = [];
     while (walker.nextNode()) {

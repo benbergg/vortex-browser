@@ -367,7 +367,24 @@
     //        不进 textContent,只看 valueText 会假报 COMMIT_FAILED(评审 H1)。
     //    (c) 存活的 [role=option][aria-selected="true"] 文本(弹层仍开时的权威信号)。
     //    用 waitFor 轮询(而非固定 sleep)等框架异步提交 + 关闭动画 settle(评审 M3)。
-    const valueText = (): string => {
+    //
+    //    verify 作用域 = root 自身 + 有界祖先链。observe 的 ref 常指向 react-select 内层
+    //    极小 input[role=combobox],input 自身匹配 closestSelector → root 塌缩成 input,
+    //    而选中值 singleValue 渲染在 input 的**兄弟**(control 容器内),选后菜单还 unmount
+    //    致 option pool 空,三信号全 scope 到塌缩 input 子树 → 全空 → 假 COMMIT_FAILED
+    //    (2026-06-14 react-select live)。故沿祖先上爬找值;停在含 2+ combobox 的共享祖先,
+    //    避免页面多 select 时串到邻居 widget 的值(trigger 逻辑同款有界爬升的对称补齐)。
+    const verifyScopes = (): HTMLElement[] => {
+      const scopes: HTMLElement[] = [root];
+      let el = root.parentElement;
+      for (let i = 0; i < 4 && el && el !== document.body; i++) {
+        if (el.querySelectorAll('[role="combobox"], [aria-haspopup="listbox"]').length > 1) break;
+        scopes.push(el);
+        el = el.parentElement;
+      }
+      return scopes;
+    };
+    const valueText = (scope: HTMLElement): string => {
       let t = "";
       const walk = (node: Node): void => {
         for (const child of Array.from(node.childNodes)) {
@@ -379,11 +396,11 @@
           }
         }
       };
-      walk(root);
+      walk(scope);
       return norm(t);
     };
-    const inputValues = (): string[] =>
-      (Array.from(root.querySelectorAll('input:not([type="hidden"])')) as HTMLInputElement[]).map(
+    const inputValues = (scope: HTMLElement): string[] =>
+      (Array.from(scope.querySelectorAll('input:not([type="hidden"])')) as HTMLInputElement[]).map(
         (i) => norm(i.value || ""),
       );
     // 选中态信号:option 池里 aria-selected="true" 的可见选项(弹层仍开时权威,多选打钩/
@@ -394,13 +411,19 @@
         .map((o) => norm(o.textContent || ""));
     const reflected = (l: string): boolean => {
       const w = norm(l);
-      const vt = valueText();
-      const ivs = inputValues();
-      const sel = selectedTexts();
-      // exact 优先(单值显示/aria-selected/input 回填),避免 "Apple Pie" includes "Apple" 假阳
-      if (sel.some((t) => t === w) || ivs.some((t) => t === w) || vt === w) return true;
+      const scopes = verifyScopes();
+      // exact 优先(单值显示/aria-selected/input 回填),避免 "Apple Pie" includes "Apple" 假阳。
+      // exact 与 substring 各自跨全部 scope,保证 exact 整体优先于 substring(不因近 scope
+      // 的 substring 命中而越过远 scope 的 exact)。
+      if (selectedTexts().some((t) => t === w)) return true;
+      for (const s of scopes) {
+        if (valueText(s) === w || inputValues(s).some((t) => t === w)) return true;
+      }
       // 再 substring(多选 chip 拼接 / 值显示含额外文本)——best-effort,同 el-select 限制
-      return vt.includes(w) || ivs.some((t) => t.includes(w));
+      for (const s of scopes) {
+        if (valueText(s).includes(w) || inputValues(s).some((t) => t.includes(w))) return true;
+      }
+      return false;
     };
     const allReflected = await waitFor(
       () => (labels.every(reflected) ? true : null),
@@ -409,10 +432,10 @@
     if (!allReflected) {
       const notReflected = labels.filter((l) => !reflected(l));
       return {
-        error: `Selected option(s) not reflected after commit: ${notReflected.join(", ")} (combobox value shows "${valueText()}"). Likely a dropped click, a single-select given multiple labels, or async not settled.`,
+        error: `Selected option(s) not reflected after commit: ${notReflected.join(", ")} (combobox value shows "${valueText(root)}"). Likely a dropped click, a single-select given multiple labels, or async not settled.`,
         errorCode: "COMMIT_FAILED",
         stage: "verify",
-        extras: { notReflected, valueText: valueText(), clicked },
+        extras: { notReflected, valueText: valueText(root), clicked },
       };
     }
 

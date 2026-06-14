@@ -153,8 +153,16 @@ describe("#24 评审修复 — 跨库鲁棒性", () => {
     expect(ARIA_SRC).toMatch(/writeFilter\(""\)/);
   });
   it("H1 verify 纳入 input.value 证据 + exact 优先", () => {
-    expect(ARIA_SRC).toMatch(/const inputValues = \(\)/);
-    expect(ARIA_SRC).toMatch(/ivs\.some\(\(t\) => t === w\)/);
+    // inputValues 现按 scope 取值(2026-06-14 verify 祖先 scope 修复,见
+    // aria-select-react-select-verify.test.ts);仍纳入 input.value 证据且 exact 优先于 substring。
+    expect(ARIA_SRC).toMatch(/const inputValues = \(scope: HTMLElement\)/);
+    expect(ARIA_SRC).toMatch(/inputValues\(s\)\.some\(\(t\) => t === w\)/);
+  });
+  it("verify 经有界祖先 scope 读值(react-select root 塌缩 input 修复)", () => {
+    // observe ref 指向内层极小 input[role=combobox] 时 root 塌缩,选中值在祖先 control 容器;
+    // verify 须沿祖先上爬,停在含 2+ combobox 的共享祖先防串到邻居 widget。
+    expect(ARIA_SRC).toMatch(/const verifyScopes = \(\)/);
+    expect(ARIA_SRC).toMatch(/role="combobox".*aria-haspopup="listbox".*\.length > 1/);
   });
   it("M3 verify 用 waitFor 轮询而非固定 sleep", () => {
     expect(ARIA_SRC).toMatch(/const allReflected = await waitFor\(/);
