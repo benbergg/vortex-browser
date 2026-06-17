@@ -26,6 +26,7 @@
 | 班牛 工单测试表(applet 58860) | 2026-06-17 | **0 缺陷**：observe 召回良好；div-onClick 状态下拉浮层(N0064 focus-container 病灶)端到端正常——8 status label 带 checked 态全召回 + act click ariaChanged 生效；小数据视图无虚拟/canvas 正确不触发盲区信号(无误报)。**N0064 修复真站持续生效** |
 | 班牛 流程布局(LogicFlow 入口) | 2026-06-17 | **非缺陷**：「流程布局」菜单项 `disabled`+`cursor:not-allowed`+无 listener → observe(interactive) 正确省略(already-graceful);LogicFlow 画布此视图不可达(工作流未配置/无权限),A1 canvas 信号未能在班牛复验(已在 Excalidraw live 验证) |
 | Semi Design Table 文档页 | 2026-06-17 | **0 缺陷 + 关键负例 PASS**：74 个装饰 Monaco minimap canvas(115×500 超阈值)**未过报** `[blindspot=canvas]`(无交互信号不被收集,A1 收集门挡住装饰 canvas);**A2 覆盖观察**:Semi `aria-rowcount=渲染数` → ARIA-based A2 不触发非 ARIA 虚拟化(见新 backlog A2-fb);filter=all 超重页(303 行+111 canvas)超时(页面固有) |
+| Naive UI data-table | 2026-06-17 | **A2-fb 缺口 live 确认真实**：`.v-vl` 虚拟表总 ~1000/~2921 行,DOM 仅 9-12 行,**全页 0 aria-rowcount** → A2(ARIA-based)不触发,agent 收不到虚拟化信号。与 ag-grid A2 同类缺陷(非 ARIA 声明)。0 canvas 无 A1 误报风险。**A2-fb 从「设计 defer」升级为「dogfood 确认的真实缺口」** |
 
 ## 待办（按 Phase 1 策略）
 - **A 族盲区信号**（brainstorm 设计闸门 → TDD 实现）：A2 虚拟列表 → A1 canvas → A3 closed-shadow → A4/A5 截断/iframe。**阻塞：需 Chrome 扩展起 + 真站 spike 确认盲区。**
