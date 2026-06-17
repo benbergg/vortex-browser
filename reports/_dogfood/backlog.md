@@ -18,7 +18,7 @@
 | A4 | 截断无量化 | P2 | ✅ done | candidateCount 透传→`# truncated: returned M of ~N`；ag-grid `80/351` live |
 | A3 | closed shadow root 无降级信号 | P1 | ⏸ defer | host 未被收集挂不上 per-element 标签(同虚拟 gap)；需专扫自定义元素(全 DOM 过滤,性能代价)；best-effort/最低价值/误报风险最高。纯函数+单测已留 |
 | A5 | iframe scanned 信号未下沉到 element 级 | P2 | ⏸ 未排期 | 现有 frame 级 `# frame N not scanned` 已部分覆盖 |
-| A2-fb | 虚拟列表 scrollHeight 回退启发式(非 ARIA 声明) | **P1↑** | 🟢 dogfood 确认真实 | **Naive live 实锤**：`.v-vl` 总 ~1000-2921 行/DOM 9-12 行/0 aria-rowcount → A2 漏报,agent 收不到虚拟化信号(同 ag-grid A2 同类)。漏 Semi/react-window/react-virtuoso/Naive。修=容器 scrollHeight/rowHeight>>渲染数 低置信回退。**误报风险需谨慎**(分页/普通滚动区/长内容div),负例必测 |
+| ~~A2-fb~~ | 虚拟列表 scrollHeight 回退启发式(非 ARIA 声明) | ~~P1~~ | ✅ **done** | **已实现+live 验证**：detectVirtualByScroll(强滚动 scrollH≥clientH×4 + estTotal>>渲染数),`# blindspots: ... virtual(~N/M)` 低置信 ~ 前缀;Naive live 检出 3 虚拟表(~2958/11 等)+40 普通表零误报;bench fixture 正例+负例 93/93;顺带修 logicflow-connect pointermove 合并 flaky |
 
 ### B. ref/snapshot 协议语义
 | ID | 标题 | 严重度 | 可信度 | 证据 | 验证 |

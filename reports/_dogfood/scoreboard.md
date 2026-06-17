@@ -26,7 +26,14 @@
 | 班牛 工单测试表(applet 58860) | 2026-06-17 | **0 缺陷**：observe 召回良好；div-onClick 状态下拉浮层(N0064 focus-container 病灶)端到端正常——8 status label 带 checked 态全召回 + act click ariaChanged 生效；小数据视图无虚拟/canvas 正确不触发盲区信号(无误报)。**N0064 修复真站持续生效** |
 | 班牛 流程布局(LogicFlow 入口) | 2026-06-17 | **非缺陷**：「流程布局」菜单项 `disabled`+`cursor:not-allowed`+无 listener → observe(interactive) 正确省略(already-graceful);LogicFlow 画布此视图不可达(工作流未配置/无权限),A1 canvas 信号未能在班牛复验(已在 Excalidraw live 验证) |
 | Semi Design Table 文档页 | 2026-06-17 | **0 缺陷 + 关键负例 PASS**：74 个装饰 Monaco minimap canvas(115×500 超阈值)**未过报** `[blindspot=canvas]`(无交互信号不被收集,A1 收集门挡住装饰 canvas);**A2 覆盖观察**:Semi `aria-rowcount=渲染数` → ARIA-based A2 不触发非 ARIA 虚拟化(见新 backlog A2-fb);filter=all 超重页(303 行+111 canvas)超时(页面固有) |
-| Naive UI data-table | 2026-06-17 | **A2-fb 缺口 live 确认真实**：`.v-vl` 虚拟表总 ~1000/~2921 行,DOM 仅 9-12 行,**全页 0 aria-rowcount** → A2(ARIA-based)不触发,agent 收不到虚拟化信号。与 ag-grid A2 同类缺陷(非 ARIA 声明)。0 canvas 无 A1 误报风险。**A2-fb 从「设计 defer」升级为「dogfood 确认的真实缺口」** |
+| Naive UI data-table | 2026-06-17 | **A2-fb 缺口 live 确认真实**：`.v-vl` 虚拟表总 ~1000/~2921 行,DOM 仅 9-12 行,**全页 0 aria-rowcount** → A2(ARIA-based)不触发。**→ 随即实现 A2-fb 并 live 复验通过**(见下) |
+
+## 实现 R4 — A2-fb 非 ARIA 虚拟化(dogfood 驱动)
+- **缺口来源**:广度 dogfood(Naive)发现 A2 只认 ARIA 声明虚拟化,漏 Semi/Naive/react-window。
+- **实现**:`detectVirtualByScroll`(强滚动 scrollH≥clientH×4 + estTotal=scrollH/rowH >> 渲染数;虚拟本质=只渲染窗口,普通滚动列表渲染全部故 est≈rendered 不触发),inline 进 page-side dedicated pass,`# blindspots: <name> virtual(~N/M)` confidence:low(~ 标估算)。
+- **live 验证**(Naive,新 build):检出 3 虚拟表(~2958/11、~1000/8、~635/55,ratio 42-561×),**43 表中 40 普通/分页表零误报**(__seenScrollers dedup 折叠嵌套表)。
+- **回归**:mcp 504 + ext 1183 + 17 blindspot 单测;bench fixture 加 A2-fb 正例(~N/10)+负例(普通 30 行滚动不报);**全量 bench 93/93 ALL GREEN + baseline 刷新**;顺带修 logicflow-connect pointermove 合并 flaky(>=STEPS→>=2+buttons 合并容错)。
+- **教训**:广度 dogfood(多库)抓出单站(ag-grid)A 族漏掉的真 P1;A1 收集门=误报防线(Semi 74 装饰 canvas 不报);A2-fb 误报靠「est>>rendered」判据天然区分虚拟 vs 普通滚动。
 
 ## 待办（按 Phase 1 策略）
 - **A 族盲区信号**（brainstorm 设计闸门 → TDD 实现）：A2 虚拟列表 → A1 canvas → A3 closed-shadow → A4/A5 截断/iframe。**阻塞：需 Chrome 扩展起 + 真站 spike 确认盲区。**
