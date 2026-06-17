@@ -45,9 +45,11 @@ export function detectBlindspot(el: HTMLElement, renderedDescendants: number): B
     }
     return null;
   }
-  // A3 closed-shadow best-effort:自定义元素(含连字符) + 有 layout box + 零可观察后代。
-  // 收窄到自定义元素以压误报(closed shadow 仅存于自定义元素)。
-  if (tag.includes("-") && renderedDescendants === 0) {
+  // A3 closed-shadow best-effort:自定义元素(含连字符) + 有 layout box + 无可观察内部。
+  // 判据用 DOM 内在量:`shadowRoot===null` 排除 open shadow(querySelectorAllDeep 已穿,
+  // open 时 shadowRoot 是对象);`childElementCount===0` 排除有 light-DOM 子元素的。
+  // 二者皆满足的自定义元素 = closed shadow 或空壳 → 低置信盲区。renderedDescendants 不参与。
+  if (tag.includes("-") && el.shadowRoot === null && el.childElementCount === 0) {
     const r = el.getBoundingClientRect();
     if (r.width >= 40 && r.height >= 24) return { kind: "shadow", confidence: "low" };
   }

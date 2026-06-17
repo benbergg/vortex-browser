@@ -34,15 +34,21 @@ describe("detectBlindspot", () => {
     const c = withRect(document.querySelector("canvas")!, 40, 16);
     expect(detectBlindspot(c, 0)).toBeNull();
   });
-  it("自定义元素无可观察后代 → shadow 低置信", () => {
+  it("自定义元素 closed shadow(无 shadowRoot,无 light 子) → shadow 低置信", () => {
     document.body.innerHTML = `<x-widget></x-widget>`;
     const w = withRect(document.querySelector("x-widget")!, 200, 80);
     expect(detectBlindspot(w, 0)).toEqual({ kind: "shadow", confidence: "low" });
   });
-  it("自定义元素有可观察后代 → 不报（负例,open shadow 已穿）", () => {
-    document.body.innerHTML = `<x-widget></x-widget>`;
+  it("自定义元素 open shadow → 不报（负例,shadowRoot 是对象,querySelectorAllDeep 已穿）", () => {
+    document.body.innerHTML = `<x-open></x-open>`;
+    const w = withRect(document.querySelector("x-open")!, 200, 80);
+    w.attachShadow({ mode: "open" }).innerHTML = "<button>x</button>";
+    expect(detectBlindspot(w, 0)).toBeNull();
+  });
+  it("自定义元素有 light-DOM 子 → 不报（负例）", () => {
+    document.body.innerHTML = `<x-widget><span>hi</span></x-widget>`;
     const w = withRect(document.querySelector("x-widget")!, 200, 80);
-    expect(detectBlindspot(w, 3)).toBeNull();
+    expect(detectBlindspot(w, 0)).toBeNull();
   });
   it("普通 div → 不报（负例）", () => {
     document.body.innerHTML = `<div>hi</div>`;
