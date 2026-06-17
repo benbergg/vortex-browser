@@ -335,7 +335,25 @@ export type ActionabilityResult =
     }
     if (!force) {
       const re = receivesEvents(el, cx, cy);
-      if (!re.ok) return { ok: false, reason: "OBSCURED", extras: { blocker: re.blocker } };
+      if (!re.ok) {
+        // 原生 <dialog>.showModal() 打开时,浏览器把对话框外内容**隐式 inert**(不设
+        // [inert] 属性)且其 ::backdrop 归属 dialog 元素 → hit-test 命中 dialog → OBSCURED。
+        // R6 的 [inert] 检测(closest("[inert]"))对原生 modal dialog 失效(无属性),
+        // 且 reason 是 OBSCURED 非 DISABLED。携 modalBlocked 供 host 侧 waitActionable
+        // 生成「关闭 modal」可 actionable 诊断,完成 R6 另一半覆盖(原生 <dialog> 是当今
+        // 标准 modal)。判据 `dialog:modal` 经 example.com live spike 实证(2026-06-17)。
+        let modalBlocked = false;
+        try {
+          modalBlocked =
+            el instanceof Element &&
+            typeof el.closest === "function" &&
+            !!document.querySelector("dialog:modal") &&
+            !el.closest("dialog:modal");
+        } catch {
+          modalBlocked = false; // :modal 伪类不被支持的旧引擎 → 静默降级
+        }
+        return { ok: false, reason: "OBSCURED", extras: { blocker: re.blocker, modalBlocked } };
+      }
     }
     return { ok: true, rect: { x: r.x, y: r.y, w: r.width, h: r.height } };
   }

@@ -95,6 +95,10 @@ export async function waitActionable(
   // inert 子树致 DISABLED(常见于加载即弹 modal/overlay 把背景内容设为 inert)→ 泛化
   // "增大 timeout / wait_for idle" hint 误导(等待无用),追加可 actionable 的关遮挡指引。
   const inertBlocked = lastReason === "DISABLED" && lastExtras?.inert === true;
+  // 原生 <dialog>.showModal() 背景化致 OBSCURED(浏览器隐式 inert 不设 [inert] 属性,
+  // R6 的 inertBlocked 分支命中不了)→ 同样追加关 modal 指引(等待/idle 无用,正解关
+  // dialog)。modalBlocked 由 actionability probe 经 `dialog:modal` 判据携带。
+  const modalBlocked = lastReason === "OBSCURED" && lastExtras?.modalBlocked === true;
   let message: string;
   if (lastReasonIsStability) {
     message = `Element not stable after ${timeout}ms (last reason: NOT_STABLE)`;
@@ -103,6 +107,11 @@ export async function waitActionable(
       `Actionability timeout after ${timeout}ms; last reason: DISABLED ` +
       `(element is in an [inert] subtree — commonly a modal/overlay backgrounding the page; ` +
       `dismiss the overlay/modal first, e.g. press Escape or click its close button, then retry)`;
+  } else if (modalBlocked) {
+    message =
+      `Actionability timeout after ${timeout}ms; last reason: OBSCURED ` +
+      `(element is covered by an open modal <dialog> in the top layer; the rest of the page is ` +
+      `inert while it is open — dismiss the dialog first, e.g. press Escape or click its close button, then retry)`;
   } else {
     message = `Actionability timeout after ${timeout}ms; last reason: ${lastReason ?? "unknown"}`;
   }
