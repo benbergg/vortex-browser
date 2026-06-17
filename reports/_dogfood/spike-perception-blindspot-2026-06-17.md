@@ -26,5 +26,18 @@
 - A4：observe.ts:2086 `truncated` 仅布尔，无 truncatedCount / candidateCount，agent 不知漏多少。
 - A5：observe.ts:2376-2387 frame 级 `scanned:false`，但 CompactElement（observe-render.ts:64-72）无 per-element「来自未扫 frame」反向标记。
 
+## 修复后验证（2026-06-17,新 build reload 后 live 复跑）
+| 盲区 | 结果 | 实证 |
+|------|------|------|
+| A2 虚拟列表 | ✅ | ag-grid observe 顶部出 `# blindspots: grid virtual(1003/37)` |
+| A1 canvas | ✅ | Excalidraw 画矩形后 canvas 行 `[blindspot=canvas]` + meta `canvas-editor` |
+| A4 截断量化 | ✅ | ag-grid `# truncated: returned 80 of ~351 candidates`;ant Select `~775`(普通页合理触发非误报) |
+| A3 closed-shadow | ⚠️ defer | 构造 `x-closed` host **未被 observe 收集**,per-element 标签挂不上(同虚拟容器 gap)。open-shadow 对照正常召回 |
+| 负例 | ✅ | ant.design Select 文档页**无 `# blindspots:` 误报**(combobox/menu 不误标,role=menu 不在虚拟集合) |
+
+**A3 defer 理由**:host 未收集需专扫一遍,但自定义元素无廉价 CSS 选择器要全 DOM 过滤(大页性能代价),且 A3 best-effort/最低价值/误报风险最高。纯函数 detectBlindspot + 单测保留(host 被收集时仍正确)。转 backlog。
+
+**集成教训**:per-element 盲区标签只对**已收集元素**有效(canvas 被收集 ✓;grid 容器/custom-element host 不被收集 ✗)。容器类盲区(虚拟列表)须走 page-side 独立扫描进 frame 级 blindspots。单测全绿但真站抓出此 gap——印证「承重墙改动必活浏览器 spike」。
+
 ## 共性根因
 observe 因技术限制（虚拟化窗口外 / canvas 像素 / 闭合 shadow / 预算截断 / 跨域 frame）扫不全时，**静默返回局部视图，不发任何「盲区/已降级/已截断」信号**。这是元瓶颈：让 agent 系统性把局部当全局。修复 = 为 observe 输出新增**盲区降级信号契约**（非改 bug，需设计 review）。

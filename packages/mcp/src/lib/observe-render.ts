@@ -225,9 +225,9 @@ function blindspotSummary(
     const b = e.blindspot;
     if (!b) continue;
     const ref = refOf(e, snapshotHash);
-    if (b.kind === "virtual") parts.push(`${e.role}@${ref} virtual(${b.total ?? "?"}/${b.rendered ?? "?"})`);
-    else if (b.kind === "canvas") parts.push(`${e.role}@${ref} canvas-editor`);
-    else parts.push(`${e.role}@${ref} shadow${b.confidence === "low" ? "?" : ""}`);
+    if (b.kind === "virtual") parts.push(`${e.role} ${ref} virtual(${b.total ?? "?"}/${b.rendered ?? "?"})`);
+    else if (b.kind === "canvas") parts.push(`${e.role} ${ref} canvas-editor`);
+    else parts.push(`${e.role} ${ref} shadow${b.confidence === "low" ? "?" : ""}`);
   }
   for (const f of frames ?? []) {
     for (const b of f.blindspots ?? []) {
