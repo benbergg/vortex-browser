@@ -21,14 +21,14 @@
 ### B. ref/snapshot 协议语义
 | ID | 标题 | 严重度 | 可信度 | 证据 | 验证 |
 |----|------|--------|--------|------|------|
-| B3 | frames 参数 public schema 阉割 number[] 形式 | P1 | 🔴 | schemas-public.ts:82 仅 enum；schemas.ts:137-143 oneOf 含 number[]；handler observe.ts:22 支持 number[]。schema 撒谎缩小 agent 探索空间 | `vortex_observe({frames:[0,2]})` 调用核对 |
+| ~~B3~~ | frames 参数 public schema 阉割 number[] 形式 | ~~P1~~→P3 | 🟢证伪 | **已核实非缺陷**：server.ts:189-202 handleCallTool `params=args??{}` 直接透传**不校验**入站参数，number[] 仍可用；public schema 仅 tools/list 字节预算简化(registry.ts:74)。残余仅可发现性(agent 不知有 number[]) | 降级 P3 doc 级 |
 | B2 | STALE_SNAPSHOT 错误码混淆「无快照」vs「过期」 | P2（agent 报 P1，已读码降级） | 🟡 | ref-parser.ts:110-114 无快照 throw STALE_SNAPSHOT；line 139 过期同码。**消息文案可区分**（"no active snapshot" vs "expired"），但 error code 相同，靠码分支的 agent 无法区分 | 不 observe 直接 act vs observe→navigate→act |
 | B1 | bare ref 同 tab 原地导航不被捕获 | P2（agent 报 P0，已读码证伪降级） | 🟢 | **已核实**：ref-parser.ts:123-134 tabId 门对 bare ref 同样生效；bare ref 仅跳过 line 139 hash 门 → 真实缺口仅「同 tab 原地导航+bare ref」，且 bare ref 计划 v0.9 弃用即解 | 低优先，v0.9 拒绝 bare ref 顺带解决 |
 
 ### C. 执行层残余
 | ID | 标题 | 严重度 | 可信度 | 证据 | 验证 |
 |----|------|--------|--------|------|------|
-| C1 | SCROLL moved 阈值不一致（dom.ts >1px vs micro-verify <5px）| P1 | 🔴 | dom.ts:1282-1284 `Math.abs > 1`；micro-verify.ts:156-159 `<5` pass。两套阈值，且 moved:false 不触发 NO_EFFECT，success 仍 true | sticky 容器 / transform 动画中的滚动容器 |
+| ~~C1~~ | SCROLL moved 阈值不一致（dom.ts >1px vs micro-verify <5px）| ~~P1~~ | 🟢证伪 | **已核实非缺陷**：两阈值测不同量——dom.ts:1283 `>1px`=「动没动」位移死区；micro-verify.ts:157 `<5px`=「到没到目标」容差。非双标。moved:false 时 success:true 是有意降级信号(#18,注释明写 agent 据此判真滚动) | 行为正确 |
 | C3 | ARIA select driver 虚拟列表越界项无降级 | P1 | 🔴 | aria-select.ts:215-227 optionPool 基于 collectVisible；line 135-143 `isVisible` 要求 w/h>0 → 虚拟外项被过滤，报 UNKNOWN_OPTION 而非等待滚动暴露 | antd Select 选项>视口 / react-select+虚拟列表 |
 | C2 | FILL reject 两套机制不统一 | P2 | 🔴 | fill-reject.ts:27-55 仅 Element Plus；dom.ts:910-917 原生 input 内联探测。两套条件可能分叉致自定义组件漏拦 | rc-checkbox / 自定义 radio 库 |
 | C4 | TYPE vs FILL clearBefore 语义不对称 | P2 | 🔴 | dom.ts:716-717 TYPE 清空再输入；dom.ts:935-938 FILL 直接覆盖。受控+防抖组件两者副作用路径不同 | 受控 input+防抖 / contentEditable+框架绑定 |
