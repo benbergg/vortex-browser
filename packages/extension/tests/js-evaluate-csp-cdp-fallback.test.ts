@@ -214,4 +214,44 @@ describe("js.evaluate CSP unsafe-eval → CDP Runtime.evaluate 回退 (github do
     const out = (await r2.dispatch(mkReq("js.evaluate", { code: "1+1" }))) as Resp;
     expect(out.error?.message).toMatch(/unsafe-eval/);
   });
+
+  // Trusted Types policy 不可创建(站点 trusted-types allowlist 不含 vortex-eval)时,
+  // page-side 自救失败、返回原始 TT 错;handler 须回退 CDP(debugger 级求值绕过 TT 强制)。
+  // live 根因:youtube 2026-06-17,policy 可创建故 page-side 自救;但 allowlist 站需此兜底。
+  const TT_MSG =
+    "Evaluating a string as JavaScript violates this document's Trusted Type assignment requirements";
+
+  it("page-side 返回 Trusted Types 错时,回退 CDP Runtime.evaluate(绕过 TT 强制)", async () => {
+    executeScript.mockResolvedValue([{ result: { error: TT_MSG } }]);
+    dbg.sendCommand.mockResolvedValue({ result: { value: 5 } });
+
+    const out = (await router.dispatch(mkReq("js.evaluate", { code: "2 + 3" }))) as Resp;
+    expect(out.error).toBeUndefined();
+    expect(out.result).toBe(5);
+    expect(dbg.attach).toHaveBeenCalledWith(42);
+    expect(dbg.sendCommand).toHaveBeenCalledWith(
+      42,
+      "Runtime.evaluate",
+      expect.objectContaining({ expression: "2 + 3", returnByValue: true }),
+    );
+  });
+
+  it("js.evaluateAsync 返回 TT 错时,同样回退 CDP(expr-first 包装)", async () => {
+    executeScript.mockResolvedValue([{ result: { error: TT_MSG } }]);
+    dbg.sendCommand.mockResolvedValue({ result: { value: 88 } });
+
+    const out = (await router.dispatch(mkReq("js.evaluateAsync", { code: "Promise.resolve(88)" }))) as Resp;
+    expect(out.result).toBe(88);
+    expect(dbg.sendCommand.mock.calls[0][2]).toMatchObject({
+      expression: "(async () => (Promise.resolve(88)))()",
+      awaitPromise: true,
+    });
+  });
+
+  it("用户错误恰含 'trusted type'(无 assignment 短语)不触发 CDP 回退", async () => {
+    executeScript.mockResolvedValue([{ result: { error: "Error: a trusted type mismatch happened" } }]);
+    const out = (await router.dispatch(mkReq("js.evaluate", { code: "throwIt()" }))) as Resp;
+    expect(out.error?.message).toMatch(/trusted type mismatch/);
+    expect(dbg.attach).not.toHaveBeenCalled();
+  });
 });

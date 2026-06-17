@@ -65,6 +65,20 @@ function isUnsafeEvalBlocked(msg: string): boolean {
 }
 
 /**
+ * 页面 `trusted-types` 指令带 allowlist(不含 `vortex-eval`)时,page-side 无法创建命名
+ * policy 自救,优雅返回**原始 TT 错**。此时回退 CDP Runtime.evaluate——debugger 级求值
+ * 绕过页面 Trusted Types 强制(与绕过 unsafe-eval 同理,Playwright 同路),仅主 frame。
+ *
+ * 用与 page-side `isTT` **同源**的精确短语「Trusted(Type|Script) … assignment」,覆盖 Chrome
+ * 两种真实 sink 措辞("violates … Trusted Type assignment requirements" /
+ * "requires 'TrustedScript' assignment");不匹配裸词,避免用户代码里恰含 "trusted type"
+ * 的普通错误被误路由 CDP **二次执行**(与 isUnsafeEvalBlocked 收紧精确短语同因)。
+ */
+function isTrustedTypesBlocked(msg: string): boolean {
+  return /Trusted ?(Type|Script)[^.]*assignment/i.test(msg);
+}
+
+/**
  * B3-4 v3.3 (V2 修正):为 vortex_evaluate { async: true } 选择包装形式。
  *  - 表达式 c → `return (async () => (${c}))()`(直接求值;handler 已 await fn(),无需内层 await)
  *  - 语句/含 return → exprSrc 构造期 SyntaxError → 回退 `return (async () => { ${c} })()`(旧契约)
@@ -393,10 +407,11 @@ export function registerJsHandlers(
       const results = await withTimeout(execPromise, timeout, "js.evaluate");
       const res = results[0]?.result as { result?: unknown; error?: string; autoIIFE?: boolean };
       if (res?.error) {
-        // CSP 禁 unsafe-eval 时回退 CDP Runtime.evaluate(仅主 frame——子 frame 需
-        // executionContextId 定位,暂不支持,保留原错)。CDP 下 top-level return 同样
-        // 非法 → 镜像 page-side 的 auto-IIFE,包成 (function(){...})() 重试。
-        if (debuggerMgr && frameId == null && isUnsafeEvalBlocked(res.error)) {
+        // CSP 禁 unsafe-eval 或 TT policy 不可创建时回退 CDP Runtime.evaluate(仅主 frame——
+        // 子 frame 需 executionContextId 定位,暂不支持,保留原错)。CDP 下 top-level return
+        // 同样非法 → 镜像 page-side 的 auto-IIFE,包成 (function(){...})() 重试。
+        if (debuggerMgr && frameId == null &&
+            (isUnsafeEvalBlocked(res.error) || isTrustedTypesBlocked(res.error))) {
           try {
             return await cdpEvaluate(debuggerMgr, tid, code, timeout);
           } catch (e) {
@@ -455,23 +470,35 @@ export function registerJsHandlers(
             } catch { g.__vortexTTPolicy = null; }
             return g.__vortexTTPolicy;
           };
-          // B3-4 v3.3 (V2): 表达式 c(无 return)走直接求值形式,语句/含 return 回退函数体形式。
-          // 此处不能调用模块级 buildAsyncSrc(序列化丢作用域),内联同一逻辑——须与之同步。
-          // 任何 new Function 抛错(SyntaxError / TT / CSP)都保守回退 stmtSrc = 旧行为。
-          const stmtSrc = `return (async () => { ${c} })()`;
-          const exprSrc = `return (async () => (${c}))()`;
-          let src = stmtSrc;
-          try { new Function(exprSrc); src = exprSrc; } catch { /* keep stmtSrc */ }
+          // 表达式 c(无 return)走 exprSrc 返回值,语句/含 return 走 stmtSrc 函数体形式。
+          // **用 eval 而非 new Function**:Trusted Types 站点上 `eval(TrustedScript)` 被豁免,
+          // 但 `new Function(TrustedScript)` 会对参数 ToString 后重新校验、TrustedScript 不被
+          // 豁免(live 实证 2026-06-17 youtube → new Function 路径 100% 崩)。故镜像 js.evaluate
+          // 同步路径:eval 裸串 → 被 TT 拦 → isTT → named policy 包成 TrustedScript → eval 放行。
+          // src 用表达式 IIFE 形式(无顶层 return),eval 直接求值返回 Promise。
+          const exprSrc = `(async () => (${c}))()`;
+          const stmtSrc = `(async () => { ${c} })()`;
+          // eval 一段源码,裸串被 TT 拦时经 named policy 重试。
+          const runEval = (s: string): unknown => {
+            try { return eval(s); }
+            catch (e) {
+              const m = e instanceof Error ? e.message : String(e);
+              const p = isTT(m) ? getPolicy() : null;
+              if (!p) throw e;
+              return eval(p.createScript(s) as unknown as string);
+            }
+          };
           try {
-            let fn: () => unknown;
-            try { fn = new Function(src) as () => unknown; }
+            // 先试 exprSrc(纯表达式直接返值);语句/含 return → SyntaxError → 回退 stmtSrc。
+            // 注:TT 页上裸串先抛 TT 错,runEval 经 policy 重试后才暴露真实 SyntaxError。
+            let promise: unknown;
+            try { promise = runEval(exprSrc); }
             catch (e0) {
               const m0 = e0 instanceof Error ? e0.message : String(e0);
-              const p = isTT(m0) ? getPolicy() : null;
-              if (!p) throw e0;
-              fn = new Function(p.createScript(src) as unknown as string) as () => unknown;
+              if (/SyntaxError|Unexpected|Illegal return/i.test(m0)) promise = runEval(stmtSrc);
+              else throw e0;
             }
-            return { result: await fn() };
+            return { result: await promise };
           } catch (err) { return { error: err instanceof Error ? err.message : String(err) }; }
         },
         args: [code],
@@ -481,9 +508,10 @@ export function registerJsHandlers(
       const results = await withTimeout(execPromise, timeout, "js.evaluateAsync");
       const res = results[0]?.result as { result?: unknown; error?: string };
       if (res?.error) {
-        // CSP 禁 unsafe-eval 时回退 CDP Runtime.evaluate(仅主 frame)。异步代码包成
-        // (async()=>{...})() + awaitPromise,与 page-side 包装一致。
-        if (debuggerMgr && frameId == null && isUnsafeEvalBlocked(res.error)) {
+        // CSP 禁 unsafe-eval 或 TT policy 不可创建时回退 CDP Runtime.evaluate(仅主 frame)。
+        // 异步代码包成 (async()=>{...})() + awaitPromise,与 page-side 包装一致。
+        if (debuggerMgr && frameId == null &&
+            (isUnsafeEvalBlocked(res.error) || isTrustedTypesBlocked(res.error))) {
           // B3-4 v3.3 (V2 修正):CSP 禁 unsafe-eval 时回退 CDP Runtime.evaluate。
           // Runtime.evaluate 求值 expression:先试表达式形式(支持纯表达式 code,B3-4),
           // 语法错误(语句/含 return)→ 回退函数体 IIFE 形式。镜像 page-side form-selection。
