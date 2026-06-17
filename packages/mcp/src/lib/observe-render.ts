@@ -74,7 +74,7 @@ interface CompactFrame {
   /** 该 frame 扫描时考虑的候选总数(用于截断量化)。@since blindspot */
   candidateCount?: number;
   /** 虚拟列表盲区(容器未被收集为元素时的 frame 级信号)。@since blindspot */
-  blindspots?: Array<{ kind: "virtual"; total: number; rendered: number; name: string }>;
+  blindspots?: Array<{ kind: "virtual"; total: number; rendered: number; name: string; confidence?: "low" }>;
 }
 
 interface CompactObserve {
@@ -232,7 +232,9 @@ function blindspotSummary(
   for (const f of frames ?? []) {
     for (const b of f.blindspots ?? []) {
       const fr = f.frameId !== 0 ? ` (frame ${f.frameId})` : "";
-      parts.push(`${b.name} virtual(${b.total}/${b.rendered})${fr}`);
+      // confidence:low(A2-fb scrollHeight 估算)用 ~ 前缀标记 total 为近似值。
+      const tot = b.confidence === "low" ? `~${b.total}` : `${b.total}`;
+      parts.push(`${b.name} virtual(${tot}/${b.rendered})${fr}`);
     }
   }
   return parts.length ? `# blindspots: ${parts.join("; ")}` : null;

@@ -63,6 +63,14 @@ describe("frame 级虚拟列表盲区（容器未收集时）", () => {
     const out = renderObserveTree(data as any, null);
     expect(out).toMatch(/# blindspots:.*virtual.*1003\/37/);
   });
+  it("A2-fb 低置信虚拟(confidence:low) total 带 ~ 前缀(估算)", () => {
+    const data = obs([], {
+      frames: [{ frameId: 0, parentFrameId: -1, url: "http://x", offset: { x: 0, y: 0 }, elementCount: 12, truncated: false, scanned: true,
+        blindspots: [{ kind: "virtual", total: 1000, rendered: 12, name: "v-vl", confidence: "low" }] }],
+    });
+    const out = renderObserveTree(data as any, null);
+    expect(out).toMatch(/# blindspots:.*v-vl virtual\(~1000\/12\)/);
+  });
   it("元素级(canvas) 与 frame级(virtual) 合并到同一 # blindspots 行", () => {
     const data = obs(
       [{ index: 5, tag: "canvas", role: "img", name: "C", frameId: 0, blindspot: { kind: "canvas" } }],

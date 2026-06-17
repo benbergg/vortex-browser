@@ -154,7 +154,7 @@ interface FramePageResult {
   candidateCount: number;
   truncated: boolean;
   /** 虚拟列表盲区(容器常不被 elements 收集,独立扫描)。@since blindspot */
-  blindspots?: Array<{ kind: "virtual"; total: number; rendered: number; name: string }>;
+  blindspots?: Array<{ kind: "virtual"; total: number; rendered: number; name: string; confidence?: "low" }>;
 }
 
 function safeOrigin(url: string | undefined): string | null {
@@ -2102,7 +2102,7 @@ async function scanOneFrame(
         // 常不被 elements 收集(rows 成顶层根),故独立 querySelectorAllDeep 一遍,
         // 产出 frame 级 blindspots → 渲染 # blindspots: meta(不依赖元素收集)。
         // canvas/shadow 走 per-element 内联标注(它们会被收集)。
-        const pageBlindspots: Array<{ kind: "virtual"; total: number; rendered: number; name: string }> = [];
+        const pageBlindspots: Array<{ kind: "virtual"; total: number; rendered: number; name: string; confidence?: "low" }> = [];
         {
           const __vc = querySelectorAllDeep("[role=grid],[role=treegrid],[role=table],[role=listbox],[role=tree]", document);
           for (const c of __vc) {
@@ -2117,6 +2117,40 @@ async function scanOneFrame(
             if (!isNaN(__decl) && __decl > __rendered && __decl >= Math.max(__rendered * 2, __rendered + 20)) {
               const __nm = c.getAttribute("aria-label") || c.getAttribute("aria-labelledby") || __cr;
               pageBlindspots.push({ kind: "virtual", total: __decl, rendered: __rendered, name: String(__nm).slice(0, 40) });
+            }
+          }
+          // [inline detectVirtualByScroll] A2-fb 非 ARIA 声明虚拟化(Semi/Naive/react-window)。
+          // 真源 blindspot-detect.ts detectVirtualByScroll,改一处须改两处。
+          // 强滚动(scrollH≥clientH×4) + estTotal(scrollH/rowH)>>渲染数(虚拟本质:只渲染窗口)。
+          const __seenScrollers = new Set();
+          const __cands = querySelectorAllDeep("table,[role=grid],[role=listbox],[role=tree],ul,ol", document);
+          for (const cand of __cands) {
+            if (cand.hasAttribute("aria-rowcount") || cand.hasAttribute("aria-setsize")) continue; // ARIA 路径已处理
+            const __rows = cand.querySelectorAll("[role=row],tr,li");
+            const __rendered = __rows.length;
+            if (__rendered < 3) continue;
+            const __rowH = __rows[0].getBoundingClientRect().height;
+            if (__rowH < 4) continue;
+            // 找最近的滚动祖先(overflow-y auto/scroll 且 scrollHeight>clientHeight)
+            let __scroller = null;
+            let __cur = cand;
+            for (let i = 0; i < 6 && __cur; i++) {
+              const __oy = getComputedStyle(__cur).overflowY;
+              if ((__oy === "auto" || __oy === "scroll") && __cur.scrollHeight > __cur.clientHeight) {
+                __scroller = __cur;
+                break;
+              }
+              __cur = __cur.parentElement;
+            }
+            if (!__scroller || __seenScrollers.has(__scroller)) continue;
+            const __sh = __scroller.scrollHeight;
+            const __ch = __scroller.clientHeight;
+            if (__ch <= 0 || __sh < __ch * 4) continue;
+            const __est = Math.round(__sh / __rowH);
+            if (__est > __rendered && __est >= Math.max(__rendered * 2, __rendered + 20)) {
+              __seenScrollers.add(__scroller);
+              const __nm = cand.getAttribute("aria-label") || (cand.getAttribute("role") || cand.tagName.toLowerCase());
+              pageBlindspots.push({ kind: "virtual", total: __est, rendered: __rendered, name: String(__nm).slice(0, 40), confidence: "low" });
             }
           }
         }
@@ -2426,7 +2460,7 @@ export function registerObserveHandlers(router: ActionRouter, debuggerMgr: Debug
         /** 该 frame 扫描时考虑的候选总数(截断量化)。@since blindspot */
         candidateCount?: number;
         /** 虚拟列表盲区(容器未收集时的 frame 级信号)。@since blindspot */
-        blindspots?: Array<{ kind: "virtual"; total: number; rendered: number; name: string }>;
+        blindspots?: Array<{ kind: "virtual"; total: number; rendered: number; name: string; confidence?: "low" }>;
       }> = [];
 
       for (const s of scans) {

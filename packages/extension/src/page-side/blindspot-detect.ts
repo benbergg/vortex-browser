@@ -45,6 +45,7 @@ export function detectBlindspot(el: HTMLElement, renderedDescendants: number): B
     }
     return null;
   }
+  // A2-fb 见下方 detectVirtualByScroll(非 ARIA 声明的虚拟化,由 dedicated pass 调用,不走此 per-element 路径)。
   // A3 closed-shadow best-effort:自定义元素(含连字符) + 有 layout box + 无可观察内部。
   // 判据用 DOM 内在量:`shadowRoot===null` 排除 open shadow(querySelectorAllDeep 已穿,
   // open 时 shadowRoot 是对象);`childElementCount===0` 排除有 light-DOM 子元素的。
@@ -52,6 +53,29 @@ export function detectBlindspot(el: HTMLElement, renderedDescendants: number): B
   if (tag.includes("-") && el.shadowRoot === null && el.childElementCount === 0) {
     const r = el.getBoundingClientRect();
     if (r.width >= 40 && r.height >= 24) return { kind: "shadow", confidence: "low" };
+  }
+  return null;
+}
+
+/**
+ * A2-fb 非 ARIA 声明的虚拟列表检测(Semi/Naive/react-window/react-virtuoso 等不设 aria-rowcount)。
+ * 核心判据:① 强滚动(scrollHeight ≥ clientHeight×4,普通滚动区/分页达不到) ② estTotal(scrollH/rowH)
+ * 远大于渲染数(虚拟的本质=只渲染视口窗口;普通可滚动列表渲染全部 → estTotal≈rendered 不触发)。
+ * 由 dedicated pass 提供已测量的 scroller + 渲染行数 + 行高(jsdom 无布局,measurements 由调用方/测试注入)。
+ * confidence:low——是估算启发式,total 为近似值。
+ */
+export function detectVirtualByScroll(
+  scroller: { scrollHeight: number; clientHeight: number },
+  renderedRows: number,
+  rowHeight: number,
+): Blindspot | null {
+  if (renderedRows < 3 || rowHeight < 4) return null;
+  const sh = scroller.scrollHeight;
+  const ch = scroller.clientHeight;
+  if (ch <= 0 || sh < ch * 4) return null;
+  const estTotal = Math.round(sh / rowHeight);
+  if (estTotal > renderedRows && estTotal >= Math.max(renderedRows * 2, renderedRows + 20)) {
+    return { kind: "virtual", total: estTotal, rendered: renderedRows, confidence: "low" };
   }
   return null;
 }
