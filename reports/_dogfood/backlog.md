@@ -18,6 +18,7 @@
 | A4 | 截断无量化 | P2 | ✅ done | candidateCount 透传→`# truncated: returned M of ~N`；ag-grid `80/351` live |
 | A3 | closed shadow root 无降级信号 | P1 | ⏸ defer | host 未被收集挂不上 per-element 标签(同虚拟 gap)；需专扫自定义元素(全 DOM 过滤,性能代价)；best-effort/最低价值/误报风险最高。纯函数+单测已留 |
 | A5 | iframe scanned 信号未下沉到 element 级 | P2 | ⏸ 未排期 | 现有 frame 级 `# frame N not scanned` 已部分覆盖 |
+| A2-fb | 虚拟列表 scrollHeight 回退启发式(非 ARIA 声明) | P2 | ⏸ backlog | **dogfood 发现(Semi)**：A2 现仅抓 ARIA 声明 virtual(aria-rowcount/setsize),漏 Semi/react-window/react-virtuoso 等不声明总量的虚拟化。设计已列「scrollHeight/rowHeight>>渲染数」低置信回退,实现时 defer。误报风险需谨慎(分页/普通滚动区) |
 
 ### B. ref/snapshot 协议语义
 | ID | 标题 | 严重度 | 可信度 | 证据 | 验证 |
