@@ -136,6 +136,8 @@ interface ScannedElement {
     /** range/number input 步长约束 */
     step?: string;
   };
+  /** 盲区降级信号:虚拟列表/canvas/closed-shadow。@since blindspot */
+  blindspot?: { kind: "virtual" | "canvas" | "shadow"; total?: number; rendered?: number; confidence?: "low" };
   _sel: string;
 }
 
@@ -2012,6 +2014,27 @@ async function scanOneFrame(
           const __href = role === "link" ? (htmlEl.getAttribute("href") || undefined) : undefined;
           // T5: date/time/file/range/number input 注入 compound 元数据,供 LLM fill 参考格式/约束
           const __inputCompound = buildInputCompound(htmlEl);
+          // [inline detectBlindspot] — 真源 packages/extension/src/page-side/blindspot-detect.ts,
+          // 改一处须改两处;tests/observe-blindspot-scan.test.ts 校验标记存在 + 纯函数行为对齐。
+          let __vtxBlind: { kind: "virtual" | "canvas" | "shadow"; total?: number; rendered?: number; confidence?: "low" } | null = null;
+          {
+            const __t = htmlEl.tagName.toLowerCase();
+            if (__t === "canvas") {
+              if (rect.width * rect.height >= 200 * 150) __vtxBlind = { kind: "canvas" };
+            } else if (["grid", "treegrid", "table", "listbox", "tree"].indexOf(role) >= 0) {
+              const __rendered =
+                role === "grid" || role === "treegrid" || role === "table"
+                  ? htmlEl.querySelectorAll("[role=row]").length
+                  : htmlEl.querySelectorAll("[role=option],[role=treeitem]").length;
+              const __rc = parseInt(htmlEl.getAttribute("aria-rowcount") || "", 10);
+              const __ss = parseInt(htmlEl.getAttribute("aria-setsize") || "", 10);
+              const __decl = !isNaN(__rc) && __rc > 0 ? __rc : !isNaN(__ss) && __ss > 0 ? __ss : NaN;
+              if (!isNaN(__decl) && __decl > __rendered && __decl >= Math.max(__rendered * 2, __rendered + 20))
+                __vtxBlind = { kind: "virtual", total: __decl, rendered: __rendered };
+            } else if (__t.indexOf("-") >= 0 && htmlEl.shadowRoot === null && htmlEl.childElementCount === 0) {
+              if (rect.width >= 40 && rect.height >= 24) __vtxBlind = { kind: "shadow", confidence: "low" };
+            }
+          }
           elements.push({
             index: elements.length,
             tag: htmlEl.tagName.toLowerCase(),
@@ -2038,6 +2061,7 @@ async function scanOneFrame(
             ...(htmlEl.hasAttribute("data-vtx-listener") ? { listenerInteractive: true as const } : {}),
             ...(__href !== undefined ? { href: __href } : {}),
             ...(__inputCompound !== undefined ? { compound: __inputCompound } : {}),
+            ...(__vtxBlind ? { blindspot: __vtxBlind } : {}),
             _sel: buildSelector(htmlEl),
           });
         }
@@ -2351,6 +2375,8 @@ export function registerObserveHandlers(router: ActionRouter, debuggerMgr: Debug
           max?: string;
           step?: string;
         };
+        /** 盲区降级信号(compact 也透传)。@since blindspot */
+        blindspot?: { kind: "virtual" | "canvas" | "shadow"; total?: number; rendered?: number; confidence?: "low" };
       };
       type FullElementOut = Omit<ScannedElement, "_sel"> & {
         frameId: number;
@@ -2371,6 +2397,8 @@ export function registerObserveHandlers(router: ActionRouter, debuggerMgr: Debug
         truncated: boolean;
         /** null 表示跨源 / 销毁导致无法扫描 */
         scanned: boolean;
+        /** 该 frame 扫描时考虑的候选总数(截断量化)。@since blindspot */
+        candidateCount?: number;
       }> = [];
 
       for (const s of scans) {
@@ -2443,6 +2471,7 @@ export function registerObserveHandlers(router: ActionRouter, debuggerMgr: Debug
               ...(e.errorMessage ? { errorMessage: e.errorMessage } : {}),
               ...(e.description ? { description: e.description } : {}),
               ...(e.compound ? { compound: e.compound } : {}),
+              ...(e.blindspot ? { blindspot: e.blindspot } : {}),
               frameId: s.frameId,
               ...(bboxTuple ? { bbox: bboxTuple } : {}),
             });
@@ -2484,6 +2513,7 @@ export function registerObserveHandlers(router: ActionRouter, debuggerMgr: Debug
               ...(e.errorMessage ? { errorMessage: e.errorMessage } : {}),
               ...(e.description ? { description: e.description } : {}),
               ...(e.compound ? { compound: e.compound } : {}),
+              ...(e.blindspot ? { blindspot: e.blindspot } : {}),
               frameId: s.frameId,
               ref,
               suggestedUsage: {
@@ -2509,6 +2539,7 @@ export function registerObserveHandlers(router: ActionRouter, debuggerMgr: Debug
           elementCount: s.page.elements.length,
           truncated: s.page.truncated,
           scanned: true,
+          candidateCount: s.page.candidateCount,
         });
       }
 
