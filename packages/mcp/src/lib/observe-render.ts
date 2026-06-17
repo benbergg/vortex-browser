@@ -59,6 +59,8 @@ export interface CompactElement {
    * @since T4-viewport
    */
   offScreenActionable?: boolean;
+  /** 盲区降级信号:虚拟列表/canvas/closed-shadow。@since blindspot */
+  blindspot?: { kind: "virtual" | "canvas" | "shadow"; total?: number; rendered?: number; confidence?: "low" };
 }
 
 interface CompactFrame {
@@ -69,6 +71,8 @@ interface CompactFrame {
   elementCount: number;
   truncated: boolean;
   scanned: boolean;
+  /** 该 frame 扫描时考虑的候选总数(用于截断量化)。@since blindspot */
+  candidateCount?: number;
 }
 
 interface CompactObserve {
@@ -187,6 +191,47 @@ function escapeName(s: string): string {
   return s.replace(/\r?\n/g, " ").replace(/"/g, '\\"').slice(0, 80);
 }
 
+/** 盲区行内 tag:挂在 agent 要操作的元素上(承重)。 */
+function blindspotTag(b?: CompactElement["blindspot"]): string {
+  if (!b) return "";
+  if (b.kind === "virtual") {
+    const t =
+      b.total != null && b.rendered != null
+        ? `${b.total}/${b.rendered}`
+        : b.total != null
+          ? `${b.total}/?`
+          : "?";
+    return ` [virtual: ${t}]`;
+  }
+  if (b.kind === "canvas") return " [blindspot=canvas]";
+  return b.confidence === "low" ? " [blindspot=shadow?]" : " [blindspot=shadow]";
+}
+
+/** 顶部盲区摘要行:让 agent 一眼知道全页有几处盲区(带 ref 指向)。无盲区返回 null。 */
+function blindspotSummary(elements: CompactElement[], snapshotHash: string | null): string | null {
+  const parts: string[] = [];
+  for (const e of elements) {
+    const b = e.blindspot;
+    if (!b) continue;
+    const ref = refOf(e, snapshotHash);
+    if (b.kind === "virtual") parts.push(`${e.role}@${ref} virtual(${b.total ?? "?"}/${b.rendered ?? "?"})`);
+    else if (b.kind === "canvas") parts.push(`${e.role}@${ref} canvas-editor`);
+    else parts.push(`${e.role}@${ref} shadow${b.confidence === "low" ? "?" : ""}`);
+  }
+  return parts.length ? `# blindspots: ${parts.join("; ")}` : null;
+}
+
+/** 截断量化 meta 行:per truncated frame。追加到 scanNotes。 */
+function pushTruncationNotes(frames: CompactFrame[] | undefined, scanNotes: string[]): void {
+  for (const f of frames ?? []) {
+    if (f.truncated && f.candidateCount != null && f.candidateCount > f.elementCount) {
+      scanNotes.push(
+        `# truncated: returned ${f.elementCount} of ~${f.candidateCount} candidates${f.frameId !== 0 ? ` (frame ${f.frameId})` : ""}`,
+      );
+    }
+  }
+}
+
 export function renderObserveCompact(
   data: CompactObserve,
   snapshotHash: string | null,
@@ -200,6 +245,8 @@ export function renderObserveCompact(
     const vp = data.viewport;
     lines.push(`Viewport: ${vp.width}x${vp.height}, scrollY=${vp.scrollY}/${vp.scrollHeight}`);
   }
+  const bsLine = blindspotSummary(data.elements, snapshotHash);
+  if (bsLine) lines.push(bsLine);
   lines.push("");
 
   // T4-diff: 查找上一快照身份键集合（不存在/过期则 null → 不 diff）。
@@ -231,7 +278,7 @@ export function renderObserveCompact(
     const newPrefix = isNew ? "* " : "";
 
     lines.push(
-      `${newPrefix}${refOf(el, snapshotHash)} [${el.role}]${name}${stateFlags(el.state)}${valueSeg}${offscreenSeg}${bboxSeg}`,
+      `${newPrefix}${refOf(el, snapshotHash)} [${el.role}]${name}${stateFlags(el.state)}${valueSeg}${offscreenSeg}${blindspotTag(el.blindspot)}${bboxSeg}`,
     );
   }
 
@@ -297,6 +344,8 @@ export function renderObserveTree(
     const vp = data.viewport;
     lines.push(`Viewport: ${vp.width}x${vp.height}, scrollY=${vp.scrollY}/${vp.scrollHeight}`);
   }
+  const bsLine = blindspotSummary(data.elements, snapshotHash);
+  if (bsLine) lines.push(bsLine);
   lines.push("");
 
   // T4-diff: 查找上一快照身份键集合。
@@ -388,7 +437,7 @@ export function renderObserveTree(
     const isNew = prevKeys !== null && !prevKeys.has(buildElementKey(e));
     const newPrefix = isNew ? "* " : "";
     lines.push(
-      `${indent}${newPrefix}- ${e.role}${name}${ref}${stateFlags(e.state)}${weak}${cursor}${listener}${valueSeg}${comp}${err}${ctrl}${desc}${offscreenSeg}${bboxSeg}${hasChildren ? ":" : ""}`,
+      `${indent}${newPrefix}- ${e.role}${name}${ref}${stateFlags(e.state)}${weak}${cursor}${listener}${valueSeg}${comp}${err}${ctrl}${desc}${offscreenSeg}${blindspotTag(e.blindspot)}${bboxSeg}${hasChildren ? ":" : ""}`,
     );
     if (hasUrl) lines.push(`${indent}  - /url: ${e.href}`);
     for (const k of kids) emit(k, depth + 1);
@@ -409,6 +458,7 @@ export function renderObserveTree(
       scanNotes.push(`# frame ${f.frameId} scanned, 0 interactive elements (url=${f.url})`);
     }
   }
+  pushTruncationNotes(data.frames, scanNotes);
   if (includeBoxes) {
     for (const f of data.frames ?? []) {
       if (f.scanned && f.frameId !== 0) {
