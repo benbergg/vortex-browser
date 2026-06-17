@@ -27,7 +27,7 @@ export type ActionabilityResult =
   | {
       ok: false;
       reason: ActionabilityFailure;
-      extras?: { blocker?: string; tagName?: string; hasReadOnly?: boolean };
+      extras?: { blocker?: string; tagName?: string; hasReadOnly?: boolean; inert?: boolean };
     };
 
 (function () {
@@ -296,7 +296,14 @@ export type ActionabilityResult =
     // options.force 诚实(2026-06-04 H 族补实现:此前 force 是 no-op)。
     if (!force) {
       if (!isVisible(el)) return { ok: false, reason: "NOT_VISIBLE" };
-      if (!isEnabled(el)) return { ok: false, reason: "DISABLED" };
+      if (!isEnabled(el)) {
+        // 区分 DISABLED 成因:inert 子树(常见于 modal/overlay 把背景内容设为 inert,
+        // 加载即弹窗的真实站极普遍——Booking.com dogfood 2026-06-17)vs 原生 disabled。
+        // 二者修复动作不同:inert 需关闭遮挡层,原生 disabled 需满足前置条件。
+        // 携带 extras.inert 供 host 侧 waitActionable 生成可 actionable 的诊断。
+        const inert = el instanceof HTMLElement && !!el.closest("[inert]");
+        return { ok: false, reason: "DISABLED", extras: { inert } };
+      }
       if (needsEditable) {
         const ed = isEditable(el);
         if (!ed.ok) {

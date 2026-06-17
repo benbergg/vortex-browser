@@ -92,11 +92,23 @@ export async function waitActionable(
   // transition + force=true 兜底建议) 生效。否则 LLM 收不到 force=true 提示,
   // 永远卡重试循环。518d500 修了 hint 文本但未改错误码,修复路径错(V4 报告 §7.3.2)。
   const lastReasonIsStability = lastReason === "NOT_STABLE";
+  // inert 子树致 DISABLED(常见于加载即弹 modal/overlay 把背景内容设为 inert)→ 泛化
+  // "增大 timeout / wait_for idle" hint 误导(等待无用),追加可 actionable 的关遮挡指引。
+  const inertBlocked = lastReason === "DISABLED" && lastExtras?.inert === true;
+  let message: string;
+  if (lastReasonIsStability) {
+    message = `Element not stable after ${timeout}ms (last reason: NOT_STABLE)`;
+  } else if (inertBlocked) {
+    message =
+      `Actionability timeout after ${timeout}ms; last reason: DISABLED ` +
+      `(element is in an [inert] subtree — commonly a modal/overlay backgrounding the page; ` +
+      `dismiss the overlay/modal first, e.g. press Escape or click its close button, then retry)`;
+  } else {
+    message = `Actionability timeout after ${timeout}ms; last reason: ${lastReason ?? "unknown"}`;
+  }
   throw vtxError(
     lastReasonIsStability ? VtxErrorCode.NOT_STABLE : VtxErrorCode.TIMEOUT,
-    lastReasonIsStability
-      ? `Element not stable after ${timeout}ms (last reason: NOT_STABLE)`
-      : `Actionability timeout after ${timeout}ms; last reason: ${lastReason ?? "unknown"}`,
+    message,
     {
       selector,
       extras: { lastReason, ...(lastExtras ?? {}) },
