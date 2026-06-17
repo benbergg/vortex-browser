@@ -94,13 +94,12 @@ describe("js.evaluate Trusted Types fallback (youtube dogfood 2026-06-01)", () =
       if (typeof arg === "string") throw new EvalError(ttMsg);
       return realEval(arg as string);
     }) as typeof eval;
-    // new Function(string) 同是 TT sink:裸字符串抛 TT 错,TrustedScript 包装放行。
-    globalThis.Function = function (body: unknown) {
-      if (body && typeof body === "object" && (body as Record<symbol, unknown>)[TRUSTED]) {
-        return realFunction(String(body));
-      }
-      if (typeof body === "string") throw new EvalError(ttMsg);
-      return realFunction(body as string);
+    // new Function 在 TT 页**恒抛**——与 eval 不同,Function 构造器对所有参数 ToString 后
+    // 重新校验,TrustedScript **不被豁免**(live 实证 2026-06-17 youtube:`eval(ts)`→7 成功,
+    // `new Function(ts)`→TT 错)。旧 mock 错误地放行 `new Function(TrustedScript)`,致坏掉的
+    // async 路径在单测里假绿、却在 YouTube 实站崩。
+    globalThis.Function = function (_body: unknown) {
+      throw new EvalError(ttMsg);
     } as unknown as FunctionConstructor;
   }
 
@@ -172,6 +171,52 @@ describe("js.evaluate Trusted Types fallback (youtube dogfood 2026-06-01)", () =
       const out = (await func("return 6 * 7")) as { result?: unknown; error?: string };
       expect(out.error).toBeUndefined();
       expect(out.result).toBe(42);
+    });
+
+    // live 复现(youtube 2026-06-17):`vortex_evaluate({async:true})` 多语句 code 在 TT 页 100% 崩。
+    // 根因——async page-side 走 `new Function(p.createScript(src))`,但 `new Function` 不接受
+    // TrustedScript(只有 eval 接受)。修复:async 路径改用 `eval` + 表达式 IIFE 形式。
+    it("on a Trusted Types page, async multi-statement code runs (eval+policy, not new Function)", async () => {
+      const func = await captureFunc("js.evaluateAsync");
+      enforceTrustedTypes();
+      const out = (await func("const a = 3; const b = 4; return a * b;")) as {
+        result?: unknown;
+        error?: string;
+      };
+      expect(out.error).toBeUndefined();
+      expect(out.result).toBe(12);
+    });
+
+    // 表达式形式选择须在 TT 页也生效:纯表达式必须走 exprSrc 形式才能返回值(stmtSrc 形式
+    // `{ ${c} }` 无 return → undefined)。旧实现用 `new Function(exprSrc)` 做语法探测,TT 页
+    // 上恒抛 TT 错(非 SyntaxError)→ 无法区分 → 退化为 stmtSrc → 纯表达式丢值。
+    it("on a Trusted Types page, async pure expression returns its value", async () => {
+      const func = await captureFunc("js.evaluateAsync");
+      enforceTrustedTypes();
+      const out = (await func("6 * 7")) as { result?: unknown; error?: string };
+      expect(out.error).toBeUndefined();
+      expect(out.result).toBe(42);
+    });
+
+    it("on a Trusted Types page, async await-expression resolves", async () => {
+      const func = await captureFunc("js.evaluateAsync");
+      enforceTrustedTypes();
+      const out = (await func("await Promise.resolve(123)")) as {
+        result?: unknown;
+        error?: string;
+      };
+      expect(out.error).toBeUndefined();
+      expect(out.result).toBe(123);
+    });
+
+    // policy 不可创建(站点 trusted-types 指令带 allowlist 不含 vortex-eval)→ page-side 无法
+    // 自救,优雅返回原始 TT 错(由 handler 决定是否回退 CDP,见 csp-cdp-fallback 测试)。
+    it("when policy creation is blocked, async surfaces the original TT error (graceful)", async () => {
+      const func = await captureFunc("js.evaluateAsync");
+      enforceTrustedTypes({ policyCreatable: false });
+      const out = (await func("return 6 * 7")) as { result?: unknown; error?: string };
+      expect(out.result).toBeUndefined();
+      expect(out.error).toMatch(/Trusted Type/);
     });
   });
 });

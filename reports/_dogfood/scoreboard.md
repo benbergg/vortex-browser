@@ -27,6 +27,26 @@
 | 班牛 流程布局(LogicFlow 入口) | 2026-06-17 | **非缺陷**：「流程布局」菜单项 `disabled`+`cursor:not-allowed`+无 listener → observe(interactive) 正确省略(already-graceful);LogicFlow 画布此视图不可达(工作流未配置/无权限),A1 canvas 信号未能在班牛复验(已在 Excalidraw live 验证) |
 | Semi Design Table 文档页 | 2026-06-17 | **0 缺陷 + 关键负例 PASS**：74 个装饰 Monaco minimap canvas(115×500 超阈值)**未过报** `[blindspot=canvas]`(无交互信号不被收集,A1 收集门挡住装饰 canvas);**A2 覆盖观察**:Semi `aria-rowcount=渲染数` → ARIA-based A2 不触发非 ARIA 虚拟化(见新 backlog A2-fb);filter=all 超重页(303 行+111 canvas)超时(页面固有) |
 | Naive UI data-table | 2026-06-17 | **A2-fb 缺口 live 确认真实**：`.v-vl` 虚拟表总 ~1000/~2921 行,DOM 仅 9-12 行,**全页 0 aria-rowcount** → A2(ARIA-based)不触发。**→ 随即实现 A2-fb 并 live 复验通过**(见下) |
+| GitHub(搜索→仓库→issues→issue) | 2026-06-17 | **0 缺陷**:observe 密集列表 ref 完整(分页非虚拟正确不报盲区)、act click→导航捕获、extract 忠实返回 DOM(issue 正文仅 "Problem" 一节点=GitHub React viewer 懒渲染,非 extract 漏抓,evaluate 核实 textContent===innerText)、**A4 截断量化信号真实生产页生效** `# truncated: returned 80 of ~146`、query 精确 element_path。执行/感知层成熟再印证 |
+| **YouTube(搜索结果,Polymer+Trusted Types)** | 2026-06-17 | **发现 1 真 P0 并 TDD 修复**:observe 完美穿透 ytd open shadow;追加式懒加载正确不触发 A2-fb。**缺陷=`vortex_evaluate({async:true})` 多语句在 TT 站 100% 崩**(根因 `new Function` 不接受 TrustedScript,仅 eval 接受);**修复 `0db53f9`**(async 改 eval+表达式 IIFE + handler CDP 回退认 TT + 修 false-green mock);live 复验 async 多语句/纯表达式/await 全通过 |
+| Google Maps(瓦片 canvas+drag) | 2026-06-17 | **0 缺陷**:observe 召回结果 feed、地图大 canvas(cursor:auto 非交互)A1 优雅不误报(可操作内容全在 DOM)、act click→SPA 详情面板(observeEffect 捕获)、**mouse_drag 成功平移重型瓦片 canvas**(截图证「在此区域搜索」按钮出现)、screenshot/evaluate 正常。canvas+drag 在异于 Excalidraw 的形态下确认成熟 |
+| Booking.com(widget 表单) | 2026-06-17 | **inert/DISABLED 行为正确(非缺陷)+ 诊断质量 P2 修复**:加载弹 modal→背景内容 [inert]→搜索框 isEnabledElement=false,vortex 正确拒绝 type(关 modal 后立即成功)。但 DISABLED 对「inert 背景化」与「原生 disabled」一视同仁,泛化 hint 误导。**修复 `d50f885`**:probe 区分 inert(extras.inert)→ waitActionable 超时消息追加关遮挡指引;live 验证 inert→改进消息 / 原生 disabled→纯消息无过触发 |
+
+## 实现 R6 — inert(modal 背景化)DISABLED 诊断可 actionable(Booking.com dogfood 驱动)
+- **缺口来源**:广度 dogfood 第三轮 Booking.com。加载即弹 modal+背景 [inert] 是极常见真实模式,第一个真实表单站就撞上。
+- **非缺陷部分**:vortex 拒绝写 inert 元素**正确**(关 modal 后 type 立即成功),inert 处理(2026-06-04 审计)工作正常。
+- **诊断缺口(P2)**:actionability DISABLED 对「inert 背景化(关遮挡)」与「原生 disabled 控件(满足前置)」一视同仁,泛化 hint「增大 timeout / wait_for idle」对 inert 场景误导(等待无用)。
+- **修复 `d50f885`**:① probe DISABLED 失败时探测 `el.closest("[inert]")` 携 extras.inert;② waitActionable 超时 lastReason=DISABLED 且 inert 时,消息追加「元素在 [inert] 子树,常见 modal/overlay 背景,先关闭遮挡层(Escape/关闭按钮)再重试」。
+- **回归**:扩展 1192 + bench 93/93 + 2 新测试;live Booking.com 注入 inert→改进消息、原生 disabled→纯消息(无过触发)。
+- **教训**:① 行为正确 ≠ 诊断到位——「失败优雅降级」要求 actionable 信号,inert/modal 是最常见的表单阻塞模式;② 实时重渲染站(Booking React)live 验证须用受控注入排除重渲染干扰(FORM 打 inert 触发重渲染致 NOT_ATTACHED 干扰)。
+
+## 实现 R5 — evaluate async Trusted Types 崩溃(YouTube dogfood 驱动)
+- **缺口来源**:广度 dogfood 第二轮(代表性应用场景:GitHub SaaS + YouTube 媒体)。GitHub 全清,YouTube 抓出 P0。
+- **缺陷**:`vortex_evaluate({async:true})` 多语句代码在 Trusted Types 强制站(YouTube/Google/GitHub 等一大类主流站)100% 崩 `JS_EXECUTION_ERROR: ...violates Trusted Type assignment`。
+- **根因(live 实证矩阵)**:`eval(p.createScript(c))`→成功 vs `new Function(p.createScript(src))`→TT 崩。**TT 下 eval 接受 TrustedScript,new Function 不接受**(参数 ToString 后重新校验)。同步 EVALUATE 走 eval 故正常,EVALUATE_ASYNC 走 new Function 故崩。
+- **修复 `0db53f9`**:① async page-side 改用 `eval` + 表达式 IIFE 形式(无顶层 return,exprSrc 先试 SyntaxError 回退 stmtSrc);② handler CDP 终极回退增加 `isTrustedTypesBlocked`(policy-allowlist 站兜底,CDP 绕过 TT);③ 修正 false-green mock(`new Function(TrustedScript)` 应恒抛)。
+- **回归**:扩展 1190 + mcp 504 单测全绿;bench 93/93;新增 9 测试。**live YouTube**:async 多语句/纯表达式/await 全通过(修前全崩)+ 非 TT localhost 回归正常。
+- **教训**:① false-green mock 是「承重墙必活浏览器」的反面教材——mock 编码错误假设(new Function 接受 TrustedScript)让坏路径单测假绿;② TT 下 eval≠new Function 的 TrustedScript 豁免差异;③ 代表性应用场景(真实 SaaS/媒体站)比组件库 demo 更能抓出 CSP/TT 类基础设施缺陷。
 
 ## 实现 R4 — A2-fb 非 ARIA 虚拟化(dogfood 驱动)
 - **缺口来源**:广度 dogfood(Naive)发现 A2 只认 ARIA 声明虚拟化,漏 Semi/Naive/react-window。
