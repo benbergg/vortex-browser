@@ -54,6 +54,27 @@ describe("blindspot 顶部 meta 摘要", () => {
   });
 });
 
+describe("frame 级虚拟列表盲区（容器未收集时）", () => {
+  it("frame.blindspots 进 # blindspots 摘要（按 name+总量）", () => {
+    const data = obs([], {
+      frames: [{ frameId: 0, parentFrameId: -1, url: "http://x", offset: { x: 0, y: 0 }, elementCount: 80, truncated: false, scanned: true,
+        blindspots: [{ kind: "virtual", total: 1003, rendered: 37, name: "grid" }] }],
+    });
+    const out = renderObserveTree(data as any, null);
+    expect(out).toMatch(/# blindspots:.*virtual.*1003\/37/);
+  });
+  it("元素级(canvas) 与 frame级(virtual) 合并到同一 # blindspots 行", () => {
+    const data = obs(
+      [{ index: 5, tag: "canvas", role: "img", name: "C", frameId: 0, blindspot: { kind: "canvas" } }],
+      { frames: [{ frameId: 0, parentFrameId: -1, url: "http://x", offset: { x: 0, y: 0 }, elementCount: 1, truncated: false, scanned: true,
+        blindspots: [{ kind: "virtual", total: 1003, rendered: 37, name: "grid" }] }] },
+    );
+    const out = renderObserveTree(data as any, null);
+    expect(out).toMatch(/# blindspots:.*canvas/);
+    expect(out).toMatch(/# blindspots:.*virtual.*1003\/37/);
+  });
+});
+
 describe("A4 截断量化", () => {
   it("truncated frame 出 # truncated: returned M of ~N", () => {
     const data = obs([], {

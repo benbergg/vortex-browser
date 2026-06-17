@@ -153,6 +153,8 @@ interface FramePageResult {
   elements: ScannedElement[];
   candidateCount: number;
   truncated: boolean;
+  /** 虚拟列表盲区(容器常不被 elements 收集,独立扫描)。@since blindspot */
+  blindspots?: Array<{ kind: "virtual"; total: number; rendered: number; name: string }>;
 }
 
 function safeOrigin(url: string | undefined): string | null {
@@ -2096,6 +2098,29 @@ async function scanOneFrame(
           collectedEls[i].setAttribute("data-vtx-ax", String(i));
         }
 
+        // [inline detectBlindspot:virtual] 虚拟列表专扫:role=grid/listbox 等容器
+        // 常不被 elements 收集(rows 成顶层根),故独立 querySelectorAllDeep 一遍,
+        // 产出 frame 级 blindspots → 渲染 # blindspots: meta(不依赖元素收集)。
+        // canvas/shadow 走 per-element 内联标注(它们会被收集)。
+        const pageBlindspots: Array<{ kind: "virtual"; total: number; rendered: number; name: string }> = [];
+        {
+          const __vc = querySelectorAllDeep("[role=grid],[role=treegrid],[role=table],[role=listbox],[role=tree]", document);
+          for (const c of __vc) {
+            const __cr = (c.getAttribute("role") || "").toLowerCase();
+            const __rendered =
+              __cr === "grid" || __cr === "treegrid" || __cr === "table"
+                ? c.querySelectorAll("[role=row]").length
+                : c.querySelectorAll("[role=option],[role=treeitem]").length;
+            const __rc = parseInt(c.getAttribute("aria-rowcount") || "", 10);
+            const __ss = parseInt(c.getAttribute("aria-setsize") || "", 10);
+            const __decl = !isNaN(__rc) && __rc > 0 ? __rc : !isNaN(__ss) && __ss > 0 ? __ss : NaN;
+            if (!isNaN(__decl) && __decl > __rendered && __decl >= Math.max(__rendered * 2, __rendered + 20)) {
+              const __nm = c.getAttribute("aria-label") || c.getAttribute("aria-labelledby") || __cr;
+              pageBlindspots.push({ kind: "virtual", total: __decl, rendered: __rendered, name: String(__nm).slice(0, 40) });
+            }
+          }
+        }
+
         return {
           url: location.href,
           title: document.title,
@@ -2108,6 +2133,7 @@ async function scanOneFrame(
           elements,
           candidateCount: allCandidates.length,
           truncated: elements.length >= max,
+          blindspots: pageBlindspots,
         };
       },
       args: [maxElements, viewport, includeText, includeAX, filterMode],
@@ -2399,6 +2425,8 @@ export function registerObserveHandlers(router: ActionRouter, debuggerMgr: Debug
         scanned: boolean;
         /** 该 frame 扫描时考虑的候选总数(截断量化)。@since blindspot */
         candidateCount?: number;
+        /** 虚拟列表盲区(容器未收集时的 frame 级信号)。@since blindspot */
+        blindspots?: Array<{ kind: "virtual"; total: number; rendered: number; name: string }>;
       }> = [];
 
       for (const s of scans) {
@@ -2540,6 +2568,7 @@ export function registerObserveHandlers(router: ActionRouter, debuggerMgr: Debug
           truncated: s.page.truncated,
           scanned: true,
           candidateCount: s.page.candidateCount,
+          ...(s.page.blindspots && s.page.blindspots.length ? { blindspots: s.page.blindspots } : {}),
         });
       }
 

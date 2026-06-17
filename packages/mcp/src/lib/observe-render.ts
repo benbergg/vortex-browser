@@ -73,6 +73,8 @@ interface CompactFrame {
   scanned: boolean;
   /** 该 frame 扫描时考虑的候选总数(用于截断量化)。@since blindspot */
   candidateCount?: number;
+  /** 虚拟列表盲区(容器未被收集为元素时的 frame 级信号)。@since blindspot */
+  blindspots?: Array<{ kind: "virtual"; total: number; rendered: number; name: string }>;
 }
 
 interface CompactObserve {
@@ -207,8 +209,17 @@ function blindspotTag(b?: CompactElement["blindspot"]): string {
   return b.confidence === "low" ? " [blindspot=shadow?]" : " [blindspot=shadow]";
 }
 
-/** 顶部盲区摘要行:让 agent 一眼知道全页有几处盲区(带 ref 指向)。无盲区返回 null。 */
-function blindspotSummary(elements: CompactElement[], snapshotHash: string | null): string | null {
+/**
+ * 顶部盲区摘要行:让 agent 一眼知道全页有几处盲区。合并两源:
+ * 1) 元素级(canvas/shadow,带 ref)——挂在已收集元素上;
+ * 2) frame 级虚拟列表(按 name,容器常未被收集为元素)。
+ * 无盲区返回 null。
+ */
+function blindspotSummary(
+  elements: CompactElement[],
+  frames: CompactFrame[] | undefined,
+  snapshotHash: string | null,
+): string | null {
   const parts: string[] = [];
   for (const e of elements) {
     const b = e.blindspot;
@@ -217,6 +228,12 @@ function blindspotSummary(elements: CompactElement[], snapshotHash: string | nul
     if (b.kind === "virtual") parts.push(`${e.role}@${ref} virtual(${b.total ?? "?"}/${b.rendered ?? "?"})`);
     else if (b.kind === "canvas") parts.push(`${e.role}@${ref} canvas-editor`);
     else parts.push(`${e.role}@${ref} shadow${b.confidence === "low" ? "?" : ""}`);
+  }
+  for (const f of frames ?? []) {
+    for (const b of f.blindspots ?? []) {
+      const fr = f.frameId !== 0 ? ` (frame ${f.frameId})` : "";
+      parts.push(`${b.name} virtual(${b.total}/${b.rendered})${fr}`);
+    }
   }
   return parts.length ? `# blindspots: ${parts.join("; ")}` : null;
 }
@@ -245,7 +262,7 @@ export function renderObserveCompact(
     const vp = data.viewport;
     lines.push(`Viewport: ${vp.width}x${vp.height}, scrollY=${vp.scrollY}/${vp.scrollHeight}`);
   }
-  const bsLine = blindspotSummary(data.elements, snapshotHash);
+  const bsLine = blindspotSummary(data.elements, data.frames, snapshotHash);
   if (bsLine) lines.push(bsLine);
   lines.push("");
 
@@ -344,7 +361,7 @@ export function renderObserveTree(
     const vp = data.viewport;
     lines.push(`Viewport: ${vp.width}x${vp.height}, scrollY=${vp.scrollY}/${vp.scrollHeight}`);
   }
-  const bsLine = blindspotSummary(data.elements, snapshotHash);
+  const bsLine = blindspotSummary(data.elements, data.frames, snapshotHash);
   if (bsLine) lines.push(bsLine);
   lines.push("");
 
