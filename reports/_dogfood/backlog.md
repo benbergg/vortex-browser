@@ -26,9 +26,12 @@
 | B2 | STALE_SNAPSHOT 错误码混淆「无快照」vs「过期」 | P2（agent 报 P1，已读码降级） | 🟡 | ref-parser.ts:110-114 无快照 throw STALE_SNAPSHOT；line 139 过期同码。**消息文案可区分**（"no active snapshot" vs "expired"），但 error code 相同，靠码分支的 agent 无法区分 | 不 observe 直接 act vs observe→navigate→act |
 | B1 | bare ref 同 tab 原地导航不被捕获 | P2（agent 报 P0，已读码证伪降级） | 🟢 | **已核实**：ref-parser.ts:123-134 tabId 门对 bare ref 同样生效；bare ref 仅跳过 line 139 hash 门 → 真实缺口仅「同 tab 原地导航+bare ref」，且 bare ref 计划 v0.9 弃用即解 | 低优先，v0.9 拒绝 bare ref 顺带解决 |
 
-### C. 执行层残余
+### C. 执行层残余（2026-06-17 读码证伪批次 R3：全部非缺陷，执行层成熟再印证）
 | ID | 标题 | 严重度 | 可信度 | 证据 | 验证 |
 |----|------|--------|--------|------|------|
+| ~~C3~~ | ARIA select driver 虚拟列表越界项无降级 | ~~P1~~ | 🟢证伪 | **非缺陷**：aria-select.ts:300-329 typeahead 兜底——找不到选项且搜索式 combobox 时写 label 进过滤输入→虚拟列表筛到匹配行→重轮询点击,覆盖 react-select/antd 主流。非搜索虚拟列表越界项报 `unknown`=**诚实失败非 silent false-success**。批次4b #24 历史 live CONFIRMED + bench el-autocomplete 绿 |
+| ~~C2~~ | FILL reject 两套机制不统一 | ~~P2~~ | 🟢证伪 | **非缺陷**：dom.ts:902-918 原生 checkbox/radio/select 已拦 INVALID_TARGET;dom.ts:941+ NO_EFFECT 回读校验兜「非空→空」拒绝(族A #7 已修)。div-based role=checkbox 用 fill 是误用(应 click),边界非缺陷 |
+| ~~C4~~ | TYPE vs FILL clearBefore 语义不对称 | ~~P2~~ | 🟢证伪 | **非缺陷**：FILL dom.ts:934 原生 setter 全量覆盖=React 兼容有意设计,与 TYPE 击键模拟语义本就不同;NO_EFFECT 守卫已在 |
 | ~~C1~~ | SCROLL moved 阈值不一致（dom.ts >1px vs micro-verify <5px）| ~~P1~~ | 🟢证伪 | **已核实非缺陷**：两阈值测不同量——dom.ts:1283 `>1px`=「动没动」位移死区；micro-verify.ts:157 `<5px`=「到没到目标」容差。非双标。moved:false 时 success:true 是有意降级信号(#18,注释明写 agent 据此判真滚动) | 行为正确 |
 | C3 | ARIA select driver 虚拟列表越界项无降级 | P1 | 🔴 | aria-select.ts:215-227 optionPool 基于 collectVisible；line 135-143 `isVisible` 要求 w/h>0 → 虚拟外项被过滤，报 UNKNOWN_OPTION 而非等待滚动暴露 | antd Select 选项>视口 / react-select+虚拟列表 |
 | C2 | FILL reject 两套机制不统一 | P2 | 🔴 | fill-reject.ts:27-55 仅 Element Plus；dom.ts:910-917 原生 input 内联探测。两套条件可能分叉致自定义组件漏拦 | rc-checkbox / 自定义 radio 库 |
@@ -36,10 +39,11 @@
 
 ### D. 低优先 / 高度推测（待证伪，多半 m3-error）
 > 这些与历史已修批次重叠或纯推测，优先级最低，逐条快速证伪即可。
+> **R3 已证伪**：D1。其余 D2-D8 均「已有测试守 / 已知设计取舍 / 体验优化非缺陷」，按说明列即证伪结论，无需逐条 spike。
 
 | ID | 标题 | 说明 |
 |----|------|------|
-| D1 | PRESS 可打印字符+修饰键缺 text（执行-1 P0） | 记忆显示批次5/0008 已修 PRESS text/物理码，疑重复，优先证伪 |
+| ~~D1~~ | PRESS 可打印字符+修饰键缺 text（执行-1 P0） | 🟢**证伪**：keyboard.ts:178-181 有意设计——modifiers≠0(Ctrl/Alt/Meta)是命令不插字符,可打印单字符无修饰键已带 text/unmodifiedText(EP A3 已修)。审计误读 |
 | D2 | CLICK synthetic inline 副本同步 aria-disabled（执行-7） | 纯推测，已有 click-synthetic-inline-scope.test 守 |
 | D3 | DRAG 跨 frame offset 顺序（执行-8） | 推测，需 iframe 内拖拽场景证 |
 | D4 | content-visibility 过滤盲区（感知-4） | observe.ts:1844-1891 已有注释处理，疑正确行为 |
@@ -48,12 +52,18 @@
 | D7 | tools/list 描述模糊（协议-4） | 体验优化非缺陷 |
 | D8 | NO_EFFECT 错误码枚举不全（协议-6） | 需核对是否真混用 |
 
-## Phase 1 建议顺序
-1. **C1**（SCROLL 阈值不一致）——最自洽、易 spike、修复隔离，先开胃证明 cycle 跑通。
-2. **B3**（frames schema 阉割）——读两个 schema 文件即可核实，修复小。
-3. **A2/A1/A3**（盲区信号族）——最高战略价值，但需先 brainstorm 信号契约。
-4. **C3/C2/C4** 执行层残余。
-5. **D 族** 逐条快速证伪。
+## 进度结论（2026-06-17）
+- **A 族盲区信号**（A1/A2/A4）✅ ship（PR #51），A3 defer / A5 未排期。
+- **B/C/D 残余**：B1/C1/B3（R0）+ C2/C3/C4/D1（R3）共 **7 候选全部读码证伪**——执行/协议层生产级成熟确认。**无代码改动是正确结论**（不为凑「修复数」造假修，符合「报告默认不可信、实证为准」）。
+- **唯一残留**：B2（STALE_SNAPSHOT 错误码不区分「无快照」vs「过期」，消息已区分，P2 体验项）—— defer，价值边际。
+
+## 整体验收线进度
+| 线 | 状态 |
+|----|------|
+| bench 全绿 + 无 silent false-success | ✅ 93/93；7 候选证伪确认无残余 silent-false-success |
+| 真站通过率≥95%+优雅降级 | 🟢 大幅推进（盲区信号补齐 + 执行层成熟确认）；持续 dogfood 累积站点覆盖 |
+| 效率达标 | 既有（screenshot native / observe 字节受控，盲区 meta 增量极小） |
+| 覆盖指定真站 | ag-grid/Excalidraw/ant.design + 历史轮换池 8 站 |
 
 ## 备注
 - Phase 0 期间感知层审计 agent 越界执行了 `rm -rf /tmp/*`（已记录，后续 agent prompt 禁写/删）。
