@@ -44,6 +44,24 @@
 | **YouTube(搜索结果,Polymer+Trusted Types)** | 2026-06-17 | **发现 1 真 P0 并 TDD 修复**:observe 完美穿透 ytd open shadow;追加式懒加载正确不触发 A2-fb。**缺陷=`vortex_evaluate({async:true})` 多语句在 TT 站 100% 崩**(根因 `new Function` 不接受 TrustedScript,仅 eval 接受);**修复 `0db53f9`**(async 改 eval+表达式 IIFE + handler CDP 回退认 TT + 修 false-green mock);live 复验 async 多语句/纯表达式/await 全通过 |
 | Google Maps(瓦片 canvas+drag) | 2026-06-17 | **0 缺陷**:observe 召回结果 feed、地图大 canvas(cursor:auto 非交互)A1 优雅不误报(可操作内容全在 DOM)、act click→SPA 详情面板(observeEffect 捕获)、**mouse_drag 成功平移重型瓦片 canvas**(截图证「在此区域搜索」按钮出现)、screenshot/evaluate 正常。canvas+drag 在异于 Excalidraw 的形态下确认成熟 |
 | Booking.com(widget 表单) | 2026-06-17 | **inert/DISABLED 行为正确(非缺陷)+ 诊断质量 P2 修复**:加载弹 modal→背景内容 [inert]→搜索框 isEnabledElement=false,vortex 正确拒绝 type(关 modal 后立即成功)。但 DISABLED 对「inert 背景化」与「原生 disabled」一视同仁,泛化 hint 误导。**修复 `d50f885`**:probe 区分 inert(extras.inert)→ waitActionable 超时消息追加关遮挡指引;live 验证 inert→改进消息 / 原生 disabled→纯消息无过触发 |
+| Reddit r/programming(shreddit web-components) | 2026-06-17 | **非缺陷**:被 "blocked by network security" 拦截页,仅 Log in / File a ticket 两 link;observe 忠实返回这 2 个(截图核实页面真只有这俩),无召回漏。bot 墙站不可达 |
+| **Wikipedia 文章页 + VisualEditor(contenteditable 富文本)** | 2026-06-17 | **0 vortex 缺陷**:① 文章页 observe 召回密集 link、**A4 截断 `# truncated: returned 80 of ~1246` 真实生产页生效**;② VE(IP-block+hCaptcha gating)`# blindspots: ul virtual(~30/8)` 来自**跨源 hCaptcha 隐形 frame** 语言列表(confidence:low,rendered=8 很可能真窗口化,跨源不可证伪,非确认误报);③ contenteditable 见下「contenteditable 深测」 |
+| ProseMirror / Lexical / 纯 contenteditable | 2026-06-17 | **0 缺陷 + 富文本面成熟确认**:observe 把编辑器 **host** 正确暴露为单一 textbox/div + 完整 value(PM e17 / Lexical e19,非碎片子节点);type 经 host 全部正常(plain ✅ / ProseMirror ✅ / Lexical ✅,含 select-all 替换);纯 CE **继承式子节点 `<p>`** type 也正常(focus 自动冒泡到 host,childText 正确写入)。**realistic flow(observe→host ref→type)在新面 contenteditable 全成熟** |
+| Amazon 商品页(/dp/) | 2026-06-17 | **非缺陷**:bot 拦截 "Continue shopping" 验证页,observe 忠实返回 3 元素;click 该按钮成功但需真实 cookie 未穿过(环境限制)。bot 墙站不可达 |
+
+## 广度 dogfood 第四轮 — contenteditable 富文本 + bot 墙真站(2026-06-17,无代码改动=成熟确认)
+- **目标**:测尚未覆盖的新缺陷面 **contenteditable 富文本编辑器**(每个评论框/富文本应用的真实面),并扩广度到 bot 墙真站。
+- **环境限制**:Reddit / Amazon bot 墙拦截、Wikipedia VE IP 编辑封禁+hCaptcha gating——最具代表性的电商/社交站对本自动化环境不可达;干净可测的开放编辑器(ProseMirror/Lexical)成主力。
+- **核心结论:contenteditable 处理对 realistic flow 全成熟,无 vortex 缺陷**。
+  - observe 把编辑器 **host** 正确折叠为单一 `textbox/div` + 完整 value(ProseMirror/Lexical),不暴露碎片子节点 → agent 拿 host ref。
+  - type 经 host 全部正常:纯 CE ✅ / ProseMirror ✅ / Lexical ✅(均含 select-all 替换、managed-focus 编辑器 Lexical 也正常)。
+  - 纯 CE **继承式子节点 `<p>`**(无自身 contenteditable 属性)type 也正常:`el.focus()` 自动冒泡到 host,文本正确写入子节点。
+- **唯一异常 — VE 非 host 子节点 type 的 silent-false-success(VE 特异,非确认生产缺陷,不修)**:
+  - 现象:在 Wikipedia VisualEditor 里瞄准继承式 `<p>` 子节点 type → 报 `success/typed/cdp-insertText` 但文本落进 VE 离屏 `div.ve-ce-surface-clipboardHandler`,可见文档不变。
+  - 根因:`el.focus()` 作用于不可聚焦的 `<p>` 时,**VE 的 focusin 处理把焦点重定向到 clipboardHandler**(实测 activeElement=clipboardHandler)→ insertText 落该处。
+  - **不构成确认缺陷的判据**:① 纯 CE 同款继承子节点 type 正常(focus 正常冒泡 host)、ProseMirror/Lexical 同款 managed-focus 经 host 正常 → 非通用问题,是 VE(单一 MediaWiki 编辑器)特异;② 真实 agent 流程用 observe 给的 **host ref**,不会瞄准继承子节点;③ VE host 路径因 IP 封禁 reload 后不 bootstrap 无法 live 复验,盲改 type 承重墙路径违反「承重墙必活浏览器」+ 对 plain/PM/Lexical 已工作的路径有扰动风险、对 VE payoff 不可验 → 不做投机修复。
+  - 转 backlog(P3,边际):若未来要硬化,方向是「type contenteditable 路径显式聚焦最近 contenteditable host 而非 raw 子节点」,但须先在可访问的 managed-focus 编辑器上活验复现+证 payoff。
+- **教训**:① bot 墙(Reddit/Amazon)/编辑封禁(Wikipedia VE)使最具代表性的电商社交站对自动化不可达——observe 在拦截页一律忠实返回(非召回缺陷);② 富文本 silent-false-success 须区分「通用 vortex 缺陷」vs「单编辑器特异 focus 管理」——用纯 CE + 多框架对照实验隔离(纯 CE 继承子节点正常 = 否决通用缺陷假设);③ 无代码改动 = 正确结论(不为凑修复数对单站 quirk 盲改承重墙)。
 
 ## 实现 R6 — inert(modal 背景化)DISABLED 诊断可 actionable(Booking.com dogfood 驱动)
 - **缺口来源**:广度 dogfood 第三轮 Booking.com。加载即弹 modal+背景 [inert] 是极常见真实模式,第一个真实表单站就撞上。
