@@ -9,14 +9,15 @@
 
 ### A. 盲区降级信号缺失族（感知层元瓶颈，最高战略价值）
 > 共性：observe 因技术限制扫不全时静默返回局部，不给 agent「这里有盲区/已降级/已截断」信号。修复多为**新增信号字段**而非改 bug，需先定信号契约。
+> **2026-06-17 实现完成**：A1/A2/A4 ✅ ship+live 复验；A3 defer；A5 未排期。设计 `docs/superpowers/specs/2026-06-17-observe-blindspot-signal-design.md`，计划 `docs/superpowers/plans/2026-06-17-observe-blindspot-signal.md`。
 
-| ID | 标题 | 严重度 | 可信度 | 证据 | 验证站点 |
-|----|------|--------|--------|------|----------|
-| A1 | canvas 内对象 0 召回无盲区信号 | P1 | 🔴 | observe.ts:1360-1363 ROOT_SELECTORS 仅 DOM；检测到 `<canvas>` 且返回 0 元素时不报「canvas 编辑器观察受限」 | Excalidraw / LogicFlow / draw.io |
-| A2 | 虚拟列表低召回无截断提示 | P1 | 🔴 | observe.ts:1409-1448 无虚拟列表检测；`[role=listbox]` childIds vs DOM children 无对比 | ag-grid / antd Table 虚拟滚动 / 淘宝搜索 |
-| A3 | closed shadow root 无降级信号 | P1 | 🔴 | observe.ts:1365-1389 querySelectorAllDeep 仅穿 open shadow，注释承认 closed 不可见但无信号；observe-render.ts:74-88 无盲区字段 | Shoelace / mode:'closed' 自定义元素 |
-| A4 | 截断无量化（漏多少未知） | P2 | 🔴 | observe.ts:2086 `truncated` 仅布尔，无 truncatedCount；frame 级无 candidateCount | 京东商品列表（历史可触发截断） |
-| A5 | iframe scanned 信号未下沉到 element 级 | P2 | 🔴 | observe.ts:2376-2387 frame 级 `scanned:false`，但 observe-render.ts:64-72 CompactElement 无「来自未扫 frame」反向标记 | Zendesk / Jira Cloud 嵌套跨域 iframe |
+| ID | 标题 | 严重度 | 状态 | 证据 |
+|----|------|--------|------|------|
+| A1 | canvas 内对象 0 召回无盲区信号 | P1 | ✅ done | per-element `[blindspot=canvas]`+meta；Excalidraw live：canvas 行出标注 |
+| A2 | 虚拟列表低召回无截断提示 | P1 | ✅ done | page-side 专扫→frame 级 `# blindspots: ... virtual(N/M)`；ag-grid live `virtual(1003/37)` |
+| A4 | 截断无量化 | P2 | ✅ done | candidateCount 透传→`# truncated: returned M of ~N`；ag-grid `80/351` live |
+| A3 | closed shadow root 无降级信号 | P1 | ⏸ defer | host 未被收集挂不上 per-element 标签(同虚拟 gap)；需专扫自定义元素(全 DOM 过滤,性能代价)；best-effort/最低价值/误报风险最高。纯函数+单测已留 |
+| A5 | iframe scanned 信号未下沉到 element 级 | P2 | ⏸ 未排期 | 现有 frame 级 `# frame N not scanned` 已部分覆盖 |
 
 ### B. ref/snapshot 协议语义
 | ID | 标题 | 严重度 | 可信度 | 证据 | 验证 |
