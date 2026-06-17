@@ -35,6 +35,18 @@ const def: CaseDefinition = {
       !/Small List[^\n]*virtual/.test(snap) && !/virtual\(3\//.test(snap),
       `setsize 与渲染相符的小 listbox 不应误报虚拟。snapshot:\n${snap.slice(0, 900)}`,
     );
+
+    // A2-fb 非 ARIA 虚拟化:scroll 容器 6000px/250px + 10 行渲染 → ~estTotal/10 低置信(~ 前缀)
+    ctx.assert(
+      /# blindspots:[^\n]*virtual\(~\d+\/10\)/.test(snap),
+      `非 ARIA 虚拟化应出 virtual(~N/10) 低置信信号。snapshot head:\n${snap.slice(0, 800)}`,
+    );
+
+    // 负例:普通可滚动列表(渲染全部 30 行,est≈30)不得被误报为虚拟
+    ctx.assert(
+      !/virtual\(~?\d+\/30\)/.test(snap),
+      `渲染全部行的普通滚动列表不应误报虚拟。snapshot:\n${snap.slice(0, 900)}`,
+    );
   },
 };
 

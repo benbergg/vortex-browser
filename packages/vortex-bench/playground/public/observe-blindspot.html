@@ -33,6 +33,25 @@
   <!-- A1 canvas:大尺寸可交互画布,内部对象 0 召回 -->
   <canvas id="board" width="400" height="300" tabindex="0"></canvas>
 
+  <!-- A2-fb 非 ARIA 虚拟化:滚动容器 250px,只渲染 10 行 + 高 spacer 撑 scrollHeight(模拟虚拟列表) -->
+  <div id="vfb" style="height:250px;overflow:auto;border:1px solid #ccc">
+    <div style="height:6000px;position:relative">
+      <table style="position:absolute;top:0;width:100%"><tbody>
+        <tr><td>vr1</td></tr><tr><td>vr2</td></tr><tr><td>vr3</td></tr><tr><td>vr4</td></tr><tr><td>vr5</td></tr>
+        <tr><td>vr6</td></tr><tr><td>vr7</td></tr><tr><td>vr8</td></tr><tr><td>vr9</td></tr><tr><td>vr10</td></tr>
+      </tbody></table>
+    </div>
+  </div>
+
+  <!-- 负例:普通可滚动列表,渲染全部 30 行(scrollHeight≈内容,est≈rendered),不应触发虚拟 -->
+  <div id="normalscroll" style="height:120px;overflow:auto;border:1px solid #ddd">
+    <table><tbody id="ns"></tbody></table>
+  </div>
+  <script>
+    const ns=document.getElementById('ns');
+    for(let i=0;i<30;i++){const tr=document.createElement('tr');tr.innerHTML='<td>row'+i+'</td>';ns.appendChild(tr);}
+  </script>
+
   <!-- 普通小 listbox:负例,setsize 与渲染相符,不应触发虚拟信号 -->
   <div role="listbox" aria-label="Small List" aria-setsize="3">
     <div role="option">opt1</div>
