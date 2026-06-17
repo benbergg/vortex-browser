@@ -3,6 +3,19 @@
 > 跟踪验收线进度（设计：`docs/superpowers/specs/2026-06-17-vortex-production-readiness-loop-design.md`）
 > 分支：`feat/production-readiness-loop`
 
+## 机制驱动 dogfood 自驱动循环（2026-06-17,`/loop` 3 轮,白盒假设先行 + 机制匹配证伪）
+> **方法改进**(对前几轮「按热门选站」反思):缺陷无一来自「热门 app 点点看」,全部来自**站点触发 vortex 原语底层交互的某个浏览器机制**(TT/CSP、inert、focus)。改进 = 白盒先列原语**实现假设**→机制匹配站/受控注入**证伪**→真缺陷 TDD 修。弃热门消费站(bot 墙击败热门驱动选择)。
+> **环境**:worktree `.worktrees/prodloop` 分支 `fix/prodloop-mechanisms`;MV3 不自动重载 → 修复 live 复验 + bench 标「待用户重载扩展」(load-bearing 检测谓词用当前扩展 evaluate 独立 live 验证)。
+
+| 轮 | 机制(假设) | 结果 |
+|----|-----------|------|
+| R1 | 原生 modal `<dialog>` 背景化 | **真缺陷 P2 + TDD 修 `1a99606`**:`showModal()` 隐式 inert 对话框外内容(**不设 `[inert]` 属性**)+ `::backdrop` 归属 dialog → 背景元素 hit-test 命中 dialog → OBSCURED + 泛化 hint「增大 timeout/wait idle」误导。**R6 inert 修复对此全盲**(无 `[inert]` 属性 + reason 是 OBSCURED 非 DISABLED)。修复=actionability OBSCURED 携 `extras.modalBlocked`(`dialog:modal` 判据 example.com live 实证)+ auto-wait 追加关 dialog 指引;3 新单测 + R6 无回归 + **扩展套件 1195/1195**。**完成 R6 另一半覆盖**(原生 `<dialog>` 是当今标准 modal) |
+| R2 | 原生 HTML5 DnD + content-visibility:auto | **0 缺陷(假设被 live 证伪=成熟)**:① 原生 HTML5 DnD(`draggable`+dragstart/dragover/drop+DataTransfer)——CDP `dispatchMouseEvent` buttons:1 **确实 engage 浏览器原生 drag controller**,快路径(steps=10)+慢路径(stepDelay=30)均 `DROPPED:PAYLOAD` 完整事件序列(原以为 CDP 合成 mouse 不触发原生 DnD,**实测推翻**);② content-visibility:auto——observe scope=full 正确收集 skip 态(`checkVisibility cv:true=false`)按钮/链接、act click 走 unskip+scrollIntoView 命中。**无代码改动=正确结论** |
+| R3 | React 受控输入 + Popover API top-layer | **0 缺陷(成熟)**:① React 受控输入(忠实复刻 `_valueTracker`)——vortex_fill(原生 setter 绕过重写 setter)+ vortex_type(逐键 dispatch)**均触发 onChange、React state 同步**(fill onChangeFires=1/type=8 逐字符),无 silent-false-success;IME composition 不模拟但插入最终文本经 input 事件处理(同 Playwright);② Popover API `[popover]`——非模态 top-layer 不 inert 页面,`dialog:modal`=false 故 **modalBlocked 正确不对 popover 过触发**,被覆盖元素 OBSCURED+blocker 命名 popover 已恰当(R1 范围正确) |
+
+**循环结论**:1 真缺陷(R1 原生 modal dialog 诊断,完成 R6 另一半)+ 4 机制成熟确认(HTML5 DnD / cv-auto / React 受控 / Popover)。**改进方法验证有效**:白盒假设先行命中率高(R1 一击中),且 report-default-untrusted 同样适用于自己的假设(R2 DnD 假设被实测推翻)。
+
+
 ## 验收线（停止条件）
 | 线 | 状态 | 说明 |
 |----|------|------|
