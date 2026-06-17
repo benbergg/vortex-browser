@@ -136,6 +136,8 @@ interface ScannedElement {
     /** range/number input 步长约束 */
     step?: string;
   };
+  /** 盲区降级信号:虚拟列表/canvas/closed-shadow。@since blindspot */
+  blindspot?: { kind: "virtual" | "canvas" | "shadow"; total?: number; rendered?: number; confidence?: "low" };
   _sel: string;
 }
 
@@ -151,6 +153,8 @@ interface FramePageResult {
   elements: ScannedElement[];
   candidateCount: number;
   truncated: boolean;
+  /** 虚拟列表盲区(容器常不被 elements 收集,独立扫描)。@since blindspot */
+  blindspots?: Array<{ kind: "virtual"; total: number; rendered: number; name: string; confidence?: "low" }>;
 }
 
 function safeOrigin(url: string | undefined): string | null {
@@ -2012,6 +2016,27 @@ async function scanOneFrame(
           const __href = role === "link" ? (htmlEl.getAttribute("href") || undefined) : undefined;
           // T5: date/time/file/range/number input 注入 compound 元数据,供 LLM fill 参考格式/约束
           const __inputCompound = buildInputCompound(htmlEl);
+          // [inline detectBlindspot] — 真源 packages/extension/src/page-side/blindspot-detect.ts,
+          // 改一处须改两处;tests/observe-blindspot-scan.test.ts 校验标记存在 + 纯函数行为对齐。
+          let __vtxBlind: { kind: "virtual" | "canvas" | "shadow"; total?: number; rendered?: number; confidence?: "low" } | null = null;
+          {
+            const __t = htmlEl.tagName.toLowerCase();
+            if (__t === "canvas") {
+              if (rect.width * rect.height >= 200 * 150) __vtxBlind = { kind: "canvas" };
+            } else if (["grid", "treegrid", "table", "listbox", "tree"].indexOf(role) >= 0) {
+              const __rendered =
+                role === "grid" || role === "treegrid" || role === "table"
+                  ? htmlEl.querySelectorAll("[role=row]").length
+                  : htmlEl.querySelectorAll("[role=option],[role=treeitem]").length;
+              const __rc = parseInt(htmlEl.getAttribute("aria-rowcount") || "", 10);
+              const __ss = parseInt(htmlEl.getAttribute("aria-setsize") || "", 10);
+              const __decl = !isNaN(__rc) && __rc > 0 ? __rc : !isNaN(__ss) && __ss > 0 ? __ss : NaN;
+              if (!isNaN(__decl) && __decl > __rendered && __decl >= Math.max(__rendered * 2, __rendered + 20))
+                __vtxBlind = { kind: "virtual", total: __decl, rendered: __rendered };
+            } else if (__t.indexOf("-") >= 0 && htmlEl.shadowRoot === null && htmlEl.childElementCount === 0) {
+              if (rect.width >= 40 && rect.height >= 24) __vtxBlind = { kind: "shadow", confidence: "low" };
+            }
+          }
           elements.push({
             index: elements.length,
             tag: htmlEl.tagName.toLowerCase(),
@@ -2038,6 +2063,7 @@ async function scanOneFrame(
             ...(htmlEl.hasAttribute("data-vtx-listener") ? { listenerInteractive: true as const } : {}),
             ...(__href !== undefined ? { href: __href } : {}),
             ...(__inputCompound !== undefined ? { compound: __inputCompound } : {}),
+            ...(__vtxBlind ? { blindspot: __vtxBlind } : {}),
             _sel: buildSelector(htmlEl),
           });
         }
@@ -2072,6 +2098,63 @@ async function scanOneFrame(
           collectedEls[i].setAttribute("data-vtx-ax", String(i));
         }
 
+        // [inline detectBlindspot:virtual] 虚拟列表专扫:role=grid/listbox 等容器
+        // 常不被 elements 收集(rows 成顶层根),故独立 querySelectorAllDeep 一遍,
+        // 产出 frame 级 blindspots → 渲染 # blindspots: meta(不依赖元素收集)。
+        // canvas/shadow 走 per-element 内联标注(它们会被收集)。
+        const pageBlindspots: Array<{ kind: "virtual"; total: number; rendered: number; name: string; confidence?: "low" }> = [];
+        {
+          const __vc = querySelectorAllDeep("[role=grid],[role=treegrid],[role=table],[role=listbox],[role=tree]", document);
+          for (const c of __vc) {
+            const __cr = (c.getAttribute("role") || "").toLowerCase();
+            const __rendered =
+              __cr === "grid" || __cr === "treegrid" || __cr === "table"
+                ? c.querySelectorAll("[role=row]").length
+                : c.querySelectorAll("[role=option],[role=treeitem]").length;
+            const __rc = parseInt(c.getAttribute("aria-rowcount") || "", 10);
+            const __ss = parseInt(c.getAttribute("aria-setsize") || "", 10);
+            const __decl = !isNaN(__rc) && __rc > 0 ? __rc : !isNaN(__ss) && __ss > 0 ? __ss : NaN;
+            if (!isNaN(__decl) && __decl > __rendered && __decl >= Math.max(__rendered * 2, __rendered + 20)) {
+              const __nm = c.getAttribute("aria-label") || c.getAttribute("aria-labelledby") || __cr;
+              pageBlindspots.push({ kind: "virtual", total: __decl, rendered: __rendered, name: String(__nm).slice(0, 40) });
+            }
+          }
+          // [inline detectVirtualByScroll] A2-fb 非 ARIA 声明虚拟化(Semi/Naive/react-window)。
+          // 真源 blindspot-detect.ts detectVirtualByScroll,改一处须改两处。
+          // 强滚动(scrollH≥clientH×4) + estTotal(scrollH/rowH)>>渲染数(虚拟本质:只渲染窗口)。
+          const __seenScrollers = new Set();
+          const __cands = querySelectorAllDeep("table,[role=grid],[role=listbox],[role=tree],ul,ol", document);
+          for (const cand of __cands) {
+            if (cand.hasAttribute("aria-rowcount") || cand.hasAttribute("aria-setsize")) continue; // ARIA 路径已处理
+            const __rows = cand.querySelectorAll("[role=row],tr,li");
+            const __rendered = __rows.length;
+            if (__rendered < 3) continue;
+            const __rowH = __rows[0].getBoundingClientRect().height;
+            if (__rowH < 4) continue;
+            // 找最近的滚动祖先(overflow-y auto/scroll 且 scrollHeight>clientHeight)
+            let __scroller = null;
+            let __cur = cand;
+            for (let i = 0; i < 6 && __cur; i++) {
+              const __oy = getComputedStyle(__cur).overflowY;
+              if ((__oy === "auto" || __oy === "scroll") && __cur.scrollHeight > __cur.clientHeight) {
+                __scroller = __cur;
+                break;
+              }
+              __cur = __cur.parentElement;
+            }
+            if (!__scroller || __seenScrollers.has(__scroller)) continue;
+            const __sh = __scroller.scrollHeight;
+            const __ch = __scroller.clientHeight;
+            if (__ch <= 0 || __sh < __ch * 4) continue;
+            const __est = Math.round(__sh / __rowH);
+            if (__est > __rendered && __est >= Math.max(__rendered * 2, __rendered + 20)) {
+              __seenScrollers.add(__scroller);
+              const __nm = cand.getAttribute("aria-label") || (cand.getAttribute("role") || cand.tagName.toLowerCase());
+              pageBlindspots.push({ kind: "virtual", total: __est, rendered: __rendered, name: String(__nm).slice(0, 40), confidence: "low" });
+            }
+          }
+        }
+
         return {
           url: location.href,
           title: document.title,
@@ -2084,6 +2167,7 @@ async function scanOneFrame(
           elements,
           candidateCount: allCandidates.length,
           truncated: elements.length >= max,
+          blindspots: pageBlindspots,
         };
       },
       args: [maxElements, viewport, includeText, includeAX, filterMode],
@@ -2351,6 +2435,8 @@ export function registerObserveHandlers(router: ActionRouter, debuggerMgr: Debug
           max?: string;
           step?: string;
         };
+        /** 盲区降级信号(compact 也透传)。@since blindspot */
+        blindspot?: { kind: "virtual" | "canvas" | "shadow"; total?: number; rendered?: number; confidence?: "low" };
       };
       type FullElementOut = Omit<ScannedElement, "_sel"> & {
         frameId: number;
@@ -2371,6 +2457,10 @@ export function registerObserveHandlers(router: ActionRouter, debuggerMgr: Debug
         truncated: boolean;
         /** null 表示跨源 / 销毁导致无法扫描 */
         scanned: boolean;
+        /** 该 frame 扫描时考虑的候选总数(截断量化)。@since blindspot */
+        candidateCount?: number;
+        /** 虚拟列表盲区(容器未收集时的 frame 级信号)。@since blindspot */
+        blindspots?: Array<{ kind: "virtual"; total: number; rendered: number; name: string; confidence?: "low" }>;
       }> = [];
 
       for (const s of scans) {
@@ -2443,6 +2533,7 @@ export function registerObserveHandlers(router: ActionRouter, debuggerMgr: Debug
               ...(e.errorMessage ? { errorMessage: e.errorMessage } : {}),
               ...(e.description ? { description: e.description } : {}),
               ...(e.compound ? { compound: e.compound } : {}),
+              ...(e.blindspot ? { blindspot: e.blindspot } : {}),
               frameId: s.frameId,
               ...(bboxTuple ? { bbox: bboxTuple } : {}),
             });
@@ -2484,6 +2575,7 @@ export function registerObserveHandlers(router: ActionRouter, debuggerMgr: Debug
               ...(e.errorMessage ? { errorMessage: e.errorMessage } : {}),
               ...(e.description ? { description: e.description } : {}),
               ...(e.compound ? { compound: e.compound } : {}),
+              ...(e.blindspot ? { blindspot: e.blindspot } : {}),
               frameId: s.frameId,
               ref,
               suggestedUsage: {
@@ -2509,6 +2601,8 @@ export function registerObserveHandlers(router: ActionRouter, debuggerMgr: Debug
           elementCount: s.page.elements.length,
           truncated: s.page.truncated,
           scanned: true,
+          candidateCount: s.page.candidateCount,
+          ...(s.page.blindspots && s.page.blindspots.length ? { blindspots: s.page.blindspots } : {}),
         });
       }
 

@@ -1,0 +1,56 @@
+{
+  "cycle": "dogfood-arco-2026-06-15",
+  "site": "https://arco.design/react/components/select",
+  "model": "minimax/MiniMax-M2.7",
+  "tool_surface": ["vortex_observe", "vortex_act", "vortex_fill", "vortex_press"],
+  "anomalies": [
+    {
+      "id": "A-1",
+      "page": "/react/components/select",
+      "component": "Select(multiple)",
+      "tab": "tab-7c2",
+      "primitive": "vortex_observe",
+      "action_sequence": [
+        { "tool": "vortex_observe", "args": { "filter": "interactive" }, "returned_excerpt": "@ref-12 combobox '请选择' … 未出现任何 chip 删除按钮 ref" },
+        { "tool": "vortex_act", "args": { "action": "click", "target": "@ref-12" }, "returned_excerpt": "ok; popup opened" },
+        { "tool": "vortex_observe", "args": { "filter": "interactive" }, "returned_excerpt": "@ref-30..37 option … 仍无已选 chip 的删除按钮 ref" }
+      ],
+      "phenomenon": "多选已选项的 chip 删除按钮在 observe 中始终没有 ref",
+      "m3_severity": "suspected-blocking",
+      "evidence": {
+        "tool_return_excerpt": "observe interactive 两次均无 .arco-tag-close-btn 对应 ref",
+        "screenshot": "screenshots/A-1.png",
+        "evaluate_dom_truth": "document.querySelectorAll('.arco-tag-close-btn').length === 3",
+        "tried_alternatives": [
+          "observe filter=all 重扫，仍无该删除按钮 ref",
+          "用最近的 chip 容器 ref act click，命中整 chip 非删除按钮，未删除"
+        ]
+      },
+      "new_tab_reproduced": true,
+      "action_path_is_vortex_native": true
+    },
+    {
+      "id": "A-2",
+      "page": "/react/components/modal",
+      "component": "Modal",
+      "tab": "tab-9f1",
+      "primitive": "vortex_act",
+      "action_sequence": [
+        { "tool": "vortex_evaluate", "args": { "code": "document.querySelector('.arco-btn-primary').click()" }, "returned_excerpt": "undefined（已点）" }
+      ],
+      "phenomenon": "Modal 确认按钮点击后无反应",
+      "m3_severity": "experience",
+      "evidence": {
+        "tool_return_excerpt": "evaluate .click() 返回 undefined，弹窗未关",
+        "evaluate_dom_truth": "document.querySelector('.arco-modal') 仍存在",
+        "tried_alternatives": [
+          "仅试了 evaluate .click()",
+          "未试 vortex_act"
+        ]
+      },
+      "new_tab_reproduced": false,
+      "action_path_is_vortex_native": false
+    }
+  ],
+  "coverage": { "pages_visited": 8, "anomalies": 2, "clean": 6 }
+}

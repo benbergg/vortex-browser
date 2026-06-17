@@ -119,10 +119,21 @@ const def: CaseDefinition = {
       `pointerdown.buttons should be 1 (primary button held during drag). got: ${JSON.stringify(pointerdown)}`,
     );
 
+    // CDP drag dispatches one move per intermediate step (STEPS), but the
+    // browser COALESCES pointermove delivery under load — observed counts
+    // vary run-to-run (3–5 for STEPS=5). The regression this case locks is
+    // "CDP path fires a trusted pointer MOVE sequence during drag", not an
+    // exact count; asserting `>= STEPS` was brittle (flaky <5). Require at
+    // least 2 moves (a genuine drag, not a teleport) with a held button on
+    // one of them — coalescing-tolerant while still proving the sequence.
     const moves = log.filter((e) => e.type === "pointermove");
     ctx.assert(
-      moves.length >= STEPS,
-      `pointermove count should be >= ${STEPS} (CDP drag emits one move per intermediate step). got: ${moves.length}`,
+      moves.length >= 2,
+      `pointermove sequence should fire during CDP drag (>=2, coalescing-tolerant). got: ${moves.length}`,
+    );
+    ctx.assert(
+      moves.some((m) => m.buttons === 1),
+      `at least one pointermove should carry buttons=1 (button held during drag). got: ${JSON.stringify(moves).slice(0, 200)}`,
     );
 
     const pointerup = log.find((e) => e.type === "pointerup");

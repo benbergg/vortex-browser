@@ -1,0 +1,106 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://vortex-browser/dogfood/anomalies.schema.json",
+  "title": "M3 dogfood 结构化上报",
+  "description": "MiniMax M3 真站评测的机器可读上报。Claude 摄取此文件做旁路自动筛查 + 逐条活校验。evaluate 只能作证据,禁止作动作路径。",
+  "type": "object",
+  "required": ["cycle", "site", "tool_surface", "anomalies", "coverage"],
+  "additionalProperties": false,
+  "properties": {
+    "cycle": {
+      "type": "string",
+      "description": "本轮 cycle id,如 dogfood-arco-2026-06-15",
+      "pattern": "^dogfood-[a-z0-9-]+-\\d{4}-\\d{2}-\\d{2}$"
+    },
+    "site": { "type": "string", "description": "目标站标识或根 URL" },
+    "model": { "type": "string", "description": "执行评测的模型 id,如 minimax/MiniMax-M2.7" },
+    "tool_surface": {
+      "type": "array",
+      "description": "本轮实际用到的 vortex 公开工具",
+      "items": { "type": "string", "pattern": "^vortex_" }
+    },
+    "anomalies": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/anomaly" }
+    },
+    "coverage": {
+      "type": "object",
+      "required": ["pages_visited", "anomalies", "clean"],
+      "additionalProperties": true,
+      "properties": {
+        "pages_visited": { "type": "integer", "minimum": 0 },
+        "anomalies": { "type": "integer", "minimum": 0 },
+        "clean": { "type": "integer", "minimum": 0 }
+      }
+    }
+  },
+  "definitions": {
+    "anomaly": {
+      "type": "object",
+      "required": [
+        "id", "page", "component", "primitive", "action_sequence",
+        "phenomenon", "m3_severity", "evidence", "new_tab_reproduced",
+        "action_path_is_vortex_native"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "pattern": "^A-\\d+$" },
+        "page": { "type": "string", "description": "组件页路径或子路由" },
+        "component": { "type": "string" },
+        "tab": { "type": "string", "description": "复测所在的新 tab id" },
+        "primitive": {
+          "type": "string",
+          "description": "涉事 vortex 原语",
+          "pattern": "^vortex_"
+        },
+        "action_sequence": {
+          "type": "array",
+          "minItems": 1,
+          "description": "完整动作链(含工具名+参数+原始返回截断)。Claude 据此判定核心动作是否旁路。",
+          "items": {
+            "type": "object",
+            "required": ["tool", "returned_excerpt"],
+            "additionalProperties": false,
+            "properties": {
+              "tool": { "type": "string", "pattern": "^vortex_" },
+              "args": { "type": "object" },
+              "returned_excerpt": { "type": "string", "maxLength": 600 }
+            }
+          }
+        },
+        "phenomenon": { "type": "string", "description": "一句话现象,不含根因猜测" },
+        "m3_severity": {
+          "type": "string",
+          "enum": ["suspected-blocking", "experience", "unsure"]
+        },
+        "evidence": {
+          "type": "object",
+          "required": ["tool_return_excerpt", "tried_alternatives"],
+          "additionalProperties": false,
+          "properties": {
+            "tool_return_excerpt": { "type": "string" },
+            "screenshot": { "type": "string", "description": "相对 cycle 目录的截图路径" },
+            "evaluate_dom_truth": {
+              "type": "string",
+              "description": "evaluate 读到的 DOM 真值表达式及结果。evaluate 只允许出现在此字段。"
+            },
+            "tried_alternatives": {
+              "type": "array",
+              "minItems": 2,
+              "description": "≥2 条 vortex 原生路径都失败的简述(如 'observe filter=all 仍漏' / 'ref act ELEMENT_NOT_FOUND')",
+              "items": { "type": "string" }
+            }
+          }
+        },
+        "new_tab_reproduced": {
+          "type": "boolean",
+          "description": "是否在全新 tab 最小序列里复现(对照旧 tab)"
+        },
+        "action_path_is_vortex_native": {
+          "type": "boolean",
+          "description": "核心交互动作是否走 act/fill/press 原语(true) 而非 evaluate 旁路(false)。false 会被 Claude 直接标 SUSPECT。"
+        }
+      }
+    }
+  }
+}

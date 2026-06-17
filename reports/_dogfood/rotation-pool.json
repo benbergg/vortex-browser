@@ -1,0 +1,130 @@
+{
+  "version": 1,
+  "updated": "2026-06-15",
+  "note": "目标站轮换池 + 覆盖状态。dogfood-rotation.mjs 按「未覆盖 > 上轮有真缺陷 > 最久未测」挑下一站。只放无需登录的组件库 demo + 已授权内部站。pages 是评估范围(每页新 tab),重点选择类/浮层/Portal/虚拟列表/拖拽。",
+  "sites": [
+    {
+      "id": "arco",
+      "label": "Arco Design (React)",
+      "base_url": "https://arco.design/react/components/",
+      "category": "component-lib",
+      "needs_login": false,
+      "pages": [
+        { "id": "C1", "path": "select", "interactions": "Select 下拉(Portal):打开→选项;multiple 多选;可搜索 filter" },
+        { "id": "C2", "path": "cascader", "interactions": "Cascader 级联:逐级展开→末级选中→读 value" },
+        { "id": "C3", "path": "date-picker", "interactions": "DatePicker:开面板→选日期;RangePicker 起止" },
+        { "id": "C4", "path": "modal", "interactions": "Modal:开→内部操作→关(Portal 焦点容器)" },
+        { "id": "C5", "path": "dropdown", "interactions": "Dropdown:点触发→点 menuitem(浮层)" },
+        { "id": "C6", "path": "table", "interactions": "Table:行复选框;固定列;展开行" },
+        { "id": "C7", "path": "tree-select", "interactions": "TreeSelect:展开树→选节点(Portal+虚拟)" },
+        { "id": "C8", "path": "input-tag", "interactions": "InputTag:输入→回车成 tag→删 tag" }
+      ],
+      "last_covered": null,
+      "history": []
+    },
+    {
+      "id": "antd",
+      "label": "Ant Design (React)",
+      "base_url": "https://ant.design/components/",
+      "category": "component-lib",
+      "needs_login": false,
+      "pages": [
+        { "id": "C1", "path": "select", "interactions": "Select:单选/多选/搜索;Portal popup" },
+        { "id": "C2", "path": "cascader", "interactions": "Cascader 级联展开→末级" },
+        { "id": "C3", "path": "date-picker", "interactions": "DatePicker/RangePicker 面板选日期" },
+        { "id": "C4", "path": "modal", "interactions": "Modal 开关 + 内部表单" },
+        { "id": "C5", "path": "table", "interactions": "Table 行选/排序/筛选下拉" },
+        { "id": "C6", "path": "tree-select", "interactions": "TreeSelect 展开选节点" },
+        { "id": "C7", "path": "transfer", "interactions": "Transfer 穿梭框 选项→移动" }
+      ],
+      "last_covered": null,
+      "history": []
+    },
+    {
+      "id": "element-plus",
+      "label": "Element Plus (Vue)",
+      "base_url": "https://element-plus.org/zh-CN/component/",
+      "category": "component-lib",
+      "needs_login": false,
+      "pages": [
+        { "id": "C1", "path": "select", "interactions": "el-select:单选/多选/filterable" },
+        { "id": "C2", "path": "select-v2", "interactions": "el-select-v2 虚拟列表:覆盖首/末/中间/缓冲边界项(0008 #38)" },
+        { "id": "C3", "path": "cascader", "interactions": "el-cascader 级联" },
+        { "id": "C4", "path": "datetime-picker", "interactions": "日期时间选择面板" },
+        { "id": "C5", "path": "dialog", "interactions": "el-dialog 开关" },
+        { "id": "C6", "path": "slider", "interactions": "el-slider 键盘方向键调值;范围" }
+      ],
+      "last_covered": null,
+      "history": []
+    },
+    {
+      "id": "mui",
+      "label": "Material UI (React)",
+      "base_url": "https://mui.com/material-ui/react-",
+      "category": "component-lib",
+      "needs_login": false,
+      "pages": [
+        { "id": "C1", "path": "select/", "interactions": "Select(Portal Menu):单选/多选" },
+        { "id": "C2", "path": "autocomplete/", "interactions": "Autocomplete combobox+Popper:输入筛选→选项" },
+        { "id": "C3", "path": "dialog/", "interactions": "Dialog 开→内部→关" },
+        { "id": "C4", "path": "slider/", "interactions": "Slider 方向键调值;范围" },
+        { "id": "C5", "path": "checkbox/", "interactions": "Checkbox/Radio/Switch 勾选读 checked" }
+      ],
+      "x_pages": [
+        { "id": "C6", "base": "https://mui.com/x/react-", "path": "data-grid/", "interactions": "DataGrid 虚拟滚动:首/末/中间行单元格/复选框(覆盖边界)" }
+      ],
+      "last_covered": "2026-06-13",
+      "history": [
+        { "cycle": "dogfood-mui-2026-06-13", "date": "2026-06-13", "vortex_defects": 0, "false_positives": 7, "note": "C1-C11 全证伪,零 vortex 缺陷(M3 旁路 evaluate 制造 7/8 假象)" }
+      ]
+    },
+    {
+      "id": "naive-ui",
+      "label": "Naive UI (Vue)",
+      "base_url": "https://www.naiveui.com/zh-CN/os-theme/components/",
+      "category": "component-lib",
+      "needs_login": false,
+      "pages": [
+        { "id": "C1", "path": "select", "interactions": "n-select 单选/多选/可筛选(虚拟)" },
+        { "id": "C2", "path": "cascader", "interactions": "n-cascader 级联" },
+        { "id": "C3", "path": "date-picker", "interactions": "日期面板" },
+        { "id": "C4", "path": "modal", "interactions": "n-modal 开关" },
+        { "id": "C5", "path": "data-table", "interactions": "n-data-table 行选/虚拟滚动" }
+      ],
+      "last_covered": null,
+      "history": []
+    },
+    {
+      "id": "semi",
+      "label": "Semi Design (React, 字节)",
+      "base_url": "https://semi.design/zh-CN/",
+      "category": "component-lib",
+      "needs_login": false,
+      "pages": [
+        { "id": "C1", "path": "input/select", "interactions": "Select 单选/多选/可搜索" },
+        { "id": "C2", "path": "navigation/cascader", "interactions": "Cascader 级联" },
+        { "id": "C3", "path": "input/datepicker", "interactions": "DatePicker 面板" },
+        { "id": "C4", "path": "show/modal", "interactions": "Modal 开关" },
+        { "id": "C5", "path": "show/table", "interactions": "Table 行选/虚拟" }
+      ],
+      "last_covered": null,
+      "history": []
+    },
+    {
+      "id": "bangniu",
+      "label": "班牛工作台 (内部业务站,已授权)",
+      "base_url": "",
+      "category": "business",
+      "needs_login": true,
+      "auth_note": "已授权内部 dogfood 目标;若撞登录墙且未登录,M3 记为 site-issue 跳过。具体 URL 评测时由用户/编排提供。",
+      "pages": [
+        { "id": "B1", "path": "(applet 看板)", "interactions": "div-onClick 菜单;cursor:pointer 容器;LogicFlow 画布拖拽连边" },
+        { "id": "B2", "path": "(工单列表)", "interactions": "虚拟长列表;浮层 tabindex 容器;跨域 iframe 子应用" }
+      ],
+      "last_covered": "2026-06-14",
+      "history": [
+        { "cycle": "N0064", "date": "2026-06-14", "vortex_defects": 1, "false_positives": 14, "note": "focus-container 修复(el-popover 容器吞子项);15 报告 1 真" }
+      ]
+    }
+  ]
+}
