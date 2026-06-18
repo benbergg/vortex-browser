@@ -59,6 +59,13 @@
 // (text grep + css find),schema 含 mode/pattern/isRegex/caseSensitive/contextChars/
 // attr/includeText/maxResults 字段,payload 实测 7417B,
 // cap +400 至 7500 留 83B 余量。沿用"加能力微调 cap 不压缩字符"惯例。
+//
+// 可验证确定性重放: 7500 → 7800 B。vortex_act options 新增 fingerprint(object)
+// 字段(record/verify 模式 + expect/autoRecover 子字段 + 1 段 description)。
+// fingerprint.description 是 handler 已实现的真公开能力(server.ts applyFingerprint
+// /shouldRecover record/verify/autoRecover),必须文档化让 LLM 知道 record→fingerprint
+// /verify→drift 的契约,沿 vortex_debug_read.filter 单点豁免先例。payload 实测
+// 7718B,cap +300 至 7800 留 82B 余量。沿用"加能力微调 cap 不压缩字符"惯例。
 
 import { describe, it, expect, afterEach } from "vitest";
 import { COMMIT_KINDS } from "@vortex-browser/shared";
@@ -70,12 +77,12 @@ describe("I15: tools/list budget + count + internalized grep", () => {
     defs.map(d => ({ name: d.name, description: d.description, inputSchema: d.schema })),
   );
 
-  it("tools/list 字节 ≤ 7500 B (vortex_query 零 LLM 探测工具, 实测 7417 留 83B buffer)", () => {
+  it("tools/list 字节 ≤ 7800 B (可验证重放 fingerprint, 实测 7718 留 82B buffer)", () => {
     // V2 P0 修复 D16: filter 子字段 description 是必要的文档化豁免
     // (handler 已实现 console.ts:160 level / network.ts:305-321 pattern+statusMin/Max),
     // 移除豁免会触发 V2 D16 真发现复发 (LLM 不知可用子字段)。
-    // 上限 7500 = 7100 (T7基线) + ~317 (vortex_query schema+description) + 余量 buffer。
-    expect(toolsListPayload.length).toBeLessThanOrEqual(7500);
+    // 上限 7800 = 7500 (vortex_query 基线) + ~301 (fingerprint schema+description)。
+    expect(toolsListPayload.length).toBeLessThanOrEqual(7800);
   });
 
   it("公开工具数量 = 20（vortex_query 零 LLM 探测: 19 + vortex_query）", () => {
@@ -166,6 +173,11 @@ describe("I15: tools/list budget + count + internalized grep", () => {
             if (toolName === "vortex_debug_read" && k === "filter" &&
                 FILTER_DOC_OVERHEAD["vortex_debug_read"] > 0) {
               // 豁免通过 (FILTER_DOC_OVERHEAD 标记)
+            } else if (toolName === "vortex_act" && k === "fingerprint") {
+              // 可验证重放豁免: vortex_act.options.fingerprint 的 record/verify 契约
+              // 必须文档化让 LLM 知道 record→fingerprint / verify→drift / autoRecover
+              // (handler 真公开能力,server.ts applyFingerprint/shouldRecover)。沿
+              // filter 单点豁免先例,1 段 description 字节远低于 82B buffer 损耗。
             } else {
               throw new Error(`${path}.properties.${k} has description (forbidden by §0.2.1)`);
             }
