@@ -3,6 +3,41 @@
 import { describe, it, expect } from "vitest";
 import { applyFingerprint, shouldRecover } from "../src/lib/fingerprint-apply.js";
 
+describe("applyFingerprint selector path (Finding 3 — 诚实 fingerprintSkipped)", () => {
+  const effect = {
+    domMutations: 1, networkRequests: 0, urlChanged: false,
+    focusChanged: false, ariaChanged: false, userFeedback: "mutation" as const,
+  };
+
+  it("click + effect + targetIdentity=null → fingerprintSkipped 非空字符串(非 {})", () => {
+    const out = applyFingerprint({ mode: "record" }, "click", null, effect);
+    expect(out).toHaveProperty("fingerprintSkipped");
+    expect(typeof out.fingerprintSkipped).toBe("string");
+    expect((out.fingerprintSkipped as string).length).toBeGreaterThan(0);
+    // 不应有 fingerprint 或 drift
+    expect(out.fingerprint).toBeUndefined();
+    expect(out.drift).toBeUndefined();
+  });
+
+  it("verify 模式 + targetIdentity=null 同样返回 fingerprintSkipped", () => {
+    const expectFp = {
+      action: "click" as const, targetIdentity: "button::Submit::0", urlChanged: false,
+      causedDomMutation: true, causedNetwork: false, focusChanged: false,
+      ariaChanged: false, userFeedback: "mutation" as const,
+    };
+    const out = applyFingerprint({ mode: "verify", expect: expectFp }, "click", null, effect);
+    expect(out).toHaveProperty("fingerprintSkipped");
+    expect(out.fingerprint).toBeUndefined();
+    expect(out.drift).toBeUndefined();
+  });
+
+  it("record + @ref 身份(targetIdentity 非 null)→ 正常返回 fingerprint,不受影响", () => {
+    const out = applyFingerprint({ mode: "record" }, "click", "button::Submit::0", effect);
+    expect(out.fingerprint).toBeDefined();
+    expect(out.fingerprintSkipped).toBeUndefined();
+  });
+});
+
 describe("applyFingerprint record", () => {
   it("record 模式把 click effect 归一化进响应", () => {
     const out = applyFingerprint(
@@ -30,14 +65,16 @@ describe("applyFingerprint record", () => {
     expect(out).toEqual({});
   });
 
-  it("targetIdentity 为 null(快照过期/index 未命中)返回空", () => {
+  it("targetIdentity 为 null(CSS selector / 快照过期 / index 未命中)→ fingerprintSkipped(诚实信号,非空 {})", () => {
     const out = applyFingerprint(
       { mode: "record" },
       "click",
       null,
       { domMutations: 1, networkRequests: 0, urlChanged: false, focusChanged: false, ariaChanged: false, userFeedback: "mutation" },
     );
-    expect(out).toEqual({});
+    // 改动:不再静默返回 {},而是携带 fingerprintSkipped 说明无法建立指纹的原因。
+    expect(out.fingerprintSkipped).toBeTruthy();
+    expect(out.fingerprint).toBeUndefined();
   });
 });
 

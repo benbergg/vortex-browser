@@ -60,6 +60,15 @@ type ContentItem =
   | { type: "text"; text: string }
   | { type: "image"; data: string; mimeType: string };
 
+/**
+ * autoRecover 成功时写入 actResult.recovered 的结构。
+ * 两种形态:成功(带新快照 id + observe 文本)和失败(snapshotId null + 错误说明)。
+ * drift 仍原样返回 —— re-observe 失败不掩盖 drift。
+ */
+type RecoveredOut =
+  | { snapshotId: string; observeText: string }
+  | { snapshotId: null; error: string };
+
 /** 普通 tool response 附加 piggyback 事件 */
 function formatError(err: unknown): string {
   if (err instanceof VtxError) {
@@ -725,13 +734,17 @@ export async function handleCallTool(
             .filter((c): c is { type: "text"; text: string } => c.type === "text")
             .map((c) => c.text)
             .join("\n");
-          actResult.recovered = { snapshotId: activeSnapshotId, observeText };
+          // re-observe 成功后 activeSnapshotId 已由 observe handler 更新。
+          // "" 作为极端兜底(re-observe 完成但 handler 未能写入快照 id 的防御性分支)。
+          const recovered: RecoveredOut = { snapshotId: activeSnapshotId ?? "", observeText };
+          actResult.recovered = recovered;
         } catch (err) {
           // re-observe 失败不掩盖 drift:挂错误说明,drift 仍原样返回。
-          actResult.recovered = {
+          const recovered: RecoveredOut = {
             snapshotId: null,
             error: err instanceof Error ? err.message : String(err),
           };
+          actResult.recovered = recovered;
         }
       }
     }
