@@ -192,7 +192,7 @@ export const DEFAULT_ERROR_META: Record<VtxErrorCode, VtxErrorMeta> = {
     recoverable: true,
   },
   AMBIGUOUS_DESCRIPTOR: {
-    hint: "Descriptor matched multiple elements in strict mode. Add a 'near' relation to disambiguate, narrow the name attribute, or set strict:false to take the first match.",
+    hint: "Descriptor (role+name) matched multiple elements during self-heal; refused to act to avoid the wrong target. Call vortex_observe to mint fresh refs and retry.",
     recoverable: true,
   },
   REF_NOT_FOUND: {

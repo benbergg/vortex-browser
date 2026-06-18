@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8">
+  <title>descriptor 自愈 fixture — act-heal-after-mutation</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; padding: 24px; max-width: 640px; }
+  </style>
+</head>
+<body>
+  <h1>descriptor 自愈测试</h1>
+  <p>
+    初始按钮 id="b1"，文本 "Save"。测试脚本将 id 改为 "b9" 使原 #b1 选择器失效，
+    但 descriptor（role=button，name="Save"）保留，验证 vortex 透明自愈后仍能点击。
+  </p>
+
+  <!-- 测试目标：初始 id=b1，DOM mutation 后改为 b9，但可见文本 "Save" 不变 -->
+  <button id="b1" type="button"
+    onclick="document.querySelector('[data-testid=&quot;result&quot;]').textContent='clicked'">
+    Save
+  </button>
+
+  <p data-testid="result">idle</p>
+</body>
+</html>

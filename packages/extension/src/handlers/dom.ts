@@ -20,6 +20,7 @@ import {
 } from "../patterns/index.js";
 import { waitActionable } from "../action/auto-wait.js";
 import { waitActionableAutoForce } from "../action/wait-actionable-auto-force.js";
+import { isStaleNotAttached, tryHealSelector } from "../action/heal.js";
 
 /**
  * 判断元素是否为"瞬态覆盖层"(react-virtuoso 动画层 / popper 浮层 / 滚动视口
@@ -87,6 +88,31 @@ async function readDialogCapturedAndDisarm(
     },
   });
   return (r[0]?.result as Array<{ type: string; message: string }>) ?? [];
+}
+
+/**
+ * 包裹 actionability gate：选择器因 NOT_ATTACHED 自旋失败且有 descriptor 时，
+ * 按 descriptor 重匹配换选择器再跑一次 gate。返回最终（可能已自愈的）选择器。
+ */
+export async function healAwareGate(
+  tabId: number,
+  frameId: number | undefined,
+  selector: string,
+  options: { timeout: number | undefined; needsEditable?: boolean },
+  force: boolean | undefined,
+  descriptor: { role?: string; name: string } | undefined,
+): Promise<{ selector: string; healed: boolean }> {
+  try {
+    await waitActionableAutoForce(tabId, frameId, selector, options, force);
+    return { selector, healed: false };
+  } catch (err) {
+    if (descriptor && isStaleNotAttached(err)) {
+      const healed = await tryHealSelector(tabId, frameId, descriptor); // 抛 AMBIGUOUS_DESCRIPTOR/STALE_REF
+      await waitActionableAutoForce(tabId, frameId, healed, options, force);
+      return { selector: healed, healed: true };
+    }
+    throw err;
+  }
 }
 
 export function registerDomHandlers(
@@ -169,7 +195,8 @@ export function registerDomHandlers(
 
     [DomActions.CLICK]: async (args, tabId) => {
       const __t = resolveTarget(args);
-      const selector = __t.selector;
+      // let 声明：gate 自愈后用 __heal.selector 重绑，下游所有引用统一用 selector。
+      let selector = __t.selector;
       const tid = await getActiveTabId(__t.boundTabId ?? (args.tabId as number | undefined) ?? tabId);
       const frameId = __t.boundFrameId ?? (args.frameId as number | undefined);
       if (frameId != null) await ensureFrameAttached(tid, frameId);
@@ -185,11 +212,11 @@ export function registerDomHandlers(
       const windowMs = args.windowMs as number | undefined;
       const explicitOnDialog = args.onDialog !== undefined;
 
-      // L2 integration: actionability + auto-wait pre-check
-      // NOT_STABLE 自动 force 重试(对齐 FILL BUG-011):京东 sticky 搜索按钮在
-      // CSS-transition 容器内 100% 触发 NOT_STABLE,无此重试则自旋满 timeout 后
-      // 直接抛错,用户需手动 force=true / useRealMouse=true 兜底。
-      await waitActionableAutoForce(
+      // L2 integration: actionability + descriptor 自愈 gate。
+      // NOT_ATTACHED 自旋到 TIMEOUT 且有 descriptor 时，healAwareGate 按 descriptor
+      // 重匹配元素、换选择器再跑一次 gate。无 descriptor 或非 stale 错误则原样抛。
+      // NOT_STABLE 自动 force 重试逻辑在 waitActionableAutoForce 内已覆盖。
+      const __heal = await healAwareGate(
         tid,
         frameId,
         selector,
@@ -197,7 +224,10 @@ export function registerDomHandlers(
         // DEFAULT_TIMEOUT_MS(2000)。历史 `?? 5000` 覆盖让 perf 修复成死代码。
         { timeout: args.timeout as number | undefined },
         args.force as boolean | undefined,
+        __t.descriptor,
       );
+      // 重绑 selector：若已自愈则改为 healed selector，下游所有路径（早返回/CDP/合成）统一引用。
+      selector = __heal.selector;
 
       // 把 page-side 返回的 raw dialogs 数组转成对外 dialogHandled 字段 + 默认 dismiss 的 warning。
       // 定义前置(原在 deferToCdp 段下方)——使下方 useRealMouse/trustedMode 早返回分支也能套用。
@@ -225,13 +255,14 @@ export function registerDomHandlers(
         // 堵 shadow-internal ref 假阴 ELEMENT_NOT_FOUND(#14)。
         await loadPageSideModule(tid, frameId, "dom-resolve");
         if (observeEffect) await loadPageSideModule(tid, frameId, "click-effect");
-        return attachDialogHandled(await cdpClickElement(debuggerMgr, tid, frameId, selector, {
+        const cdpResult = attachDialogHandled(await cdpClickElement(debuggerMgr, tid, frameId, selector, {
           force: args.force as boolean | undefined,
           observeEffect,
           windowMs,
           onDialog: args.onDialog as string | undefined,
           promptText: (args.promptText as string | undefined) ?? null,
         }));
+        return __heal.healed ? { ...(cdpResult as object), healed: true } : cdpResult;
       }
 
       // 普通 element.click() 路径（含失败探测）
@@ -530,26 +561,30 @@ export function registerDomHandlers(
       // 已在 runSyntheticClick 前预注入。
       if (inner?.deferToCdp) {
         try {
-          return attachDialogHandled(await cdpClickElement(debuggerMgr, tid, frameId, selector, {
+          const deferResult = attachDialogHandled(await cdpClickElement(debuggerMgr, tid, frameId, selector, {
             force: args.force as boolean | undefined,
             observeEffect,
             windowMs,
             onDialog: args.onDialog as string | undefined,
             promptText: (args.promptText as string | undefined) ?? null,
           }));
+          return __heal.healed ? { ...(deferResult as object), healed: true } : deferResult;
         } catch {
           // CDP 探测/attach 失败 → 回退合成(cdpAvailable=false 强制不再 defer,本次真点击)。
           res = await runSyntheticClick(false);
           throwIfClickError(res);
-          return attachDialogHandled(res?.result);
+          const fallbackResult = attachDialogHandled(res?.result);
+          return __heal.healed ? { ...(fallbackResult as object), healed: true } : fallbackResult;
         }
       }
-      return attachDialogHandled(res?.result);
+      const synthResult = attachDialogHandled(res?.result);
+      return __heal.healed ? { ...(synthResult as object), healed: true } : synthResult;
     },
 
     [DomActions.TYPE]: async (args, tabId) => {
       const __t = resolveTarget(args);
-      const selector = __t.selector;
+      // let 声明：gate 自愈后用 __heal.selector 重绑，下游所有引用统一用 selector。
+      let selector = __t.selector;
       const text = args.text as string;
       const delay = (args.delay as number | undefined) ?? 0;
       if (text == null) throw vtxError(VtxErrorCode.INVALID_PARAMS, "Missing required param: text");
@@ -557,17 +592,19 @@ export function registerDomHandlers(
       const frameId = __t.boundFrameId ?? (args.frameId as number | undefined);
       if (frameId != null) await ensureFrameAttached(tid, frameId);
 
-      // L2 integration: actionability + auto-wait pre-check (editable required)
-      // NOT_STABLE 自动 force 重试(对齐 FILL BUG-011 / CLICK):sticky/transition
-      // 容器内的可编辑字段(京东搜索框)100% 触发 NOT_STABLE,无此重试则自旋满
-      // timeout 后直接抛错。
-      await waitActionableAutoForce(
+      // L2 integration: actionability + descriptor 自愈 gate。
+      // needsEditable:true 保持与原 waitActionableAutoForce 调用一致（type 需可编辑元素）。
+      // NOT_STABLE 自动 force 重试逻辑在 waitActionableAutoForce 内已覆盖。
+      const __healType = await healAwareGate(
         tid,
         frameId,
         selector,
         { timeout: args.timeout as number | undefined, needsEditable: true },
         args.force as boolean | undefined,
+        __t.descriptor,
       );
+      // 重绑 selector：若已自愈则改为 healed selector，下游所有引用统一用 selector。
+      selector = __healType.selector;
 
       // Probe target: shared validation + contentEditable detection.
       // The page-side handler below runs the legacy
@@ -672,7 +709,8 @@ export function registerDomHandlers(
         } else {
           await debuggerMgr.sendCommand(tid, "Input.insertText", { text });
         }
-        return { success: true, typed: text.length, path: "cdp-insertText" };
+        const cdpTypeResult = { success: true, typed: text.length, path: "cdp-insertText" };
+        return __healType.healed ? { ...cdpTypeResult, healed: true } : cdpTypeResult;
       }
 
       // input / textarea path — legacy synthetic dispatch (kept
@@ -768,7 +806,8 @@ export function registerDomHandlers(
         [selector, text, delay ?? 0],
       );
       if (res?.error) mapPageError(res, selector);
-      return res?.result;
+      const typeResult = res?.result;
+      return __healType.healed ? { ...(typeResult as object), healed: true } : typeResult;
       } finally {
         await readDialogCapturedAndDisarm(tid, frameId);
       }
@@ -776,7 +815,8 @@ export function registerDomHandlers(
 
     [DomActions.FILL]: async (args, tabId) => {
       const __t = resolveTarget(args);
-      const selector = __t.selector;
+      // let 声明：gate 自愈后用 __heal.selector 重绑，下游所有引用统一用 selector。
+      let selector = __t.selector;
       const fallbackToNative = args.fallbackToNative === true;
       const rawValue = args.value;
       if (rawValue == null) throw vtxError(VtxErrorCode.INVALID_PARAMS, "Missing required param: value");
@@ -796,17 +836,19 @@ export function registerDomHandlers(
       const frameId = __t.boundFrameId ?? (args.frameId as number | undefined);
       if (frameId != null) await ensureFrameAttached(tid, frameId);
 
-      // L2 integration: actionability + auto-wait pre-check (editable required)
-      // BUG-011 N0060 京东评测 B 方案: NOT_STABLE 时默认自动 force=true 重试一次,
-      // 消除京东 sticky 搜索栏 100% 触发 NOT_STABLE 需手动 force=true 兜底的痛点。
-      // 重试语义抽到 waitActionableAutoForce 共享(CLICK/TYPE/FILL 一致),详见该模块。
-      await waitActionableAutoForce(
+      // L2 integration: actionability + descriptor 自愈 gate。
+      // needsEditable:true 保持与原 waitActionableAutoForce 调用一致（fill 需可编辑元素）。
+      // NOT_STABLE 自动 force 重试(对齐 BUG-011 / CLICK)逻辑在 waitActionableAutoForce 内已覆盖。
+      const __healFill = await healAwareGate(
         tid,
         frameId,
         selector,
         { timeout: args.timeout as number | undefined, needsEditable: true },
         args.force as boolean | undefined,
+        __t.descriptor,
       );
+      // 重绑 selector：若已自愈则改为 healed selector，下游所有引用统一用 selector。
+      selector = __healFill.selector;
 
       // === framework-aware rejection via page-side bundle (@since 0.4.0, migrated T2.7a) ===
       if (!fallbackToNative) {
@@ -971,12 +1013,14 @@ export function registerDomHandlers(
         await readDialogCapturedAndDisarm(tid, frameId);
       }
       if (res?.error) mapPageError(res, selector);
-      return res?.result;
+      const fillResult = res?.result;
+      return __healFill.healed ? { ...(fillResult as object), healed: true } : fillResult;
     },
 
     [DomActions.SELECT]: async (args, tabId) => {
       const __t = resolveTarget(args);
-      const selector = __t.selector;
+      // let 声明：gate 自愈后用 __heal.selector 重绑，下游所有引用统一用 selector。
+      let selector = __t.selector;
       // value 可为单值(string)或数组(string[],原生 <select multiple> 多选)。
       const value = args.value as string | string[];
       if (value == null) throw vtxError(VtxErrorCode.INVALID_PARAMS, "Missing required param: value");
@@ -984,8 +1028,17 @@ export function registerDomHandlers(
       const frameId = __t.boundFrameId ?? (args.frameId as number | undefined);
       if (frameId != null) await ensureFrameAttached(tid, frameId);
 
-      // L2 integration: actionability + auto-wait pre-check
-      await waitActionable(tid, frameId, selector, { timeout: args.timeout as number | undefined, force: args.force as boolean | undefined });
+      // L2 integration: actionability + descriptor 自愈 gate。
+      const __healSelect = await healAwareGate(
+        tid,
+        frameId,
+        selector,
+        { timeout: args.timeout as number | undefined },
+        args.force as boolean | undefined,
+        __t.descriptor,
+      );
+      // 重绑 selector：若已自愈则改为 healed selector，下游所有引用统一用 selector。
+      selector = __healSelect.selector;
 
       // 加载 dom-resolve 模块，使 inline func 能通过 shadow 穿透解析 selector
       await loadPageSideModule(tid, frameId, "dom-resolve");
@@ -1171,7 +1224,8 @@ export function registerDomHandlers(
         await readDialogCapturedAndDisarm(tid, frameId);
       }
       if (res?.error) mapPageError(res, selector);
-      return res?.result;
+      const selectResult = res?.result;
+      return __healSelect.healed ? { ...(selectResult as object), healed: true } : selectResult;
     },
 
     [DomActions.SCROLL]: async (args, tabId) => {
@@ -1318,10 +1372,27 @@ export function registerDomHandlers(
 
     [DomActions.HOVER]: async (args, tabId) => {
       const __t = resolveTarget(args);
-      const selector = __t.selector;
+      // let 声明：gate 自愈后用 __heal.selector 重绑，下游所有引用统一用 selector。
+      let selector = __t.selector;
       const tid = await getActiveTabId(__t.boundTabId ?? (args.tabId as number | undefined) ?? tabId);
       const frameId = __t.boundFrameId ?? (args.frameId as number | undefined);
       if (frameId != null) await ensureFrameAttached(tid, frameId);
+
+      // L2 integration: descriptor 自愈 gate。HOVER 原本不走 actionability 门；
+      // 此处加入 healAwareGate 使 stale ref 能重匹配元素后重试。HOVER 不检查
+      // disabled，故用 force=true 跳过 actionability 严格门，仅借助 waitActionable
+      // 的 NOT_ATTACHED 检测触发自愈路径（与原行为兼容）。
+      const __healHover = await healAwareGate(
+        tid,
+        frameId,
+        selector,
+        { timeout: args.timeout as number | undefined },
+        /* force */ true, // HOVER 原来不走门，用 force:true 保留原有宽松语义
+        __t.descriptor,
+      );
+      // 重绑 selector：若已自愈则改为 healed selector，下游所有引用统一用 selector。
+      selector = __healHover.selector;
+
       // 加载 dom-resolve 模块，使 inline func 能通过 shadow 穿透解析 selector
       await loadPageSideModule(tid, frameId, "dom-resolve");
       // dialog arm:hover 操作(mouseover/mouseenter + CDP mouseMoved)可能触发同步 confirm,默认 dismiss 防冻屏。
@@ -1411,7 +1482,8 @@ export function registerDomHandlers(
           y: hr.cy + oy,
         });
       }
-      return { success: true, ...(hr?.tooltip ?? {}) };
+      const hoverResult = { success: true, ...(hr?.tooltip ?? {}) };
+      return __healHover.healed ? { ...hoverResult, healed: true } : hoverResult;
       } finally {
         await readDialogCapturedAndDisarm(tid, frameId);
       }

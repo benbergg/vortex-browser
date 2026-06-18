@@ -2591,6 +2591,8 @@ export function registerObserveHandlers(router: ActionRouter, debuggerMgr: Debug
             index: globalIdx,
             selector: e._sel,
             frameId: s.frameId,
+            role: e.role,
+            name: e.name,
           });
         }
         framesOut.push({

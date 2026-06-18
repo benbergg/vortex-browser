@@ -18,6 +18,10 @@ export interface SnapshotElement {
   selector: string;
   /** 元素所在 frame id；跨 frame snapshot 用于路由。@since 0.4.0 */
   frameId?: number;
+  /** descriptor 自愈：observe 计算的 ARIA role；选择器失效时重匹配用。@since v0.10 */
+  role?: string;
+  /** descriptor 自愈：observe 计算的 accessible name；选择器失效时重匹配用。@since v0.10 */
+  name?: string;
 }
 
 export interface SnapshotEntry {

@@ -10,6 +10,8 @@ export interface ResolvedTarget {
   /** 使用 snapshot index 时绑定的 tab/frame，优先级高于 args.tabId / args.frameId */
   boundTabId?: number;
   boundFrameId?: number;
+  /** stale 选择器自愈用；仅 index 路径且 snapshot 存了 role/name 时有值。@since v0.10 */
+  descriptor?: { role?: string; name: string };
 }
 
 export function resolveTarget(args: Record<string, unknown>): ResolvedTarget {
@@ -51,11 +53,17 @@ export function resolveTarget(args: Record<string, unknown>): ResolvedTarget {
         { snapshotId, index },
       );
     }
+    // name 非空时才带 descriptor，向后兼容（无 descriptor 的旧 snapshot 保持 undefined）
+    const descriptor =
+      hit.name != null && hit.name !== ""
+        ? { role: hit.role, name: hit.name }
+        : undefined;
     return {
       selector: hit.selector,
       boundTabId: entry.tabId,
       // 跨 frame snapshot 时 element.frameId 才是权威；回退到 entry.frameId（兼容旧单 frame snapshot）
       boundFrameId: hit.frameId ?? entry.frameId,
+      ...(descriptor ? { descriptor } : {}),
     };
   }
 

@@ -20,8 +20,11 @@ const DOM_SRC = readFileSync(
 
 describe("CLICK CDP 路径 dialogHandled 转换 (trusted/realMouse 早返回分支)", () => {
   it("useRealMouse || trustedMode 分支用 attachDialogHandled 包裹 cdpClickElement", () => {
+    // 自愈接入后，cdpResult 先存变量再返回（保留 attachDialogHandled 包裹语义）。
+    // 匹配模式：分支内 return 或赋值（=）紧跟 attachDialogHandled(await cdpClickElement(...)）。
+    // 窗口限制 500 字符防止跨分支误判；(?:return|=)\s* 约束调用必须出现在 return 或赋值语境中。
     expect(DOM_SRC).toMatch(
-      /useRealMouse \|\| trustedMode[\s\S]{0,500}?return attachDialogHandled\(\s*await cdpClickElement/,
+      /useRealMouse \|\| trustedMode[\s\S]{0,500}?(?:return|=)\s*attachDialogHandled\(\s*await cdpClickElement/,
     );
   });
 
