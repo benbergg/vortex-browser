@@ -236,6 +236,24 @@ export class MessageRouter {
     this.requestBuffer = [];
   }
 
+  /** 当前 NM(扩展 SW)是否在线。dev-reload 端点据此 fail-fast,避免向睡眠 SW 静默丢信号。 */
+  isNmConnected(): boolean {
+    return this.nmConnected;
+  }
+
+  /**
+   * dev-only:主动推送 reload-extension 控制消息(被动 dist watcher 的按需触发版)。
+   *
+   * 故意**不**走 requestBuffer:控制消息只对在线 SW 有意义,缓冲到下次重连再发会触发
+   * 一次多余重载。SW 离线时直接返回 false,由调用方(dev-reload 端点)上报
+   * EXTENSION_NOT_CONNECTED——把原 watcher「写给睡眠 SW 被静默丢弃」(C2)变成显式失败。
+   */
+  pushReloadExtension(reason?: string): boolean {
+    if (!this.nmConnected) return false;
+    writeNmMessage(this.stdout, { type: "control", action: "reload-extension", reason });
+    return true;
+  }
+
   private sendToClient(resp: VtxResponse): void {
     const ws = this.sessions.getClient();
     if (ws && ws.readyState === 1) {

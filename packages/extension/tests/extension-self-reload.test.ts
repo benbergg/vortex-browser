@@ -21,6 +21,11 @@ const SERVER_INDEX = readFileSync(
   join(__dirname, "..", "..", "server", "src", "index.ts"),
   "utf8",
 );
+// dev-reload 重构:扩展 dist 路径解析抽到 ext-dist.ts(供 watcher + /dev/reload-extension 共用)
+const SERVER_EXT_DIST = readFileSync(
+  join(__dirname, "..", "..", "server", "src", "ext-dist.ts"),
+  "utf8",
+);
 const BG = readFileSync(
   join(__dirname, "..", "src", "background.ts"),
   "utf8",
@@ -49,9 +54,13 @@ describe("server extension-dist watcher (@since 0.4.0 O-3b)", () => {
     );
   });
 
-  it("resolves extension dist path from own module url, not hardcoded", () => {
-    expect(SERVER_INDEX).toMatch(/fileURLToPath\(import\.meta\.url\)/);
-    expect(SERVER_INDEX).toMatch(/\.\.\/\.\.\/\.\.\/extension\/dist/);
+  it("resolves extension dist path from own module url, not hardcoded (ext-dist.ts)", () => {
+    // 路径解析逻辑抽到 ext-dist.ts:watcher 与 /dev/reload-extension 共用同一锚点,
+    // 保证「本 server 服务的 dist」单一真源(dev-reload C1 校验依赖此一致性)。
+    expect(SERVER_EXT_DIST).toMatch(/fileURLToPath\(import\.meta\.url\)/);
+    expect(SERVER_EXT_DIST).toMatch(/\.\.\/\.\.\/\.\.\/extension\/dist/);
+    // index.ts 仍经 resolveExtensionDist() 取得 extDist 并 statSync 守卫
+    expect(SERVER_INDEX).toMatch(/resolveExtensionDist\(\)/);
   });
 
   it("debounces multiple change events (vite build writes many files)", () => {

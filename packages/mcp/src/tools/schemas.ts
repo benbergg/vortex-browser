@@ -74,6 +74,39 @@ function diagnosticsTools(): ToolDef[] {
   ];
 }
 
+// ──────────────────────────────────────────────────────────────────────────────
+// Dev（1 个，cap:"dev" opt-in）—— 仅本地联调/评测用，绝不进 prod 用户面
+// ──────────────────────────────────────────────────────────────────────────────
+
+function devTools(): ToolDef[] {
+  return [
+    {
+      name: "vortex_dev_reload",
+      action: "__mcp_dev_reload__",
+      // dev cap 工具：经 --caps=dev 提升。改完扩展代码 + rebuild 后调一次,
+      // 触发 chrome.runtime.reload() 并轮询 diagnostics.version 的 buildStamp,
+      // 直到戳变化(= 新 dist 已生效)才返回——让评测回合永不对旧代码跑测。
+      description:
+        "DEV ONLY (cap:dev). After rebuilding the extension, reload it in Chrome and verify " +
+        "the new build is live before continuing. Triggers chrome.runtime.reload() via the " +
+        "server, then polls until the extension's buildStamp changes. Returns " +
+        "{reloaded, fromStamp, toStamp, targetStamp, waitedMs}. Call it between an extension " +
+        "code change and re-running tests so you never benchmark stale code.",
+      cap: "dev",
+      schema: {
+        type: "object",
+        properties: {
+          timeoutMs: {
+            type: "number",
+            description: "Max ms to wait for the reloaded extension to reconnect with a new buildStamp (default 15000).",
+          },
+        },
+        required: [],
+      },
+    },
+  ];
+}
+
 function eventsTools(): ToolDef[] {
   return [
     {
@@ -826,6 +859,7 @@ function verifyTools(): ToolDef[] {
 export function getAllToolDefs(): ToolDef[] {
   return [
     ...diagnosticsTools(),
+    ...devTools(),
     ...eventsTools(),
     ...observeTools(),
     ...tabTools(),

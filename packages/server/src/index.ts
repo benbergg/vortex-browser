@@ -1,14 +1,13 @@
 import { createServer } from "http";
 import { writeFileSync, readFileSync, unlinkSync, existsSync, watch, statSync } from "fs";
 import { execSync } from "child_process";
-import { fileURLToPath } from "node:url";
-import { dirname, resolve } from "node:path";
 import express from "express";
 import { NativeMessagingReader, writeNmMessage } from "./native-messaging.js";
 import { SessionManager } from "./session.js";
 import { MessageRouter } from "./message-router.js";
 import { createWsServer } from "./ws-server.js";
 import { createHttpRoutes } from "./http-routes.js";
+import { resolveExtensionDist } from "./ext-dist.js";
 
 const PIDFILE = "/tmp/vortex-server.pid";
 
@@ -36,8 +35,7 @@ function installExtensionDistWatcher(): void {
   if (process.env.VORTEX_NO_EXT_AUTO_RELOAD === "1") return;
 
   // 运行位置：packages/server/dist/src/index.js，扩展 dist：packages/extension/dist
-  const here = dirname(fileURLToPath(import.meta.url));
-  const extDist = resolve(here, "../../../extension/dist");
+  const extDist = resolveExtensionDist();
 
   try {
     // 必须存在才 watch（避免扩展未 build 时 server 启动报错）
