@@ -46,3 +46,58 @@ export function normalizeClickFingerprint(
     userFeedback: effect.userFeedback,
   };
 }
+
+export type DriftClass =
+  | "target" | "url" | "value" | "scroll"
+  | "dom" | "network" | "focus" | "aria" | "feedback";
+
+export interface Drift {
+  classes: DriftClass[];
+  details: Array<{ field: string; expected: unknown; actual: unknown }>;
+}
+
+const SCROLL_TOL = 5;
+
+/** 比对两个指纹。返回 null=matched;否则列出 drift 类别 + 字段(诚实表征:说清哪里变了)。 */
+export function compareFingerprint(
+  expect: EffectFingerprint,
+  actual: EffectFingerprint,
+): Drift | null {
+  const classes = new Set<DriftClass>();
+  const details: Drift["details"] = [];
+  const ne = (field: string, cls: DriftClass, e: unknown, a: unknown): void => {
+    if (e !== a) { classes.add(cls); details.push({ field, expected: e, actual: a }); }
+  };
+
+  // 确定量(始终比对)
+  ne("targetIdentity", "target", expect.targetIdentity, actual.targetIdentity);
+  ne("urlChanged", "url", expect.urlChanged, actual.urlChanged);
+  if (expect.valueAfter !== undefined || actual.valueAfter !== undefined) {
+    ne("valueAfter", "value", expect.valueAfter, actual.valueAfter);
+  }
+  if (expect.scrollAfter || actual.scrollAfter) {
+    const e = expect.scrollAfter, a = actual.scrollAfter;
+    const off = (k: "top" | "left"): boolean =>
+      Math.abs((e?.[k] ?? 0) - (a?.[k] ?? 0)) > SCROLL_TOL;
+    if (!e || !a || off("top") || off("left")) {
+      classes.add("scroll");
+      details.push({ field: "scrollAfter", expected: e, actual: a });
+    }
+  }
+
+  // 类别签名(weak fp 跳过——hover/drag 无确定性副作用判定)
+  if (!expect.weak) {
+    if (expect.causedDomMutation !== undefined)
+      ne("causedDomMutation", "dom", expect.causedDomMutation, actual.causedDomMutation);
+    if (expect.causedNetwork !== undefined)
+      ne("causedNetwork", "network", expect.causedNetwork, actual.causedNetwork);
+    if (expect.focusChanged !== undefined)
+      ne("focusChanged", "focus", expect.focusChanged, actual.focusChanged);
+    if (expect.ariaChanged !== undefined)
+      ne("ariaChanged", "aria", expect.ariaChanged, actual.ariaChanged);
+    if (expect.userFeedback !== undefined)
+      ne("userFeedback", "feedback", expect.userFeedback, actual.userFeedback);
+  }
+
+  return classes.size ? { classes: [...classes], details } : null;
+}
