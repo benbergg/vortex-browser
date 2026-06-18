@@ -51,13 +51,21 @@ const def: CaseDefinition = {
       `observe 应能看到"惰性按钮",snapshot head:\n${snap1.slice(0, 600)}`,
     );
 
+    // warmup: 先点一次"有效果按钮"使其获得焦点,让后续 record/verify 的 focusChanged 稳定为 false。
+    // 否则 record 捕捉首次点击的 focusChanged:true,而 verify 时按钮已聚焦(focusChanged:false)→ 假 focus drift。
+    // focusChanged 是"首次 vs 后续点击同元素"的不稳定信号,只有 e2e 才暴露(单测 / 静态 review 看不到运行时焦点行为)。
+    await ctx.call("vortex_act", { action: "click", target: effRef! });
+    const snapW = extractText(await ctx.call("vortex_observe", {}));
+    const effRefW = findRef(snapW, "有效果按钮");
+    ctx.assert(effRefW !== null, `warmup 后 observe 应能看到"有效果按钮"`);
+
     // ① record: 有效果按钮 → fingerprint.causedDomMutation = true
     // server 在 fpActive 时自动补 observeEffect:true,所以 effect 字段有值。
-    // 使用 @ref(effRef)确保 lookupIdentity 能命中快照并返回 role::name::frameId 身份串。
+    // 使用 @ref(effRefW)确保 lookupIdentity 能命中快照并返回 role::name::frameId 身份串。
     const rec = parseActResult(
       await ctx.call("vortex_act", {
         action: "click",
-        target: effRef!,
+        target: effRefW!,
         options: { fingerprint: { mode: "record" } },
       }),
     );
