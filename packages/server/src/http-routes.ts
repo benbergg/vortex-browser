@@ -5,6 +5,7 @@ import { VtxErrorCode } from "@vortex-browser/shared";
 import type { MessageRouter } from "./message-router.js";
 import { detectTrustedMode } from "./trusted-mode.js";
 import { relaunchTrusted } from "./relauncher.js";
+import { resolveExtensionDist, readBuildStamp } from "./ext-dist.js";
 
 /** GET /trusted-mode:回当前 Chrome 是否带 flag(trusted)。popup 状态指示用。 */
 export function trustedModeHandler(_req: Request, res: Response): void {
@@ -15,6 +16,32 @@ export function trustedModeHandler(_req: Request, res: Response): void {
 export function relaunchHandler(_req: Request, res: Response): void {
   relaunchTrusted();
   res.json({ ok: true });
+}
+
+/**
+ * POST /dev/reload-extension:dev-only 按需触发扩展自重载(O-3b watcher 的主动版)。
+ *
+ * 不等待重载完成(`chrome.runtime.reload()` 会杀掉本 server 进程——新 SW spawn 新
+ * host,killOldProcess 收旧进程),立即返回。「重载是否生效」由存活的 MCP 进程轮询
+ * diagnostics.version 的 buildStamp 来验证(见 mcp __mcp_dev_reload__)。
+ *
+ * 返回 targetStamp(本 server 服务的 dist/build-stamp.txt)= 期望加载的扩展构建戳;
+ * MCP 用它与扩展实际上报的 buildStamp 比对,不一致即 C1 路径错配。
+ */
+export function devReloadHandler(router: MessageRouter): (req: Request, res: Response) => void {
+  return (_req, res) => {
+    if (!router.isNmConnected()) {
+      res.status(503).json({
+        ok: false,
+        error: { code: VtxErrorCode.EXTENSION_NOT_CONNECTED, message: "Extension is not connected" },
+      });
+      return;
+    }
+    const extDist = resolveExtensionDist();
+    const targetStamp = readBuildStamp(extDist);
+    router.pushReloadExtension("dev_reload");
+    res.json({ ok: true, triggered: true, targetStamp, extDist });
+  };
 }
 
 export function createHttpRoutes(router: MessageRouter): Router {
@@ -60,6 +87,7 @@ export function createHttpRoutes(router: MessageRouter): Router {
 
   app.get("/trusted-mode", trustedModeHandler);
   app.post("/relaunch-trusted", relaunchHandler);
+  app.post("/dev/reload-extension", devReloadHandler(router));
 
   return app;
 }

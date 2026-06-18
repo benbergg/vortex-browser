@@ -317,6 +317,104 @@ export async function handleCallTool(
     }
   }
 
+  // dev-only: vortex_dev_reload —— rebuild 扩展后按需重载并验证新代码生效(cap:dev)。
+  // 触发 server 推 reload-extension → chrome.runtime.reload() → 轮询 diagnostics.version
+  // 的 buildStamp 直到变化(= 新 dist 已加载)。验证由**存活的本 MCP 进程**做,因为
+  // 重载会杀掉触发它的 server 进程(新 SW spawn 新 host + killOldProcess 收旧)。
+  if (toolDef.action === "__mcp_dev_reload__") {
+    const timeoutMs = typeof params.timeoutMs === "number" ? params.timeoutMs : 15000;
+    const startedAt = Date.now();
+    const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+    // 1. 记录重载前的 buildStamp(扩展未连则留空,触发步骤会给出明确错误)
+    let fromStamp: string | undefined;
+    try {
+      const before = await sendRequest("diagnostics.version", {}, PORT, undefined, 5000);
+      fromStamp = (before.result as { buildStamp?: string } | undefined)?.buildStamp;
+    } catch {
+      /* SW 可能此刻未连,继续尝试触发 */
+    }
+
+    // 2. 触发 server 推送 reload-extension 控制消息
+    let targetStamp: string | null = null;
+    try {
+      const r = await fetch(`http://localhost:${PORT}/dev/reload-extension`, { method: "POST" });
+      const body = (await r.json()) as {
+        ok?: boolean;
+        targetStamp?: string | null;
+        error?: { code?: string; message?: string };
+      };
+      if (!r.ok || body.ok === false) {
+        return {
+          isError: true,
+          content: [{ type: "text" as const, text: JSON.stringify({
+            reloaded: false,
+            error: body.error?.code ?? "RELOAD_TRIGGER_FAILED",
+            message: body.error?.message ?? `reload trigger failed (HTTP ${r.status})`,
+            hint: "扩展未连(SW 可能睡眠或未加载)。先调一次任意 vortex 工具唤醒 SW,或确认扩展已在 Chrome 加载。",
+          }, null, 2) }],
+        };
+      }
+      targetStamp = body.targetStamp ?? null;
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return {
+        isError: true,
+        content: [{ type: "text" as const,
+          text: `vortex-server unreachable at localhost:${PORT} (cannot trigger reload).\n${msg}` }],
+      };
+    }
+
+    // 3. 轮询 diagnostics.version,直到 buildStamp 变化(= SW 已重载并换到新 dist)
+    await sleep(300); // 给 chrome.runtime.reload()(setTimeout 50ms + 进程切换)起步余地
+    let toStamp: string | undefined;
+    while (Date.now() - startedAt < timeoutMs) {
+      try {
+        const resp = await sendRequest("diagnostics.version", {}, PORT, undefined, 3000);
+        const stamp = (resp.result as { buildStamp?: string } | undefined)?.buildStamp;
+        if (stamp && stamp !== fromStamp) { toStamp = stamp; break; }
+      } catch {
+        /* 重载窗口内 server 进程被换/WS 断开 = 瞬态,继续轮询(client 懒重连) */
+      }
+      await sleep(500);
+    }
+
+    const waitedMs = Date.now() - startedAt;
+    if (!toStamp) {
+      return {
+        isError: true,
+        content: [{ type: "text" as const, text: JSON.stringify({
+          reloaded: false,
+          error: "RELOAD_TIMEOUT",
+          fromStamp: fromStamp ?? null,
+          targetStamp,
+          waitedMs,
+          hint:
+            "buildStamp 未在超时内变化。可能:① chrome.runtime.reload() 未生效;" +
+            "② Chrome 加载的扩展 dist 与本 server 服务的 dist 不是同一个(C1 路径错配)——" +
+            "为当前 worktree 跑 `node packages/server/dist/bin/vortex-server.js install` 后重载扩展。",
+        }, null, 2) }],
+      };
+    }
+
+    // 4. 强校验:扩展实际 buildStamp 应 == 本 server dist 的 targetStamp,不一致即 C1
+    const mismatch = targetStamp != null && toStamp !== targetStamp;
+    return {
+      content: [{ type: "text" as const, text: JSON.stringify({
+        reloaded: true,
+        fromStamp: fromStamp ?? null,
+        toStamp,
+        targetStamp,
+        waitedMs,
+        ...(mismatch ? {
+          warning:
+            "加载的扩展 buildStamp 与本 server 服务的 dist 不一致(C1)。重载生效了,但 Chrome 里 " +
+            "加载的可能是另一个 worktree 的 dist——确认你 rebuild 的 dist 正是 Chrome 加载的那个。",
+        } : {}),
+      }, null, 2) }],
+    };
+  }
+
   // observe.snapshot 专用分发：compact → 紧凑文本，full → 原 JSON pretty
   // PR #4 把 vortex_observe 的 toolDef.action 从 "observe.snapshot" 改成 "L4.observe"，
   // 这条 condition 必须同时识别两者，否则 v0.6 vortex_observe 会绕开整个 special
