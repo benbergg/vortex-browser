@@ -3,7 +3,7 @@
     "vortex": {
       "type": "stdio",
       "command": "node",
-      "args": ["packages/mcp/dist/src/server.js"]
+      "args": ["packages/mcp/dist/src/server.js", "--caps=dev"]
     }
   }
 }
