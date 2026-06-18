@@ -1,7 +1,7 @@
 // 可验证确定性重放——applyFingerprint / shouldRecover 纯逻辑单测。
 // 与 MCP transport 解耦,直接测 record/verify/autoRecover 决策,无需 mock 整条链路。
 import { describe, it, expect } from "vitest";
-import { applyFingerprint } from "../src/lib/fingerprint-apply.js";
+import { applyFingerprint, shouldRecover } from "../src/lib/fingerprint-apply.js";
 
 describe("applyFingerprint record", () => {
   it("record 模式把 click effect 归一化进响应", () => {
@@ -57,5 +57,20 @@ describe("applyFingerprint verify", () => {
     const out = applyFingerprint({ mode: "verify", expect: expectFp }, "click", "button::Submit::0",
       { domMutations: 0, networkRequests: 0, urlChanged: false, focusChanged: false, ariaChanged: false, userFeedback: "none" });
     expect(out.drift!.classes).toEqual(expect.arrayContaining(["dom", "network", "feedback"]));
+  });
+});
+
+describe("shouldRecover", () => {
+  it("autoRecover 且 drift 非空 → true", () => {
+    expect(shouldRecover({ mode: "verify", expect: {} as any, autoRecover: true }, { classes: ["dom"], details: [] })).toBe(true);
+  });
+  it("drift null → false", () => {
+    expect(shouldRecover({ mode: "verify", expect: {} as any, autoRecover: true }, null)).toBe(false);
+  });
+  it("未开 autoRecover → false(诚实优先,交回调用方)", () => {
+    expect(shouldRecover({ mode: "verify", expect: {} as any }, { classes: ["dom"], details: [] })).toBe(false);
+  });
+  it("record 模式 → false(record 无 drift 概念)", () => {
+    expect(shouldRecover({ mode: "record" }, null)).toBe(false);
   });
 });
