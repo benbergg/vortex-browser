@@ -40,3 +40,22 @@ describe("applyFingerprint record", () => {
     expect(out).toEqual({});
   });
 });
+
+describe("applyFingerprint verify", () => {
+  const expectFp = {
+    action: "click" as const, targetIdentity: "button::Submit::0", urlChanged: false,
+    causedDomMutation: true, causedNetwork: true, focusChanged: false, ariaChanged: false, userFeedback: "mutation" as const,
+  };
+  it("效果复现 → drift null(matched)", () => {
+    const out = applyFingerprint({ mode: "verify", expect: expectFp }, "click", "button::Submit::0",
+      { domMutations: 5, networkRequests: 2, urlChanged: false, focusChanged: false, ariaChanged: false, userFeedback: "mutation" });
+    expect(out.drift).toBeNull();
+    // verify 也回传本次实测指纹(诚实表征:即便 matched 也让调用方看到实测值)。
+    expect(out.fingerprint).toMatchObject({ action: "click", targetIdentity: "button::Submit::0" });
+  });
+  it("副作用消失 → drift 含 dom/network/feedback", () => {
+    const out = applyFingerprint({ mode: "verify", expect: expectFp }, "click", "button::Submit::0",
+      { domMutations: 0, networkRequests: 0, urlChanged: false, focusChanged: false, ariaChanged: false, userFeedback: "none" });
+    expect(out.drift!.classes).toEqual(expect.arrayContaining(["dom", "network", "feedback"]));
+  });
+});
