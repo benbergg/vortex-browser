@@ -1,12 +1,17 @@
 // 可验证确定性重放——click 闭环端到端验证。
 // 验证 vortex_act options.fingerprint = {mode:"record"} / {mode:"verify"} 的四个属性:
-//   1. record: #eff 有副作用 → fingerprint.causedDomMutation = true
+//   1. record: 有效果按钮 → fingerprint.causedDomMutation = true
 //   2. verify 同按钮复现 → drift null(matched)
-//   3. verify #inert(target 不同 + 无 DOM 副作用)→ drift 含 "dom" 或 "target"
+//   3. verify 惰性按钮(target 不同 + 无 DOM 副作用)→ drift 含 "dom" 或 "target"
 //   4. 零开销契约: 不传 fingerprint → 无 fingerprint / drift 字段
-// 复用 click-effect-signal.html 的 #eff / #inert 按钮(与 click-effect-signal.case.ts 共享 playgroundPath)。
+// 复用 click-effect-signal.html 的"有效果按钮"/"惰性按钮"(与 click-effect-signal.case.ts 共享 playgroundPath)。
+//
+// 重要:target 必须用 vortex_observe 返回的 @ref(如 @3f5f:e1),而非原始 CSS selector(#eff / #inert)。
+// ref-parser.ts:108 只在 @eN 形式下设 params.index;selector 形式的 params.index 始终为 undefined,
+// 导致 lookupIdentity 返回 null → applyFingerprint 无法建立 targetIdentity → fingerprint 字段缺失。
+// 使用 @ref 可保证 lookupIdentity 正确查到 role::name::frameId 身份串,是 record/verify 的真实路径。
 import type { CaseDefinition } from "../src/types.js";
-import { extractText } from "./_helpers.js";
+import { extractText, findRef } from "./_helpers.js";
 
 interface ActWithFingerprint {
   success?: boolean;
@@ -30,14 +35,29 @@ const def: CaseDefinition = {
   playgroundPath: "/synth/click-effect-signal.html",
   tier: "medium",
   async run(ctx) {
-    // ① record: 有效果按钮 #eff → fingerprint.causedDomMutation = true
+    // 前置 observe:建立快照索引,提取两个按钮的 @ref。
+    // click-effect-signal.html 中按钮文本:
+    //   #eff   → accessible name "有效果按钮"
+    //   #inert → accessible name "惰性按钮"
+    const snap1 = extractText(await ctx.call("vortex_observe", {}));
+    const effRef = findRef(snap1, "有效果按钮");
+    ctx.assert(
+      effRef !== null,
+      `observe 应能看到"有效果按钮",snapshot head:\n${snap1.slice(0, 600)}`,
+    );
+    const inertRef = findRef(snap1, "惰性按钮");
+    ctx.assert(
+      inertRef !== null,
+      `observe 应能看到"惰性按钮",snapshot head:\n${snap1.slice(0, 600)}`,
+    );
+
+    // ① record: 有效果按钮 → fingerprint.causedDomMutation = true
     // server 在 fpActive 时自动补 observeEffect:true,所以 effect 字段有值。
-    // observe 前置确保快照索引已建,targetIdentity lookupIdentity 能命中 ref。
-    await ctx.call("vortex_observe", {});
+    // 使用 @ref(effRef)确保 lookupIdentity 能命中快照并返回 role::name::frameId 身份串。
     const rec = parseActResult(
       await ctx.call("vortex_act", {
         action: "click",
-        target: "#eff",
+        target: effRef!,
         options: { fingerprint: { mode: "record" } },
       }),
     );
@@ -47,17 +67,19 @@ const def: CaseDefinition = {
     );
     ctx.assert(
       rec.fingerprint!.causedDomMutation === true,
-      `#eff 有 DOM 副作用,record 应得 causedDomMutation=true: ${JSON.stringify(rec.fingerprint)}`,
+      `有效果按钮有 DOM 副作用,record 应得 causedDomMutation=true: ${JSON.stringify(rec.fingerprint)}`,
     );
 
     const storedFp = rec.fingerprint!;
 
-    // ② verify 同按钮(#eff)复现 → drift null(matched)
-    await ctx.call("vortex_observe", {});
+    // ② verify 同按钮(有效果按钮)复现 → drift null(matched)
+    const snap2 = extractText(await ctx.call("vortex_observe", {}));
+    const effRef2 = findRef(snap2, "有效果按钮");
+    ctx.assert(effRef2 !== null, `第二次 observe 应能看到"有效果按钮"`);
     const ok = parseActResult(
       await ctx.call("vortex_act", {
         action: "click",
-        target: "#eff",
+        target: effRef2!,
         options: { fingerprint: { mode: "verify", expect: storedFp } },
       }),
     );
@@ -70,12 +92,14 @@ const def: CaseDefinition = {
       `效果复现应 matched(drift null), got ${JSON.stringify(ok.drift)}`,
     );
 
-    // ③ verify #inert(target 不同 + 无 DOM 副作用)→ drift 含 "dom" 或 "target"
-    await ctx.call("vortex_observe", {});
+    // ③ verify 惰性按钮(target 不同 + 无 DOM 副作用)→ drift 含 "dom" 或 "target"
+    const snap3 = extractText(await ctx.call("vortex_observe", {}));
+    const inertRef3 = findRef(snap3, "惰性按钮");
+    ctx.assert(inertRef3 !== null, `第三次 observe 应能看到"惰性按钮"`);
     const drifted = parseActResult(
       await ctx.call("vortex_act", {
         action: "click",
-        target: "#inert",
+        target: inertRef3!,
         options: { fingerprint: { mode: "verify", expect: storedFp } },
       }),
     );
@@ -89,9 +113,12 @@ const def: CaseDefinition = {
     );
 
     // ④ 零开销契约: 不传 fingerprint → 无 fingerprint / drift 字段
-    await ctx.call("vortex_observe", {});
+    // CSS selector 可用于零开销路径,因为 fpActive=false 时整个指纹块被跳过。
+    const snap4 = extractText(await ctx.call("vortex_observe", {}));
+    const inertRef4 = findRef(snap4, "惰性按钮");
+    ctx.assert(inertRef4 !== null, `第四次 observe 应能看到"惰性按钮"`);
     const plain = parseActResult(
-      await ctx.call("vortex_act", { action: "click", target: "#inert" }),
+      await ctx.call("vortex_act", { action: "click", target: inertRef4! }),
     );
     ctx.assert(
       plain.fingerprint == null,
