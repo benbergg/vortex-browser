@@ -113,6 +113,22 @@ interface Drift {
 - **MCP**(`packages/mcp`):指纹存储(Phase 1 = session 内,Phase 2 = 落盘)、drift 比对、autoRecover 编排——天然在 MCP,因为编排要用 ref-parser / snapshot 状态,且 Phase 2 落盘需要 Node fs。
 - **数据流**:`act 执行 → 采集 effect → page-side 归一化 fp → record: 返回 fp / verify: 比对 expect → 返回 {matched, drift}`。
 
+## 6.1 实现现实(写计划阶段确认,据此细化)
+
+写实现计划时核查代码,确认两条实现现实,据此细化设计——不缩 spec 意图,反而更贴合现有代码:
+
+1. **effect 采集是 click 专属**:`observeEffect` → `ClickEffect`(`packages/extension/src/page-side/click-effect.ts`,字段 = domMutations / networkRequests / networkSample / urlChanged / focusChanged / ariaChanged / userFeedback / toastHit / dialogHit / observed / windowMs / clamped)仅在 dom.ts CLICK handler 与 cdp.ts `cdpClickElement` 路径采集。fill/type/select/scroll 走 `micro-verify` 的 value / 位置回读,**无副作用采集管道**。
+
+2. **每个 action 用它已有的最强信号**(关键细化):click **没有回读值**(点按钮无 value 可读),只能靠副作用判生效 → 用类别签名;fill/type/select/scroll **有确定的回读值** → value / 位置回读本身就是最强成功信号,无需强加类别采集。因此:
+   - `click` 的 fingerprint = 类别签名(ClickEffect 副作用)+ `urlChanged` + `targetIdentity`
+   - `fill`/`type`/`select` 的 fingerprint = `valueAfter`(micro-verify 回读)+ `targetIdentity`
+   - `scroll` 的 fingerprint = `scrollAfter`(±5px)+ `targetIdentity`
+   - `hover`/`drag` = 弱(`weak:true`),只 `targetIdentity`(+ 若有类别)
+
+3. **targetIdentity 来源**:click 路径返回 `element:{tag,text}`,**不含 role::name**。observe 的 `renderSnapshotCache`(`observe-render.ts`)只存 `buildElementKey` 的 `Set`,不按 index 索引。→ 需扩展该缓存按 ref index 存 `role::name::frameId`,供 record 时取 `targetIdentity`(计划 Task)。
+
+4. **范围分层**:Phase 1 **核心闭环聚焦 `click`**(silent-false-success 唯一重灾区,见 §0;唯一无回读值的动作),fill/type/select/scroll 的确定量 fingerprint 列为 Phase 1 **后段可延后 task**(它们 value 回读已是强校验,fingerprint 价值边际)。
+
 ## 7. 测试策略(TDD)
 
 - **单测**:
