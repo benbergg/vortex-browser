@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="zh"><head><meta charset="utf-8"><title>overlay truncation priority</title></head>
+<body>
+<h1>密集页 + portal 弹层(截断顺序盲区)</h1>
+<!--
+  复现 DEFECT-1:页面交互元素 >maxElements(80),portal 弹层 DOM 序排在 body 末尾。
+  observe 按 DOM 序取前 80 → 顶部 90 个导航链接占满,刚"打开"的视口内弹层选项被截掉。
+  overlay-priority 修复后:可见浮层(role=listbox,position:absolute)的交互后代应前置,免遭截断。
+-->
+<nav id="nav"></nav>
+<script>
+  // 90 个导航链接(DOM 序在前,填满 80 cap)
+  var nav = document.getElementById("nav");
+  for (var i = 0; i < 90; i++) {
+    var a = document.createElement("a");
+    a.href = "#link" + i;
+    a.textContent = "导航链接 " + i;
+    a.style.display = "block";
+    nav.appendChild(a);
+  }
+</script>
+<!-- portal 弹层:挂 body 末尾(脱离 trigger 子树),position:absolute、视口内、z-index 抬升 -->
+<div id="dropdown" role="listbox" aria-label="选择人员"
+     style="position:absolute;top:90px;left:320px;z-index:1050;background:#fff;border:1px solid #ccc;padding:4px;width:160px">
+  <div role="option" data-vtx-oracle="opt-jack" style="padding:6px;cursor:pointer">Jack</div>
+  <div role="option" data-vtx-oracle="opt-lucy" style="padding:6px;cursor:pointer">Lucy</div>
+  <div role="option" data-vtx-oracle="opt-ming" style="padding:6px;cursor:pointer">yiminghe</div>
+</div>
+</body></html>
