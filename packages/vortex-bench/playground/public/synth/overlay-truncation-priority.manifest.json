@@ -1,0 +1,11 @@
+{
+  "fixture": "overlay-truncation-priority",
+  "path": "/synth/overlay-truncation-priority.html",
+  "tier": "medium",
+  "frames": "main",
+  "entries": [
+    { "id": "opt-jack", "interactive": true, "expectedName": "Jack", "expectedRole": "option", "pattern": "overlay-truncation-priority", "note": "密集页(>80 交互元素)上 portal 弹层(body 末尾)的选项,须经 overlay-priority 前置免遭 80 截断" },
+    { "id": "opt-lucy", "interactive": true, "expectedName": "Lucy", "expectedRole": "option", "pattern": "overlay-truncation-priority" },
+    { "id": "opt-ming", "interactive": true, "expectedName": "yiminghe", "expectedRole": "option", "pattern": "overlay-truncation-priority" }
+  ]
+}

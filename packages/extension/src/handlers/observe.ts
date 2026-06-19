@@ -327,6 +327,49 @@ export function isFocusContainerOnly(el: Element): boolean {
 }
 
 /**
+ * overlay-priority(DEFECT-1):弹层语义 role 集——可见且脱流时,其交互后代前置免遭
+ * maxElements 截断(portal 弹层挂 body 末尾,DOM 序最后,密集页上点开即被截掉)。
+ * 注意:inject func(scanOneFrame)内联同名副本,closure 注入无法 import,**改一处须
+ * 同步另一处**;`observe-overlay-priority.test.ts` jsdom 直测本导出锁守护。
+ */
+export const OVERLAY_POPUP_ROLES = new Set<string>([
+  "dialog", "alertdialog", "listbox", "menu", "tree", "grid", "tooltip",
+]);
+
+/**
+ * 元素是否"脱离正常流"——自身或近祖先(≤maxHops 跳,到 body 止)position fixed/absolute。
+ * 把静态在流内的 role=grid/tree/listbox(数据表/侧栏树/常驻列表)排除出前置,只前置
+ * 真正的弹出层(浮层),保护 baseline 不漂移。inject func 内联同名副本,改一处须同步。
+ */
+export function isOverlayFloating(el: Element, maxHops = 6): boolean {
+  let cur: Element | null = el;
+  let hops = 0;
+  const body = el.ownerDocument?.body;
+  while (cur && cur !== body && hops < maxHops) {
+    const pos = getComputedStyle(cur as HTMLElement).position;
+    if (pos === "fixed" || pos === "absolute") return true;
+    cur = cur.parentElement;
+    hops++;
+  }
+  return false;
+}
+
+/**
+ * overlay-priority 候选重排:把"在任一浮层根内"的候选(含浮层根自身)前置到最前,保持
+ * 其相对 DOM 序;其余保持原序。**无浮层根 → 返回原数组同序(零漂移,baseline 不变)**。
+ * inject func 内联同名逻辑,改一处须同步。
+ */
+export function partitionOverlayFirst(candidates: Element[], overlayRoots: Element[]): Element[] {
+  if (overlayRoots.length === 0) return candidates;
+  const inOverlay = (el: Element): boolean =>
+    overlayRoots.some((root) => root === el || root.contains(el));
+  const front: Element[] = [];
+  const rest: Element[] = [];
+  for (const el of candidates) (inOverlay(el) ? front : rest).push(el);
+  return front.length > 0 ? [...front, ...rest] : candidates;
+}
+
+/**
  * 班牛(bytenew)bnCheck 自定义勾选控件识别(N0064 P2-1 dogfood)。
  *
  *   <div class="bnCheck"><span class="bnCheck-status[ checked]">…</span>
@@ -1756,11 +1799,76 @@ async function scanOneFrame(
           }
         }
 
-        const allCandidates: Element[] = [
+        const baseCandidates: Element[] = [
           ...Array.from(nodeList),
           ...cursorPointerLeaves,
           ...iconCtaExtras,
         ];
+
+        // ── overlay-priority(DEFECT-1):可见浮层的交互后代前置,免遭 maxElements 截断 ──
+        // Portal 弹层(下拉/菜单/Modal)挂 body 末尾,DOM 序排最后。密集页(交互元素
+        // >maxElements)上按 DOM 序取前 N 会把刚打开、视口内的弹层选项整体截掉——agent
+        // 「点开了却找不到选项」(ant.design Select dogfood 实证:782 候选,80 全是顶部
+        // 导航,刚开的下拉 Jack/Lucy 被丢)。检测可见浮层根 → 把其内交互后代前置到候选
+        // 最前。**无浮层时候选顺序零改动**(baseline 零漂移)。框架无关:ARIA 弹层语义
+        // role + portal 定位双信号取并集。
+        // ⚠ 内联副本:逻辑须与模块级 OVERLAY_POPUP_ROLES / isOverlayFloating /
+        // partitionOverlayFirst 保持一致(observe-overlay-priority.test.ts 锁),改一处须同步。
+        const OVERLAY_POPUP_ROLES = new Set([
+          "dialog", "alertdialog", "listbox", "menu", "tree", "grid", "tooltip",
+        ]);
+        const isVisibleForOverlay = (el: Element): boolean => {
+          const r = el.getBoundingClientRect();
+          if (r.width === 0 || r.height === 0) return false;
+          const cs = getComputedStyle(el as HTMLElement);
+          return cs.visibility !== "hidden" && cs.visibility !== "collapse" && cs.display !== "none";
+        };
+        // 浮层根须"脱离正常流"——自身或近祖先(到 body,≤6 跳)position:fixed/absolute。
+        // 这把静态在流内的 role=grid/tree/listbox(ag-grid、文件树、常驻列表)排除在外,
+        // 只前置真正的弹出层,保护 baseline 不漂移。
+        const isFloatingOverlay = (el: Element): boolean => {
+          let cur: Element | null = el;
+          let hops = 0;
+          while (cur && cur !== docBody && hops < 6) {
+            const pos = getComputedStyle(cur as HTMLElement).position;
+            if (pos === "fixed" || pos === "absolute") return true;
+            cur = cur.parentElement;
+            hops++;
+          }
+          return false;
+        };
+        const overlayRoots: Element[] = [];
+        // 信号一:ARIA 弹层语义 role + 脱流定位(穿 open shadow,与主扫描一致)。
+        for (const el of querySelectorAllDeep("[role]", document)) {
+          const role = el.getAttribute("role")?.trim().split(/\s+/)[0];
+          if (!role || !OVERLAY_POPUP_ROLES.has(role)) continue;
+          if (isVisibleForOverlay(el) && isFloatingOverlay(el)) overlayRoots.push(el);
+        }
+        // 信号二:body 直接子节点的 portal(脱流 + z-index 抬升 + 含交互后代),
+        // 兜住无 ARIA role 的自定义弹层(如 el-select popper)。
+        if (docBody) {
+          for (const el of Array.from(docBody.children)) {
+            if (overlayRoots.includes(el)) continue;
+            const cs = getComputedStyle(el as HTMLElement);
+            if (cs.position !== "fixed" && cs.position !== "absolute") continue;
+            const z = parseInt(cs.zIndex, 10);
+            if (!(z > 0)) continue;
+            if (!isVisibleForOverlay(el)) continue;
+            if (!el.querySelector(ATOMIC_INTERACTIVE_SELECTORS)) continue;
+            overlayRoots.push(el);
+          }
+        }
+        const allCandidates: Element[] = ((): Element[] => {
+          if (overlayRoots.length === 0) return baseCandidates;
+          const inOverlay = (el: Element): boolean =>
+            overlayRoots.some((root) => root === el || root.contains(el));
+          const front: Element[] = [];
+          const rest: Element[] = [];
+          for (const el of baseCandidates) (inOverlay(el) ? front : rest).push(el);
+          // front 由 baseCandidates 顺序过滤得来,保持相对 DOM 序;全在浮层内时
+          // front===base 顺序、rest 空 → 与原序一致,无漂移。
+          return front.length > 0 ? [...front, ...rest] : baseCandidates;
+        })();
 
         const elements: Array<{
           index: number;

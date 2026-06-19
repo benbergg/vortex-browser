@@ -1,0 +1,291 @@
+[0m
+> build · MiniMax-M3
+[0m
+[0m# [0mTodos
+[•] 确认目录结构与 anomalies.schema.json 格式
+[ ] C1 Select 新 tab 评估（单选/多选/搜索/Portal）
+[ ] C2 Cascader 新 tab 评估
+[ ] C3 DatePicker/RangePicker 新 tab 评估
+[ ] C4 Modal 新 tab 评估
+[ ] C5 Table 新 tab 评估
+[ ] C6 TreeSelect 新 tab 评估
+[ ] C7 Transfer 新 tab 评估
+[ ] 产出 eval-observations.md 与 anomalies.json 双产物
+[ ] verification-before-completion 自检
+[0m
+[0m$ [0mls /Users/lg/workspace/vortex/reports/dogfood-antd-2026-06-19/ 2>/dev/null && ls /Users/lg/workspace/vortex/reports/_dogfood/ 2>/dev/null
+EVAL-BRIEF.md
+m3-session.log
+screenshots
+anomalies.example.json
+anomalies.schema.json
+backlog.md
+EVAL-BRIEF.template.md
+rotation-pool.json
+scoreboard.md
+spike-perception-blindspot-2026-06-17.md
+[0m
+[0m✱ [0mGlob "reports/_dogfood/*.json"[90m 3 matches[0m
+[0m→ [0mRead reports/_dogfood/anomalies.schema.json
+[0m→ [0mRead reports/_dogfood/anomalies.example.json
+[0m
+[0m$ [0mvortex --version 2>/dev/null; which vortex 2>/dev/null
+vortex not found
+[0m
+[0m$ [0mls /Users/lg/workspace/vortex/reports/dogfood-antd-2026-06-19/screenshots/ 2>/dev/null; cat /Users/lg/workspace/vortex/reports/dogfood-antd-2026-06-19/m3-session.log 2>/dev/null | head -50
+[0m
+> build · MiniMax-M3
+[0m
+[0m# [0mTodos
+[•] 确认目录结构与 anomalies.schema.json 格式
+[ ] C1 Select 新 tab 评估（单选/多选/搜索/Portal）
+[ ] C2 Cascader 新 tab 评估
+[ ] C3 DatePicker/RangePicker 新 tab 评估
+[ ] C4 Modal 新 tab 评估
+[ ] C5 Table 新 tab 评估
+[ ] C6 TreeSelect 新 tab 评估
+[ ] C7 Transfer 新 tab 评估
+[ ] 产出 eval-observations.md 与 anomalies.json 双产物
+[ ] verification-before-completion 自检
+[0m
+[0m$ [0mls /Users/lg/workspace/vortex/reports/dogfood-antd-2026-06-19/ 2>/dev/null && ls /Users/lg/workspace/vortex/reports/_dogfood/ 2>/dev/null
+EVAL-BRIEF.md
+m3-session.log
+screenshots
+anomalies.example.json
+anomalies.schema.json
+backlog.md
+EVAL-BRIEF.template.md
+rotation-pool.json
+scoreboard.md
+spike-perception-blindspot-2026-06-17.md
+[0m
+[0m✱ [0mGlob "reports/_dogfood/*.json"[90m 3 matches[0m
+[0m→ [0mRead reports/_dogfood/anomalies.schema.json
+[0m→ [0mRead reports/_dogfood/anomalies.example.json
+[0m
+[0m⚙ [0mvortex_vortex_tab_list Unknown
+[0m
+[0m# [0mTodos
+[✓] 确认目录结构与 anomalies.schema.json 格式
+[•] C1 Select 新 tab 评估（单选/多选/搜索/Portal）
+[ ] C2 Cascader 新 tab 评估
+[ ] C3 DatePicker/RangePicker 新 tab 评估
+[ ] C4 Modal 新 tab 评估
+[ ] C5 Table 新 tab 评估
+[ ] C6 TreeSelect 新 tab 评估
+[ ] C7 Transfer 新 tab 评估
+[ ] 产出 eval-observations.md 与 anomalies.json 双产物
+[ ] verification-before-completion 自检
+[0m
+[0m⚙ [0mvortex_vortex_tab_close {"tabId":984524660}
+## C1 Select — 新 tab
+[0m✗ [0mvortex_vortex_tab_create {"url":"https://ant.design/components/select","active":true} failed
+[91m[1mError: [0mvortex-server is not running at localhost:6800.
+To start: cd /path/to/vortex && pnpm --filter @vortex-browser/server start
+
+Once it's running, retry your last tool call.
+
+Original error: Failed to connect to vortex-server at localhost:6800: 
+[0m
+[0m$ [0mls /Users/lg/workspace/vortex/ | head -20
+CHANGELOG.md
+collect.log
+CONTRIBUTING.md
+docs
+LICENSE
+node_modules
+package.json
+packages
+playground
+pnpm-lock.yaml
+pnpm-workspace.yaml
+README.md
+README.zh-CN.md
+reports
+scripts
+tsconfig.base.json
+[0m
+[0m$ [0mls /Users/lg/workspace/vortex/packages/ 2>/dev/null
+cli
+extension
+mcp
+server
+shared
+vortex-bench
+vortex-migrate
+[0m
+[0m$ [0mpnpm --filter @vortex-browser/server start
+[ERR_PNPM_RECURSIVE_RUN_NO_SCRIPT] None of the selected packages has a "start" script
+[0m
+[0m$ [0mcat /Users/lg/workspace/vortex/packages/server/package.json | head -30
+{
+  "name": "@vortex-browser/server",
+  "version": "1.0.2",
+  "type": "module",
+  "main": "dist/src/index.js",
+  "types": "dist/src/index.d.ts",
+  "bin": {
+    "vortex-server": "dist/bin/vortex-server.js"
+  },
+  "files": [
+    "dist",
+    "native-host.sh"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "test": "vitest run",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@vortex-browser/shared": "workspace:*",
+    "commander": "^13.0.0",
+    "express": "^4.21.0",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.0",
+    "@types/ws": "^8.5.0",
+    "typescript": "^5.7.0",
+    "vitest": "^2.1.0"
+[0m
+[0m$ [0mls /Users/lg/workspace/vortex/packages/server/dist/bin/ 2>/dev/null; ls /Users/lg/workspace/vortex/packages/server/dist/src/ 2>/dev/null | head -10
+vortex-server.d.ts
+vortex-server.d.ts.map
+vortex-server.js
+vortex-server.js.map
+ext-dist.d.ts
+ext-dist.d.ts.map
+ext-dist.js
+ext-dist.js.map
+http-routes.d.ts
+http-routes.d.ts.map
+http-routes.js
+http-routes.js.map
+index.d.ts
+index.d.ts.map
+[0m
+[0m$ [0mcat /Users/lg/workspace/vortex/packages/server/dist/bin/vortex-server.js | head -50
+#!/usr/bin/env node
+import { appendFileSync } from "fs";
+import { Command } from "commander";
+import { startServer } from "../src/index.js";
+import { installNmHost, DEFAULT_EXTENSION_ID } from "../src/install-nm-host.js";
+// ─────────────────────────────────────────────────────────────────────────────
+// install 子命令：手动 argv 检测，不用 commander subcommand。
+// 原因：Chrome Native Messaging 启动时会把 chrome-extension://<id>/ 作为位置参数
+// 追加进 argv，若用 commander .command('install') 可能把未知位置参数当未知命令报错。
+// 手动检测可精确匹配 "install" 字符串，chrome-extension:// 开头的参数自然跳过。
+// ─────────────────────────────────────────────────────────────────────────────
+if (process.argv[2] === "install") {
+    // 不带 ID 时用 manifest 钉死 key 对应的默认扩展 ID(方案 B),无需用户复制粘贴。
+    // 仅当加载的扩展 ID 不同(如商店分发改了 key)才需显式 `install <id>` 覆盖。
+    const extId = process.argv[3] || DEFAULT_EXTENSION_ID;
+    const usingDefault = !process.argv[3];
+    try {
+        const r = installNmHost(extId);
+        console.log(`✓ Native messaging host registered: ${r.hostName}`);
+        console.log(`  extension id: ${extId}${usingDefault ? " (default, pinned)" : ""}`);
+        console.log(`  manifest: ${r.manifestPath}`);
+        console.log(`  host script: ${r.nativeHostPath}`);
+        console.log(`\nReload the Vortex extension in chrome://extensions to connect.`);
+        process.exit(0);
+    }
+    catch (e) {
+        console.error(`install failed: ${e.message}`);
+        process.exit(1);
+    }
+}
+const LOG = "/tmp/vortex-server.log";
+const log = (msg) => appendFileSync(LOG, `${new Date().toISOString()} ${msg}\n`);
+log("=== vortex-server starting ===");
+log(`pid=${process.pid} argv=${process.argv.join(" ")}`);
+log(`stdin isTTY=${process.stdin.isTTY} stdout isTTY=${process.stdout.isTTY}`);
+process.on("uncaughtException", (err) => {
+    log(`UNCAUGHT: ${err.stack ?? err.message}`);
+});
+process.on("unhandledRejection", (err) => {
+    log(`UNHANDLED: ${err}`);
+});
+const program = new Command();
+program
+    .option("--port <port>", "local HTTP/WS port", String(process.env.VORTEX_PORT ?? "6800"))
+    // Chrome Native Messaging 启动时会追加未知参数（--parent-window 等）以及
+    // chrome-extension://<id>/ 等位置参数，全部放行
+    .allowUnknownOption(true)
+    .allowExcessArguments(true)
+    .parse(process.argv);
+const opts = program.opts();
+[0m
+[0m$ [0mnohup node /Users/lg/workspace/vortex/packages/server/dist/bin/vortex-server.js --port 6800 > /tmp/vortex-server-stdout.log 2>&1 &
+echo "Started PID $!"
+sleep 3
+curl -sf http://localhost:6800/health || echo "Server not responding yet"
+Started PID 53636
+{"status":"ok","timestamp":1781864500603}
+[0m
+[0m✗ [0mvortex_vortex_tab_create {"url":"https://ant.design/components/select","active":true} failed
+[91m[1mError: [0mvortex-server is not running at localhost:6800.
+To start: cd /path/to/vortex && pnpm --filter @vortex-browser/server start
+
+Once it's running, retry your last tool call.
+
+Original error: Failed to connect to vortex-server at localhost:6800: 
+[0m
+[0m$ [0mcurl -sf http://localhost:6800/health; echo; ps -ef | grep -i vortex | grep -v grep
+{"status":"ok","timestamp":1781864523227}
+  501 25636 25617   0  5:21下午 ??         0:03.74 /Users/lg/.nvm/versions/node/v22.22.0/lib/node_modules/@colbymchenry/codegraph/node_modules/@colbymchenry/codegraph-darwin-x64/node --liftoff-only /Users/lg/.nvm/versions/node/v22.22.0/lib/node_modules/@colbymchenry/codegraph/node_modules/@colbymchenry/codegraph-darwin-x64/lib/dist/bin/codegraph.js serve --mcp --path /Users/lg/workspace/vortex
+  501 45717     1   0  6:08下午 ??         0:01.04 node /Users/lg/workspace/vortex/packages/mcp/dist/src/server.js
+  501 51861 51759   0  6:19下午 ??         0:09.48 opencode run 请严格按附带的 EVAL-BRIEF.md 执行本轮 vortex 真站评测。只用 vortex MCP 工具；evaluate 仅作证据读 DOM 真值，禁止旁路完成交互。完成后产出 brief 中指定路径的双产物：anomalies.json（严格符合 reports/_dogfood/anomalies.schema.json）+ eval-observations.md。 -f /Users/lg/workspace/vortex/reports/dogfood-antd-2026-06-19/EVAL-BRIEF.md -m minimax-cn-coding-plan/MiniMax-M3 --print-logs --attach http://localhost:4567
+  501 51952 51771   0  6:19下午 ??         0:01.18 node /Users/lg/workspace/vortex/packages/mcp/dist/src/server.js
+  501 53763 33241   0  6:21下午 ??         0:00.59 node /Users/lg/workspace/vortex/packages/server/dist/bin/vortex-server.js
+  501 10175 10090   0  3:03下午 ttys000    0:00.62 /Users/lg/.nvm/versions/node/v22.22.0/bin/node /Users/lg/.nvm/versions/node/v22.22.0/lib/node_modules/@vortex-browser/mcp/dist/src/server.js
+  501  6371  6278   0  8:22上午 ttys002    0:00.67 /Users/lg/.nvm/versions/node/v22.22.0/bin/node /Users/lg/.nvm/versions/node/v22.22.0/lib/node_modules/@vortex-browser/mcp/dist/src/server.js
+[0m
+[0m⚙ [0mvortex_vortex_tab_create {"url":"https://ant.design/components/select","active":true}
+[0m⚙ [0mvortex_vortex_tab_list Unknown
+[0m⚙ [0mvortex_vortex_wait_for {"mode":"idle","timeout":5000,"tabId":984524694}
+[0m⚙ [0mvortex_vortex_observe {"filter":"interactive","frames":"main","tabId":984524694}
+[0m⚙ [0mvortex_vortex_evaluate {"code":"(function(){\n  // Scroll to Basic Usage demo\n  const el = document.getElementById('select-demo-basic');\n  if (el) el.scrollIntoView({block:'start'});\n  return {found: !!el, y: window.scrollY};\n})()","tabId":984524694}
+[0m⚙ [0mvortex_vortex_observe {"scope":"viewport","filter":"interactive","frames":"main","tabId":984524694}
+[0m⚙ [0mvortex_vortex_query {"mode":"css","pattern":".ant-select-selector","maxResults":15,"tabId":984524694}
+[0m⚙ [0mvortex_vortex_evaluate {"code":"(function(){\n  const sels = Array.from(document.querySelectorAll('.ant-select-selector'));\n  return {\n    count: sels.length,\n    rects: sels.slice(0,5).map(el => {\n      const r = el.getBoundingClientRect();\n      return {y: Math.round(r.y), h: Math.round(r.height), txt: (el.textContent||'').trim().slice(0,30)};\n    })\n  };\n})()","tabId":984524694}
+[0m⚙ [0mvortex_vortex_evaluate {"code":"(function(){\n  const ifr = Array.from(document.querySelectorAll('iframe'));\n  return {\n    count: ifr.length,\n    samples: ifr.slice(0,5).map(f => ({src: f.src.slice(0,80), id: f.id, w: f.clientWidth, h: f.clientHeight}))\n  };\n})()","tabId":984524694}
+[0m⚙ [0mvortex_vortex_evaluate {"code":"(function(){\n  // The antd demos are rendered inside .antd-demo, look at the HTML structure\n  const demos = document.querySelectorAll('[id^=\"select-demo-\"]');\n  return {\n    count: demos.length,\n    samples: Array.from(demos).slice(0,3).map(d => ({\n      id: d.id,\n      tag: d.tagName,\n      childCount: d.children.length,\n      firstChildTag: d.firstElementChild?.tagName,\n      firstChildClass: d.firstElementChild?.className?.toString?.().slice(0,80)\n    }))\n  };\n})()","tabId":984524694}
+[0m⚙ [0mvortex_vortex_evaluate {"code":"(function(){\n  const demo = document.getElementById('select-demo-basic');\n  if (!demo) return {err:'no demo'};\n  const box = demo.querySelector('.code-box-demo');\n  return {\n    demoHTML: box ? box.innerHTML.slice(0, 600) : 'no .code-box-demo'\n  };\n})()","tabId":984524694}
+[0m⚙ [0mvortex_vortex_evaluate {"code":"(function(){\n  const sels = Array.from(document.querySelectorAll('.ant-select'));\n  return {\n    count: sels.length,\n    rects: sels.slice(0,8).map(el => {\n      const r = el.getBoundingClientRect();\n      return {y: Math.round(r.y), h: Math.round(r.height), txt: (el.textContent||'').trim().slice(0,30)};\n    })\n  };\n})()","tabId":984524694}
+[0m⚙ [0mvortex_vortex_evaluate {"code":"(function(){\n  const demo = document.getElementById('select-demo-basic');\n  const sel = demo.querySelector('.ant-select');\n  return {classes: sel?.className};\n})()","tabId":984524694}
+[0m⚙ [0mvortex_vortex_evaluate {"code":"(function(){\n  window.scrollTo(0, 0);\n  // Hide sidebar to focus on demos\n  const aside = document.querySelector('.ant-layout-sider, aside, .ant-menu');\n  return {asideTag: aside?.tagName, asideClass: aside?.className?.toString?.().slice(0,80)};\n})()","tabId":984524694}
+[0m⚙ [0mvortex_vortex_evaluate {"code":"(function(){\n  // Hide sidebar and header for cleaner observation\n  const sels = ['.ant-layout-sider', '#components-page', 'header.ant-layout-header', '.ant-layout-header'];\n  sels.forEach(s => document.querySelectorAll(s).forEach(e => e.style.display='none'));\n  // Scroll to basic demo\n  document.getElementById('select-demo-basic').scrollIntoView({block:'start'});\n  return {ok: true, scrollY: window.scrollY};\n})()","tabId":984524694}
+[0m⚙ [0mvortex_vortex_observe {"scope":"viewport","filter":"interactive","frames":"main","tabId":984524694}
+[0m⚙ [0mvortex_vortex_evaluate {"code":"(function(){\n  // Restore visibility\n  document.querySelectorAll('*').forEach(e => { if(e.style.display==='none') e.style.display=''; });\n  // Hide sidebar more aggressively\n  ['aside', '.ant-layout-sider', '#components-page', '.ant-menu-root', 'header.ant-layout-header'].forEach(s => {\n    document.querySelectorAll(s).forEach(e => {\n      e.setAttribute('data-hide-orig-display', e.style.display);\n      e.style.display='none';\n    });\n  });\n  // Also hide all anchor links in left sidebar\n  document.querySelectorAll('.ant-anchor, .toc-affix, #anchor-list').forEach(e => e.style.display='none');\n  // Scroll to demo\n  document.getElementById('select-demo-basic').scrollIntoView({block:'start'});\n  return {ok: true, hidden: document.querySelectorAll('[style*=\"display: none\"]').length};\n})()","tabId":984524694}
+[0m⚙ [0mvortex_vortex_observe {"scope":"viewport","filter":"interactive","frames":"main","tabId":984524694}
+[0m⚙ [0mvortex_vortex_act {"target":"@bd8b:e15","action":"click","tabId":984524694}
+[0m✗ [0mvortex_vortex_observe {"scope":"viewport","filter":"interactive","frames":"main","tabId":984524694} failed
+[91m[1mError: [0mMCP error -32603: Timeout: no response for observe.snapshot after 30000ms
+[0m⚙ [0mvortex_vortex_screenshot {"format":"jpeg","quality":60,"tabId":984524694}
+[0m⚙ [0mvortex_vortex_evaluate {"code":"(function(){\n  // Find portal dropdown\n  const opts = Array.from(document.querySelectorAll('.ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option'));\n  return {\n    count: opts.length,\n    items: opts.slice(0,8).map(o => ({\n      txt: o.textContent.trim(),\n      disabled: o.classList.contains('ant-select-item-option-disabled'),\n      selected: o.classList.contains('ant-select-item-option-selected')\n    }))\n  };\n})()","tabId":984524694}
+[0m⚙ [0mvortex_vortex_observe {"filter":"interactive","frames":"all-permitted","tabId":984524694}
+[0m⚙ [0mvortex_vortex_act {"target":"@d61c:e72","action":"click","tabId":984524694}
+[0m⚙ [0mvortex_vortex_evaluate {"code":"(function(){\n  // Check the basic usage demo's first select value\n  const demo = document.getElementById('select-demo-basic');\n  const sel = demo.querySelector('.ant-select-selection-item, .ant-select-content');\n  const title = demo.querySelector('.ant-select [title]');\n  return {\n    title: title?.getAttribute('title'),\n    selectionText: sel?.textContent?.trim(),\n    ariaExpanded: demo.querySelector('.ant-select input')?.getAttribute('aria-expanded')\n  };\n})()","tabId":984524694}
+[0m⚙ [0mvortex_vortex_evaluate {"code":"(function(){\n  document.getElementById('select-demo-multiple').scrollIntoView({block:'start'});\n  return {y: window.scrollY};\n})()","tabId":984524694}
+[0m⚙ [0mvortex_vortex_observe {"scope":"viewport","filter":"interactive","frames":"main","tabId":984524694}
+[0m⚙ [0mvortex_vortex_act {"target":"@45e7:e22","action":"click","tabId":984524694}
+[0m⚙ [0mvortex_vortex_observe {"filter":"interactive","frames":"all-permitted","tabId":984524694}
+[0m⚙ [0mvortex_vortex_evaluate {"code":"(function(){\n  const opts = Array.from(document.querySelectorAll('.ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option'));\n  return {\n    count: opts.length,\n    items: opts.slice(0,10).map((o,i) => ({i, txt: o.textContent.trim(), selected: o.classList.contains('ant-select-item-option-selected')}))\n  };\n})()","tabId":984524694}
+[0m⚙ [0mvortex_vortex_observe {"filter":"interactive","frames":"all-permitted","tabId":984524694}
+[0m⚙ [0mvortex_vortex_press {"key":"ArrowDown","tabId":984524694}
+[0m⚙ [0mvortex_vortex_press {"key":"ArrowDown","tabId":984524694}
+[0m⚙ [0mvortex_vortex_evaluate {"code":"(function(){\n  const active = document.querySelector('.ant-select-item-option-active');\n  const selected = Array.from(document.querySelectorAll('.ant-select-selection-item')).map(e => e.textContent.trim());\n  return {active: active?.textContent?.trim(), selected};\n})()","tabId":984524694}
+[0m⚙ [0mvortex_vortex_query {"mode":"css","pattern":".ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option","maxResults":5,"tabId":984524694}
+[0m⚙ [0mvortex_vortex_act {"target":".ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option:nth-child(5)","action":"click","tabId":984524694}
+[0m⚙ [0mvortex_vortex_evaluate {"code":"(function(){\n  const demo = document.getElementById('select-demo-multiple');\n  const sel = demo.querySelector('.ant-select-multiple .ant-select-selection-item');\n  const all = Array.from(demo.querySelectorAll('.ant-select-selection-item')).map(e => e.textContent.trim());\n  return {firstSel: sel?.textContent?.trim(), all};\n})()","tabId":984524694}
+[0m⚙ [0mvortex_vortex_evaluate {"code":"(function(){\n  const dropdowns = Array.from(document.querySelectorAll('.ant-select-dropdown:not(.ant-select-dropdown-hidden)'));\n  return {\n    visible: dropdowns.length,\n    details: dropdowns.map(d => {\n      const opts = Array.from(d.querySelectorAll('.ant-select-item-option')).map(o => ({txt: o.textContent.trim(), selected: o.classList.contains('ant-select-item-option-selected')}));\n      return {opts: opts.slice(0,8)};\n    })\n  };\n})()","tabId":984524694}
+[0m⚙ [0mvortex_vortex_evaluate {"code":"(function(){\n  const demo = document.getElementById('select-demo-multiple');\n  const selItems = Array.from(demo.querySelectorAll('.ant-select-multiple .ant-select-selection-item')).map(e => e.textContent.trim());\n  return {selItems};\n})()","tabId":984524694}
+[0m⚙ [0mvortex_vortex_evaluate {"code":"(function(){\n  // The multiple-selection demo: which demo is the Happy one?\n  const demos = ['select-demo-multiple', 'select-demo-tags', 'select-demo-search-users', 'select-demo-search-multi-field', 'select-demo-multiple-tag'];\n  const out = {};\n  demos.forEach(id => {\n    const demo = document.getElementById(id);\n    if (!demo) return;\n    const sels = Array.from(demo.querySelectorAll('.ant-select-selection-item, .ant-select-content'));\n    out[id] = sels.map(s => s.textContent.trim());\n  });\n  return out;\n})()","tabId":984524694}
+[0m⚙ [0mvortex_vortex_evaluate {"code":"(function(){\n  // Find demo containing the Happy emoji select\n  const allDemos = document.querySelectorAll('[id^=\"select-demo-\"]');\n  const out = {};\n  allDemos.forEach(demo => {\n    if (demo.textContent.includes('Happy') || demo.textContent.includes('Feeling Good')) {\n      const sels = Array.from(demo.querySelectorAll('.ant-select-selection-item, .ant-select-content'));\n      out[demo.id] = sels.map(s => s.textContent.trim()).slice(0,8);\n    }\n  });\n  return out;\n})()","tabId":984524694}
+[0m⚙ [0mvortex_vortex_evaluate {"code":"(function(){\n  document.getElementById('select-demo-search').scrollIntoView({block:'start'});\n  return {y: window.scrollY};\n})()","tabId":984524694}
+[0m⚙ [0mvortex_vortex_observe {"scope":"viewport","filter":"interactive","frames":"main","tabId":984524694}
+[0m⚙ [0mvortex_vortex_act {"target":"@6cf6:e38","action":"click","tabId":984524694}
+[0m⚙ [0mvortex_vortex_fill {"target":".ant-select-focused input.ant-select-input","value":"Lucy","tabId":984524694}
