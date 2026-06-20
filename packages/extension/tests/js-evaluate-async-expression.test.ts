@@ -83,7 +83,9 @@ describe("EVALUATE_ASYNC page-side func — 自包含 + 真跑 (B3-4)", () => {
   // V2 关键守卫:防 V1 假绿 —— func 源码不能引用 buildAsyncSrc
   it("func 序列化安全:源码不引用模块函数 buildAsyncSrc", async () => {
     const fn = await captureAsyncFunc();
-    expect(fn.toString()).not.toMatch(/buildAsyncSrc/);
+    // 剥离行/块注释后再断言:func 已内联,buildAsyncSrc 仅出现在解释性注释,裸正则误匹配 → 假阳。
+    const src = fn.toString().replace(/\/\/.*$/gm, "").replace(/\/\*[\s\S]*?\*\//g, "");
+    expect(src).not.toMatch(/buildAsyncSrc/);
   });
 
   it("纯表达式 'Promise.resolve(42)' → { result: 42 }", async () => {
