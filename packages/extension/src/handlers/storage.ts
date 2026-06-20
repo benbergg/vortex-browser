@@ -203,25 +203,41 @@ export function registerStorageHandlers(router: ActionRouter): void {
 
     [StorageActions.GET_SESSION_STORAGE]: async (args, tabId) => {
       const key = args.key as string | undefined;
+      // 对齐 GET_LOCAL_STORAGE(BUG-002):加 maxLength 校验 + 截断 trailer。否则大
+      // sessionStorage value 被 MCP 传输层静默截断、无 VORTEX_TRUNCATED 信号,agent 误读为
+      // 完整(sibling 路径不对称,白盒实测 2026-06-20:同 20000 字符值 op:get 截断有信号、
+      // op:session-get 原样返回无信号)。截断逻辑须与 GET_LOCAL_STORAGE 内联 truncate 同步。
+      const maxLength = (args.maxLength as number | undefined) ?? 10240;
+      if (!Number.isInteger(maxLength) || maxLength < 1 || maxLength > 5242880) {
+        throw vtxError(VtxErrorCode.INVALID_PARAMS,
+          `maxLength must be an integer in [1, 5242880]; got ${maxLength}`);
+      }
       const tid = await getActiveTabId((args.tabId as number | undefined) ?? tabId);
       const results = await chrome.scripting.executeScript({
         target: { tabId: tid },
-        func: (k: string | null) => {
+        func: (k: string | null, ml: number) => {
+          const lim = ml || 10240; // 兜底:防御性默认
+          const truncate = (s: string) => {
+            if (s.length <= lim) return s;
+            return s.slice(0, lim) + "\n\n[VORTEX_TRUNCATED original=" + s.length + " limit=" + lim + "] Call vortex_observe first for a structured index on large pages.";
+          };
           try {
             if (k) {
-              return { result: sessionStorage.getItem(k) };
+              const v = sessionStorage.getItem(k);
+              if (v == null) return { result: null };
+              return { result: truncate(v) };
             }
             const all: Record<string, string> = {};
             for (let i = 0; i < sessionStorage.length; i++) {
               const key = sessionStorage.key(i);
-              if (key) all[key] = sessionStorage.getItem(key) ?? "";
+              if (key) all[key] = truncate(sessionStorage.getItem(key) ?? "");
             }
             return { result: all };
           } catch (err) {
             return { error: err instanceof Error ? err.message : String(err) };
           }
         },
-        args: [key ?? null],
+        args: [key ?? null, maxLength],
         world: "MAIN",
       });
       const res = results[0]?.result as { result?: unknown; error?: string };
