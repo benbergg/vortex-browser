@@ -378,11 +378,22 @@ export function partitionOverlayFirst(candidates: Element[], overlayRoots: Eleme
  * 生效(overlay-priority 优先级更高)。inject func 内联同名逻辑,改一处须同步。
  */
 export function partitionMainContentFirst(candidates: Element[], mainEl: Element | null): Element[] {
-  if (!mainEl) return candidates;
+  // 内容区(<main>/[role=main])元素恒前置;无语义 landmark 时(多数文档站如 semi.design
+  // 用 <div id=main-content> 而非 <main>)退而把导航区(<nav>/[role=navigation|menubar])元素
+  // 后置。二者都把长导航挤出 maxElements 前缀,让主内容召回;只重排不丢弃(空则原数组同序)。
+  const isNav = (el: Element): boolean =>
+    !!el.closest('nav,[role="navigation"],[role="menubar"]');
   const inMain: Element[] = [];
-  const outMain: Element[] = [];
-  for (const el of candidates) (mainEl.contains(el) ? inMain : outMain).push(el);
-  return inMain.length > 0 && outMain.length > 0 ? [...inMain, ...outMain] : candidates;
+  const mid: Element[] = [];
+  const nav: Element[] = [];
+  for (const el of candidates) {
+    if (mainEl && mainEl.contains(el)) inMain.push(el);
+    else if (isNav(el)) nav.push(el);
+    else mid.push(el);
+  }
+  // 仅当跨 ≥2 个分桶才重排,否则原数组同序(零漂移)。
+  const buckets = (inMain.length > 0 ? 1 : 0) + (mid.length > 0 ? 1 : 0) + (nav.length > 0 ? 1 : 0);
+  return buckets <= 1 ? candidates : [...inMain, ...mid, ...nav];
 }
 
 /**
@@ -1876,14 +1887,22 @@ async function scanOneFrame(
         }
         const allCandidates: Element[] = ((): Element[] => {
           if (overlayRoots.length === 0) {
-            // main-content-priority(A-1):无浮层时按 <main>/[role=main] 内容区前置,
-            // 免遭长导航霸占 maxElements。逻辑须与模块级 partitionMainContentFirst 一致。
-            const mainEl = document.querySelector("main") ?? document.querySelector('[role="main"]');
-            if (!mainEl) return baseCandidates;
-            const inMain: Element[] = [];
-            const outMain: Element[] = [];
-            for (const el of baseCandidates) (mainEl.contains(el) ? inMain : outMain).push(el);
-            return inMain.length > 0 && outMain.length > 0 ? [...inMain, ...outMain] : baseCandidates;
+            // main-content-priority(A-1):内容区(<main>/[role=main])前置 + 导航区
+            // (<nav>/[role=navigation|menubar])降权。多数文档站无语义 <main>(semi.design
+            // 用 <div id=main-content>),靠 nav 降权兜底。须与模块级 partitionMainContentFirst 同步。
+            const mainElA1 = document.querySelector("main") ?? document.querySelector('[role="main"]') ?? document.querySelector("#main-content");
+            const isNavA1 = (el: Element): boolean =>
+              !!el.closest('nav,[role="navigation"],[role="menubar"]');
+            const a1Main: Element[] = [];
+            const a1Mid: Element[] = [];
+            const a1Nav: Element[] = [];
+            for (const el of baseCandidates) {
+              if (mainElA1 && mainElA1.contains(el)) a1Main.push(el);
+              else if (isNavA1(el)) a1Nav.push(el);
+              else a1Mid.push(el);
+            }
+            const a1Buckets = (a1Main.length > 0 ? 1 : 0) + (a1Mid.length > 0 ? 1 : 0) + (a1Nav.length > 0 ? 1 : 0);
+            return a1Buckets <= 1 ? baseCandidates : [...a1Main, ...a1Mid, ...a1Nav];
           }
           const inOverlay = (el: Element): boolean =>
             overlayRoots.some((root) => root === el || root.contains(el));
