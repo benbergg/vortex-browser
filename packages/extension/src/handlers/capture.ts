@@ -93,6 +93,29 @@ async function captureTab(
 }
 
 /**
+ * 取顶层 frame(主文档)的滚动偏移。captureBeyondViewport:true 下 CDP clip 用「文档坐标」,
+ * 而 capture.element / computeFrameClip 经 getBoundingClientRect + getIframeOffset 拿到的是
+ * 「顶层视口相对坐标」。页面滚动后两者相差 window.scrollX/Y——不补这一项,滚动后截视口内某
+ * 元素会落到文档同 y 的另一处,返回错误元素截图(白盒实测 2026-06-20)。scrollY=0 时两坐标系
+ * 重合故仅在滚动页面暴露。跨源 iframe 内元素也只需补「顶层」滚动一次:祖先链各级自身滚动已
+ * 包含在 getBoundingClientRect 累加里,唯独顶层视口→文档的换算缺这一项。定位失败时返 {0,0}
+ * (退化为旧行为,绝不引入回归)。
+ */
+async function getTopScroll(tabId: number): Promise<{ x: number; y: number }> {
+  try {
+    const res = await chrome.scripting.executeScript({
+      target: { tabId }, // 不带 frameId → 顶层 frame
+      func: () => ({ result: { x: window.scrollX, y: window.scrollY } }),
+      world: "MAIN",
+    });
+    const v = (res[0]?.result as { result?: { x: number; y: number } })?.result;
+    return v ?? { x: 0, y: 0 };
+  } catch {
+    return { x: 0, y: 0 };
+  }
+}
+
+/**
  * 单截某 frame 时计算 viewport bbox 作 CDP clip。
  * 用 chrome.scripting.executeScript 在目标 frame 内取 documentElement bounding rect,
  * 再加 iframe-offset 拼绝对坐标。frameId=0 不走此路径(由 SCREENSHOT handler 守卫)。
@@ -115,9 +138,10 @@ async function computeFrameClip(
     throw vtxError(VtxErrorCode.JS_EXECUTION_ERROR, `Failed to compute clip for frameId=${frameId}`);
   }
   const { x: offsetX, y: offsetY } = await getIframeOffset(tabId, frameId);
+  const topScroll = await getTopScroll(tabId);
   return {
-    x: rect.x + offsetX,
-    y: rect.y + offsetY,
+    x: rect.x + offsetX + topScroll.x,
+    y: rect.y + offsetY + topScroll.y,
     width: rect.width,
     height: rect.height,
   };
@@ -237,19 +261,22 @@ export function registerCaptureHandlers(
         );
       }
 
-      // 2. iframe 坐标偏移（复用共享工具）
+      // 2. iframe 坐标偏移（复用共享工具）+ 顶层文档滚动偏移
+      //    （captureBeyondViewport:true 的 clip 用文档坐标,须把视口相对坐标补回滚动量）
       const { x: offsetX, y: offsetY } = await getIframeOffset(tid, frameId);
+      const topScroll = await getTopScroll(tid);
+      const absRect = {
+        x: rect.x + offsetX + topScroll.x,
+        y: rect.y + offsetY + topScroll.y,
+        width: rect.width,
+        height: rect.height,
+      };
 
       // 3. CDP 裁剪截图
       const { dataUrl } = await captureTab(debuggerMgr, tid, {
         format,
         quality,
-        clip: {
-          x: rect.x + offsetX,
-          y: rect.y + offsetY,
-          width: rect.width,
-          height: rect.height,
-        },
+        clip: absRect,
       });
 
       return {
@@ -257,12 +284,7 @@ export function registerCaptureHandlers(
         format,
         ...(format === "jpeg" && quality != null ? { quality } : {}),
         selector,
-        rect: {
-          x: rect.x + offsetX,
-          y: rect.y + offsetY,
-          width: rect.width,
-          height: rect.height,
-        },
+        rect: absRect,
         timestamp: Date.now(),
       };
     },
