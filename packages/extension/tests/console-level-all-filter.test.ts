@@ -24,6 +24,7 @@ type OnEventCb = (tabId: number, method: string, params: unknown) => void;
 
 interface ConsoleArgs {
   level?: string;
+  limit?: number;
 }
 
 describe("console.getLogs level='all' 哨兵 = 无级别过滤", () => {
@@ -103,5 +104,20 @@ describe("console.getLogs level='all' 哨兵 = 无级别过滤", () => {
     const logs = await getLogs(304, { level: "warn" });
     expect(logs).toHaveLength(1);
     expect(logs[0].text).toBe("CANARY_WARN");
+  });
+
+  // debug_read 顶层 tail → dispatch 写成 limit。此前 console.getLogs 漏读 = silent no-op。
+  it("tail(limit)=2 → 仅最近 2 条(此前返回全部 4 条 = silent no-op)", async () => {
+    await seed(305);
+    const logs = await getLogs(305, { limit: 2 });
+    expect(logs).toHaveLength(2);
+    expect(logs.map((l) => l.text)).toEqual(["CANARY_ERROR", "CANARY_INFO"]);
+  });
+
+  it("level + tail 组合:无 level 全 4 条时 limit=1 → 最近 1 条(CANARY_INFO)", async () => {
+    await seed(306);
+    const logs = await getLogs(306, { limit: 1 });
+    expect(logs).toHaveLength(1);
+    expect(logs[0].text).toBe("CANARY_INFO");
   });
 });
