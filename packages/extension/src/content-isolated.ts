@@ -24,6 +24,12 @@
 
   // 1. 接 MAIN world 的 dialog 通知
   window.addEventListener("message", (ev) => {
+    // 安全(CWE-345 跨域消息伪造):只接受**本 frame 自身 MAIN world**(content-main)发来的
+    // 消息。合法 bridge 是同 window 的 MAIN→ISOLATED postMessage(ev.source 必为本 window)。
+    // 缺此检查时,任意页面脚本 / 跨域子 iframe 经 window.top.postMessage 即可伪造
+    // dialog.opened 事件注入 MCP 事件流(text 攻击者可控、url 取本顶 frame,伪装成顶页弹框;
+    // 白盒实测 2026-06-20:opaque-origin 子 frame 伪造消息通过旧 __vortex__-only 守卫)。
+    if (ev.source !== window) return;
     const data = ev.data as { __vortex__?: boolean; type?: string; kind?: string; text?: string } | null;
     if (!data || data.__vortex__ !== true) return;
     if (data.type === "dialog.opened") {
