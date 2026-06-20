@@ -388,6 +388,28 @@ export function partitionOverlayFirst(candidates: Element[], overlayRoots: Eleme
 }
 
 /**
+ * 导航菜单根识别(A-1 main 层降权,ant.design dogfood):<main> 内常驻 role=menu/tree
+ * 侧栏导航(ant.design ant-menu-inline:74 项跨页链接、position static、无 fixed 祖先,
+ * 既不走 overlay 也不在 <nav> landmark 内,却 DOM 序前于 demo 霸占 maxElements)。
+ * 判据:① 在 nav/navigation/menubar landmark 内,或 ② 菜单项 ≥5 且多数(≥60%)为
+ * 跨页 <a href>(非 #/锚点)链接。②把"被演示的 Menu 组件"(项无跨页链接)排除在外,
+ * 只降权真站点导航。inject func 内联同名逻辑,改一处须同步。
+ */
+export function isNavMenuRoot(el: Element, role: string): boolean {
+  if (role !== "menu" && role !== "tree") return false;
+  if (el.closest('nav,[role="navigation"],[role="menubar"]')) return true;
+  const items = el.querySelectorAll('[role="menuitem"],[role="treeitem"]');
+  if (items.length < 5) return false;
+  let links = 0;
+  for (const it of Array.from(items)) {
+    const a = it.matches("a[href]") ? it : it.querySelector("a[href]");
+    const href = a?.getAttribute("href") ?? "";
+    if (href.length > 1 && !href.startsWith("#")) links++;
+  }
+  return links >= items.length * 0.6;
+}
+
+/**
  * main-content-priority(A-1):文档站「左导航 + 右主内容」布局下,导航(DOM 序在前)
  * 霸占 maxElements 配额、主内容 0 召回(semi.design Select dogfood 实证:154 个 nav
  * 排在 244 个 Select demo 之前,maxElements=80/100 全给 nav)。用 WAI-ARIA landmark
@@ -401,11 +423,23 @@ export function partitionMainContentFirst(candidates: Element[], mainEl: Element
   // 后置。二者都把长导航挤出 maxElements 前缀,让主内容召回;只重排不丢弃(空则原数组同序)。
   const isNav = (el: Element): boolean =>
     !!el.closest('nav,[role="navigation"],[role="menubar"]');
+  // 持久导航菜单(role=menu/tree 跨页链接侧栏)即便落在 <main> 内也须降权——否则
+  // ant.design 侧栏 74 项排在 demo 之前霸占 maxElements。向上找最近的导航菜单根。
+  const inNavMenu = (el: Element): boolean => {
+    let cur: Element | null = el;
+    while (cur) {
+      const r = cur.getAttribute("role")?.trim().split(/\s+/)[0] ?? "";
+      if ((r === "menu" || r === "tree") && isNavMenuRoot(cur, r)) return true;
+      cur = cur.parentElement;
+    }
+    return false;
+  };
   const inMain: Element[] = [];
   const mid: Element[] = [];
   const nav: Element[] = [];
   for (const el of candidates) {
-    if (mainEl && mainEl.contains(el)) inMain.push(el);
+    if (inNavMenu(el)) nav.push(el);
+    else if (mainEl && mainEl.contains(el)) inMain.push(el);
     else if (isNav(el)) nav.push(el);
     else mid.push(el);
   }
@@ -1893,6 +1927,31 @@ async function scanOneFrame(
           if (id && document.querySelector('[aria-controls~="' + id + '"],[aria-owns~="' + id + '"]')) return false;
           return true;
         };
+        // 导航菜单根:role=menu/tree 侧栏导航,即便在 <main> 内、position static(ant.design
+        // ant-menu-inline)也须从 main 层降权。判据=在 nav landmark 内,或菜单项 ≥5 且多数为
+        // 跨页 <a href> 链接(把"被演示的 Menu 组件"排除)。模块级 isNavMenuRoot 同名,改一处须同步。
+        const isNavMenuRoot = (el: Element, role: string): boolean => {
+          if (role !== "menu" && role !== "tree") return false;
+          if (el.closest('nav,[role="navigation"],[role="menubar"]')) return true;
+          const items = el.querySelectorAll('[role="menuitem"],[role="treeitem"]');
+          if (items.length < 5) return false;
+          let links = 0;
+          for (const it of Array.from(items)) {
+            const a = it.matches("a[href]") ? it : it.querySelector("a[href]");
+            const href = a?.getAttribute("href") ?? "";
+            if (href.length > 1 && !href.startsWith("#")) links++;
+          }
+          return links >= items.length * 0.6;
+        };
+        const inNavMenu = (el: Element): boolean => {
+          let cur: Element | null = el;
+          while (cur && cur !== docBody) {
+            const r = cur.getAttribute("role")?.trim().split(/\s+/)[0] ?? "";
+            if ((r === "menu" || r === "tree") && isNavMenuRoot(cur, r)) return true;
+            cur = cur.parentElement;
+          }
+          return false;
+        };
         const overlayRoots: Element[] = [];
         // 信号一:ARIA 弹层语义 role + 脱流定位(穿 open shadow,与主扫描一致)。
         for (const el of querySelectorAllDeep("[role]", document)) {
@@ -1933,7 +1992,8 @@ async function scanOneFrame(
           const a1Mid: Element[] = [];
           const a1Nav: Element[] = [];
           for (const el of nonOverlay) {
-            if (mainElA1 && mainElA1.contains(el)) a1Main.push(el);
+            if (inNavMenu(el)) a1Nav.push(el);
+            else if (mainElA1 && mainElA1.contains(el)) a1Main.push(el);
             else if (isNavA1(el)) a1Nav.push(el);
             else a1Mid.push(el);
           }

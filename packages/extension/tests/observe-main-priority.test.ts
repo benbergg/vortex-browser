@@ -3,7 +3,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { partitionMainContentFirst } from "../src/handlers/observe.js";
+import { partitionMainContentFirst, isNavMenuRoot } from "../src/handlers/observe.js";
 
 /**
  * main-content-priority(A-1):文档站「左导航 + 右主内容」布局下,导航(DOM 序在前)
@@ -67,6 +67,70 @@ describe("main-content-priority (A-1)", () => {
       const out = partitionMainContentFirst([get("nav"), get("c")], get("m"));
       expect(out.map((e) => e.id)).toEqual(["c", "nav"]);
     });
+
+    it("ant.design 场景:<main> 内嵌跨页链接 role=menu 侧栏 → 侧栏降权、demo 前移", () => {
+      // ant.design:侧栏 ant-menu-inline(role=menu)在 <main> 内、position static、
+      // 无 fixed 祖先,故不走 overlay 也不被 isNav(非 nav landmark)捕获,DOM 序前于
+      // demo,74 项菜单霸占 maxElements。判据=跨页 <a href> 链接占多数 → 降权。
+      const links = Array.from({ length: 6 }, (_, i) =>
+        `<li role="menuitem"><a id="s${i}" href="/components/c${i}">C${i}</a></li>`,
+      ).join("");
+      document.body.innerHTML =
+        `<main id="m">` +
+        `<ul role="menu" id="side">${links}</ul>` +
+        `<select id="demo0"></select><input id="demo1">` +
+        `</main>`;
+      const get = (id: string) => document.getElementById(id)!;
+      const cands = [
+        get("s0"), get("s1"), get("s2"), get("s3"), get("s4"), get("s5"),
+        get("demo0"), get("demo1"),
+      ];
+      const out = partitionMainContentFirst(cands, get("m"));
+      // demo 应排在 6 个侧栏链接之前
+      expect(out.map((e) => e.id)).toEqual([
+        "demo0", "demo1", "s0", "s1", "s2", "s3", "s4", "s5",
+      ]);
+    });
+  });
+
+  describe("isNavMenuRoot(导航菜单根识别)", () => {
+    it("nav landmark 内的 role=menu → true", () => {
+      document.body.innerHTML = `<nav><ul role="menu" id="m"></ul></nav>`;
+      expect(isNavMenuRoot(document.getElementById("m")!, "menu")).toBe(true);
+    });
+    it("跨页链接占多数的 role=menu(无 nav 祖先,ant.design 侧栏)→ true", () => {
+      const links = Array.from({ length: 6 }, (_, i) =>
+        `<li role="menuitem"><a href="/components/c${i}">C${i}</a></li>`,
+      ).join("");
+      document.body.innerHTML = `<ul role="menu" id="m">${links}</ul>`;
+      expect(isNavMenuRoot(document.getElementById("m")!, "menu")).toBe(true);
+    });
+    it("被演示的 Menu 组件(项无跨页链接)→ false(不误降内容区)", () => {
+      const items = Array.from({ length: 6 }, (_, i) =>
+        `<li role="menuitem">Item ${i}</li>`,
+      ).join("");
+      document.body.innerHTML = `<ul role="menu" id="m">${items}</ul>`;
+      expect(isNavMenuRoot(document.getElementById("m")!, "menu")).toBe(false);
+    });
+    it("锚点(#)链接不算跨页 → false", () => {
+      const items = Array.from({ length: 6 }, (_, i) =>
+        `<li role="menuitem"><a href="#sec${i}">S${i}</a></li>`,
+      ).join("");
+      document.body.innerHTML = `<ul role="menu" id="m">${items}</ul>`;
+      expect(isNavMenuRoot(document.getElementById("m")!, "menu")).toBe(false);
+    });
+    it("项数 <5 → false(小菜单不当导航)", () => {
+      document.body.innerHTML =
+        `<ul role="menu" id="m">` +
+        `<li role="menuitem"><a href="/a">A</a></li>` +
+        `<li role="menuitem"><a href="/b">B</a></li>` +
+        `</ul>`;
+      expect(isNavMenuRoot(document.getElementById("m")!, "menu")).toBe(false);
+    });
+    it("role 非 menu/tree → false", () => {
+      document.body.innerHTML = `<nav><ul role="listbox" id="m"></ul></nav>`;
+      expect(isNavMenuRoot(document.getElementById("m")!, "listbox")).toBe(false);
+    });
   });
 
   describe("inject func 内联副本 drift 锁(改一处须同步)", () => {
@@ -83,6 +147,10 @@ describe("main-content-priority (A-1)", () => {
     it("内联含导航区降权(nav/[role=navigation] closest)", () => {
       expect(SRC).toContain('nav,[role="navigation"],[role="menubar"]');
       expect(SRC).toMatch(/isNavA1\(el\)/);
+    });
+    it("内联含导航菜单根降权(inNavMenu / isNavMenuRoot,ant.design 侧栏)", () => {
+      expect(SRC).toMatch(/inNavMenu\(el\)/);
+      expect(SRC).toContain('[role="menuitem"],[role="treeitem"]');
     });
   });
 });
