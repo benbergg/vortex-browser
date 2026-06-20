@@ -1001,7 +1001,11 @@ async function scanOneFrame(
             el.getAttribute("data-testid") || el.getAttribute("data-test");
           if (testId) {
             const attr = el.getAttribute("data-testid") ? "data-testid" : "data-test";
-            const testSel = `[${attr}="${testId.replace(/"/g, '\\"')}"]`;
+            // 反斜杠须先于引号转义(与下方 aria-label 路径一致)。漏转义反斜杠时,
+            // data-testid 含 `\` 的元素(page 可控)会让 CSS 把 `\x` 当转义符 → 选择器
+            // 错配(实测 `a\b` → 旧选择器匹配 0、去转义后若碰撞他元素则返回错误 ref =
+            // silent wrong-target);CodeQL CWE-116 incomplete-escaping 捕获,2026-06-20。
+            const testSel = `[${attr}="${testId.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"]`;
             // 同 id:testid 也可能重复(列表项复用),唯一才用,否则 fall through。
             if (document.querySelectorAll(testSel).length === 1) return testSel;
           }
