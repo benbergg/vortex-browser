@@ -1,4 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
 import type { NmRequest } from "@vortex-browser/shared";
 import { ActionRouter } from "../src/lib/router.js";
 import { registerPageHandlers } from "../src/handlers/page.js";
@@ -85,5 +88,32 @@ describe("page.wait @ref 解析 (BUG-002 N0063)", () => {
     expect(resp.error).toBeUndefined();
     expect(resp.result).toMatchObject({ waited: 30 });
     expect(executeScript).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * element 模式 MutationObserver 属性变更失明回归锁(白盒实机复现,2026-06-20)。
+ *
+ * 现象:wait_for(mode=element, "#x.ready") 等已存在元素的 class/属性翻转满足时,
+ *   observer 配置 `{ childList: true, subtree: true }` 缺 attributes,classList.add
+ *   不触发回调 → 即便条件满足仍 TIMEOUT。机制级(0 churn、DOM 匹配、回调从不触发)
+ *   + live(class 8s 加上、元素真实匹配、12s TIMEOUT)双证。有后台 DOM churn 的页面
+ *   会间歇性掩盖,静止/完成态页面可靠失败。
+ *
+ * 修复:observer 加 attributes:true,attributeName=class/aria-* 等翻转即重查 querySelector。
+ */
+describe("page.wait element 模式属性变更检测", () => {
+  const PAGE_SRC = readFileSync(
+    join(dirname(fileURLToPath(import.meta.url)), "..", "src", "handlers", "page.ts"),
+    "utf8",
+  );
+  it("MutationObserver 监听 attributes(已存在元素 class/属性翻转可被检测)", () => {
+    // observer.observe 配置须含 attributes: true(否则纯属性变更失明)。
+    const cfg = PAGE_SRC.match(
+      /observer\.observe\(\s*document\.body,\s*\{[^}]*attributes:\s*true[^}]*\}\s*\)/,
+    );
+    expect(cfg).not.toBeNull();
+    // childList/subtree 不回归(节点增删仍检测)。
+    expect(PAGE_SRC).toMatch(/observer\.observe\(\s*document\.body,\s*\{[^}]*childList:\s*true[^}]*subtree:\s*true/);
   });
 });

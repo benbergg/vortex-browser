@@ -302,7 +302,11 @@ export function registerPageHandlers(router: ActionRouter, debuggerMgr: Debugger
               const observer = new MutationObserver(() => {
                 if (document.querySelector(sel)) { observer.disconnect(); resolve(true); }
               });
-              observer.observe(document.body, { childList: true, subtree: true });
+              // attributes:true 不可省——常见诉求是等已存在元素的 class/属性翻转满足
+              // selector(#modal.open / [aria-expanded=true] / li.selected),纯属性变更
+              // 不产生 childList,缺 attributes 则 observer 失明 → 条件已满足仍 TIMEOUT
+              // (2026-06-20 白盒机制+live 双证;静止页可靠失败,churn 页间歇掩盖)。
+              observer.observe(document.body, { childList: true, subtree: true, attributes: true });
               setTimeout(() => { observer.disconnect(); resolve(false); }, ms);
             });
           },
