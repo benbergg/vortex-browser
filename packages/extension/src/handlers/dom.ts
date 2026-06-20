@@ -622,6 +622,7 @@ export function registerDomHandlers(
       const probe = await nativePageQuery<{
         ok?: true;
         isContentEditable?: boolean;
+        ceText?: string;
         errorCode?: string;
         error?: string;
         extras?: Record<string, unknown>;
@@ -682,7 +683,13 @@ export function registerDomHandlers(
               editSel.addRange(range);
             }
           }
-          return { ok: true, isContentEditable: el.isContentEditable === true };
+          return {
+            ok: true,
+            isContentEditable: el.isContentEditable === true,
+            // 回读校验基线:contentEditable 写入前的文本(select-all 不改 textContent,
+            // 此处捕获安全)。host 端 insertText 后比对,识别编辑器拒收(族 A 护栏)。
+            ceText: el.isContentEditable ? (el.textContent ?? "") : undefined,
+          };
         },
         [selector, text !== ""],
       );
@@ -708,6 +715,35 @@ export function registerDomHandlers(
           }
         } else {
           await debuggerMgr.sendCommand(tid, "Input.insertText", { text });
+        }
+        // 族 A silent-false-success 护栏(对齐 input/textarea 路径 786-793 的回读校验):
+        // CDP Input.insertText 即便被编辑器 beforeinput.preventDefault(只读/受限富文本)
+        // 拒绝也不抛错。回读 textContent,若非空文本写完内容完全未变(now===before)且未含
+        // 写入文本(now!==txt)→ 编辑器拒收,报 NO_EFFECT 而非假成功(2026-06-20 白盒复现)。
+        // now!==txt 排除「重输相同文本」假阳;成功插入必改 textContent(now!==before)已先排除。
+        if (text !== "") {
+          const verify = await nativePageQuery<{
+            errorCode?: string;
+            error?: string;
+            extras?: Record<string, unknown>;
+          } | undefined>(
+            tid,
+            frameId,
+            (sel: string, before: string, txt: string) => {
+              const els = (window as any).__vortexDomResolve.queryAllDeep(sel) as Element[];
+              const now = els.length ? ((els[0] as HTMLElement).textContent ?? "") : "";
+              if (now === before && now !== txt) {
+                return {
+                  errorCode: "NO_EFFECT",
+                  error: `Element ${sel} rejected typed text "${txt}" (contentEditable unchanged; likely a read-only or input-guarded editor)`,
+                  extras: { attempted: txt },
+                };
+              }
+              return {};
+            },
+            [selector, probe?.ceText ?? "", text],
+          );
+          if (verify?.error) mapPageError(verify, selector);
         }
         const cdpTypeResult = { success: true, typed: text.length, path: "cdp-insertText" };
         return __healType.healed ? { ...cdpTypeResult, healed: true } : cdpTypeResult;
