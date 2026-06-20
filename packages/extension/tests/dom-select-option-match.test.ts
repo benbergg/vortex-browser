@@ -36,4 +36,21 @@ describe("SELECT handler native <select> option 匹配", () => {
     expect(idxErr).toBeGreaterThan(-1);
     expect(idxAssign).toBeGreaterThan(idxErr);
   });
+
+  // silent-false-success 护栏回归锁(白盒实机复现,2026-06-20)。
+  //
+  // 现象:受控/约束 <select> 在 change 监听中把选择 snap-back 还原(如 React 受控
+  //   组件拒收、业务约束回弹)。单值路径 `el.value=opt.value` → dispatch change →
+  //   读回被还原的 el.value 后无条件 return {success:true},不与意图 opt.value 比对,
+  //   对「选了 B 实则回到 A」报假成功。多选路径有 selectedNow 回读(1221),单值漏。
+  //
+  // 修复:单值 dispatch change 后比对 el.value !== opt.value → NO_EFFECT。option value
+  //   是精确值无规范化(不同于 FILL 的自由文本),严格比对无假阳风险。
+  it("单值选择 dispatch change 后回读校验,被还原 → NO_EFFECT(非假成功)", () => {
+    // change 之后必须有 el.value !== opt.value 的回读守卫,且接 NO_EFFECT。
+    const guard = DOM_SRC.match(
+      /el\.value = opt\.value[\s\S]*?el\.value\s*!==\s*opt\.value[\s\S]*?errorCode:\s*"NO_EFFECT"/,
+    );
+    expect(guard).not.toBeNull();
+  });
 });

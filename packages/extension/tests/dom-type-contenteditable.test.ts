@@ -106,4 +106,30 @@ describe("dom.type contentEditable path (@since 0.8.x Round-1 R1-A)", () => {
     // probe 的 selectAll 实参由 `text !== ""` 传入,空串不全选不清空。
     expect(DOM_SRC).toMatch(/\[selector,\s*text\s*!==\s*""\]/);
   });
+
+  // silent-false-success 护栏回归锁(白盒实机复现,2026-06-20)。
+  //
+  // 现象:对 beforeinput.preventDefault() 的只读/受限富文本编辑器 type 文本,
+  //   CDP Input.insertText 被拒、内容纹丝未动,但 contentEditable 路径无回读校验,
+  //   照报 {success:true, typed:N}。与 input/textarea 路径(786-793 回读 NO_EFFECT)
+  //   护栏不对称——族 A 遗漏点。
+  //
+  // 修复:probe 捕获写入前 textContent(ceText),insertText 后回读比对,内容完全
+  //   未变且未含写入文本 → NO_EFFECT。
+  it("contentEditable 路径 probe 捕获写入前文本基线(ceText)", () => {
+    // probe 返回 ceText 作为回读校验基线。
+    expect(DOM_SRC).toMatch(/ceText/);
+  });
+
+  it("contentEditable insertText 后回读校验,内容未变且未含写入文本 → NO_EFFECT", () => {
+    // insertText 之后、cdp-insertText 结果之前,必须有一次回读把 NO_EFFECT 守卫
+    // 接到 mapPageError(对齐 input/textarea 路径的硬失败上报)。
+    const guard = DOM_SRC.match(
+      /Input\.insertText[\s\S]*?errorCode:\s*"NO_EFFECT"[\s\S]*?path:\s*"cdp-insertText"/,
+    );
+    expect(guard).not.toBeNull();
+    // 守卫条件:内容完全未变(now === before)且未含写入文本(now !== txt),
+    // 避免「重输相同文本」假阳、对齐 input 路径只报硬失败的克制。
+    expect(DOM_SRC).toMatch(/now\s*===\s*before\s*&&\s*now\s*!==\s*txt/);
+  });
 });
