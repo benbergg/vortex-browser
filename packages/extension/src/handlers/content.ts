@@ -212,6 +212,33 @@ export function registerContentHandlers(router: ActionRouter): void {
             if (!root) return { result: "" };
             const hidden = isHiddenChain(root);
             const inner = (root as HTMLElement).innerText ?? "";
+            // open shadow 穿透:Chrome 的 innerText **不进 shadow tree**,页面用
+            // web component 时 shadow 内可见文本被静默漏掉(silent-false-negative,
+            // 与 observe/walkControls 已穿 open shadow 不对称,违反 "visible text"
+            // 契约;实机复现 2026-06-20:open shadow canary 被 extract 漏、被 observe
+            // 召回)。遍历 root 子树找 open shadow host(closed shadowRoot 读为 null,
+            // 浏览器硬限制、两原语都不可达),取其 shadow 子树 innerText,includes 去重
+            // 追加(slot 投影的 light 文本已在 base 里,去重避免重复;live spike 验证
+            // slot 组件无重复,同 walkWithAlt 既有取舍)。
+            const collectShadowText = (rootEl: Element, base: string): string => {
+              let result = base;
+              const stack: Element[] = [rootEl];
+              let visited = 0;
+              while (stack.length && visited < 5000) {
+                const el = stack.pop()!;
+                visited++;
+                const sr = (el as { shadowRoot?: ShadowRoot | null }).shadowRoot;
+                if (sr) {
+                  for (const sc of Array.from(sr.children)) {
+                    const t = ((sc as HTMLElement).innerText ?? "").trim();
+                    if (t && !result.includes(t)) result += "\n" + t;
+                    stack.push(sc);
+                  }
+                }
+                for (const child of Array.from(el.children)) stack.push(child);
+              }
+              return result;
+            };
             // REQ-NNN N0060 京东评测: innerText 不读 img alt attribute, 京东
             // 自营/淘宝/天猫角标 `<img alt="...">` 是 attribute 不是 text node。
             // walkWithAlt 追加未在 innerText 中出现的 alt 文字 (dedup via
@@ -228,7 +255,7 @@ export function registerContentHandlers(router: ActionRouter): void {
               });
               return result;
             };
-            const text = hidden ? "" : walkWithAlt(root, inner);
+            const text = hidden ? "" : walkWithAlt(root, collectShadowText(root, inner));
 
             if (!opts.wantValue && !opts.wantAttrs) {
               return { result: text };
