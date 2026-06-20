@@ -36,26 +36,42 @@ export const textSearchFunc = (
     //  ② display:none / visibility:hidden / 祖先隐藏 由 Element.checkVisibility() 兜底
     //     (Chrome 105+);老环境无此 API 时跳过该判定,保持向后兼容(不误杀可见文本)。
     const SKIP_TEXT_TAGS = new Set(["SCRIPT", "STYLE", "NOSCRIPT", "TEMPLATE"]);
-    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {
-      acceptNode(n: Node): number {
-        const parent = (n as Text).parentElement;
-        if (!parent) return NodeFilter.FILTER_REJECT;
-        if (SKIP_TEXT_TAGS.has(parent.tagName)) return NodeFilter.FILTER_REJECT;
-        const cv = (parent as unknown as { checkVisibility?: () => boolean }).checkVisibility;
-        if (typeof cv === "function" && !cv.call(parent)) return NodeFilter.FILTER_REJECT;
-        return NodeFilter.FILTER_ACCEPT;
-      },
-    });
     let fullText = "";
     const nodeOffsets: Array<{ offset: number; length: number; node: Node }> = [];
-    while (walker.nextNode()) {
-      const node = walker.currentNode;
-      const text = node.textContent;
-      if (text && text.trim()) {
-        nodeOffsets.push({ offset: fullText.length, length: text.length, node });
-        fullText += text;
+    // 穿 open shadow:每个 root 用 TreeWalker 高效遍历自身 light 文本,再对其内
+    // shadow host 递归(深度封顶 8,与 observe querySelectorAllDeep 同语义)。
+    // 旧实现仅 createTreeWalker(document.body) 不下降 shadow root → web-component
+    // 页面 shadow 内文本被静默漏抓(text total:0,无信号)。closed shadow 的
+    // shadowRoot 返 null 天然不穿。顺序:light 文本在前、各 shadow root 文本顺次追加
+    // (同 querySelectorAllDeep 的 light-先/shadow-后);grep 上下文与 element_path
+    // 按 nodeOffsets 解析,不依赖严格文档序。
+    const SHADOW_WALK_MAX_DEPTH = 8;
+    const collectRoot = (root: Document | ShadowRoot | Element, depth: number): void => {
+      const walker = document.createTreeWalker(root as Node, NodeFilter.SHOW_TEXT, {
+        acceptNode(n: Node): number {
+          const parent = (n as Text).parentElement;
+          if (!parent) return NodeFilter.FILTER_REJECT;
+          if (SKIP_TEXT_TAGS.has(parent.tagName)) return NodeFilter.FILTER_REJECT;
+          const cv = (parent as unknown as { checkVisibility?: () => boolean }).checkVisibility;
+          if (typeof cv === "function" && !cv.call(parent)) return NodeFilter.FILTER_REJECT;
+          return NodeFilter.FILTER_ACCEPT;
+        },
+      });
+      while (walker.nextNode()) {
+        const node = walker.currentNode;
+        const text = node.textContent;
+        if (text && text.trim()) {
+          nodeOffsets.push({ offset: fullText.length, length: text.length, node });
+          fullText += text;
+        }
       }
-    }
+      if (depth >= SHADOW_WALK_MAX_DEPTH) return;
+      for (const host of (root as Document | ShadowRoot).querySelectorAll("*")) {
+        const sr = (host as HTMLElement).shadowRoot;
+        if (sr) collectRoot(sr, depth + 1);
+      }
+    };
+    collectRoot(document.body, 0);
 
     let re: RegExp;
     try {
@@ -127,7 +143,7 @@ export const textSearchFunc = (
  * 参数通过 args: [selector, attributes, maxResults, includeText] 注入。
  * 返回 { elements, total, showing } 或 { error, elements: [], total: 0 }。
  */
-const cssQueryFunc = (
+export const cssQueryFunc = (
   selector: string,
   attributes: string[] | null,
   maxResults: number,
@@ -138,9 +154,24 @@ const cssQueryFunc = (
   showing: number;
 } | { error: string; elements: never[]; total: number } => {
   try {
-    let elements: NodeListOf<Element>;
+    // 穿 open shadow 深度遍历,与 observe 的 querySelectorAllDeep 同语义(98b61e5):
+    // document.querySelectorAll 只查 light DOM,web-component 页面 shadow 内元素被
+    // 静默漏计(css total 偏小,无 error 无信号)。closed shadow 的 shadowRoot 返
+    // null 天然不穿,与 observe 一致。⚠ 内联副本(注入 page-side 丢模块作用域),
+    // 逻辑须与 observe.ts querySelectorAllDeep 保持一致,改一处须同步。
+    const SHADOW_WALK_MAX_DEPTH = 8;
+    const queryAllDeep = (sel: string, root: Document | ShadowRoot, depth: number): Element[] => {
+      const acc: Element[] = Array.from(root.querySelectorAll(sel));
+      if (depth >= SHADOW_WALK_MAX_DEPTH) return acc;
+      for (const host of root.querySelectorAll("*")) {
+        const sr = (host as HTMLElement).shadowRoot;
+        if (sr) acc.push(...queryAllDeep(sel, sr, depth + 1));
+      }
+      return acc;
+    };
+    let elements: Element[];
     try {
-      elements = document.querySelectorAll(selector);
+      elements = queryAllDeep(selector, document, 0);
     } catch (e) {
       return { error: "Invalid CSS selector: " + (e instanceof Error ? e.message : String(e)), elements: [], total: 0 };
     }
