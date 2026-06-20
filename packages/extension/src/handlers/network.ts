@@ -479,11 +479,16 @@ export function registerNetworkHandlers(
         );
       }
 
-      // 获取 body：优先从 FIFO 缓存取，否则实时 CDP 调用
+      // 获取 body：优先从 FIFO 缓存取，否则实时 CDP 调用。
+      // encoding 必须一并回传(对齐 sibling getResponseBody):二进制响应 CDP 返
+      // base64Encoded:true,body 是 base64 串。若丢弃此标志,agent 把 base64 当 text
+      // 误读(实机复现 2026-06-20:image/png 响应 body=iVBORw0KGgo... 无信号)。
       let bodyRaw = "";
+      let encoding = "text";
       const cachedBody = responseBodies.get(requestId);
       if (cachedBody) {
         bodyRaw = cachedBody.body;
+        encoding = cachedBody.encoding;
       } else if (debuggerMgr.isAttached(tid)) {
         try {
           const result = await debuggerMgr.sendCommand(
@@ -492,15 +497,18 @@ export function registerNetworkHandlers(
             { requestId },
           ) as any;
           bodyRaw = result.body ?? "";
+          encoding = result.base64Encoded ? "base64" : "text";
         } catch {
           // 204/重定向/body 已淘汰时静默回退空字符串
           bodyRaw = "";
         }
       }
 
-      // body 截断
+      // body 截断。base64 须对齐 4 字符 quad 边界,否则尾部残缺 quad 让整段
+      // atob 解码抛错(length%4==1 时必失败);对齐后返回前缀整段可解码。
       const truncated = bodyRaw.length > maxLength;
-      const body = truncated ? bodyRaw.slice(0, maxLength) : bodyRaw;
+      const limit = encoding === "base64" ? maxLength - (maxLength % 4) : maxLength;
+      const body = truncated ? bodyRaw.slice(0, limit) : bodyRaw;
 
       return {
         requestId,
@@ -510,6 +518,7 @@ export function registerNetworkHandlers(
         statusText: entry.statusText ?? null,
         headers: entry.responseHeaders ?? {},
         body,
+        encoding,
         truncated,
       };
     },

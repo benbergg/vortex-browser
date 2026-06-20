@@ -230,4 +230,83 @@ describe("network.getRequestDetail (source=request) — 单请求 status+body", 
     expect(detail.truncated).toBe(false);
     expect(detail.status).toBe(201);
   });
+
+  // 独立模块实例 + 自定义 base64 body 的工厂(test ④ 同款隔离手法)
+  async function setupBase64(body: string, base64Encoded: boolean) {
+    vi.resetModules();
+    const router2 = new ActionRouter();
+    const mock2 = makeDebuggerMock({ body, base64Encoded });
+    vi.stubGlobal("chrome", {
+      tabs: {
+        query: vi.fn().mockResolvedValue([{ id: 42 }]),
+        onRemoved: { addListener: vi.fn() },
+      },
+      scripting: { executeScript: vi.fn().mockResolvedValue([{ result: [] }]) },
+    });
+    ({ registerNetworkHandlers } = await import("../src/handlers/network.js"));
+    registerNetworkHandlers(router2, mock2.mgr, { send: vi.fn() } as any, { emit: vi.fn() } as any);
+    await router2.dispatch(mkReq("network.subscribe", {}, 42));
+    const onEventCb2 = mock2.getOnEventCb()!;
+    return { router2, onEventCb2 };
+  }
+
+  // ⑦ 二进制响应(CDP base64Encoded:true)必须回传 encoding:"base64",
+  //    否则 agent 把 base64 串当 text 误读(实机复现 2026-06-20:google PNG,
+  //    body=iVBORw0KGgo... 无 encoding 字段;sibling getResponseBody 却带 encoding)。
+  it("⑦ base64 响应回传 encoding=base64(对齐 getResponseBody)", async () => {
+    // 1KB PNG 的 base64(短,truncated:false),用 PNG magic 前缀
+    const b64 = "iVBORw0KGgoAAAANSUhEUg" + "A".repeat(200);
+    const { router2, onEventCb2 } = await setupBase64(b64, true);
+    simulateRequest(onEventCb2, 42, "req-png", "https://x.com/logo.png", 200, {
+      "content-type": "image/png",
+    });
+    await new Promise((r) => setTimeout(r, 10));
+
+    const resp = await router2.dispatch(
+      mkReq("network.getRequestDetail", { requestId: "req-png" }, 42),
+    );
+    expect(resp.error).toBeUndefined();
+    const detail = resp.result as Record<string, unknown>;
+    expect(detail.encoding).toBe("base64");
+    expect(detail.body).toBe(b64);
+    expect(detail.truncated).toBe(false);
+  });
+
+  // ⑧ text 响应回传 encoding=text(显式标注,消除"无字段=未知"歧义)
+  it("⑧ text 响应回传 encoding=text", async () => {
+    const { router2, onEventCb2 } = await setupBase64('{"ok":true}', false);
+    simulateRequest(onEventCb2, 42, "req-json", "https://x.com/api", 200);
+    await new Promise((r) => setTimeout(r, 10));
+
+    const resp = await router2.dispatch(
+      mkReq("network.getRequestDetail", { requestId: "req-json" }, 42),
+    );
+    const detail = resp.result as Record<string, unknown>;
+    expect(detail.encoding).toBe("text");
+    expect(detail.body).toBe('{"ok":true}');
+  });
+
+  // ⑨ base64 截断须对齐 4 字符 quad,保证返回前缀整段可 atob 解码。
+  //    maxLength=10001 → 10001%4=1,若直接 slice 会留半个 quad → atob 抛错;
+  //    对齐后 body.length=10000(可被 4 整除)。
+  it("⑨ base64 截断对齐 4 字符 quad 边界", async () => {
+    const bigB64 = "QUJD".repeat(5000); // 20000 字符,全合法 base64
+    const { router2, onEventCb2 } = await setupBase64(bigB64, true);
+    simulateRequest(onEventCb2, 42, "req-bigpng", "https://x.com/big.png", 200, {
+      "content-type": "image/png",
+    });
+    await new Promise((r) => setTimeout(r, 10));
+
+    const resp = await router2.dispatch(
+      mkReq("network.getRequestDetail", { requestId: "req-bigpng", maxLength: 10001 }, 42),
+    );
+    const detail = resp.result as Record<string, unknown>;
+    expect(detail.encoding).toBe("base64");
+    expect(detail.truncated).toBe(true);
+    const body = detail.body as string;
+    expect(body.length).toBe(10000); // 10001 - (10001 % 4)
+    expect(body.length % 4).toBe(0);
+    // 前缀可被 atob 解码(不抛错)
+    expect(() => atob(body)).not.toThrow();
+  });
 });
