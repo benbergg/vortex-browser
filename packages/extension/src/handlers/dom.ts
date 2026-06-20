@@ -1249,6 +1249,17 @@ export function registerDomHandlers(
             }
             el.value = opt.value;
             el.dispatchEvent(new Event("change", { bubbles: true }));
+            // 回读校验副作用真发生(对齐多选路径 selectedNow 校验):受控/约束 <select>
+            // 可能在 change 监听中把选择 snap-back 还原(React 受控拒收、业务约束回弹),
+            // el.value 读回 ≠ 意图 = 选择被拒,报 NO_EFFECT 而非假成功(2026-06-20 白盒复现)。
+            // option value 是精确值无规范化(不同于 FILL 自由文本的克制空判),严格比对无假阳。
+            if (el.value !== opt.value) {
+              return {
+                errorCode: "NO_EFFECT",
+                error: `<select> ${sel} did not retain selection "${String(val)}" (value is "${el.value}" after change; likely a controlled/constrained select reverting)`,
+                extras: { intended: opt.value, actual: el.value },
+              };
+            }
             return { result: { success: true, value: el.value } };
           } catch (err) {
             return { error: err instanceof Error ? err.message : String(err) };
