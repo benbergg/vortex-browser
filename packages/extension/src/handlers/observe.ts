@@ -370,6 +370,22 @@ export function partitionOverlayFirst(candidates: Element[], overlayRoots: Eleme
 }
 
 /**
+ * main-content-priority(A-1):文档站「左导航 + 右主内容」布局下,导航(DOM 序在前)
+ * 霸占 maxElements 配额、主内容 0 召回(semi.design Select dogfood 实证:154 个 nav
+ * 排在 244 个 Select demo 之前,maxElements=80/100 全给 nav)。用 WAI-ARIA landmark
+ * <main>/[role=main] 锁定内容区,把其内候选前置,保持相对 DOM 序;无 landmark
+ * (mainEl=null)或候选全在/全不在 main 内 → 返回原数组同序(零漂移)。仅在无浮层根时
+ * 生效(overlay-priority 优先级更高)。inject func 内联同名逻辑,改一处须同步。
+ */
+export function partitionMainContentFirst(candidates: Element[], mainEl: Element | null): Element[] {
+  if (!mainEl) return candidates;
+  const inMain: Element[] = [];
+  const outMain: Element[] = [];
+  for (const el of candidates) (mainEl.contains(el) ? inMain : outMain).push(el);
+  return inMain.length > 0 && outMain.length > 0 ? [...inMain, ...outMain] : candidates;
+}
+
+/**
  * 班牛(bytenew)bnCheck 自定义勾选控件识别(N0064 P2-1 dogfood)。
  *
  *   <div class="bnCheck"><span class="bnCheck-status[ checked]">…</span>
@@ -1859,7 +1875,16 @@ async function scanOneFrame(
           }
         }
         const allCandidates: Element[] = ((): Element[] => {
-          if (overlayRoots.length === 0) return baseCandidates;
+          if (overlayRoots.length === 0) {
+            // main-content-priority(A-1):无浮层时按 <main>/[role=main] 内容区前置,
+            // 免遭长导航霸占 maxElements。逻辑须与模块级 partitionMainContentFirst 一致。
+            const mainEl = document.querySelector("main") ?? document.querySelector('[role="main"]');
+            if (!mainEl) return baseCandidates;
+            const inMain: Element[] = [];
+            const outMain: Element[] = [];
+            for (const el of baseCandidates) (mainEl.contains(el) ? inMain : outMain).push(el);
+            return inMain.length > 0 && outMain.length > 0 ? [...inMain, ...outMain] : baseCandidates;
+          }
           const inOverlay = (el: Element): boolean =>
             overlayRoots.some((root) => root === el || root.contains(el));
           const front: Element[] = [];
