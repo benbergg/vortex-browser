@@ -159,7 +159,11 @@ export function registerConsoleHandlers(
       await ensureSubscribed(tid);
       const level = args.level as string | undefined;
       let logs = consoleLogs.get(tid) ?? [];
-      if (level) {
+      // 'all' 是文档化的「全部级别」哨兵(dispatch.ts:214,vortex_debug_read
+      // filter.level='error'|'warn'|'all')。没有 entry 的 level 字面为 'all',
+      // 当作具体级别过滤会让「请求全部日志」静默返回 [](silent-false-negative)。
+      // 故 'all' 视作无级别过滤(同时覆盖 vortex_console 与 vortex_debug_read)。
+      if (level && level !== "all") {
         logs = logs.filter((l) => l.level === level);
       }
       return logs;
