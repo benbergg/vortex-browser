@@ -383,8 +383,11 @@ export function registerPageHandlers(router: ActionRouter, debuggerMgr: Debugger
 
       const results = await chrome.scripting.executeScript({
         target: buildExecuteTarget(tid, frameId),
-        // page-side polling: requestAnimationFrame for the visible-update phase,
-        // setTimeout for the inter-poll gap. Stops on first truthy value or on
+        // page-side polling: 纯 setTimeout 调度(不用 requestAnimationFrame)。
+        // rAF 在隐藏 tab(active:false / 后台 tab,document.visibilityState='hidden')
+        // 被浏览器冻结不回调 → poll 体(含超时判定)永不执行 → promise 挂死到传输超时
+        // (2026-06-20 白盒+DAST 双证)。setTimeout 在隐藏 tab 仍触发(虽节流),与
+        // page.wait / dom.waitSettled 一致。Stops on first truthy value or on
         // timeout. Returns { ok, value, waitedMs, error? } so the caller can
         // distinguish "expr threw" from "expr never went truthy".
         func: (expr: string, timeoutMs: number, intervalMs: number) => {
@@ -416,9 +419,9 @@ export function registerPageHandlers(router: ActionRouter, debuggerMgr: Debugger
                   resolve({ ok: false, waitedMs: Date.now() - start, error: lastError });
                   return;
                 }
-                setTimeout(() => requestAnimationFrame(poll), intervalMs);
+                setTimeout(poll, intervalMs);
               };
-              setTimeout(() => requestAnimationFrame(poll), intervalMs);
+              setTimeout(poll, intervalMs);
             },
           );
         },
