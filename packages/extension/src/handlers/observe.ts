@@ -808,7 +808,25 @@ async function scanOneFrame(
               if (t === "reset") return "Reset";
               if (t === "image") return "Submit Query";
             }
-            // AI: <select> 不能落到下面 textContent 兜底——select 的 textContent 是
+            // <label> 包裹的 labelable 控件(无 id 关联、非 radio/checkbox/按钮):
+            // 按 HTML <label> 语义,控件的可及名 = 包裹 label 的文本。手写表单极常见
+            // (httpbin <label>Customer name: <input></label>),此前仅 radio/checkbox
+            // 命中,text/email/tel/textarea 全落到下方 placeholder 兜底 → 空名。
+            // 关键:AX 语义覆盖层仅施加于主 frame 0,iframe 子框(同源/跨域皆然)的
+            // 此类控件只能靠本启发式命名——缺这一支会让所有 iframe 表单字段无名
+            // (2026-06-22 跨域/iframe dogfood)。克隆 label 后剥除嵌套表单控件,避免
+            // textarea 的当前文本 / <select> 的 option 文本拼接污染名(AI 噪声同理规避)。
+            {
+              const wrapLabel = el.closest("label");
+              if (wrapLabel) {
+                const clone = wrapLabel.cloneNode(true) as HTMLElement;
+                for (const ctrl of clone.querySelectorAll("input, textarea, select"))
+                  ctrl.remove();
+                const txt = normName(clone.textContent);
+                if (txt) return txt;
+              }
+            }
+            // <select> 无包裹 label 时不落 textContent 兜底——select 的 textContent 是
             // 全部 <option> 文本的拼接("Name (A to Z)Name (Z to A)Price..."噪声)。
             // 名应来自 label/aria(已在上面解析),无 label 则返空(当前选中值由
             // getValueInfo 以 value= 暴露)(2026-06-02 dogfood AI)。
