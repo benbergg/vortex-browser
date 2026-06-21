@@ -271,4 +271,47 @@ describe("click-effect page-side module (__vortexClickEffect)", () => {
       vi.useRealTimers();
     }
   });
+
+  // 视觉隐藏(sr-only / 屏幕阅读器 live-region announcer)的 role=alert/status 对用户零
+  // 视觉呈现,不应计入 userFeedback。Next.js __next-route-announcer__(role=alert + clip
+  // + 1×1)存在于每个 Next.js 页面,不滤会让每次 click 误报 userFeedback:"toast"
+  // (2026-06-21 mantine.dev dogfood 实测:开/选 Select 两次点击均误报 toast)。
+  // JSDOM 无布局,桩 checkVisibility + getBoundingClientRect 复刻 announcer 几何。
+  describe("collectFeedback 不把 sr-only announcer 误判为 toast(Next.js route announcer 回归)", () => {
+    function stubGeom(el: Element, w: number, h: number): void {
+      (el as any).checkVisibility = () => true; // 非 display:none/visibility:hidden
+      (el as any).getBoundingClientRect = () => ({
+        width: w, height: h, top: 0, left: 0, right: w, bottom: h, x: 0, y: 0, toJSON() {},
+      });
+    }
+
+    it("sr-only role=alert(1×1 + clip,空文本) → toastHit 空, userFeedback != toast", async () => {
+      const ns = await load();
+      const ann = document.createElement("p");
+      ann.setAttribute("role", "alert");
+      ann.setAttribute("aria-live", "assertive");
+      ann.style.position = "absolute";
+      ann.style.overflow = "hidden";
+      ann.style.clip = "rect(0px, 0px, 0px, 0px)";
+      document.body.appendChild(ann);
+      stubGeom(ann, 1, 1);
+      const t = ns.begin("#b", 10);
+      const eff = (await ns.end(t)) as any;
+      expect(eff.toastHit).toEqual([]);
+      expect(eff.userFeedback).not.toBe("toast");
+    });
+
+    it("真实可见 toast(.ant-message,多 px,有文本)仍被检测 → userFeedback=toast", async () => {
+      const ns = await load();
+      const toast = document.createElement("div");
+      toast.className = "ant-message";
+      toast.textContent = "操作成功";
+      document.body.appendChild(toast);
+      stubGeom(toast, 200, 40);
+      const t = ns.begin("#b", 10);
+      const eff = (await ns.end(t)) as any;
+      expect(eff.toastHit).toContain(".ant-message");
+      expect(eff.userFeedback).toBe("toast");
+    });
+  });
 });
