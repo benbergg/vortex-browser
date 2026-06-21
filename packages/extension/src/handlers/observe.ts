@@ -220,7 +220,23 @@ export async function resolveTargetFrames(
   if (framesParam === "all-permitted") {
     // 按扩展 manifest host_permissions 过滤。host_permissions=<all_urls> 时
     // 行为等同 "all"；当 manifest 收紧 host_permissions 时，只 scan 有权限的。
-    return asTargets(all.filter((f) => isFrameInPermissions(f.url)));
+    // about:srcdoc 子框的 protocol 是 "about:" —— 按 raw url 判会被 isFrameInPermissions
+    // 直接拒，但 srcdoc 据 HTML spec 恒继承父文档 origin(同源可注入)。改按继承源判权限,
+    // 使 all-permitted 对 srcdoc 与 all-same-origin 一致(否则 TinyMCE 等把 contenteditable
+    // 体放在 about:srcdoc iframe 的富文本编辑器,all-permitted 漏扫编辑器内容。Issue #15 同源
+    // 逻辑此前只覆盖 all-same-origin。2026-06-22 tiny.cloud dogfood)。about:blank 不算
+    // 「作者刻意内容」(常为空/广告/瞬态占位),保持排除以免噪声。
+    const byId = new Map(all.map((f) => [f.frameId, f]));
+    return asTargets(
+      all.filter((f) => {
+        if (isFrameInPermissions(f.url)) return true;
+        if (f.url === "about:srcdoc") {
+          const origin = inheritedOrigin(f, byId);
+          return origin != null && isFrameInPermissions(origin);
+        }
+        return false;
+      }),
+    );
   }
   if (framesParam === "all-same-origin") {
     const main = all.find((f) => f.frameId === 0);
