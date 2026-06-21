@@ -151,6 +151,15 @@ interface PendingEntry {
     }
     const r = el.getBoundingClientRect();
     if (r.width === 0 || r.height === 0) return false;
+    // 视觉隐藏(sr-only)的 live-region announcer:checkVisibility 仍判 visible(非
+    // display:none/visibility:hidden)、rect 非 0,却对用户零视觉呈现 —— sr-only 标准做法是
+    // clip/clip-path 折叠 + 收缩到 1×1px(Next.js __next-route-announcer__、Tailwind .sr-only、
+    // react-aria VisuallyHidden、Bootstrap .sr-only 皆如此)。Next.js route announcer(role=alert)
+    // 存在于每个 Next.js 页面,不滤会让 toast 选择器在其上误命中 → 每次 click 误报
+    // userFeedback:"toast"(2026-06-21 mantine.dev dogfood:开/选 Select 两次点击均误报)。
+    // 用尺寸判别(≤1px 任一维):真实 toast/dialog 反馈恒为多 px 框,排除亚像素安全;比 clip
+    // 计算样式判别更稳(unset clip 在 JSDOM 默认即 rect(0..),在真浏览器为 auto,不可靠)。
+    if (r.width <= 1 || r.height <= 1) return false;
     return true;
   }
 
