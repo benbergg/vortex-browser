@@ -2105,13 +2105,22 @@ async function scanOneFrame(
               htmlEl.querySelector(
                 "input[type=checkbox], input[type=radio]",
               ) != null;
+            // contenteditable 宿主(显式 attribute 非 "false")是一等可编辑控件,
+            // 语义等同 textarea —— 富文本编辑器(Quill/ProseMirror/Slate/Lexical)的
+            // 可编辑体常是无 role/无 aria-label 的裸 div(Quill .ql-editor 即如此)。
+            // 不豁免 require-name 门会被当噪声容器丢弃,agent observe 看不到编辑器、
+            // 无法定位输入目标(2026-06-22 quilljs.com dogfood)。仅认显式 attribute
+            // (非继承)避免把编辑器内继承可编辑的子节点也豁免。
+            const ceAttr = htmlEl.getAttribute("contenteditable");
+            const isEditableHost = ceAttr != null && ceAttr !== "false";
             const formLike =
               tag === "input" ||
               tag === "select" ||
               tag === "textarea" ||
               tag === "button" ||
               (tag === "a" && htmlEl.hasAttribute("href")) ||
-              wrapsFormControl;
+              wrapsFormControl ||
+              isEditableHost;
             const hasExplicitRole =
               !!htmlEl.getAttribute("role") ||
               !!htmlEl.getAttribute("aria-label");

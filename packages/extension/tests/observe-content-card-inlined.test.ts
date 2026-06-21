@@ -77,3 +77,13 @@ describe("observe #42:多 CTA 容器去重内联(源码锁)", () => {
     expect(OBSERVE_SRC).toMatch(/不查子文本互不为子串/);
   });
 });
+
+describe("observe contenteditable 宿主豁免 require-name 门(源码锁,quilljs dogfood)", () => {
+  it("BUG-3 门 formLike 含 isEditableHost(显式 contenteditable 非 false)", () => {
+    // 富文本编辑器(Quill/ProseMirror)的可编辑体常是无 role/无 aria-label 的裸 div,
+    // 不豁免 require-name 会被当噪声容器丢弃 → observe 看不到编辑器。
+    expect(OBSERVE_SRC).toMatch(/const ceAttr = htmlEl\.getAttribute\("contenteditable"\);/);
+    expect(OBSERVE_SRC).toMatch(/const isEditableHost = ceAttr != null && ceAttr !== "false";/);
+    expect(OBSERVE_SRC).toMatch(/wrapsFormControl \|\|\s*\n\s*isEditableHost;/);
+  });
+});
