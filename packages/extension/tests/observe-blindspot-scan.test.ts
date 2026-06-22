@@ -21,6 +21,8 @@ describe("scan func 内联 detectBlindspot 与纯函数一致", () => {
     // 误报闸:祖先 DOM 行数 >> 本列表渲染数 → 跳过(MDN 侧栏实证),须与 canonical 同步
     expect(src).toContain("__scrollerRows");
     expect(src).toContain("__scrollerRows > __rendered * 2");
+    // A2-fb-div 纯 div 虚拟列表(react-window/virtuoso/PrimeReact VirtualScroller)内联
+    expect(src).toContain("[inline detectDivVirtualScroller]");
   });
   it("纯函数对 grid aria-rowcount=1000/rendered=10 → virtual(行为基线)", () => {
     document.body.innerHTML = `<div role="grid" aria-rowcount="1000">${"<div role='row'></div>".repeat(10)}</div>`;
