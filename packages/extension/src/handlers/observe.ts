@@ -2479,6 +2479,18 @@ async function scanOneFrame(
             // 1249 项,某 6 项小列表被估成 303(scrollH 9692/rowH 32)实证。
             const __scrollerRows = __scroller.querySelectorAll("[role=row],tr,li").length;
             if (__scrollerRows > __rendered * 2) continue;
+            // 页面级滚动容器(body/html/main/scrollingElement 或近视口高)的 scrollHeight 反映
+            // 整页内容而非该列表,est 会把整页高度误当列表行数(react-aria docs props 表 37 行
+            // 全渲染却因滚动祖先是 <main> 被误报 ~186/37,2026-06-22 dogfood)。仅对有界专用
+            // 滚动视口启用本估算启发式;页面级 window-scroller 虚拟列表通常设 aria-rowcount。
+            const __pageLevel =
+              __scroller === document.scrollingElement ||
+              __scroller === document.body ||
+              __scroller === document.documentElement ||
+              __scroller.tagName === "MAIN" ||
+              __scroller.getAttribute("role") === "main" ||
+              __ch >= window.innerHeight * 0.9;
+            if (__pageLevel) continue;
             const __est = Math.round(__sh / __rowH);
             if (__est > __rendered && __est >= Math.max(__rendered * 2, __rendered + 20)) {
               __seenScrollers.add(__scroller);

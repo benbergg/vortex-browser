@@ -82,37 +82,49 @@ describe("detectBlindspot", () => {
 });
 
 describe("detectVirtualByScroll (A2-fb 非 ARIA 虚拟化)", () => {
-  it("Naive 式虚拟表(渲染12/scrollH 48000/clientH 250/rowH 48) → virtual ~1000 低置信", () => {
-    const b = detectVirtualByScroll({ scrollHeight: 48000, clientHeight: 250 }, 12, 48);
+  it("Naive 式虚拟表(有界视口 scrollH 48000/clientH 250/rowH 48,渲染12) → virtual ~1000 低置信", () => {
+    // 有界专用滚动视口(isPageLevelScroller=false)。
+    const b = detectVirtualByScroll({ scrollHeight: 48000, clientHeight: 250 }, 12, 48, false);
     expect(b).toEqual({ kind: "virtual", total: 1000, rendered: 12, confidence: "low" });
   });
   it("普通可滚动列表(渲染100/estTotal≈100) → 不报（负例:渲染全部非虚拟）", () => {
     // sh=2000 ch=400 → 5x 强滚动,但 rendered=100 estTotal=100 不>>rendered
-    expect(detectVirtualByScroll({ scrollHeight: 2000, clientHeight: 400 }, 100, 20)).toBeNull();
+    expect(detectVirtualByScroll({ scrollHeight: 2000, clientHeight: 400 }, 100, 20, false)).toBeNull();
   });
   it("分页表(10 行无超额滚动 sh≈ch) → 不报（负例）", () => {
-    expect(detectVirtualByScroll({ scrollHeight: 420, clientHeight: 400 }, 10, 40)).toBeNull();
+    expect(detectVirtualByScroll({ scrollHeight: 420, clientHeight: 400 }, 10, 40, false)).toBeNull();
   });
   it("行数太少(<3) → 不报（负例）", () => {
-    expect(detectVirtualByScroll({ scrollHeight: 48000, clientHeight: 250 }, 2, 48)).toBeNull();
+    expect(detectVirtualByScroll({ scrollHeight: 48000, clientHeight: 250 }, 2, 48, false)).toBeNull();
   });
   it("clientHeight 0(未布局) → 不报（负例）", () => {
-    expect(detectVirtualByScroll({ scrollHeight: 48000, clientHeight: 0 }, 12, 48)).toBeNull();
+    expect(detectVirtualByScroll({ scrollHeight: 48000, clientHeight: 0 }, 12, 48, false)).toBeNull();
   });
   it("强滚动但 estTotal 仅略多于渲染(rendered18/estTotal30) → 不报（负例:缓冲非虚拟）", () => {
     // sh=1200 ch=240 → 5x, rowH=40, estTotal=30, rendered=18 → 30<max(36,38) 不触发
-    expect(detectVirtualByScroll({ scrollHeight: 1200, clientHeight: 240 }, 18, 40)).toBeNull();
+    expect(detectVirtualByScroll({ scrollHeight: 1200, clientHeight: 240 }, 18, 40, false)).toBeNull();
+  });
+  it("全渲染文档表在页面级滚动容器(<main>)内 → 不报（负例:2026-06-22 react-aria FP）", () => {
+    // react-aria DatePicker docs:props 表 37 行全渲染,滚动祖先是 <main>(scrollH 5967=整页内容、
+    // ch 660)。est=5967/32≈186 看似虚拟,但页面级容器 scrollHeight 反映整页非该表 → 正确不报
+    // (此前误报 ~186/37)。isPageLevelScroller=true。
+    expect(detectVirtualByScroll({ scrollHeight: 5967, clientHeight: 660 }, 37, 32, true)).toBeNull();
+  });
+  it("页面级滚动容器即使强滚动+est远超渲染也不报（负例:页面级 scrollHeight 不可靠,A2-fb 不覆盖)", () => {
+    // 即便数值满足虚拟判据,页面级容器(body/main/window-scroller)的 scrollH=整页 → est 不可信。
+    // 此类 window-scroller 虚拟列表通常设 aria-rowcount,由 ARIA 路径覆盖,A2-fb 不冒误报风险。
+    expect(detectVirtualByScroll({ scrollHeight: 48000, clientHeight: 800 }, 12, 48, true)).toBeNull();
   });
   it("小列表嵌于高大导航祖先(scrollerRowCount 1249 >> rendered 6) → 不报（误报闸:MDN 实证）", () => {
     // aside scrollH=9692/clientH=634 → 15x 强滚动,rowH=32,est=303>>6 本会误报,
     // 但 scrollerRowCount=1249 > 6*2 → 祖先含其它内容,非本列表虚拟化 → null。
     expect(
-      detectVirtualByScroll({ scrollHeight: 9692, clientHeight: 634 }, 6, 32, 1249),
+      detectVirtualByScroll({ scrollHeight: 9692, clientHeight: 634 }, 6, 32, false, 1249),
     ).toBeNull();
   });
   it("真虚拟列表祖先只含窗口行(scrollerRowCount≈rendered) → 仍正常报", () => {
     // 显式传 scrollerRowCount=12(≈rendered 12,真虚拟:祖先只渲染窗口)→ 闸不触发,照常报。
-    expect(detectVirtualByScroll({ scrollHeight: 48000, clientHeight: 250 }, 12, 48, 12)).toEqual({
+    expect(detectVirtualByScroll({ scrollHeight: 48000, clientHeight: 250 }, 12, 48, false, 12)).toEqual({
       kind: "virtual",
       total: 1000,
       rendered: 12,
