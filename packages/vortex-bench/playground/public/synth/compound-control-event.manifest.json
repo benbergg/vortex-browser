@@ -1,0 +1,9 @@
+{
+  "fixture": "compound-control-event",
+  "path": "/synth/compound-control-event.html",
+  "tier": "hard",
+  "frames": "main",
+  "entries": [
+    { "id": "evt-compound", "interactive": true, "expectedName": "4p Repeating Event", "expectedRole": null, "pattern": "compound-control-event", "note": "FullCalendar <a.fc-event> 单一复合控件:time+title 不得碎成多 ref,<a> 作单一事件节点暴露(碎片化时 geometry join 命中首子 4p → name-mismatch)" }
+  ]
+}

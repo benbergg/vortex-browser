@@ -346,6 +346,40 @@ export function isFocusContainerOnly(el: Element): boolean {
 }
 
 /**
+ * 嵌套 cursor:pointer 择叶里「单一复合控件」否决判据(FullCalendar `<a.fc-event>` dogfood 根因)。
+ *
+ * isMultiCtaContainer 把「≥2 个有文本 cursor:pointer 子」的祖先当多 CTA 布局容器拆分
+ * (drop 容器、保所有子,#42 班牛 createBox 三独立按钮)。但**原生交互元素**
+ * (`<a>`/`<button>`/`<summary>` 或交互 role)是单一复合控件:其 cursor:pointer 子
+ * (FullCalendar 事件的 `.fc-event-time` "4p" + `.fc-event-title` "Repeating Event")是
+ * 视觉部件、非独立动作。误拆会让一个事件碎成两 ref、"4p" 成误导性局部。多 CTA 真容器
+ * 恒为非交互布局层(div/span/li 无交互 role)。命中本判据 → 该祖先不可当多 CTA 容器拆分,
+ * 保留祖先(其文本含各子文本)、drop 视觉部件子项。
+ *
+ * Why export:供 `observe-compound-control.test.ts` jsdom 直测真源;inject func 内联同语义
+ * 副本(closure 注入无法 import),改一处须同步另一处,源码锁守护。
+ */
+export const SINGLE_CONTROL_ROLES = new Set<string>([
+  "button",
+  "link",
+  "menuitem",
+  "menuitemcheckbox",
+  "menuitemradio",
+  "option",
+  "tab",
+  "treeitem",
+  "checkbox",
+  "radio",
+  "switch",
+]);
+export function isCompoundControlSelf(el: Element): boolean {
+  const tag = el.tagName;
+  if (tag === "A" || tag === "BUTTON" || tag === "SUMMARY") return true;
+  const role = el.getAttribute("role")?.trim().split(/\s+/)[0];
+  return !!role && SINGLE_CONTROL_ROLES.has(role);
+}
+
+/**
  * overlay-priority(DEFECT-1):弹层语义 role 集——可见且脱流时,其交互后代前置免遭
  * maxElements 截断(portal 弹层挂 body 末尾,DOM 序最后,密集页上点开即被截掉)。
  * 注意:inject func(scanOneFrame)内联同名副本,closure 注入无法 import,**改一处须
@@ -1807,8 +1841,25 @@ async function scanOneFrame(
         }
         // 多 CTA 容器:≥2 个有文本的最近 candidate 子、且自身非内容卡 → 保子、drop 容器。
         // 不查子文本互不为子串(createBox '创建'⊂'创建空白工作表'是中文巧合,仍是独立按钮)。
+        // isCompoundControlSelf 内联副本——真源见导出函数(可单测),inject func 注入丢
+        // 模块作用域不能 import,改一处须同步另一处(源码锁守护)。原生 <a>/<button>/
+        // <summary> 或交互 role 是单一复合控件,其 cursor:pointer 子是视觉部件非独立 CTA
+        // (FullCalendar `<a.fc-event>` 的 .fc-event-time + .fc-event-title),不可当多 CTA
+        // 容器拆分。多 CTA 真容器恒为非交互布局层(div/span/li)。
+        const SINGLE_CONTROL_ROLES = new Set([
+          "button", "link", "menuitem", "menuitemcheckbox", "menuitemradio",
+          "option", "tab", "treeitem", "checkbox", "radio", "switch",
+        ]);
+        const isCompoundControlSelf = (anc: Element): boolean => {
+          const tag = anc.tagName;
+          if (tag === "A" || tag === "BUTTON" || tag === "SUMMARY") return true;
+          const role = anc.getAttribute("role")?.trim().split(/\s+/)[0];
+          return !!role && SINGLE_CONTROL_ROLES.has(role);
+        };
         const isMultiCtaContainer = (anc: Element, kids: Element[]): boolean => {
           if (kids.length < 2) return false;
+          // 原生交互祖先(单一复合控件)不拆分——其文本部件子(时间/标题/图标)非独立动作。
+          if (isCompoundControlSelf(anc)) return false;
           let withText = 0;
           for (const c of kids) {
             if ((c.textContent ?? "").trim().length > 0) withText++;

@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="zh"><head><meta charset="utf-8"><title>compound control event</title>
+<style>
+  .event,.dot,.time,.title{cursor:pointer}
+  .event{display:block;border:1px solid #3788d8;background:#3788d8;color:#fff;padding:4px 6px;width:200px;text-decoration:none}
+  .dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:#fff}
+  .time{font-weight:bold;margin:0 4px}
+</style>
+</head><body>
+<h1>单一复合控件(FullCalendar `&lt;a.fc-event&gt;` 时间+标题)</h1>
+<!-- FullCalendar 定时事件:`<a class="fc-event">`(cursor:pointer、无 href,vanilla JS 驱动)
+     含 .fc-daygrid-event-dot(空)+ .fc-event-time "4p" + .fc-event-title。三者皆 cursor:pointer。
+     time/title 两个有文本子曾触发 isMultiCtaContainer 误判 → `<a>` 被拆成两碎片 ref、"4p"
+     成误导性局部。修复后 `<a>` 作单一事件节点暴露(时间/标题是视觉部件非独立动作)。
+     oracle 打在 `<a>` 上:碎片化时 geometry join 命中首子("4p")→ name-mismatch;修复后
+     命中 `<a>` → 全文本。 -->
+<a class="event" data-vtx-oracle="evt-compound">
+  <div class="dot"></div>
+  <div class="time">4p</div>
+  <div class="title">Repeating Event</div>
+</a>
+</body></html>
