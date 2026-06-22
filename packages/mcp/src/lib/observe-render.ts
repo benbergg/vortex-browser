@@ -107,7 +107,7 @@ export interface RenderSnapshotEntry {
 }
 
 /** 快照 ID → 身份键集合映射；TTL 5 分钟，容量上限 20 条。 */
-const renderSnapshotCache = new Map<string, { keys: Set<string>; ts: number }>();
+const renderSnapshotCache = new Map<string, { keys: Set<string>; identityByIndex: Map<string, string>; ts: number }>();
 const RENDER_CACHE_TTL_MS = 5 * 60 * 1000;
 const RENDER_CACHE_MAX = 20;
 
@@ -119,6 +119,8 @@ export function storeSnapshot(snapshotId: string, entries: RenderSnapshotEntry[]
   gcRenderCache();
   renderSnapshotCache.set(snapshotId, {
     keys: new Set(entries.map((e) => e.elementKey)),
+    // storeSnapshot 仅用于测试，不提供 index 信息，故 identityByIndex 为空。
+    identityByIndex: new Map(),
     ts: Date.now(),
   });
 }
@@ -131,8 +133,14 @@ function buildElementKey(e: CompactElement): string {
 /** 渲染完成后把本次快照存入缓存供后续 diff 使用。 */
 function autoStoreSnapshot(snapshotId: string, elements: CompactElement[]): void {
   gcRenderCache();
+  // 按 `${frameId}:${index}` 建立索引，供 lookupIdentity 按 ref 坐标取回语义身份。
+  const identityByIndex = new Map<string, string>();
+  for (const e of elements) {
+    identityByIndex.set(`${e.frameId}:${e.index}`, buildElementKey(e));
+  }
   renderSnapshotCache.set(snapshotId, {
     keys: new Set(elements.map(buildElementKey)),
+    identityByIndex,
     ts: Date.now(),
   });
 }
@@ -146,6 +154,21 @@ function lookupSnapshot(snapshotId: string): Set<string> | null {
     return null;
   }
   return entry.keys;
+}
+
+/**
+ * 按 `{frameId, index}` 从快照缓存取回元素语义身份（`role::name::frameId`）。
+ * 快照不存在、已过期或 index 未命中均返回 null。
+ * 供重放模块将 ref 坐标映射为跨快照稳定的语义 key。
+ */
+export function lookupIdentity(snapshotId: string, frameId: number, index: number): string | null {
+  const entry = renderSnapshotCache.get(snapshotId);
+  if (!entry) return null;
+  if (Date.now() - entry.ts > RENDER_CACHE_TTL_MS) {
+    renderSnapshotCache.delete(snapshotId);
+    return null;
+  }
+  return entry.identityByIndex.get(`${frameId}:${index}`) ?? null;
 }
 
 function gcRenderCache(): void {

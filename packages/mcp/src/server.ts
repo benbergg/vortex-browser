@@ -17,6 +17,8 @@ import { getToolDefs, getToolDef, setEnabledCaps } from "./tools/registry.js";
 import { dispatchNewTool } from "./tools/dispatch.js";
 import { computeTransportTimeout } from "./lib/timeout.js";
 import { liftWaitForRefToTarget } from "./lib/wait-for-ref.js";
+import { applyFingerprint, shouldRecover, type FingerprintOpt } from "./lib/fingerprint-apply.js";
+import { lookupIdentity } from "./lib/observe-render.js";
 export { dispatchNewTool };
 
 // Read package.json via createRequire so the bundle works under both ts-node
@@ -57,6 +59,15 @@ import { VtxError, DEFAULT_ERROR_META, type VtxEventLevel, type VtxErrorCode } f
 type ContentItem =
   | { type: "text"; text: string }
   | { type: "image"; data: string; mimeType: string };
+
+/**
+ * autoRecover 成功时写入 actResult.recovered 的结构。
+ * 两种形态:成功(带新快照 id + observe 文本)和失败(snapshotId null + 错误说明)。
+ * drift 仍原样返回 —— re-observe 失败不掩盖 drift。
+ */
+type RecoveredOut =
+  | { snapshotId: string; observeText: string }
+  | { snapshotId: null; error: string };
 
 /** 普通 tool response 附加 piggyback 事件 */
 function formatError(err: unknown): string {
@@ -676,6 +687,19 @@ export async function handleCallTool(
     params.frameId = parseInt(m[1], 10);
   }
 
+  // ── 可验证确定性重放(click)──
+  // 零开销契约:options.fingerprint 缺失时整段跳过,act 行为字节级不变。
+  // 守卫双条件:① fpOpt 存在 ② 逻辑 act action === "click"(Phase 1 仅 click 有 effect)。
+  // 注意 action 取 params.action(逻辑 act 动作),非下方 dispatch 后的 dom.click。
+  const fpOpt = (params.options as { fingerprint?: FingerprintOpt } | undefined)?.fingerprint;
+  const fpActive = !!fpOpt && params.action === "click";
+  if (fpActive) {
+    // record/verify 都需要 effect 信号 → 强制 observeEffect(caller 未显式开时补上)。
+    const opts = (params.options ?? {}) as Record<string, unknown>;
+    if (opts.observeEffect === undefined) opts.observeEffect = true;
+    params.options = opts;
+  }
+
   try {
     const { tabId, returnMode, timeout, ...rest } = params;
     // WAIT-TIMEOUT-MARGIN(族 O):调用方 timeout 既要作 handler 内层 poll 预算,又决定
@@ -775,6 +799,50 @@ export async function handleCallTool(
           if (truncWarning) items.push({ type: "text" as const, text: truncWarning });
           items.push({ type: "image" as const, data: m[2], mimeType: `image/${m[1]}` });
           return withEvents(items);
+        }
+      }
+    }
+
+    // ── 可验证确定性重放:record/verify 在 act 正常 JSON 上挂 fingerprint/drift/recovered。──
+    // 两信号正交:fingerprint drift 与 stale-ref 互不相干,本块只在 act 成功且带 effect 后跑,
+    // 不触碰 resolveTargetParam 的 STALE_SNAPSHOT 路径。
+    if (fpActive && fpOpt && resp.result && typeof resp.result === "object") {
+      const actResult = resp.result as Record<string, unknown> & {
+        effect?: import("@vortex-browser/shared").ClickEffectLike;
+      };
+      // targetIdentity:由解析得的 {index, frameId} 经快照缓存反查语义身份(role::name::frameId)。
+      // params.index/frameId/snapshotId 由上方 target 翻译写入;snapshotId 优先用解析结果,
+      // 回退当前 activeSnapshotId。index 缺失(selector 直传无快照坐标)→ identity 为 null,
+      // applyFingerprint 自然返回空,诚实不臆造。
+      const snapId = (params.snapshotId as string | undefined) ?? activeSnapshotId;
+      const idx = params.index as number | undefined;
+      const frameId = (params.frameId as number | undefined) ?? 0;
+      const identity =
+        snapId != null && idx != null ? lookupIdentity(snapId, frameId, idx) : null;
+      const fpOut = applyFingerprint(fpOpt, "click", identity, actResult.effect);
+      Object.assign(actResult, fpOut);
+      // autoRecover:仅当 verify 检出 drift 且显式 autoRecover:true 时再 observe 一次,
+      // 否则诚实交回调用方(不自动 re-observe)。
+      if (shouldRecover(fpOpt, fpOut.drift ?? null)) {
+        try {
+          const reob = await handleCallTool({
+            params: { name: "vortex_observe", arguments: { tabId } },
+          });
+          const observeText = reob.content
+            .filter((c): c is { type: "text"; text: string } => c.type === "text")
+            .map((c) => c.text)
+            .join("\n");
+          // re-observe 成功后 activeSnapshotId 已由 observe handler 更新。
+          // "" 作为极端兜底(re-observe 完成但 handler 未能写入快照 id 的防御性分支)。
+          const recovered: RecoveredOut = { snapshotId: activeSnapshotId ?? "", observeText };
+          actResult.recovered = recovered;
+        } catch (err) {
+          // re-observe 失败不掩盖 drift:挂错误说明,drift 仍原样返回。
+          const recovered: RecoveredOut = {
+            snapshotId: null,
+            error: err instanceof Error ? err.message : String(err),
+          };
+          actResult.recovered = recovered;
         }
       }
     }
