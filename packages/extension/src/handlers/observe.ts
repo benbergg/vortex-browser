@@ -1549,6 +1549,16 @@ async function scanOneFrame(
           "*:not(svg *):not(script):not(style):not(meta):not(link):not(head):not(head *)",
           document,
         );
+        // SVG 内部交互元素补集:上面 `:not(svg *)` 把 svg 后代整类排除(防装饰 path/g
+        // 刷屏),但带交互信号的 svg 子元素(role/onclick/直绑 listener/可聚焦)是真控件——
+        // recharts/d3 可点 rect·circle、draw.io/流程图形状、地图可点区域。无 role 仅靠
+        // listener/cursor 信号的 svg 控件此前整类漏(2026-06-22 APG/recharts dogfood,
+        // act 侧 SVG click 崩溃的 observe 对偶)。仅选带信号者控开销,仍走下方同一入池门
+        // (cursor/framework/listener + require-name)过滤装饰。
+        const svgInteractivePool = querySelectorAllDeep(
+          "svg [role],svg [onclick],svg [data-vtx-listener],svg [tabindex]:not([tabindex='-1'])",
+          document,
+        );
         const FALLBACK_CAP = 5000; // hard ceiling against pathological pages
         const docRoot = document.documentElement;
         const docBody = document.body;
@@ -1637,7 +1647,7 @@ async function scanOneFrame(
           if (role && FOCUS_CONTAINER_ROLES.has(role)) return true;
           return !anc.matches(ATOMIC_INTERACTIVE_SELECTORS);
         };
-        for (const el of Array.from(fallbackPool)) {
+        for (const el of [...Array.from(fallbackPool), ...Array.from(svgInteractivePool)]) {
           if (cursorPointerExtras.length >= FALLBACK_CAP) break;
           if (interactiveSet.has(el)) continue;
           // Skip <html> / <body> — a SPA setting cursor:pointer on the root
@@ -1679,7 +1689,14 @@ async function scanOneFrame(
           }
           if (hasInteractiveAncestor) continue;
           const htmlEl = el as HTMLElement;
-          if (htmlEl.offsetWidth === 0 || htmlEl.offsetHeight === 0) continue;
+          // SVG 元素无 offsetWidth/offsetHeight(undefined),退回 getBoundingClientRect 测尺寸,
+          // 否则 `undefined === 0` 恒 false 使零尺寸 svg defs/clip 漏过尺寸门。
+          if (typeof htmlEl.offsetWidth === "number") {
+            if (htmlEl.offsetWidth === 0 || htmlEl.offsetHeight === 0) continue;
+          } else {
+            const __r = el.getBoundingClientRect();
+            if (__r.width === 0 || __r.height === 0) continue;
+          }
           // 入池信号:cursor:pointer(常见但继承可疑)或框架确凿绑定的 onClick。
           // 后者更强,覆盖 cursor:auto 的 React/Vue 裸 div 按钮(2026-06-04 淘宝评价区
           // 真漏「查看全部评价」「切换大图模式」)。下游 require-name + 含交互后代/祖先
