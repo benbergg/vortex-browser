@@ -380,6 +380,40 @@ export function isCompoundControlSelf(el: Element): boolean {
 }
 
 /**
+ * Tailwind / 原子 CSS 工具类判据 —— iconNameFromClass 的 className 兜底否决用
+ * (swiperjs.com / tiptap.dev dogfood 2026-06-22)。
+ *
+ * 现象:无 aria-label/title/alt 的图标元素(`<a class="mb-4"><img alt=""></a>`、
+ * `<button class="p-0.5"><svg lucide></button>`)落到 className 兜底,正则
+ * `^_?([a-zA-Z][a-zA-Z0-9_-]{2,})` 把 Tailwind 布局类(`mb-4`/`p-0`/`block`/`size-12`/
+ * `text-grayAlpha-600`)当语义名返回,对 agent 是噪声且误导。
+ *
+ * 判据:精确匹配显示/定位/排版关键字集,或前缀匹配间距/尺寸/颜色/层叠等工具类族。
+ * 真语义图标类(`icon-search`/`close`/`chevron-down`/`arrow-left`)不命中——它们不以
+ * Tailwind 前缀起、不在关键字集。命中 → 视为非语义,className 兜底跳过该 token。
+ *
+ * Why export:供 `observe-tailwind-utility-name.test.ts` jsdom 直测真源;inject func
+ * 内联同语义副本(closure 注入无法 import),改一处须同步另一处,源码锁守护。
+ */
+const TW_UTILITY_KEYWORDS = new Set<string>([
+  "block", "inline", "inline-block", "inline-flex", "inline-grid", "flex", "grid",
+  "hidden", "contents", "table", "flow-root", "flex-row", "flex-col", "flex-wrap",
+  "absolute", "relative", "fixed", "sticky", "static",
+  "truncate", "grow", "shrink", "italic", "underline", "uppercase", "lowercase",
+  "capitalize", "antialiased", "rounded", "border", "shadow",
+]);
+const TW_UTILITY_PREFIX_RE =
+  /^-?(?:m|p)[trblxyse]?-\d|^(?:w|h|size|min-w|max-w|min-h|max-h|gap|space-x|space-y|inset|top|bottom|left|right|order|basis|col-span|row-span|grid-cols|grid-rows|text|bg|border|ring|rounded|shadow|opacity|z|leading|tracking|translate|scale|rotate|duration|delay|ease|justify|items|self|place|flex)-/;
+export function isTailwindUtilityClass(token: string): boolean {
+  const t = token.toLowerCase();
+  // 变体类含冒号分隔符(hover:opacity-75 / md:flex / dark:bg-gray-800 / group-hover:…)——
+  // 整体非语义。冒号在 CSS class 标识符里仅 Tailwind/UnoCSS 变体使用(BEM/语义类不含)。
+  if (t.includes(":")) return true;
+  if (TW_UTILITY_KEYWORDS.has(t)) return true;
+  return TW_UTILITY_PREFIX_RE.test(t);
+}
+
+/**
  * overlay-priority(DEFECT-1):弹层语义 role 集——可见且脱流时,其交互后代前置免遭
  * maxElements 截断(portal 弹层挂 body 末尾,DOM 序最后,密集页上点开即被截掉)。
  * 注意:inject func(scanOneFrame)内联同名副本,closure 注入无法 import,**改一处须
@@ -648,6 +682,24 @@ async function scanOneFrame(
         const ICON_CLASS_DENY_NAMES = new Set([
           "icon", "iconfont", "btn", "button", "wrapper", "container",
         ]);
+        // isTailwindUtilityClass 内联副本(真源见导出函数,可单测;注入体不能 import,
+        // 改一处须同步,源码锁守护)。Tailwind/原子 CSS 工具类(mb-4/p-0/block/size-12/
+        // text-grayAlpha-600)非语义,className 兜底命中即跳过,防当图标名泄漏。
+        const TW_UTILITY_KEYWORDS = new Set([
+          "block", "inline", "inline-block", "inline-flex", "inline-grid", "flex", "grid",
+          "hidden", "contents", "table", "flow-root", "flex-row", "flex-col", "flex-wrap",
+          "absolute", "relative", "fixed", "sticky", "static",
+          "truncate", "grow", "shrink", "italic", "underline", "uppercase", "lowercase",
+          "capitalize", "antialiased", "rounded", "border", "shadow",
+        ]);
+        const TW_UTILITY_PREFIX_RE =
+          /^-?(?:m|p)[trblxyse]?-\d|^(?:w|h|size|min-w|max-w|min-h|max-h|gap|space-x|space-y|inset|top|bottom|left|right|order|basis|col-span|row-span|grid-cols|grid-rows|text|bg|border|ring|rounded|shadow|opacity|z|leading|tracking|translate|scale|rotate|duration|delay|ease|justify|items|self|place|flex)-/;
+        const isTailwindUtilityClass = (token: string): boolean => {
+          const t = token.toLowerCase();
+          if (t.includes(":")) return true; // 变体类 hover:/md:/dark: 等
+          if (TW_UTILITY_KEYWORDS.has(t)) return true;
+          return TW_UTILITY_PREFIX_RE.test(t);
+        };
         function iconNameFromClass(el: Element): string {
           const inner = el.querySelector("svg, img") as Element | null;
           if (!inner) return "";
@@ -677,6 +729,10 @@ async function scanOneFrame(
           const cls =
             el.className && typeof el.className === "string" ? el.className : "";
           for (const c of cls.split(/\s+/).filter(Boolean)) {
+            // Tailwind/原子工具类(mb-4/block/size-12/text-*/hover:opacity-75)非语义,
+            // 整体跳过——对原始 token 检测(变体类的冒号在裁剪前才在)。否则无 aria-label
+            // 的图标元素命名退化到布局/变体类(swiperjs/tiptap dogfood)。
+            if (isTailwindUtilityClass(c)) continue;
             const m = c.match(/^_?([a-zA-Z][a-zA-Z0-9_-]{2,})/);
             if (!m || !m[1]) continue;
             const cleaned = m[1]
