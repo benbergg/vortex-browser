@@ -661,6 +661,18 @@ async function scanOneFrame(
           }
           const aria = inner.getAttribute("aria-label")?.trim();
           if (aria) return aria.slice(0, 80);
+          // 1b. svg 图标库类名(lucide `lucide lucide-chevron-right` / feather
+          //     `feather feather-x`):图标语义名在 svg 自身 class,远胜按钮的
+          //     Tailwind 布局类——否则下方 className 兜底把 `p-0.5` 截成噪声名 "p-0"
+          //     (2026-06-22 tiptap.dev dogfood:侧栏 chevron 展开按钮命名 "p-0")。
+          //     取 `<lib>-<name>` 的 name,hyphen→空格。lucide 广用于 shadcn/ui 等。
+          if (inner.tagName === "svg") {
+            const svgCls = inner.getAttribute("class") || "";
+            for (const tok of svgCls.split(/\s+/)) {
+              const lm = tok.match(/^(?:lucide|feather)-(.+)$/);
+              if (lm && lm[1]) return lm[1].replace(/-/g, " ").slice(0, 80);
+            }
+          }
           // 2. className 兜底，带 denylist
           const cls =
             el.className && typeof el.className === "string" ? el.className : "";
