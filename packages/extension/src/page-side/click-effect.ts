@@ -163,6 +163,33 @@ interface PendingEntry {
     return true;
   }
 
+  // 裸 ARIA role 选择器([role='alert']/[role='status']/[role='dialog']/[role='alertdialog'])
+  // 既被瞬态 toast/对话框用,也被常驻正文内容块误用(文档站说明框 div.callout role=alert,
+  // 760×106 完全可见、position:relative 在正常文档流)。sr-only 尺寸滤拦不住这类大尺寸可见块。
+  // 区分信号:真 toast/对话框恒为定位浮层(自身或祖先 position fixed/absolute/sticky,脱离正常
+  // 流或固定视口),文档内容块在正常流(static/relative)。沿 parentElement 上溯命中任一定位
+  // 浮层祖先即判为浮层。框架专属 .class 选择器不经此门(bootstrap .toast 自身常 static、容器
+  // 才 fixed),仅裸 role 选择器(sel 以 "[role=" 起)受约束。
+  function isOverlayPositioned(el: Element): boolean {
+    let cur: Element | null = el;
+    let hops = 0;
+    while (cur && hops < 50) {
+      let pos = "";
+      try {
+        pos = window.getComputedStyle(cur).position;
+      } catch {
+        /* getComputedStyle 不可用 → 视为非浮层,跳过本层 */
+      }
+      if (pos === "fixed" || pos === "absolute" || pos === "sticky") return true;
+      cur = cur.parentElement;
+      hops++;
+    }
+    return false;
+  }
+
+  // 裸 role 选择器(攻击面同 toast/dialog 两族)统一判别:以 "[role=" 起即为裸 role 选择器。
+  const isBareRoleSelector = (sel: string): boolean => sel.indexOf("[role=") === 0;
+
   // 嗅探 click 派发后窗口内可见的 toast / dialog 选择器命中集合(去重),并经 shared 的
   // classifyFeedback 给出 userFeedback 桶(优先级 dialog > toast > mutation > none)。
   // 与 collectNetwork 一样是纯 page-side,无 CDP debugger 依赖,合成/CDP 两路皆可用。
@@ -176,10 +203,13 @@ interface PendingEntry {
     const dialogHit: string[] = [];
     // 逐选择器 try 包裹:某选择器抛错(如 :popover-open 在不支持 Popover API 的浏览器
     // 抛 SyntaxError)只跳过该项,不拖垮整批 toast/dialog 检测(原单 try 会全丢)。
+    // 裸 role 选择器(如 [role=alert]/[role=status])命中常驻内容块会误判 toast,
+    // 故对其追加「定位浮层」门(isOverlayPositioned);其余选择器照常。
     const hitAny = (sel: string): boolean => {
       try {
+        const gated = isBareRoleSelector(sel);
         for (const n of Array.from(document.querySelectorAll(sel))) {
-          if (isVisible(n)) return true;
+          if (isVisible(n) && (!gated || isOverlayPositioned(n))) return true;
         }
       } catch {
         /* 不支持的选择器 → 跳过,保留其他信号 */
