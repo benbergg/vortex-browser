@@ -45,3 +45,35 @@ describe("observe className name quality — emotion/generated-class denial (202
     expect(denyIdx).toBeLessThan(returnCleanedIdx);
   });
 });
+
+/**
+ * Regression lock for the lucide/feather svg-icon-library name fix
+ * (tiptap.dev dogfood 2026-06-22).
+ *
+ * 现象:侧栏 chevron 展开按钮(`<button class="p-0.5 rounded ...">` 含
+ * `<svg class="lucide lucide-chevron-right">`,无 aria-label/title/text)被
+ * observe 命名为 "p-0" —— iconNameFromClass 的 className 兜底用正则
+ * `^_?([a-zA-Z][a-zA-Z0-9_-]{2,})` 把 Tailwind 布局类 `p-0.5` 截成噪声名 "p-0",
+ * 且从不读 svg 自身的 `lucide-chevron-right` 类(图标语义真源)。
+ *
+ * 修复:iconNameFromClass 在 className 兜底之前,先读 inner svg 的 class,
+ * 命中 `lucide-<name>` / `feather-<name>` 即返回 <name>(hyphen→空格)。
+ * lucide 广用于 shadcn/ui 等,svg 类是图标语义的标准载体。
+ */
+describe("observe svg-icon-library name — lucide/feather svg class reading (2026-06-22 tiptap dogfood)", () => {
+  it("iconNameFromClass reads inner svg lucide-/feather- class", () => {
+    expect(OBSERVE_SRC).toMatch(/\/\^\(\?:lucide\|feather\)-\(\.\+\)\$\//);
+  });
+
+  it("svg-icon-lib reading runs before the className denylist fallback (避免 Tailwind 类泄漏)", () => {
+    const svgIconIdx = OBSERVE_SRC.search(/\/\^\(\?:lucide\|feather\)-\(\.\+\)\$\//);
+    const classnameFallbackIdx = OBSERVE_SRC.indexOf("// 2. className 兜底");
+    expect(svgIconIdx).toBeGreaterThan(0);
+    expect(classnameFallbackIdx).toBeGreaterThan(0);
+    expect(svgIconIdx).toBeLessThan(classnameFallbackIdx);
+  });
+
+  it("仅在 inner.tagName === svg 时读取(不误伤 img alt 路径)", () => {
+    expect(OBSERVE_SRC).toMatch(/if \(inner\.tagName === "svg"\) \{[\s\S]*?lucide\|feather[\s\S]*?\}/);
+  });
+});

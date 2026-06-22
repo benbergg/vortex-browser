@@ -1,0 +1,9 @@
+{
+  "fixture": "lucide-icon-button",
+  "path": "/synth/lucide-icon-button.html",
+  "tier": "medium",
+  "frames": "main",
+  "entries": [
+    { "id": "lucide-chevron", "interactive": true, "expectedName": "chevron right", "expectedRole": null, "pattern": "lucide-icon-button", "note": "lucide svg 图标按钮:名取 svg lucide- 类(chevron right),非 Tailwind 布局类 p-0" }
+  ]
+}

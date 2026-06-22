@@ -1,0 +1,13 @@
+<!doctype html>
+<html lang="zh"><head><meta charset="utf-8"><title>lucide icon button</title>
+<style>button{padding:8px;border:1px solid #888;background:#fff;cursor:pointer}svg{display:block}</style>
+</head><body>
+<h1>lucide svg 图标按钮(无 aria-label/text,图标名在 svg class)</h1>
+<!-- shadcn/ui 等广用 lucide:`<svg class="lucide lucide-chevron-right">`。按钮无 aria-label/
+     title/text,只有 Tailwind 布局类 `p-0.5`。修复前 iconNameFromClass 把 `p-0.5` 截成噪声
+     名 "p-0";修复后读 svg 自身 lucide 类 → "chevron right"。oracle 打按钮,expectedName
+     断言图标语义名而非 Tailwind 类。 -->
+<button class="p-0.5 rounded hover:bg-gray-100" data-vtx-oracle="lucide-chevron">
+  <svg xmlns="http://www.w3.org/2000/svg" class="lucide lucide-chevron-right" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 18 6-6-6-6"></path></svg>
+</button>
+</body></html>
