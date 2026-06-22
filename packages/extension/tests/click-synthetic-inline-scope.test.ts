@@ -109,4 +109,30 @@ describe("合成 click inline func 注入作用域(P0 isTransient 回归锁)", (
     await router.dispatch(mkReq({ selector: "#btn" }));
     expect(clicked).toBeGreaterThan(0);
   });
+
+  // 2026-06-22 APG multi-thumb slider dogfood:SVG <g role=slider> 等无 .click() 方法的
+  // 非 HTML 元素(SVGElement.prototype.click===undefined),合成 click 路径裸调 el.click()
+  // → "G.click is not a function" JS_EXECUTION_ERROR,SVG 交互元素整类点击崩溃。
+  it("合成 click 对无 .click() 方法的 SVG 元素不抛错且仍派发 click 事件", async () => {
+    const svgNS = "http://www.w3.org/2000/svg";
+    const svg = dom.window.document.createElementNS(svgNS, "svg");
+    const g = dom.window.document.createElementNS(svgNS, "g");
+    g.setAttribute("id", "svgthumb");
+    g.setAttribute("role", "slider");
+    g.setAttribute("tabindex", "0");
+    // 复刻真实 Chrome:SVGElement 无 click 方法(jsdom 可能补全,强制 undefined 求确定性)
+    Object.defineProperty(g, "click", { value: undefined, configurable: true });
+    (g as unknown as { getBoundingClientRect: () => DOMRect }).getBoundingClientRect = () =>
+      ({ x: 10, y: 10, width: 40, height: 20, top: 10, bottom: 30, left: 10, right: 50 }) as DOMRect;
+    svg.appendChild(g);
+    dom.window.document.body.appendChild(svg);
+    let clicked = 0;
+    g.addEventListener("click", () => {
+      clicked++;
+    });
+    const resp = await router.dispatch(mkReq({ selector: "#svgthumb" }));
+    expect(resp.error?.message ?? "").not.toMatch(/is not a function/);
+    expect(resp.error).toBeUndefined();
+    expect(clicked).toBeGreaterThan(0);
+  });
 });
