@@ -1,8 +1,326 @@
 {
   "version": 1,
-  "updated": "2026-06-19",
+  "updated": "2026-06-22",
   "note": "目标站轮换池 + 覆盖状态。dogfood-rotation.mjs 按「未覆盖 > 上轮有真缺陷 > 最久未测」挑下一站。只放无需登录的组件库 demo + 已授权内部站。pages 是评估范围(每页新 tab),重点选择类/浮层/Portal/虚拟列表/拖拽。",
   "sites": [
+    {
+      "id": "svg-charts-sortable-tables",
+      "label": "SVG 图表(ApexCharts/Highcharts)+ Wikipedia 可排序表",
+      "base_url": "https://en.wikipedia.org/wiki/List_of_countries_and_dependencies_by_population",
+      "category": "structural-edge",
+      "needs_login": false,
+      "pages": [
+        {
+          "id": "S1",
+          "path": "",
+          "interactions": "SVG 图表 role=img 优雅;可排序 columnheader observe+click sort effect"
+        }
+      ],
+      "history": [
+        {
+          "date": "2026-06-22",
+          "iteration": 13,
+          "result": "0 新缺陷(証伪):图表 role=img 优雅;Wikipedia 可排序表 observe/act/effect 全通;子框 role 降级判架构级转 brainstorm"
+        }
+      ]
+    },
+    {
+      "id": "cross-origin-iframe-forms",
+      "label": "跨域/iframe 表单(httpbin via 注入 iframe + CodeSandbox 预览)",
+      "base_url": "https://httpbin.org/forms/post",
+      "category": "structural-edge",
+      "needs_login": false,
+      "pages": [
+        {
+          "id": "X1",
+          "path": "/forms/post",
+          "interactions": "注入跨域+同源 iframe 测子框 observe 命名/act;label 包裹控件可访问名;AX 覆盖层主框独享降级"
+        }
+      ],
+      "history": [
+        {
+          "date": "2026-06-22",
+          "iteration": 12,
+          "result": "1 真缺陷修复 PR#71:iframe 子框 label 包裹控件无名(AX 覆盖仅主框);CodeSandbox nodebox 异质渲染判为非缺陷"
+        }
+      ]
+    },
+    {
+      "id": "youtube",
+      "label": "YouTube (真实站, Polymer light-DOM + 搜索联想)",
+      "base_url": "https://www.youtube.com/",
+      "category": "real-world",
+      "needs_login": false,
+      "pages": [
+        {
+          "id": "C1",
+          "path": "",
+          "interactions": "搜索联想 search-as-you-type;视频卡;90 yt-* 自定义元素(light DOM 无 shadow)"
+        }
+      ],
+      "last_covered": "2026-06-22",
+      "history": [
+        {
+          "cycle": "dogfood-youtube-2026-06-22",
+          "date": "2026-06-22",
+          "vortex_defects": 0,
+          "false_positives": 0,
+          "note": "observe 干净+搜索联想 type 实时结果;闭合 shadow A3 spike:host 带 role 时 observe 发 [blindspot=shadow?] 优雅降级,无 role 同 SR 盲(可接受)"
+        }
+      ]
+    },
+    {
+      "id": "github",
+      "label": "GitHub repo 页 (真实生产站, custom elements + native dialog)",
+      "base_url": "https://github.com/microsoft/playwright",
+      "category": "real-world",
+      "needs_login": false,
+      "pages": [
+        {
+          "id": "C1",
+          "path": "",
+          "interactions": "Code 下拉(clone 面板 overlay)/Go to file 模糊查找/分支菜单/文件树;custom elements + native dialog"
+        }
+      ],
+      "last_covered": "2026-06-22",
+      "history": [
+        {
+          "cycle": "dogfood-github-2026-06-22",
+          "date": "2026-06-22",
+          "vortex_defects": 0,
+          "false_positives": 0,
+          "note": "observe/overlay-priority/readonly/act type/search-as-you-type 全正常;Code 面板 clone URL 正确标 readonly;Go to file 模糊查找实时结果;真实生产站验证"
+        }
+      ]
+    },
+    {
+      "id": "monaco",
+      "label": "Monaco 编辑器 (microsoft.github.io/monaco-editor, EditContext)",
+      "base_url": "https://microsoft.github.io/monaco-editor/",
+      "category": "code-editor",
+      "needs_login": false,
+      "pages": [
+        {
+          "id": "C1",
+          "path": "",
+          "interactions": "EditContext 编辑器:click 聚焦→press 输入;语言/主题 combobox;readonly 检测"
+        }
+      ],
+      "last_covered": "2026-06-22",
+      "history": [
+        {
+          "cycle": "dogfood-monaco-2026-06-22",
+          "date": "2026-06-22",
+          "vortex_defects": 0,
+          "false_positives": 0,
+          "note": "observe 呈现编辑器(role=textbox)+combobox;readonly 检测验证;proper focus→press 输入插入(EditContext API);早期 NOT_EDITABLE 系未聚焦+textarea churn 非缺陷"
+        }
+      ]
+    },
+    {
+      "id": "react-datepicker",
+      "label": "react-datepicker (reactdatepicker.com, 日历弹层)",
+      "base_url": "https://reactdatepicker.com/",
+      "category": "date-picker",
+      "needs_login": false,
+      "pages": [
+        {
+          "id": "C1",
+          "path": "",
+          "interactions": "日历 gridcell 点选 + 键盘日期录入(受控态同步);多实例(106)须 data-spike 锁定单个"
+        }
+      ],
+      "last_covered": "2026-06-22",
+      "history": [
+        {
+          "cycle": "dogfood-react-datepicker-2026-06-22",
+          "date": "2026-06-22",
+          "vortex_defects": 0,
+          "false_positives": 0,
+          "note": "点选+键盘 fill 受控态均正常;toast FP 系 PR#68(未合并)1×1 announcer,非新缺陷=再验证 PR#68;106 实例多实例陷阱"
+        }
+      ]
+    },
+    {
+      "id": "quill",
+      "label": "Quill 富文本编辑器 (quilljs.com, 裸 contenteditable)",
+      "base_url": "https://quilljs.com/",
+      "category": "rich-text",
+      "needs_login": false,
+      "pages": [
+        {
+          "id": "C1",
+          "path": "",
+          "interactions": "无 role/label 的 .ql-editor contenteditable:observe 发现 + 工具栏 Bold/Italic + 输入"
+        }
+      ],
+      "last_covered": "2026-06-22",
+      "history": [
+        {
+          "cycle": "dogfood-quill-2026-06-22",
+          "date": "2026-06-22",
+          "vortex_defects": 1,
+          "false_positives": 0,
+          "note": "无名 div[contenteditable] 编辑体被 observe BUG-3 require-name 门漏报,修复纳入 formLike 豁免(PR #70),live 验证 3 编辑器全现"
+        }
+      ]
+    },
+    {
+      "id": "tinymce",
+      "label": "TinyMCE 富文本编辑器 (tiny.cloud, srcdoc iframe)",
+      "base_url": "https://www.tiny.cloud/docs/tinymce/latest/",
+      "category": "rich-text",
+      "needs_login": false,
+      "pages": [
+        {
+          "id": "C1",
+          "path": "full-featured-open-source-demo/",
+          "interactions": "srcdoc contenteditable 编辑体:observe frames=all-permitted 感知 + 工具栏 Bold/菜单 + 跨帧输入"
+        },
+        {
+          "id": "C2",
+          "path": "classic-demo/",
+          "interactions": "classic iframe 模式编辑器"
+        }
+      ],
+      "last_covered": "2026-06-22",
+      "history": [
+        {
+          "cycle": "dogfood-tinymce-2026-06-22",
+          "date": "2026-06-22",
+          "vortex_defects": 1,
+          "false_positives": 0,
+          "note": "all-permitted 漏扫 about:srcdoc 编辑器帧(isFrameInPermissions 拒 about: protocol),修复经 inheritedOrigin 纳入(PR #69),live 验证 all-permitted 现呈现编辑器内容;工具栏/菜单 observe 正常"
+        }
+      ]
+    },
+    {
+      "id": "radix",
+      "label": "Radix UI Primitives (React)",
+      "base_url": "https://www.radix-ui.com/primitives/docs/components/",
+      "category": "component-lib",
+      "needs_login": false,
+      "pages": [
+        {
+          "id": "C1",
+          "path": "slider",
+          "interactions": "Slider:click 聚焦 thumb→ArrowRight 键盘调值"
+        },
+        {
+          "id": "C2",
+          "path": "dialog",
+          "interactions": "Dialog Portal+焦点陷阱:open→portal 内 fill→close"
+        },
+        {
+          "id": "C3",
+          "path": "dropdown-menu",
+          "interactions": "DropdownMenu portal:menuitemcheckbox/radio toggle;submenu"
+        },
+        {
+          "id": "C4",
+          "path": "select",
+          "interactions": "Select portal listbox"
+        }
+      ],
+      "last_covered": "2026-06-21",
+      "history": [
+        {
+          "cycle": "dogfood-radix-2026-06-21",
+          "date": "2026-06-21",
+          "vortex_defects": 0,
+          "false_positives": 0,
+          "note": "Slider 键盘/Dialog 焦点陷阱+portal fill/DropdownMenu checkbox toggle 全正常;dialog/toast effect 检测正确;PR #68 无 FP。连续 3 fresh 库 0 缺陷→策略转向 canvas/拖拽/业务站"
+        }
+      ]
+    },
+    {
+      "id": "primevue",
+      "label": "PrimeVue (Vue3, Nuxt docs)",
+      "base_url": "https://primevue.org/",
+      "category": "component-lib",
+      "needs_login": false,
+      "pages": [
+        {
+          "id": "C1",
+          "path": "select/",
+          "interactions": "Select basic/filter/virtual scroll:act+fill 提交值"
+        },
+        {
+          "id": "C2",
+          "path": "multiselect/",
+          "interactions": "MultiSelect basic/chips:数组 fill→chips+aria-selected;chip 删除"
+        },
+        {
+          "id": "C3",
+          "path": "cascadeselect/",
+          "interactions": "CascadeSelect 级联"
+        },
+        {
+          "id": "C4",
+          "path": "treeselect/",
+          "interactions": "TreeSelect 展开树→选节点"
+        },
+        {
+          "id": "C5",
+          "path": "datatable/",
+          "interactions": "DataTable 虚拟滚动行选/排序"
+        }
+      ],
+      "last_covered": "2026-06-21",
+      "history": [
+        {
+          "cycle": "dogfood-primevue-2026-06-21",
+          "date": "2026-06-21",
+          "vortex_defects": 0,
+          "false_positives": 0,
+          "note": "Select/MultiSelect/Virtual 全 intended 路径正常;observe 正确发 virtual blindspot;PR #68 toast 修复在 Nuxt announcer 交叉验证;OBSCURED on sr-only [role=combobox]=正确拒绝(fill 路径工作);COMMIT_FAILED 系自身状态污染(clean reload 后正常)"
+        }
+      ]
+    },
+    {
+      "id": "mantine",
+      "label": "Mantine (React, Next.js docs)",
+      "base_url": "https://mantine.dev/core/",
+      "category": "component-lib",
+      "needs_login": false,
+      "pages": [
+        {
+          "id": "C1",
+          "path": "select/",
+          "interactions": "Select combobox(Portal listbox):开→选→读 value"
+        },
+        {
+          "id": "C2",
+          "path": "multi-select/",
+          "interactions": "MultiSelect:多选 pill + 删除"
+        },
+        {
+          "id": "C3",
+          "path": "combobox/",
+          "interactions": "Combobox 底层:可搜索/虚拟"
+        },
+        {
+          "id": "C4",
+          "path": "modal/",
+          "interactions": "Modal(Portal 焦点容器)开→内部→关"
+        },
+        {
+          "id": "C5",
+          "path": "tree-select/",
+          "interactions": "TreeSelect 展开树→选节点"
+        }
+      ],
+      "last_covered": "2026-06-21",
+      "history": [
+        {
+          "cycle": "dogfood-mantine-2026-06-21",
+          "date": "2026-06-21",
+          "vortex_defects": 1,
+          "false_positives": 0,
+          "note": "sr-only Next.js __next-route-announcer__(role=alert,1×1+clip)被 click-effect isVisible 误判 toast→每次 click 误报 userFeedback:toast;尺寸判别修复(#65),live 验证 toastHit:[]/userFeedback:mutation"
+        }
+      ]
+    },
     {
       "id": "arco",
       "label": "Arco Design (React)",
