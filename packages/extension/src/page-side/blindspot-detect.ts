@@ -68,11 +68,20 @@ export function detectVirtualByScroll(
   scroller: { scrollHeight: number; clientHeight: number },
   renderedRows: number,
   rowHeight: number,
+  // 滚动祖先 DOM 内实际行数(li/tr/role=row)。默认等于 renderedRows(向后兼容:
+  // 不传时视为「祖先只含本列表」,闸不触发)。调用方应传真实测量值。
+  scrollerRowCount: number = renderedRows,
 ): Blindspot | null {
   if (renderedRows < 3 || rowHeight < 4) return null;
   const sh = scroller.scrollHeight;
   const ch = scroller.clientHeight;
   if (ch <= 0 || sh < ch * 4) return null;
+  // 误报闸(MDN CSS 参考侧栏实证):真虚拟列表的滚动祖先只含视口窗口的行
+  // (scrollerRowCount ≈ renderedRows);若祖先 DOM 行数远多于本列表渲染数,说明
+  // scrollHeight 来自祖先里**其它真实内容**(整片导航侧栏含多个列表共 1249 项),
+  // estTotal=scrollH/rowH 把整片高度误当本列表的行 → 误报。某 6 项小列表的祖先
+  // aside scrollH=9692/rowH=32 被估成 303,但 aside 实含 1249 项全在 DOM(非虚拟)。
+  if (scrollerRowCount > renderedRows * 2) return null;
   const estTotal = Math.round(sh / rowHeight);
   if (estTotal > renderedRows && estTotal >= Math.max(renderedRows * 2, renderedRows + 20)) {
     return { kind: "virtual", total: estTotal, rendered: renderedRows, confidence: "low" };

@@ -2331,6 +2331,12 @@ async function scanOneFrame(
             const __sh = __scroller.scrollHeight;
             const __ch = __scroller.clientHeight;
             if (__ch <= 0 || __sh < __ch * 4) continue;
+            // 误报闸:真虚拟列表的滚动祖先只含视口窗口的行(≈__rendered);若祖先 DOM
+            // 行数远多于本候选渲染数,说明 __sh 来自祖先里其它真实内容(整片导航侧栏含
+            // 多个列表),__est 把整片高度误当本列表的行 → 误报。MDN CSS 参考 aside 含
+            // 1249 项,某 6 项小列表被估成 303(scrollH 9692/rowH 32)实证。
+            const __scrollerRows = __scroller.querySelectorAll("[role=row],tr,li").length;
+            if (__scrollerRows > __rendered * 2) continue;
             const __est = Math.round(__sh / __rowH);
             if (__est > __rendered && __est >= Math.max(__rendered * 2, __rendered + 20)) {
               __seenScrollers.add(__scroller);

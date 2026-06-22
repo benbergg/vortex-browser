@@ -78,4 +78,20 @@ describe("detectVirtualByScroll (A2-fb 非 ARIA 虚拟化)", () => {
     // sh=1200 ch=240 → 5x, rowH=40, estTotal=30, rendered=18 → 30<max(36,38) 不触发
     expect(detectVirtualByScroll({ scrollHeight: 1200, clientHeight: 240 }, 18, 40)).toBeNull();
   });
+  it("小列表嵌于高大导航祖先(scrollerRowCount 1249 >> rendered 6) → 不报（误报闸:MDN 实证）", () => {
+    // aside scrollH=9692/clientH=634 → 15x 强滚动,rowH=32,est=303>>6 本会误报,
+    // 但 scrollerRowCount=1249 > 6*2 → 祖先含其它内容,非本列表虚拟化 → null。
+    expect(
+      detectVirtualByScroll({ scrollHeight: 9692, clientHeight: 634 }, 6, 32, 1249),
+    ).toBeNull();
+  });
+  it("真虚拟列表祖先只含窗口行(scrollerRowCount≈rendered) → 仍正常报", () => {
+    // 显式传 scrollerRowCount=12(≈rendered 12,真虚拟:祖先只渲染窗口)→ 闸不触发,照常报。
+    expect(detectVirtualByScroll({ scrollHeight: 48000, clientHeight: 250 }, 12, 48, 12)).toEqual({
+      kind: "virtual",
+      total: 1000,
+      rendered: 12,
+      confidence: "low",
+    });
+  });
 });
