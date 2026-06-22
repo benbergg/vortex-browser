@@ -140,3 +140,74 @@ describe("parseObserveSnapshot — 树格式", () => {
     expect(rows).toHaveLength(4); // list/listitem/button/link，/url 不计行
   });
 });
+
+describe("parseObserveSnapshot — 树格式容忍 compound=/desc=/blindspot/offscreen 等中间段(2026-06-22 FullCalendar/native-form dogfood)", () => {
+  // observe-render 在 value= 与 bbox= 间注入多种字段(顺序见 observe-render.ts:458):
+  // value= → compound=(...) → error= → controls= → desc= → [offscreen] → [virtual:]/[blindspot=]
+  // → bbox=。旧 TREE_ROW_RE 只容忍 value= 与 bbox=,遇 compound=(...) 等中间段整行失配被
+  // 静默丢 —— native-form-baseline 的 file/range input(唯二带 compound=)行丢失 → bench
+  // geometry-join 无行可匹配 → 假 recall-miss(c8/c16),掩盖真实召回正确。
+  it("compound=(file-input ...) 行不丢、bbox 仍解析(native-form c8 file input)", () => {
+    const text = `SnapshotId: s
+URL: u
+
+- button "File input" [ref=@4ec1:e8] [cursor=pointer] value=未选择任何文件 compound=(file-input file=None) bbox=[512,228,416,38]`;
+    const p = parseObserveSnapshot(text);
+    expect(p.rows).toHaveLength(1);
+    expect(p.rows[0].role).toBe("button");
+    expect(p.rows[0].name).toBe("File input");
+    expect(p.rows[0].flags).toContain("cursor=pointer");
+    expect(p.rows[0].bbox).toEqual([512, 228, 416, 38]);
+  });
+
+  it("compound=(range-input min/max/step) 行不丢、bbox 仍解析(native-form c16 range)", () => {
+    const text = `SnapshotId: s
+URL: u
+
+- slider "Example range" [ref=@4ec1:e16] value=5 compound=(range-input min=0 max=10 step=1) bbox=[952,230,416,24]`;
+    const p = parseObserveSnapshot(text);
+    expect(p.rows).toHaveLength(1);
+    expect(p.rows[0].role).toBe("slider");
+    expect(p.rows[0].name).toBe("Example range");
+    expect(p.rows[0].bbox).toEqual([952, 230, 416, 24]);
+  });
+
+  it("desc= / [offscreen] / [virtual: N/M] / blindspot 等中间段不丢行、bbox 仍解析", () => {
+    const text = `SnapshotId: s
+URL: u
+
+- button "搜索" [ref=@h:e0] desc="Press / to search" bbox=[1,2,3,4]
+- list "结果" [ref=@h:e1] [virtual: 114/7] bbox=[5,6,7,8]
+- button "屏外" [ref=@h:e2] [offscreen] bbox=[9,10,11,12]
+- canvas "图" [ref=@h:e3] [blindspot=canvas] bbox=[13,14,15,16]`;
+    const p = parseObserveSnapshot(text);
+    expect(p.rows).toHaveLength(4);
+    expect(p.rows[0].bbox).toEqual([1, 2, 3, 4]);
+    expect(p.rows[1].bbox).toEqual([5, 6, 7, 8]);
+    expect(p.rows[2].bbox).toEqual([9, 10, 11, 12]);
+    expect(p.rows[3].bbox).toEqual([13, 14, 15, 16]);
+  });
+
+  it("中间段存在但无 bbox(无 includeBoxes)→ 行仍解析、bbox=null", () => {
+    const text = `SnapshotId: s
+URL: u
+
+- slider "评分" [ref=@h:e0] value=5 compound=(range-input min=0 max=10)`;
+    const p = parseObserveSnapshot(text);
+    expect(p.rows).toHaveLength(1);
+    expect(p.rows[0].role).toBe("slider");
+    expect(p.rows[0].bbox).toBeNull();
+  });
+
+  it("compound= 行带 children 冒号结尾仍解析", () => {
+    const text = `SnapshotId: s
+URL: u
+
+- combobox "城市" [ref=@h:e0] value=北京 compound=(combobox count=3 options=北京|上海|广州) bbox=[1,2,3,4]:`;
+    const p = parseObserveSnapshot(text);
+    expect(p.rows).toHaveLength(1);
+    expect(p.rows[0].role).toBe("combobox");
+    expect(p.rows[0].name).toBe("城市");
+    expect(p.rows[0].bbox).toEqual([1, 2, 3, 4]);
+  });
+});
