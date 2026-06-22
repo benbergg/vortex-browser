@@ -442,6 +442,24 @@ export function isOverlayFloating(el: Element, maxHops = 6): boolean {
 }
 
 /**
+ * 持久导航菜单判据(overlay 误判修复):role=menu/tree 的常驻结构(侧栏导航 / 常驻树)由
+ * 用户主动导航而非触发器打开,不是临时弹层,却可能因常驻容器 position:fixed(粘性滚动)
+ * 误过 isOverlayFloating。判据:真弹层由触发器(combobox/按钮)经 aria-controls/aria-owns
+ * 关联;无控制器即持久结构;在 <nav>/[role=navigation] landmark 内同样视为导航。
+ * listbox/dialog/tooltip 等本质临时,不在此列。inject func 内联同名逻辑,改一处须同步。
+ * (semi.design 侧栏 ul[role=menu].semi-navigation-list 实证:228 项被误前置吞掉 maxElements。)
+ */
+export function isPersistentNavMenu(el: Element, role: string): boolean {
+  if (role !== "menu" && role !== "tree") return false;
+  if (el.closest('nav,[role="navigation"]')) return true;
+  const id = el.id;
+  if (id && el.ownerDocument?.querySelector('[aria-controls~="' + id + '"],[aria-owns~="' + id + '"]')) {
+    return false;
+  }
+  return true;
+}
+
+/**
  * overlay-priority 候选重排:把"在任一浮层根内"的候选(含浮层根自身)前置到最前,保持
  * 其相对 DOM 序;其余保持原序。**无浮层根 → 返回原数组同序(零漂移,baseline 不变)**。
  * inject func 内联同名逻辑,改一处须同步。
@@ -454,6 +472,67 @@ export function partitionOverlayFirst(candidates: Element[], overlayRoots: Eleme
   const rest: Element[] = [];
   for (const el of candidates) (inOverlay(el) ? front : rest).push(el);
   return front.length > 0 ? [...front, ...rest] : candidates;
+}
+
+/**
+ * 导航菜单根识别(A-1 main 层降权,ant.design dogfood):<main> 内常驻 role=menu/tree
+ * 侧栏导航(ant.design ant-menu-inline:74 项跨页链接、position static、无 fixed 祖先,
+ * 既不走 overlay 也不在 <nav> landmark 内,却 DOM 序前于 demo 霸占 maxElements)。
+ * 判据:① 在 nav/navigation/menubar landmark 内,或 ② 菜单项 ≥5 且多数(≥60%)为
+ * 跨页 <a href>(非 #/锚点)链接。②把"被演示的 Menu 组件"(项无跨页链接)排除在外,
+ * 只降权真站点导航。inject func 内联同名逻辑,改一处须同步。
+ */
+export function isNavMenuRoot(el: Element, role: string): boolean {
+  if (role !== "menu" && role !== "tree") return false;
+  if (el.closest('nav,[role="navigation"],[role="menubar"]')) return true;
+  const items = el.querySelectorAll('[role="menuitem"],[role="treeitem"]');
+  if (items.length < 5) return false;
+  let links = 0;
+  for (const it of Array.from(items)) {
+    const a = it.matches("a[href]") ? it : it.querySelector("a[href]");
+    const href = a?.getAttribute("href") ?? "";
+    if (href.length > 1 && !href.startsWith("#")) links++;
+  }
+  return links >= items.length * 0.6;
+}
+
+/**
+ * main-content-priority(A-1):文档站「左导航 + 右主内容」布局下,导航(DOM 序在前)
+ * 霸占 maxElements 配额、主内容 0 召回(semi.design Select dogfood 实证:154 个 nav
+ * 排在 244 个 Select demo 之前,maxElements=80/100 全给 nav)。用 WAI-ARIA landmark
+ * <main>/[role=main] 锁定内容区,把其内候选前置,保持相对 DOM 序;无 landmark
+ * (mainEl=null)或候选全在/全不在 main 内 → 返回原数组同序(零漂移)。仅在无浮层根时
+ * 生效(overlay-priority 优先级更高)。inject func 内联同名逻辑,改一处须同步。
+ */
+export function partitionMainContentFirst(candidates: Element[], mainEl: Element | null): Element[] {
+  // 内容区(<main>/[role=main])元素恒前置;无语义 landmark 时(多数文档站如 semi.design
+  // 用 <div id=main-content> 而非 <main>)退而把导航区(<nav>/[role=navigation|menubar])元素
+  // 后置。二者都把长导航挤出 maxElements 前缀,让主内容召回;只重排不丢弃(空则原数组同序)。
+  const isNav = (el: Element): boolean =>
+    !!el.closest('nav,[role="navigation"],[role="menubar"]');
+  // 持久导航菜单(role=menu/tree 跨页链接侧栏)即便落在 <main> 内也须降权——否则
+  // ant.design 侧栏 74 项排在 demo 之前霸占 maxElements。向上找最近的导航菜单根。
+  const inNavMenu = (el: Element): boolean => {
+    let cur: Element | null = el;
+    while (cur) {
+      const r = cur.getAttribute("role")?.trim().split(/\s+/)[0] ?? "";
+      if ((r === "menu" || r === "tree") && isNavMenuRoot(cur, r)) return true;
+      cur = cur.parentElement;
+    }
+    return false;
+  };
+  const inMain: Element[] = [];
+  const mid: Element[] = [];
+  const nav: Element[] = [];
+  for (const el of candidates) {
+    if (inNavMenu(el)) nav.push(el);
+    else if (mainEl && mainEl.contains(el)) inMain.push(el);
+    else if (isNav(el)) nav.push(el);
+    else mid.push(el);
+  }
+  // 仅当跨 ≥2 个分桶才重排,否则原数组同序(零漂移)。
+  const buckets = (inMain.length > 0 ? 1 : 0) + (mid.length > 0 ? 1 : 0) + (nav.length > 0 ? 1 : 0);
+  return buckets <= 1 ? candidates : [...inMain, ...mid, ...nav];
 }
 
 /**
@@ -2061,12 +2140,48 @@ async function scanOneFrame(
           }
           return false;
         };
+        // 持久导航菜单误判修复:role=menu/tree 的常驻结构(侧栏导航/常驻树)无触发器打开,
+        // 不是临时弹层,却因常驻容器 position:fixed(粘性滚动)误过 isFloatingOverlay。
+        // 真弹层由触发器(combobox/按钮)经 aria-controls/aria-owns 关联;无控制器即持久
+        // 结构;在 nav landmark 内同样视为导航。listbox/dialog/tooltip 不在此列。
+        const isPersistentMenu = (el: Element, role: string): boolean => {
+          if (role !== "menu" && role !== "tree") return false;
+          if (el.closest('nav,[role="navigation"]')) return true;
+          const id = el.id;
+          if (id && document.querySelector('[aria-controls~="' + id + '"],[aria-owns~="' + id + '"]')) return false;
+          return true;
+        };
+        // 导航菜单根:role=menu/tree 侧栏导航,即便在 <main> 内、position static(ant.design
+        // ant-menu-inline)也须从 main 层降权。判据=在 nav landmark 内,或菜单项 ≥5 且多数为
+        // 跨页 <a href> 链接(把"被演示的 Menu 组件"排除)。模块级 isNavMenuRoot 同名,改一处须同步。
+        const isNavMenuRoot = (el: Element, role: string): boolean => {
+          if (role !== "menu" && role !== "tree") return false;
+          if (el.closest('nav,[role="navigation"],[role="menubar"]')) return true;
+          const items = el.querySelectorAll('[role="menuitem"],[role="treeitem"]');
+          if (items.length < 5) return false;
+          let links = 0;
+          for (const it of Array.from(items)) {
+            const a = it.matches("a[href]") ? it : it.querySelector("a[href]");
+            const href = a?.getAttribute("href") ?? "";
+            if (href.length > 1 && !href.startsWith("#")) links++;
+          }
+          return links >= items.length * 0.6;
+        };
+        const inNavMenu = (el: Element): boolean => {
+          let cur: Element | null = el;
+          while (cur && cur !== docBody) {
+            const r = cur.getAttribute("role")?.trim().split(/\s+/)[0] ?? "";
+            if ((r === "menu" || r === "tree") && isNavMenuRoot(cur, r)) return true;
+            cur = cur.parentElement;
+          }
+          return false;
+        };
         const overlayRoots: Element[] = [];
         // 信号一:ARIA 弹层语义 role + 脱流定位(穿 open shadow,与主扫描一致)。
         for (const el of querySelectorAllDeep("[role]", document)) {
           const role = el.getAttribute("role")?.trim().split(/\s+/)[0];
           if (!role || !OVERLAY_POPUP_ROLES.has(role)) continue;
-          if (isVisibleForOverlay(el) && isFloatingOverlay(el)) overlayRoots.push(el);
+          if (isVisibleForOverlay(el) && isFloatingOverlay(el) && !isPersistentMenu(el, role)) overlayRoots.push(el);
         }
         // 信号二:body 直接子节点的 portal(脱流 + z-index 抬升 + 含交互后代),
         // 兜住无 ARIA role 的自定义弹层(如 el-select popper)。
@@ -2083,15 +2198,33 @@ async function scanOneFrame(
           }
         }
         const allCandidates: Element[] = ((): Element[] => {
-          if (overlayRoots.length === 0) return baseCandidates;
+          // 两层正交排序(组合 overlay-priority + main-content-priority):
+          // ① 浮层(DEFECT-1):可见浮层内元素前置免遭截断;
+          // ② 非浮层部分(A-1):内容区(<main>/[role=main]/#main-content)前置 + 导航区
+          //    (<nav>/[role=navigation|menubar])降权。二者正交:组件库 demo 页常驻 ARIA 浮层
+          //    (overlayRoots>0)时主内容仍须召回,故 main/nav 排序不能只在无浮层时跑。
+          //    须与模块级 partitionOverlayFirst ∘ partitionMainContentFirst 同步。
           const inOverlay = (el: Element): boolean =>
-            overlayRoots.some((root) => root === el || root.contains(el));
-          const front: Element[] = [];
-          const rest: Element[] = [];
-          for (const el of baseCandidates) (inOverlay(el) ? front : rest).push(el);
-          // front 由 baseCandidates 顺序过滤得来,保持相对 DOM 序;全在浮层内时
-          // front===base 顺序、rest 空 → 与原序一致,无漂移。
-          return front.length > 0 ? [...front, ...rest] : baseCandidates;
+            overlayRoots.length > 0 && overlayRoots.some((root) => root === el || root.contains(el));
+          const overlayEls: Element[] = [];
+          const nonOverlay: Element[] = [];
+          for (const el of baseCandidates) (inOverlay(el) ? overlayEls : nonOverlay).push(el);
+          const mainElA1 = document.querySelector("main") ?? document.querySelector('[role="main"]') ?? document.querySelector("#main-content");
+          const isNavA1 = (el: Element): boolean =>
+            !!el.closest('nav,[role="navigation"],[role="menubar"]');
+          const a1Main: Element[] = [];
+          const a1Mid: Element[] = [];
+          const a1Nav: Element[] = [];
+          for (const el of nonOverlay) {
+            if (inNavMenu(el)) a1Nav.push(el);
+            else if (mainElA1 && mainElA1.contains(el)) a1Main.push(el);
+            else if (isNavA1(el)) a1Nav.push(el);
+            else a1Mid.push(el);
+          }
+          // 零漂移:无浮层且主/导航未跨 ≥2 桶 → 原数组同序。
+          const a1Buckets = (a1Main.length > 0 ? 1 : 0) + (a1Mid.length > 0 ? 1 : 0) + (a1Nav.length > 0 ? 1 : 0);
+          if (overlayEls.length === 0 && a1Buckets <= 1) return baseCandidates;
+          return [...overlayEls, ...a1Main, ...a1Mid, ...a1Nav];
         })();
 
         const elements: Array<{

@@ -49,7 +49,7 @@ export function createHttpRoutes(router: MessageRouter): Router {
   app.use(json());
 
   app.get("/health", (_req, res) => {
-    res.json({ status: "ok", timestamp: Date.now() });
+    res.json({ status: "ok", nmConnected: router.isNmConnected(), timestamp: Date.now() });
   });
 
   app.post("/api/:namespace/:method", async (req, res) => {

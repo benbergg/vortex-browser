@@ -24,6 +24,7 @@ import { dirname, join } from "node:path";
 import {
   OVERLAY_POPUP_ROLES,
   isOverlayFloating,
+  isPersistentNavMenu,
   partitionOverlayFirst,
 } from "../src/handlers/observe.js";
 
@@ -119,5 +120,44 @@ describe("overlay-priority (DEFECT-1)", () => {
     it("内联保留无浮层零漂移(overlayRoots.length === 0 → baseCandidates)", () => {
       expect(SRC).toMatch(/overlayRoots\.length === 0/);
     });
+  });
+});
+
+describe("isPersistentNavMenu(持久导航菜单 ≠ 临时浮层,A-1 overlay 误判修复)", () => {
+  it("role=menu 无触发器(侧栏导航;semi.design ul[role=menu].semi-navigation-list 实证)→ true", () => {
+    document.body.innerHTML = `<ul id="m" role="menu"><li role="menuitem">a</li></ul>`;
+    expect(isPersistentNavMenu(document.getElementById("m")!, "menu")).toBe(true);
+  });
+  it("role=menu 被 aria-controls 触发器关联(真弹出菜单)→ false", () => {
+    document.body.innerHTML = `<button aria-controls="mm">open</button><ul id="mm" role="menu"></ul>`;
+    expect(isPersistentNavMenu(document.getElementById("mm")!, "menu")).toBe(false);
+  });
+  it("role=menu 在 <nav> landmark 内 → true(导航结构)", () => {
+    document.body.innerHTML = `<nav><ul id="n" role="menu"></ul></nav>`;
+    expect(isPersistentNavMenu(document.getElementById("n")!, "menu")).toBe(true);
+  });
+  it("role=tree 无触发器(常驻文件树)→ true", () => {
+    document.body.innerHTML = `<ul id="t" role="tree"></ul>`;
+    expect(isPersistentNavMenu(document.getElementById("t")!, "tree")).toBe(true);
+  });
+  it("role=listbox(下拉弹层)不在此列 → false(仍交位置判据)", () => {
+    document.body.innerHTML = `<ul id="lb" role="listbox"></ul>`;
+    expect(isPersistentNavMenu(document.getElementById("lb")!, "listbox")).toBe(false);
+  });
+  it("role=dialog → false", () => {
+    document.body.innerHTML = `<div id="d" role="dialog"></div>`;
+    expect(isPersistentNavMenu(document.getElementById("d")!, "dialog")).toBe(false);
+  });
+});
+
+describe("inject func isPersistentMenu 内联同步锁", () => {
+  const SRC2 = readFileSync(
+    join(dirname(fileURLToPath(import.meta.url)), "..", "src", "handlers", "observe.ts"),
+    "utf8",
+  );
+  it("内联 overlay 收集排除持久菜单(role=menu/tree 无触发器不计浮层)", () => {
+    expect(SRC2).toContain("isPersistentMenu");
+    expect(SRC2).toContain("aria-controls~=");
+    expect(SRC2).toMatch(/&& !isPersistentMenu\(el, role\)/);
   });
 });

@@ -14,6 +14,8 @@ export class MessageRouter {
   private pending = new Map<string, PendingRequest>();
   private requestBuffer: NmMessageFromServer[] = [];
   private nmConnected = false;
+  /** A-4:本进程生命周期内是否曾建立过 NM 连接。区分「冷启动等首连」与「从未连接」。 */
+  private everConnected = false;
   private stdout: NodeJS.WritableStream;
   private sessions: SessionManager;
   private requestCounter = 0;
@@ -27,6 +29,7 @@ export class MessageRouter {
   setNmConnected(connected: boolean): void {
     this.nmConnected = connected;
     if (connected) {
+      this.everConnected = true;
       this.flushBuffer();
     } else {
       // stdin 'end' = 扩展 SW 拥有的 NM 通道永久关闭(本进程 stdin 终态,之后无 data;
@@ -105,6 +108,22 @@ export class MessageRouter {
         ...(nmReq.args as Record<string, unknown>),
         trustedMode: detectTrustedMode(),
       };
+    }
+
+    // A-4:NM 从未建立连接(手动启 server / NM 配置错)→ 没有 SW 会连上来,buffer 只是
+    // 干等满 30s 才 TIMEOUT。此场景立即 fail-fast 为 EXTENSION_NOT_CONNECTED。Chrome 正常
+    // spawn 本进程时 SW 在毫秒内即发首条 NM 消息(everConnected 先于任何 WS 请求置真),
+    // 故不影响冷启动;曾连接过(everConnected)则照常走下方 buffer/BRIDGE-2。
+    if (!this.nmConnected && !this.everConnected) {
+      this.sendToClient({
+        action: vtxReq.action,
+        id: vtxReq.id,
+        error: {
+          code: VtxErrorCode.EXTENSION_NOT_CONNECTED,
+          message: "Extension has never connected (native messaging not established)",
+        },
+      });
+      return;
     }
 
     const timeout = setTimeout(() => {
