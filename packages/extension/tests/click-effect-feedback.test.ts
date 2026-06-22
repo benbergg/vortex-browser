@@ -40,6 +40,11 @@ describe("选择器覆盖", () => {
   it("dialog 含 el-dialog/ant-modal/bn-drawer", () => {
     expect([...DIALOG_SELECTORS].join(" ")).toMatch(/\.el-dialog|\.ant-modal|\.bn-drawer/);
   });
+  // 2026-06-22 flatpickr/Popover API dogfood:原生 popover 打开无 DOM mutation/属性变化,
+  // 框架 dialog/toast 类不匹配 → userFeedback 误报 "none"。:popover-open 纳入 dialog 类瞬态浮层。
+  it("dialog 含 :popover-open(原生 Popover API 反馈)", () => {
+    expect([...DIALOG_SELECTORS]).toContain(":popover-open");
+  });
 });
 
 describe("TOAST_SELECTORS 不含常驻 [aria-live] 包裹（antd Spin 假阳回归 A5/A6）", () => {

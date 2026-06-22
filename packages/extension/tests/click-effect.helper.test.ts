@@ -313,5 +313,51 @@ describe("click-effect page-side module (__vortexClickEffect)", () => {
       expect(eff.toastHit).toContain(".ant-message");
       expect(eff.userFeedback).toBe("toast");
     });
+
+    // 2026-06-22 Popover API dogfood:原生 popover 打开无 DOM mutation,:popover-open 归 dialog。
+    it("打开的原生 popover(:popover-open) → dialogHit 含 :popover-open, userFeedback=dialog", async () => {
+      const ns = await load();
+      const pop = document.createElement("div");
+      pop.setAttribute("popover", "");
+      pop.textContent = "弹出层";
+      document.body.appendChild(pop);
+      stubGeom(pop, 200, 80);
+      // jsdom 无真实 top-layer,桩 querySelectorAll 让 :popover-open 命中本节点(其余委托原实现)
+      const orig = document.querySelectorAll.bind(document);
+      (document as any).querySelectorAll = (sel: string) =>
+        sel === ":popover-open" ? [pop] : orig(sel);
+      try {
+        const t = ns.begin("#b", 10);
+        const eff = (await ns.end(t)) as any;
+        expect(eff.dialogHit).toContain(":popover-open");
+        expect(eff.userFeedback).toBe("dialog");
+      } finally {
+        (document as any).querySelectorAll = orig;
+      }
+    });
+
+    it(":popover-open 抛 SyntaxError(浏览器不支持)不拖垮 toast 检测(逐选择器 guard)", async () => {
+      const ns = await load();
+      const toast = document.createElement("div");
+      toast.className = "ant-message";
+      toast.textContent = "已保存";
+      document.body.appendChild(toast);
+      stubGeom(toast, 200, 40);
+      // 复刻不支持 Popover API 的浏览器::popover-open 抛 SyntaxError;其余委托原实现
+      const orig = document.querySelectorAll.bind(document);
+      (document as any).querySelectorAll = (sel: string) => {
+        if (sel === ":popover-open") throw new SyntaxError("unsupported pseudo");
+        return orig(sel);
+      };
+      try {
+        const t = ns.begin("#b", 10);
+        const eff = (await ns.end(t)) as any;
+        // 守卫:单个选择器抛错被局部吞掉,toast 仍正确分类(旧单 try 会整批退化为 none)
+        expect(eff.toastHit).toContain(".ant-message");
+        expect(eff.userFeedback).toBe("toast");
+      } finally {
+        (document as any).querySelectorAll = orig;
+      }
+    });
   });
 });

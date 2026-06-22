@@ -174,24 +174,24 @@ interface PendingEntry {
   } {
     const toastHit: string[] = [];
     const dialogHit: string[] = [];
+    // 逐选择器 try 包裹:某选择器抛错(如 :popover-open 在不支持 Popover API 的浏览器
+    // 抛 SyntaxError)只跳过该项,不拖垮整批 toast/dialog 检测(原单 try 会全丢)。
+    const hitAny = (sel: string): boolean => {
+      try {
+        for (const n of Array.from(document.querySelectorAll(sel))) {
+          if (isVisible(n)) return true;
+        }
+      } catch {
+        /* 不支持的选择器 → 跳过,保留其他信号 */
+      }
+      return false;
+    };
     try {
       for (const sel of TOAST_SELECTORS) {
-        const nodes = document.querySelectorAll(sel);
-        for (const n of Array.from(nodes)) {
-          if (isVisible(n)) {
-            toastHit.push(sel);
-            break;
-          }
-        }
+        if (hitAny(sel)) toastHit.push(sel);
       }
       for (const sel of DIALOG_SELECTORS) {
-        const nodes = document.querySelectorAll(sel);
-        for (const n of Array.from(nodes)) {
-          if (isVisible(n)) {
-            dialogHit.push(sel);
-            break;
-          }
-        }
+        if (hitAny(sel)) dialogHit.push(sel);
       }
     } catch {
       return { userFeedback: classifyFeedback(false, false, domMutations), toastHit, dialogHit };

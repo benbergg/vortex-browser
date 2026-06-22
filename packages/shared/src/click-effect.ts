@@ -33,6 +33,12 @@ export const DIALOG_SELECTORS = [
   ".MuiDrawer-root",
   "[role='dialog']",
   "[role='alertdialog']",
+  // 原生 Popover API:showPopover 把元素移入 top-layer,无 DOM mutation/属性变化,
+  // 框架 dialog/toast 类也不匹配 → userFeedback 误报 "none"(agent 误判点击无反馈)。
+  // :popover-open 仅匹配带 popover 属性的打开态元素(GitHub/shadcn 等渐广),精确不误伤
+  // flatpickr/antd 等非原生浮层。该伪类在不支持的浏览器抛 SyntaxError,collectFeedback
+  // 逐选择器 try 包裹兜底(2026-06-22 flatpickr/Popover API dogfood)。
+  ":popover-open",
 ] as const;
 
 export function classifyFeedback(
