@@ -27,7 +27,7 @@ export type ActionabilityResult =
   | {
       ok: false;
       reason: ActionabilityFailure;
-      extras?: { blocker?: string; tagName?: string; hasReadOnly?: boolean; inert?: boolean };
+      extras?: { blocker?: string; tagName?: string; hasReadOnly?: boolean; inert?: boolean; ariaValueWidget?: string };
     };
 
 (function () {
@@ -307,10 +307,18 @@ export type ActionabilityResult =
       if (needsEditable) {
         const ed = isEditable(el);
         if (!ed.ok) {
+          // ARIA value 控件(role=slider/spinbutton,div-based 如 Radix/APG)无可填 input,
+          // 但可经键盘(Arrow/Home/End)或 drag 设值。携带 ariaValueWidget 供 host 侧生成
+          // 可 actionable 指引,替代通用 hint 误导的「pick a selector pointing to an actual
+          // input」——这类控件根本无 input(radix-ui slider dogfood 2026-06-22 实测,
+          // 键盘 ArrowRight 50→51、vortex_mouse_drag 50→80 均生效)。
+          const role = el.getAttribute("role");
+          const ariaValueWidget =
+            role === "slider" || role === "spinbutton" ? role : undefined;
           return {
             ok: false,
             reason: "NOT_EDITABLE",
-            extras: { tagName: ed.tagName, hasReadOnly: ed.hasReadOnly },
+            extras: { tagName: ed.tagName, hasReadOnly: ed.hasReadOnly, ariaValueWidget },
           };
         }
       }

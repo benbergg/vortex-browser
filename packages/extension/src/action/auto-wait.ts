@@ -77,9 +77,21 @@ export async function waitActionable(
     const interval = RETRY_INTERVAL_MS[result.reason];
     if (interval < 0) {
       // Non-retryable semantic error (e.g. NOT_EDITABLE) — throw immediately.
+      // ARIA value 控件(role=slider/spinbutton)无 input 可填,但可经键盘/drag 设值 →
+      // 给出可 actionable 指引,替代通用 NOT_EDITABLE hint 误导的「point to an actual input」
+      // (根本无 input)。沿用 inertBlocked/modalBlocked 经 extras 定制 message 的模式。
+      const ariaValueWidget =
+        result.reason === "NOT_EDITABLE"
+          ? (lastExtras?.ariaValueWidget as string | undefined)
+          : undefined;
+      const message = ariaValueWidget
+        ? `NOT_EDITABLE on selector "${selector}" (role=${ariaValueWidget} is an ARIA value widget ` +
+          `with no fillable input — set its value with vortex_press Arrow/Home/End keys after focusing it, ` +
+          `or drag the thumb with vortex_mouse_drag; do not use vortex_fill)`
+        : `${result.reason} on selector "${selector}"`;
       throw vtxError(
         mapToVtxCode(result.reason),
-        `${result.reason} on selector "${selector}"`,
+        message,
         { selector, extras: lastExtras },
       );
     }
