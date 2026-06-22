@@ -809,7 +809,7 @@ async function scanOneFrame(
         // 组件库 CSS 字体图标(::before 字形,无 inner svg/img)。仅显示路径(getAccessibleName
         // 末位 iconFontName)给已召回图标按钮补名,**不进 gate**(round-12 幽灵续命约束)。
         const ICON_FONT_PREFIXES = [
-          "bi-", "fa-", "glyphicon-", "vxe-icon-", "van-icon-",
+          "bi-", "fa-", "glyphicon-", "vxe-icon-", "van-icon-", "pi-",
         ];
         // FontAwesome 样式修饰类(非图标名,与 `fa-<icon>` 同形,故白名单逐一跳过)。
         const ICON_FONT_MODIFIERS = new Set([
@@ -830,15 +830,15 @@ async function scanOneFrame(
           "fa-flip-horizontal", "fa-flip-vertical", "fa-flip-both",
           // 图标叠放工具类
           "fa-stack", "fa-stack-1x", "fa-stack-2x",
+          // PrimeIcons 动画/布局修饰(非图标名,与 pi-<icon> 同形)
+          "pi-spin", "pi-pulse", "pi-fw",
         ]);
         // 纯图标按钮的末位兜底:图标用 CSS 字体字形渲染(Bootstrap Icons `bi-gear`、
         // FontAwesome `fa-gear`、Glyphicons `glyphicon-cog`),无 inner svg/img 故
         // iconNameFromClass 吃不到,且无 aria-label/title/text → accessible name 真空。
         // 仅匹配已知 icon-font 前缀时取名(strip 前缀、hyphen→空格),避免泛 className
         // 噪声(2026-06-03 Monaco editor dogfood AP)。
-        function iconFontName(el: Element): string {
-          const cls =
-            el.className && typeof el.className === "string" ? el.className : "";
+        function iconFontNameFromClassStr(cls: string): string {
           const tokens = cls.split(/\s+/).filter(Boolean);
           for (const c of tokens) {
             const lower = c.toLowerCase();
@@ -865,6 +865,27 @@ async function scanOneFrame(
                 return c.slice(5).replace(/-/g, " ");
               }
             }
+          }
+          return "";
+        }
+        function iconFontName(el: Element): string {
+          // el 自身 class 优先(Bootstrap `<button class="bi bi-gear">`、Monaco AP 场景)。
+          const own = iconFontNameFromClassStr(
+            el.className && typeof el.className === "string" ? el.className : "",
+          );
+          if (own) return own;
+          // 再回退到内部图标元素(<i>/<span>)的 class——很多库把字体图标类放在子 <i>:
+          // PrimeVue/PrimeReact `<a><i class="pi pi-github">`、FA `<button><i class="fa fa-x">`。
+          // 无 aria/title/text 的图标链接/按钮(github/discord/cog)否则全无名
+          // (primevue.org dogfood 2026-06-22)。display-path 末位兜底,不进 gate(round-12)。
+          // 遍历**全部** i/span(非仅首个):图标 <i> 常排在装饰 span 之后
+          // (PrimeVue cog 按钮:animate-spin 装饰 span 在前、pi-cog 图标 <i> 在后)。
+          for (const innerIcon of el.querySelectorAll("i[class], span[class]")) {
+            if (innerIcon === el) continue;
+            const n = iconFontNameFromClassStr(
+              typeof innerIcon.className === "string" ? innerIcon.className : "",
+            );
+            if (n) return n;
           }
           return "";
         }
