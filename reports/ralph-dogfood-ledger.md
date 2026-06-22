@@ -299,3 +299,57 @@
 - **⚠ 验证缺口(诚实记录)**:「经扩展 SW 的 live observe 复验 + bench 94」本 session **未能完成**——dev_reload 反复 RELOAD_TIMEOUT(fromStamp==targetStamp 报新 stamp 但 SW 实跑旧码),用户手动重载亦未使新码生效(MV3 SW 重载本 session 卡死,见 [[vortex_chrome_mv3_testing]] 已知坑)。fix 正确性由「单测 + 完整代码路径 trace + 真实 DOM 逻辑 spike(在活页面实际元素上验证产出正确名)」三重确证,但**经 SW 的端到端 live + bench 回归待 SW 恢复后补验**。不假报 bench 通过。
 - 桶:1 真缺陷(observe 图标命名:漏读 PrimeIcons 字体图标类)+ 1 大类证伪(PrimeVue Tree 结构交互)。
 - **教训**:① 命名缺陷有两向:泄漏噪声(iter-24/25/26 className 前缀)vs **漏读可用名**(本轮 pi- 字体图标),后者让 agent 丢失真实语义(不知是 GitHub 链接),同样有害。② 改 observe 命名前必先 grep 既有同类函数(`iconFontName` 已存在),避免重名冲突 + 找到正确扩展点(display-path vs gate,round-12 约束)。③ 字体图标类常在**子 `<i>` 且排在装饰元素之后**,须 querySelectorAll 遍历非取首个(cog 装饰 span 实证)。④ 当 SW 重载工具失效阻塞 live 验证时,真实 DOM 上复刻逻辑跑实际元素是最强替代证据(验证逻辑+定位到正确代码路径),但须诚实标注端到端 live/bench 缺口、绝不假报。
+
+### Iteration 30 — primevue.org(PrimeVue · act 类原语,observe-naming 环境受阻下的旁路 dogfood)· **0 真缺陷(干净通过 + 环境确诊)**
+- **背景**:本轮启动时 observe 注入 scan 仍为旧码(#87 PrimeIcons naming 不生效,github `<i class="pi pi-github">` 仍 `link ""`)。先**确诊到底什么旧**:`dev_reload` 返 `fromStamp==targetStamp==mqp5z2dg`(SW 报新 bundle)、整页 reload + MCP 重连均不清缓存。决定性判别——测落在 **SW handler** 的 #65(`debug_read tail`):连发 4 fetch、`tail:2` 精确返末 2 条(旧码返全 4)→ **#65 live ⇒ SW handler 是新码**。结论钉死:**SW 后台 handler + page-side 文件 = 新码;唯独页面注入的 observe scan inline func 被 Chrome 缓存成旧码**(只有 chrome://extensions 移除重加/Cmd+Q 能清,见 [[vortex_chrome_mv3_testing]] 二次实证块)。
+- **旁路策略**:observe-naming 类暂挂,改用**已确认新鲜**的 act 类原语在真站 dogfood(observe 仍返可用 ref,dom-resolve 新鲜解析)。
+- **测试与结果(全部 PASS,无 vortex 缺陷)**:① CLICK + observeEffect(Tree 展开 e16)→ realMouse 命中、domMutations:32、userFeedback:"mutation"(新 page-side click-effect.js 正常);② fill on slider(role=slider)→ **#85 live**:NOT_EDITABLE 带 ARIA value 控件专属提示(指引 vortex_press Arrow/Home/End 或 vortex_mouse_drag);③ 按提示 press ArrowRight on slider → thumb inset-inline-start 0%→1%(**推荐路径真实有效**,非空提示);④ debug_read tail #65 live;⑤ navigate load 退化 surface degraded:true。
+- 桶:0 真缺陷;5 项原语行为证伪(CLICK/press/fill-reject/debug_read/navigate 均正确)。
+- **旁证发现(非 vortex)**:PrimeVue slider 有 role=slider/aria-valuemin/max 却**不设 aria-valuenow**——primevue 自身 a11y 瑕疵,vortex 无责。
+- **诚实记录**:本轮无可修项(干净通过亦价值,不硬凑修复)。observe-quality 高价值轴(召回/命名)仍待扩展硬重载后才能在新 observe 上真验,转 iteration 31。
+- **iter-30 补**:vortex_mouse_drag 拖 slider thumb → inset-inline-start 精确到 75%%(#85 提示的第二条推荐路径 mouse_drag 同样验证有效;press + drag 双路径皆真实可用,非空提示)。act 旁路 dogfood 至此 6 项原语全 PASS、零 vortex 缺陷。
+
+### Iteration 31 — primevue.org InputNumber(act 旁路续,observe-naming 仍受阻)· **0 真缺陷(初判 silent-false-success 经 spike 证伪)**
+- **初判**:`vortex_fill(#integeronly, "12345")` 返 `success:true`,但聚焦态即时读 `input.value="12345"`(未格式化)而 `aria-valuenow="42723"`(模型未变)→ 疑 silent-false-success(fill 校验只比 DOM value、漏受控组件模型背离)。
+- **spike 确诊(铁律:动手前实机验根因)**:① 复刻 fill 的 native value-setter + input/change 事件 → 显示值变但 aria-valuenow 不变;② 关键判别——**blur 后** `value="12,345"`、`aria-valuenow="12345"`。→ primevue InputNumber 设计是 **blur/enter 才提交 v-model**,聚焦期间不同步;先前读到旧 valuenow 纯属**聚焦态时序假象**。
+- **结论**:fill 已正确把值写进 input,primevue 按自身契约在失焦提交模型。**非 vortex 缺陷**;标准 agent 流程(fill 后点其他元素/提交=自然 blur)会正确落值。
+- 桶:0 真缺陷;1 候选经 spike 证伪。
+- **教训**:受控格式化输入(primevue InputNumber 类)的「模型」常**延迟到 blur/enter 提交**,聚焦态读框架模型(aria-valuenow / v-model)是时序假象——验 fill 是否生效须在 blur 后读,或读 DOM input.value(fill 的契约边界=把值写进 input,提交时机归组件)。误把延迟提交当 silent-false-success 是易犯误判。
+
+### Iteration 32 — primevue.org Select(下拉 overlay 全流程,act + 结构 observe)· **0 真缺陷**
+- **流程**:click combobox(e15)开下拉 → effect ariaChanged:true/32 mutations;observe 正确把 overlay 5 选项(New York/Rome/London/Istanbul/Paris)**前置**(OVERLAY_POPUP_ROLES 优先生效);act click "Rome"(e2)→ combobox label="Rome"、aria-expanded=false、0 选项(overlay 消散)、模型提交。
+- **结论**:Select open→枚举→选中→提交→关闭 链路完整正确,0 缺陷。**注:observe 结构召回正常**(overlay 选项前置准确)——陈旧 scan 仅影响图标 naming 质量,结构/recall 仍可用(故本轮能正常驱动)。
+- **旁证**:observe 在 select 密集页首两次 30s 超时、第三次正常 → SW 瞬时卡顿,非性能问题;借机量 DOM=506 div/5343 元素/0 shadow,**证伪 #75 div-scan 性能地雷担忧**(廉价 scrollHeight 门下 506 div 开销可忽略)。
+- 桶:0 真缺陷;Select 全流程 + observe overlay 优先 + #75 性能 三项证伪/通过。
+
+### Iteration 33 — github.com(真实生产应用,act 旁路)· **0 真缺陷**
+- **TYPE on 真实过滤输入**:`vortex_act(type, "vortex")` on GitHub dashboard "Find a repository…" 框 → success/typed 6/page-side-dispatch。
+- **初判误报 → spike 纠正**:首次验证抓 `a[href^="/benbergg/"]` 全页链接,见非 vortex 仓库仍在 → 疑 type 没触发过滤。spike scope 到真正过滤容器 `div.js-repos-container` → 列表只剩 `/benbergg/vortex-browser` → **type 正确触发 GitHub 客户端过滤**,初判是验证选择器错(抓了主 feed 区 repo 链接),非 type 缺陷。
+- **结论**:TYPE 在真实生产应用过滤输入上正确工作(page-side-dispatch 正确派发 input 事件驱动客户端过滤)。observe 召回优秀(GitHub 真 aria-label,naming 无 fallback 问题)。0 缺陷。
+- 桶:0 真缺陷;TYPE 真站通过 + 1 验证误报经 spike 自纠。
+- **教训**:验证 act 效果时,效果列表要 scope 到**正确的组件容器**(GitHub 同一 href 在 feed/sidebar 多处出现),全页 querySelector 易误判「未生效」——与 iter-31 的「聚焦态读模型」同属验证方法误差,非 vortex 缺陷。
+
+### Iteration 34 — primevue.org Editor(Quill contenteditable 富文本,act 旁路)· **0 真缺陷**
+- **type 进 contenteditable(含换行)**:`vortex_act(type, "Line one\nLine two")` on Quill `.ql-editor[contenteditable]` → success/typed 17/**path cdp-insertText**;验证 innerHTML=`<p>Line one</p><p>Line two</p>`(换行正确转为段落分隔),富文本多行输入处理正确。
+- **SELECTOR_AMBIGUOUS 正确**:4 个 .ql-editor → 报 SELECTOR_AMBIGUOUS 提示用 ref/更具体选择器(正确行为,非缺陷)。
+- **observe 间歇超时 = 瞬时 SW 卡顿(非性能缺陷)**:editor 页 observe 连续 30s 超时,但 select 页同样超时两次后第三次成功 → 非确定性(真 O(n²) 会必现)。量 editor DOM=2992 元素/410 SVG/maxDepth 19/0 shadow(< select 页 5343 却也偶超时)→ 归因 MV3 SW 不稳(本 session 一贯:SW 休眠/NM 断),非 observe 代码。重载后应复测 observe 在这两页的稳定性。
+- 桶:0 真缺陷;contenteditable type 通过 + SELECTOR_AMBIGUOUS 正确 + observe 超时归因瞬态。
+
+### Iteration 35 — sortablejs.github.io(真实 DnD 库,drag 原语,act 旁路)· **0 真缺陷**
+- **drag-drop 列表重排**:vortex_mouse_drag 拖 example1 的 Item 1(713,243)→ Item 4 下方(713,400,steps 20)→ 列表序 `[1,2,3,4,5,6]` → `[2,3,4,1,5,6]`(Item 1 移到位置 3)。CDP trusted 鼠标拖拽正确触发 SortableJS pointer-based DnD。
+- **结论**:drag-drop(历史最易出缺陷原语,班牛 connect-edge 曾真缺陷)在真实 DnD 库上正确工作,0 缺陷。视口外元素先 scrollIntoView 后拖拽正常。
+- 桶:0 真缺陷;drag 真站重排通过。
+- **iter 30–35 综合**:跨 primevue/GitHub/SortableJS 三类真站,click/type/press/fill/mouse_drag(slider+列表)/Select 全流程/contenteditable 换行/drag 重排/debug_read/navigate 全部正确;#65/#85 live;4 候选 spike 证伪;#75 性能证伪。**新鲜 act+结构 observe 层产品级成熟,零 vortex 缺陷**。唯图标 naming/blindspot(#82/#83/#84/#87/#74/#75/#86)受陈旧注入 scan 阻塞待重载真验。
+
+### Iteration 36 — primevue.org extract 原语(act 旁路)· **0 真缺陷(初判 extract 返空经 spike 证伪)**
+- **初判**:`vortex_extract(target=".doc-main, main, [class*=content]")` 返 ""，但 `.doc-main` innerText 有 6876 字符 → 疑 extract 缺陷。
+- **spike 逐步隔离**:① 单 `.doc-main` → 正确返 6876 字符内容(含 `[VORTEX_TRUNCATED original=6876 limit=N]` 截断标记 + observe 提示);② `.doc-main, main` → 正常(返 .doc-main);③ 加 `[class*=content]` 即返空 → 该 union 匹配 77 元素,**首个 DOM 序匹配是 `config-panel-content`(主题配置抽屉,关闭态/屏幕外)**;其 innerText 报 48 字符但 extract 可见性过滤(更准)判其不可见 → 返 ""。
+- **结论**:extract 正确——resolve 到首匹配元素 + 应用可见性过滤,关闭抽屉(离屏)正确返空;我的 union 选择器恰首匹配到该抽屉。**extract 离屏内容过滤是正确特性,非缺陷**;单选择器精确提取正常。
+- 桶:0 真缺陷;extract 单选择器通过 + 截断标记正确 + 1 候选(union 选择器返空)经 spike 证伪。
+- **教训**:extract 的「可见文本」过滤比 innerText 严(正确排除离屏/关闭抽屉);union/宽选择器易首匹配到不可见元素返空,与 iter-31/33 同属选择器/验证方法误差,非 vortex 缺陷。
+
+### Iteration 37 — the-internet.herokuapp.com/iframe(跨框 act 尝试)· **0 真缺陷(observe 省略 iframe 内容经 spike 证实为正确)**
+- **目标**:测 iframe 跨框 act(TinyMCE 富文本嵌 iframe)。observe(frames=all-permitted)只返主框 1 链接,未含 iframe 内容 → 初疑帧降入漏失。
+- **spike**:iframe(mce_0_ifr)同源可访问,但 `designMode=off`/`body.isContentEditable=false`/`anyCE=0`/focusable=1 → **TinyMCE 当前非可编辑态,iframe 内无可交互元素**,observe interactive filter 正确无可收(非帧降入缺陷)。该 iframe 因此也非有效跨框 act 目标(无可操作内容)。
+- **受限说明**:observe 为陈旧注入 scan,帧降入逻辑亦无法在陈旧码上确证;但本例 iframe 客观无可交互元素,无论是否降入结果都正确。跨框 act 真验(需 observe 出帧 ref 驱动)受陈旧 observe 阻塞,转重载后。
+- 桶:0 真缺陷;1 候选(iframe 内容缺失)经 spike 证实为正确行为。
