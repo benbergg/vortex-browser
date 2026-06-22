@@ -4,18 +4,23 @@
 import type { ObserveRow, ObserveHeader, ParsedObserve } from "../scan-types.js";
 
 // ── 树格式（新，a11y-tree）─────────────────────────────────────────────────
-// 每行：{indent}- {role} "{name}"? [ref=@..] {[flag]..}? {value=..}? {bbox=[..]}? {:}?
+// 每行：{indent}- {role} "{name}"? [ref=@..] {[flag]..}? {…中间段…}? {bbox=[..]}? {:}?
 // 缩进 2 空格/层；role 裸词；name 可含转义 \"；flag 容忍 = 与 :（cursor=pointer / sort:asc）；
-// value= 段容忍跳过（不进 ObserveRow，同旧格式处理）。
+// 中间段（value= / compound=(...) / error= / controls= / desc= / [offscreen] / [virtual:..] /
+// [blindspot=..]，顺序见 observe-render.ts:458）由惰性 .*? 整体跳过——不进 ObserveRow。bbox=
+// 恒为末尾数据段(可选,后仅跟 children 冒号),用前置 .*? + 末尾捕获稳妥提取。旧版只容忍
+// value=/bbox=,遇 compound=(...) 等中间段整行失配被静默丢(native-form file/range input 假
+// recall-miss,2026-06-22 FullCalendar/native-form dogfood)。
 const TREE_ROW_RE =
-  /^(\s*)-\s+(\S+)(?:\s+"((?:\\.|[^"\\])*)")?\s+\[ref=(@[\w:]+)\]((?:\s+\[[a-z:=]+\])*)(?:\s+value=(?:"(?:\\.|[^"\\])*"|\S+))?(?:\s+bbox=\[(\d+),(\d+),(\d+),(\d+)\])?\s*:?\s*$/;
+  /^(\s*)-\s+(\S+)(?:\s+"((?:\\.|[^"\\])*)")?\s+\[ref=(@[\w:]+)\]((?:\s+\[[a-z:=]+\])*).*?(?:\s+bbox=\[(\d+),(\d+),(\d+),(\d+)\])?\s*:?\s*$/;
 
 // ── 旧扁平格式（向后兼容）──────────────────────────────────────────────────
-// 元素行: @<ref> [<role>] "<name>"? (<flags>)* (value=..)? (bbox=[..])?
+// 元素行: @<ref> [<role>] "<name>"? (<flags>)* (…中间段…)? (bbox=[..])?
 // flag 段容忍 `:`:aria-sort 渲染为 [sort:asc]/[sort:desc]（observe-render.ts），
 // 旧 [a-z]+ 不含冒号会让整行失配被静默丢（2026-06-02 AC，同 value= 段教训）。
+// 中间段(value=/compound=(...)/desc= 等)同树格式由惰性 .*? 跳过,只保 bbox= 末尾捕获。
 const FLAT_ROW_RE =
-  /^(@[\w:]+)\s+\[([^\]]+)\](?:\s+"((?:\\.|[^"\\])*)")?((?:\s+\[[a-z:]+\])*)(?:\s+value=(?:"(?:\\.|[^"\\])*"|\S+))?(?:\s+bbox=\[(\d+),(\d+),(\d+),(\d+)\])?\s*$/;
+  /^(@[\w:]+)\s+\[([^\]]+)\](?:\s+"((?:\\.|[^"\\])*)")?((?:\s+\[[a-z:]+\])*).*?(?:\s+bbox=\[(\d+),(\d+),(\d+),(\d+)\])?\s*$/;
 
 // flag 匹配（树格式：含 = 符，如 cursor=pointer；扁平格式：仅含 a-z:）
 const FLAG_RE_TREE = /\[([a-z:=]+)\]/g;
