@@ -45,6 +45,14 @@ import type { DebuggerManager } from "../lib/debugger-manager.js";
 export const LISTENER_MARK_ATTR = "data-vtx-listener";
 
 /**
+ * scan 用来识别「拖放投放区(drop target)」元素的属性名（pre-scan 打、post-scan 清）。
+ * 与 LISTENER_MARK_ATTR 并列但语义不同:drop 区不是点击目标,渲染为独立 [dropzone] 信号,
+ * 供 ref-based vortex_drag 的 endRef 定位投放区(无此信号则仅靠 drop/dragover 监听、无
+ * role/无 cursor/非 draggable 的 drop 区对 observe 完全不可见 → 拖放任务无 endRef 可表达)。
+ */
+export const DROPZONE_MARK_ATTR = "data-vtx-dropzone";
+
+/**
  * 点击监听器元素数上限：超过此值跳过标记，静默回退（召回安全）。
  * 与 browser-use 同量级（10000）——监听器极多的页让位给现有启发式。
  */
@@ -56,6 +64,15 @@ export const JS_LISTENER_ELEMENT_CAP = 10000;
  */
 const CLICK_EVENT_TYPES = ["click", "mousedown", "mouseup", "pointerdown", "pointerup"];
 
+/**
+ * 拖放投放区事件类型:含其一即判为 drop target。
+ * - `drop`:标准 HTML5 投放处理器(决定性信号)。
+ * - `dragenter`/`dragover`:react-dnd / 多数库给投放节点绑的接受信号(其 drop 常在 window
+ *   级集中处理,投放节点自身可能只有 dragenter/dragover/dragleave)——纳入以覆盖库模式。
+ * 不含 `dragstart`/`drag`/`dragend`(那是**拖源**信号,拖源已由 draggable=true 召回)。
+ */
+const DROP_TARGET_EVENT_TYPES = ["drop", "dragenter", "dragover"];
+
 /** DOMDebugger.getEventListeners 单条监听器形（只用到 type + backendNodeId）。 */
 interface CdpEventListener {
   type?: string;
@@ -66,7 +83,10 @@ interface CdpEventListener {
 export type ListenerMechanism = "domDebugger" | "skipped-heavy" | "error";
 
 export interface ListenerMarkResult {
+  /** 打了 data-vtx-listener 的点击类元素数。 */
   count: number;
+  /** 打了 data-vtx-dropzone 的投放区元素数。 */
+  dropzoneCount: number;
   mechanism: ListenerMechanism;
 }
 
@@ -100,7 +120,7 @@ export async function markListenerElements(
       returnByValue: false,
     })) as { result?: { objectId?: string } } | undefined;
     docObjectId = docResp?.result?.objectId;
-    if (!docObjectId) return { count: 0, mechanism: "error" };
+    if (!docObjectId) return { count: 0, dropzoneCount: 0, mechanism: "error" };
 
     // 一次拿整个文档子树（含 shadow / iframe）所有监听器，每条带 backendNodeId
     const leResp = (await debuggerMgr.sendCommand(tabId, "DOMDebugger.getEventListeners", {
@@ -110,44 +130,54 @@ export async function markListenerElements(
     })) as { listeners?: CdpEventListener[] } | undefined;
     const listeners = leResp?.listeners ?? [];
 
-    const backendIds = new Set<number>();
+    // 同一次 getEventListeners 结果分两类:点击类(→data-vtx-listener)与投放区(→data-vtx-dropzone)。
+    const clickIds = new Set<number>();
+    const dropIds = new Set<number>();
     for (const l of listeners) {
-      if (CLICK_EVENT_TYPES.includes(l.type ?? "") && typeof l.backendNodeId === "number") {
-        backendIds.add(l.backendNodeId);
-      }
+      const t = l.type ?? "";
+      if (typeof l.backendNodeId !== "number") continue;
+      if (CLICK_EVENT_TYPES.includes(t)) clickIds.add(l.backendNodeId);
+      if (DROP_TARGET_EVENT_TYPES.includes(t)) dropIds.add(l.backendNodeId);
     }
-    if (backendIds.size === 0) return { count: 0, mechanism: "domDebugger" };
-    if (backendIds.size > JS_LISTENER_ELEMENT_CAP) return { count: 0, mechanism: "skipped-heavy" };
+    if (clickIds.size === 0 && dropIds.size === 0) {
+      return { count: 0, dropzoneCount: 0, mechanism: "domDebugger" };
+    }
+    if (clickIds.size + dropIds.size > JS_LISTENER_ELEMENT_CAP) {
+      return { count: 0, dropzoneCount: 0, mechanism: "skipped-heavy" };
+    }
 
     // pushNodesByBackendIdsToFrontend 要求 DOM agent 已「请求过文档」(否则
     // "Document needs to be requested first")。depth:-1+pierce 确保 shadow/iframe
     // 节点也在 frontend map 内，与 getEventListeners 的 pierce:true 对齐。仅在确有
-    // 点击监听器(且 ≤cap)时才付此遍历代价。
+    // 关注监听器(且 ≤cap)时才付此遍历代价。
     await debuggerMgr.sendCommand(tabId, "DOM.getDocument", { depth: -1, pierce: true });
 
-    // backendNodeId → nodeId（批量一次）
-    const pushResp = (await debuggerMgr.sendCommand(tabId, "DOM.pushNodesByBackendIdsToFrontend", {
-      backendNodeIds: [...backendIds],
-    })) as { nodeIds?: number[] } | undefined;
-    const nodeIds = pushResp?.nodeIds ?? [];
-
-    let count = 0;
-    for (const nodeId of nodeIds) {
-      if (!nodeId) continue;
-      try {
-        await debuggerMgr.sendCommand(tabId, "DOM.setAttributeValue", {
-          nodeId,
-          name: LISTENER_MARK_ATTR,
-          value: "",
-        });
-        count++;
-      } catch {
-        // 单节点失败跳过（如节点已从 frontend map 失效），继续
+    // 单类标记:backendNodeId 集合 → nodeId → setAttributeValue。返回实际标记数。
+    const markSet = async (ids: Set<number>, attr: string): Promise<number> => {
+      if (ids.size === 0) return 0;
+      const pushResp = (await debuggerMgr.sendCommand(tabId, "DOM.pushNodesByBackendIdsToFrontend", {
+        backendNodeIds: [...ids],
+      })) as { nodeIds?: number[] } | undefined;
+      const nodeIds = pushResp?.nodeIds ?? [];
+      let n = 0;
+      for (const nodeId of nodeIds) {
+        if (!nodeId) continue;
+        try {
+          await debuggerMgr.sendCommand(tabId, "DOM.setAttributeValue", { nodeId, name: attr, value: "" });
+          n++;
+        } catch {
+          // 单节点失败跳过（如节点已从 frontend map 失效），继续
+        }
       }
-    }
-    return { count, mechanism: "domDebugger" };
+      return n;
+    };
+
+    // 点击类先标(保序:既有测试断言首个 push 为点击集),投放区后标。
+    const count = await markSet(clickIds, LISTENER_MARK_ATTR);
+    const dropzoneCount = await markSet(dropIds, DROPZONE_MARK_ATTR);
+    return { count, dropzoneCount, mechanism: "domDebugger" };
   } catch {
-    return { count: 0, mechanism: "error" };
+    return { count: 0, dropzoneCount: 0, mechanism: "error" };
   } finally {
     if (docObjectId) {
       try {

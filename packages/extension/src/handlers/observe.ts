@@ -106,6 +106,9 @@ interface ScannedElement {
   /** CDP getEventListeners 确认有 click/mousedown/pointerdown 监听器。
    * 高优先交互判定信号（优先级高于 cursor:pointer 启发），并集增强不删元素。@since T3 */
   listenerInteractive?: true;
+  /** CDP getEventListeners 确认有 drop/dragenter/dragover 监听器 → 投放区,渲染 [dropzone]。
+   * 入池信号(否则无 role/cursor 的 drop 区不可见),与 listenerInteractive 正交。@since dropzone-discovery */
+  dropzoneInteractive?: true;
   /** 最近的已收集祖先的 frame-local index；根节点 undefined。@since a11y-tree */
   parentIndex?: number;
   /** role=link 的 href，供 compact 树渲染 /url。@since a11y-tree */
@@ -1673,13 +1676,19 @@ async function scanOneFrame(
             // 标记的纯 addEventListener 元素,vanilla/jQuery 直绑——见 observe-js-listener.ts)。
             // 二者并集:framework 覆盖委托型、listener 覆盖直绑型,互补无盲区(T3 discovery)。
             const __hasDirectListener = el.hasAttribute("data-vtx-listener");
-            if (!hasFrameworkClick(el) && !__hasDirectListener) continue;
+            // 投放区(drop target)入池信号:pre-scan CDP 标的 data-vtx-dropzone(见
+            // observe-js-listener.ts)。body/html 排除——全局 file-drop 监听常绑在
+            // 文档根,不该把整页当 drop 区。drop 区不是点击目标,渲染 [dropzone] 而非
+            // [listener](透传见下方 entry 构造)。
+            const __hasDropzone =
+              el.hasAttribute("data-vtx-dropzone") && el.tagName !== "BODY" && el.tagName !== "HTML";
+            if (!hasFrameworkClick(el) && !__hasDirectListener && !__hasDropzone) continue;
             // framework onClick 常挂事件委托的**容器**层;若内部已有更细 cursor:pointer
             // 子项(如多个 SKU 选项),让位给子项各自入池——否则下方择叶因容器文字最长
             // 保留容器,把多真选项合并成一个不可操作大块(2026-06-04 淘宝 SKU 区回归)。
-            // **direct listener 不让位**:addEventListener 绑在元素自身,它就是精确点击
-            // 目标(非委托容器),不该让位给装饰性 pointer 子项。仅 framework 委托路径让位。
-            if (!__hasDirectListener) {
+            // **direct listener / dropzone 不让位**:addEventListener / drop 监听绑在元素自身,
+            // 它就是精确目标(非委托容器),不该让位给装饰性 pointer 子项。仅 framework 委托路径让位。
+            if (!__hasDirectListener && !__hasDropzone) {
               const finerDesc = el.querySelectorAll("*");
               let hasFinerPointer = false;
               for (let di = 0; di < finerDesc.length && di < 200; di++) {
@@ -2216,6 +2225,13 @@ async function scanOneFrame(
             // T3 discovery: pre-scan CDP getEventListeners 标记的纯 addEventListener
             // 元素带 data-vtx-listener → 渲染 [listener] 真值信号(此处属性尚存,清理在后)。
             ...(htmlEl.hasAttribute("data-vtx-listener") ? { listenerInteractive: true as const } : {}),
+            // 投放区:data-vtx-dropzone(drop/dragenter/dragover 监听)→ 渲染 [dropzone] 信号,
+            // 与 [listener] 正交(同一元素可兼具)。body/html 排除全局 file-drop 误标。
+            ...(htmlEl.hasAttribute("data-vtx-dropzone") &&
+            htmlEl.tagName !== "BODY" &&
+            htmlEl.tagName !== "HTML"
+              ? { dropzoneInteractive: true as const }
+              : {}),
             ...(__href !== undefined ? { href: __href } : {}),
             ...(__inputCompound !== undefined ? { compound: __inputCompound } : {}),
             ...(__vtxBlind ? { blindspot: __vtxBlind } : {}),
@@ -2534,7 +2550,7 @@ export function registerObserveHandlers(router: ActionRouter, debuggerMgr: Debug
       // data-vtx-listener 属性直接生成,不再需要事后 CDP pass。
 
       // marker 清理(无条件):data-vtx-ax(scan stamping)+ data-vtx-listener
-      // (pre-scan discovery)。两者无条件打,故清理也须无条件,防标记残留。清理失败不致命。
+      // + data-vtx-dropzone(pre-scan discovery)。无条件打,故清理也须无条件,防标记残留。清理失败不致命。
       try {
         await chrome.scripting.executeScript({
           target: { tabId: tid, allFrames: true },
@@ -2542,6 +2558,8 @@ export function registerObserveHandlers(router: ActionRouter, debuggerMgr: Debug
             for (const el of document.querySelectorAll("[data-vtx-ax]")) el.removeAttribute("data-vtx-ax");
             for (const el of document.querySelectorAll("[data-vtx-listener]"))
               el.removeAttribute("data-vtx-listener");
+            for (const el of document.querySelectorAll("[data-vtx-dropzone]"))
+              el.removeAttribute("data-vtx-dropzone");
           },
         });
       } catch {
@@ -2570,6 +2588,8 @@ export function registerObserveHandlers(router: ActionRouter, debuggerMgr: Debug
         clickHint?: string;
         /** CDP getEventListeners 真值信号，透传渲染层。@since T3 */
         listenerInteractive?: true;
+        /** 投放区(drop/dragenter/dragover 监听)真值信号 → 渲染 [dropzone]。@since dropzone-discovery */
+        dropzoneInteractive?: true;
         frameId: number;
         // Issue #21 — populated only when input.includeBoxes && e.inViewport (T4).
         bbox?: [number, number, number, number];
@@ -2679,6 +2699,8 @@ export function registerObserveHandlers(router: ActionRouter, debuggerMgr: Debug
                 : {}),
               // T3: CDP getEventListeners 真值信号透传渲染层（并集增强）。
               ...(e.listenerInteractive ? { listenerInteractive: true as const } : {}),
+              // 投放区真值信号透传渲染层（→ [dropzone]）。
+              ...(e.dropzoneInteractive ? { dropzoneInteractive: true as const } : {}),
               // a11y-tree: 全局重映射后的父指针 + href（link 元素）。
               ...(globalParentIndex !== undefined ? { parentIndex: globalParentIndex } : {}),
               ...(e.href ? { href: e.href } : {}),
@@ -2721,6 +2743,8 @@ export function registerObserveHandlers(router: ActionRouter, debuggerMgr: Debug
                 : {}),
               // T3: CDP getEventListeners 真值信号透传渲染层（并集增强）。
               ...(e.listenerInteractive ? { listenerInteractive: true as const } : {}),
+              // 投放区真值信号透传渲染层（→ [dropzone]）。
+              ...(e.dropzoneInteractive ? { dropzoneInteractive: true as const } : {}),
               // a11y-tree: 全局重映射后的父指针 + href（link 元素）。
               ...(globalParentIndex !== undefined ? { parentIndex: globalParentIndex } : {}),
               ...(e.href ? { href: e.href } : {}),

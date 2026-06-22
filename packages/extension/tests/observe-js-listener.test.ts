@@ -23,6 +23,7 @@ import {
   markListenerElements,
   JS_LISTENER_ELEMENT_CAP,
   LISTENER_MARK_ATTR,
+  DROPZONE_MARK_ATTR,
 } from "../src/handlers/observe-js-listener.js";
 import { renderObserveTree } from "../../mcp/src/lib/observe-render.js";
 
@@ -63,7 +64,9 @@ function makeDbg(config: DbgConfig): {
       return Promise.resolve({ root: { nodeId: 1 } });
     }
     if (method === "DOM.pushNodesByBackendIdsToFrontend") {
-      return Promise.resolve({ nodeIds: config.nodeIds ?? [] });
+      // config.nodeIds 显式提供时用之(legacy 单 push 测试);否则 echo 入参 backendNodeIds
+      // 作 nodeIds(支持 click+dropzone 两次 push 各自返回对应节点)。
+      return Promise.resolve({ nodeIds: config.nodeIds ?? params?.backendNodeIds ?? [] });
     }
     return Promise.resolve({});
   });
@@ -162,6 +165,135 @@ describe("markListenerElements · 召回零回退", () => {
 
   it("LISTENER_MARK_ATTR 是 data-vtx-listener", () => {
     expect(LISTENER_MARK_ATTR).toBe("data-vtx-listener");
+  });
+});
+
+// ---- 投放区(drop target)发现 ----
+
+describe("markListenerElements · dropzone 发现", () => {
+  it("drop/dragover 监听 → 打 data-vtx-dropzone(同节点去重计 1)", async () => {
+    const dbg = makeDbg({
+      listeners: [
+        { type: "drop", backendNodeId: 5 },
+        { type: "dragover", backendNodeId: 5 }, // 同节点,Set 去重
+        { type: "dragenter", backendNodeId: 5 },
+      ],
+    });
+    const res = await markListenerElements(dbg as any, 1);
+    expect(res.mechanism).toBe("domDebugger");
+    expect(res.dropzoneCount).toBe(1);
+    expect(res.count).toBe(0); // 无点击类
+    const setCall = dbg.calls.find((c) => c.method === "DOM.setAttributeValue");
+    expect(setCall!.params.name).toBe(DROPZONE_MARK_ATTR);
+  });
+
+  it("DROPZONE_MARK_ATTR 是 data-vtx-dropzone", () => {
+    expect(DROPZONE_MARK_ATTR).toBe("data-vtx-dropzone");
+  });
+
+  it("拖源信号 dragstart/drag/dragend 不算投放区(它们是拖源,由 draggable 召回)", async () => {
+    const dbg = makeDbg({
+      listeners: [
+        { type: "dragstart", backendNodeId: 9 },
+        { type: "drag", backendNodeId: 9 },
+        { type: "dragend", backendNodeId: 9 },
+      ],
+    });
+    const res = await markListenerElements(dbg as any, 1);
+    expect(res.dropzoneCount).toBe(0);
+    expect(res.count).toBe(0);
+  });
+
+  it("点击 + 投放区共存 → 各打各属性,两次 push 互不污染", async () => {
+    const dbg = makeDbg({
+      listeners: [
+        { type: "click", backendNodeId: 11 },
+        { type: "drop", backendNodeId: 22 },
+      ],
+      // 不设 nodeIds → mock echo 入参,使 click push 返 [11]、drop push 返 [22]
+    });
+    const res = await markListenerElements(dbg as any, 1);
+    expect(res.count).toBe(1);
+    expect(res.dropzoneCount).toBe(1);
+    const setCalls = dbg.calls.filter((c) => c.method === "DOM.setAttributeValue");
+    const listenerSet = setCalls.find((c) => c.params.name === LISTENER_MARK_ATTR);
+    const dropzoneSet = setCalls.find((c) => c.params.name === DROPZONE_MARK_ATTR);
+    expect(listenerSet!.params.nodeId).toBe(11);
+    expect(dropzoneSet!.params.nodeId).toBe(22);
+  });
+
+  it("点击集先 push(保序,不破坏既有点击断言)", async () => {
+    const dbg = makeDbg({
+      listeners: [
+        { type: "drop", backendNodeId: 22 },
+        { type: "click", backendNodeId: 11 },
+      ],
+    });
+    await markListenerElements(dbg as any, 1);
+    const pushes = dbg.calls.filter((c) => c.method === "DOM.pushNodesByBackendIdsToFrontend");
+    expect(pushes[0].params.backendNodeIds).toEqual([11]); // 首个 push 为点击集
+    expect(pushes[1].params.backendNodeIds).toEqual([22]);
+  });
+
+  it("无任何监听器 → dropzoneCount 0,不触发 getDocument", async () => {
+    const dbg = makeDbg({ listeners: [] });
+    const res = await markListenerElements(dbg as any, 1);
+    expect(res.dropzoneCount).toBe(0);
+    expect(dbg.calls.some((c) => c.method === "DOM.getDocument")).toBe(false);
+  });
+
+  it("CDP 抛错 → dropzoneCount 0 + error(召回零回退)", async () => {
+    const dbg = makeDbg({ throwOn: "DOMDebugger.getEventListeners" });
+    const res = await markListenerElements(dbg as any, 1);
+    expect(res.dropzoneCount).toBe(0);
+    expect(res.mechanism).toBe("error");
+  });
+});
+
+// ---- 渲染层 [dropzone] 标记 ----
+
+describe("observe-render [dropzone] 标记", () => {
+  it("dropzoneInteractive=true → 渲染输出含 [dropzone]", () => {
+    const data = {
+      snapshotId: "s1",
+      url: "https://example.com",
+      elements: [
+        { index: 0, tag: "div", role: "div", name: "Drop files here", frameId: 0, dropzoneInteractive: true },
+      ],
+    };
+    const out = renderObserveTree(data as any, null);
+    expect(out).toContain("[dropzone]");
+  });
+
+  it("无 dropzoneInteractive → 不含 [dropzone]", () => {
+    const data = {
+      snapshotId: "s1",
+      url: "https://example.com",
+      elements: [{ index: 0, tag: "button", role: "button", name: "提交", frameId: 0 }],
+    };
+    const out = renderObserveTree(data as any, null);
+    expect(out).not.toContain("[dropzone]");
+  });
+
+  it("listener + dropzone 正交共存 → 同时含 [listener] 和 [dropzone]", () => {
+    const data = {
+      snapshotId: "s1",
+      url: "https://example.com",
+      elements: [
+        {
+          index: 0,
+          tag: "div",
+          role: "div",
+          name: "可点亦可投放",
+          frameId: 0,
+          listenerInteractive: true,
+          dropzoneInteractive: true,
+        },
+      ],
+    };
+    const out = renderObserveTree(data as any, null);
+    expect(out).toContain("[listener]");
+    expect(out).toContain("[dropzone]");
   });
 });
 
