@@ -671,14 +671,14 @@ async function scanOneFrame(
         // Icon-only fallback：先 svg `<title>` / img alt / aria-label，失败再 className。
         // 触发条件：元素含 svg/img 后代（典型 svg/img 图标按钮）。
         // **不**包含 `<i>` 标签兜底——空 `<i>` 多为 CSS pseudo-element 渲染的装饰。
-        // className 路径带 denylist，过滤掉 Element Plus / Ant / Vant 等框架前缀类
+        // className 路径带 denylist，过滤掉 Element Plus / Ant / Vant / Mantine 等框架前缀类
         // 和通用泛词 (icon/iconfont/btn/button/wrapper/container)——它们对 LLM 等同
         // "icon"/"button"，零信息（testc 实测 `el-icon` × 3 + `el-popover_*` × 2）。
         // 以及生成式原子类（emotion `css-*` / styled-components `sc-*`）纯 hash，
         // 否决以免框架前缀被否后级联回退到 emotion token（preview.pro.ant.design dogfood）。
         // CSS Modules `_closeIcon_1ygkr_39` → `closeIcon` 仍正常保留（不在 denylist）。
         // 共用于：(1) cursor:pointer fallback gate (2) getAccessibleName 末尾兜底。
-        const ICON_CLASS_DENY_PREFIXES = ["el-", "ant-", "anticon", "van-"];
+        const ICON_CLASS_DENY_PREFIXES = ["el-", "ant-", "anticon", "van-", "mantine-"];
         const ICON_CLASS_DENY_NAMES = new Set([
           "icon", "iconfont", "btn", "button", "wrapper", "container",
         ]);
@@ -764,6 +764,12 @@ async function scanOneFrame(
                   seg.length >= 8 && /[a-z]/.test(seg) && /[A-Z]/.test(seg) && /[0-9]/.test(seg),
               );
             if (isHashSeg) continue;
+            // CSS Modules 打包哈希类(vanilla-extract / Mantine：`Name-module__HASH__part`,
+            // 如 `MdxLlmAffix-module__OdnXjG__control`)是 build 期 scramble,零语义。
+            // 否决以免框架前缀(mantine-)被否后级联回退到此类哈希名,泄漏成
+            // `mdxllmaffix-module__odnxjg` 等噪声(mantine.dev ActionIcon dogfood 2026-06-22);
+            // cleaning 仅剥尾段 `__part`,核心 `-module__hash` 仍在 lower 中可判定。
+            if (/-module__[a-z0-9]/.test(lower)) continue;
             return cleaned;
           }
           return "";
