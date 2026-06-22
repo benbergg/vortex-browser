@@ -648,6 +648,20 @@ async function scanOneFrame(
             // BUG-3 噪声过滤器丢弃的非交互背景层凭这个假名续命被误报为可交互
             // (2026-06-01 preview.pro.ant.design dogfood 实测)。
             if (/^css-/.test(lower) || /^sc-[a-z]/.test(lower)) continue;
+            // 无框架前缀的高熵随机类名(CSS-modules 默认 [hash] / 各家构建产物,如
+            // DuckDuckGo `w0GlwvoHJHjX9o0DVIaL`、`YZxymVMEkIDA0nZSt_Pm`)零语义,当名
+            // 比无名更糟(噪声 + 假名击败 require-name 过滤,见下方 getAccessibleName
+            // isContainer 注释 AJ),否决 → 元素回退到无名被噪声过滤器丢弃。
+            // **按段检测**:按 -/_ 切段,任一段长 ≥8 且大小写混合 + 含数字 = 哈希
+            // (覆盖无分隔符整段哈希与含 _/- 的哈希段 `YZxymVMEkIDA0nZSt_Pm`)。
+            // 语义名不误伤:kebab/snake 段为纯小写、camelCase 无数字(`closeIcon` 保留)。
+            const isHashSeg = cleaned
+              .split(/[-_]/)
+              .some(
+                (seg) =>
+                  seg.length >= 8 && /[a-z]/.test(seg) && /[A-Z]/.test(seg) && /[0-9]/.test(seg),
+              );
+            if (isHashSeg) continue;
             return cleaned;
           }
           return "";
