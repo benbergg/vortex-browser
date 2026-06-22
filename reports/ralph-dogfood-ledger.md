@@ -353,3 +353,23 @@
 - **spike**:iframe(mce_0_ifr)同源可访问,但 `designMode=off`/`body.isContentEditable=false`/`anyCE=0`/focusable=1 → **TinyMCE 当前非可编辑态,iframe 内无可交互元素**,observe interactive filter 正确无可收(非帧降入缺陷)。该 iframe 因此也非有效跨框 act 目标(无可操作内容)。
 - **受限说明**:observe 为陈旧注入 scan,帧降入逻辑亦无法在陈旧码上确证;但本例 iframe 客观无可交互元素,无论是否降入结果都正确。跨框 act 真验(需 observe 出帧 ref 驱动)受陈旧 observe 阻塞,转重载后。
 - 桶:0 真缺陷;1 候选(iframe 内容缺失)经 spike 证实为正确行为。
+
+### Iteration 38 — the-internet.herokuapp.com/login(fill_form 批量 + 表单提交,act 旁路)· **0 真缺陷**
+- **vortex_fill_form 批量**:2 字段(#username=tomsmith / #password=SuperSecretPassword!)→ total 2/success 2/failed 0,字段值实测正确。
+- **提交+导航**:act click `button[type=submit]`(realMouse)→ 实测 url=/secure、flash="You logged into a secure area!"、logout 链接出现 = **登录成功**。
+- **effect windowMs 时序说明(非缺陷)**:click 的 observeEffect 报 urlChanged:false/userFeedback:none/domMutations:0 —— 导航服务器往返 >300ms 窗口,属已知设计(windowMs 上限 3000,慢导航不入窗),事后 observe 验证确认成功。**潜在增强(非本轮缺陷,记录备查)**:observeEffect 可考虑对触发 beforeunload/导航的 click 加 navigationPending 信号,避免 agent 仅凭 effect 误判「无反馈」;但当前属文档化行为,指引是事后 observe 复验。
+- 桶:0 真缺陷;fill_form 批量 + 表单提交流程通过;1 effect 时序现象证为已知设计。
+
+### Iteration 39 — observeEffect 导航盲区深度诊断(代码级,act 旁路)· **0 修复(诊断驱动:确为架构性已知限制,不强行修)**
+- **问题**:observeEffect 对整文档导航型 click(表单提交/链接跳转)报 userFeedback:none(iter-38 login 实证:提交成功导航到 /secure,但 effect urlChanged:false/none)。urlChanged 仅捕同文档(SPA)导航。
+- **代码级诊断(读 click-effect.ts begin/end)**:采集器 page-side,end() 自适应轮询网络至 idle/ceiling 后 diff url。整文档导航在窗口关闭后才发生(login:窗口 300ms 关、服务器往返后 ~400ms 才导航),end() Promise 已 resolve;pagehide 在导航时触发但页面正被销毁、与 resolve 竞态 → page-side 无法可靠捕获。`observed:false` 是「导航中途替换 document」的既有信号,但「窗口后导航」走不到它。
+- **判断(不修)**:① 注释明示「success 不为导航翻转」是有意设计;② 有缓解(事后 observe 复验,iter-38 已验证);③ 干净修法须 background 层接 chrome.webNavigation.onCommitted(非平凡、改 load-bearing 点击路径、回归风险高),非快速 dogfood 补丁。**按「诊断后再动手 / 修真缺陷 / 不凑修复」原则,转 backlog 作增强,本轮不改码**。
+- 桶:0 修复;1 真限制经代码级确诊为架构性、有缓解、修法非平凡 → backlog。
+- **教训**:page-side 效果采集对「窗口后整文档导航」存在固有盲区(上下文被导航摧毁);silent-fail 判别对导航型动作依赖事后 observe。增强方向=background webNavigation,非 page-side 补丁。
+
+### Iteration 40 — observe 陈旧注入 scan 三重确认 + #87 真实 DOM 逻辑验证(代码级)· **0 缺陷(确认环境阻塞,非代码缺陷)**
+- **动机**:解整 session 矛盾——SW 是新码(#65 tail live 证)为何 observe 注入 scan 旧?读 observe.ts:scan 经 `chrome.scripting.executeScript({func, world:"MAIN"})`(~2100 行内联 scanOneFrame,属 SW bundle)。
+- **决定性测试**:在真实 primevue github `<a class="topbar-item"><i class="pi pi-github"></i></a>` 上精确复刻合并后 iconFontName 逻辑 → 返 **"github"**。即 **#87 代码正确**;observe 实际输出 `link ""` = 注入 scan 跑旧码。
+- **三重确认**:① SW handler 新(#65 live)② #87 逻辑真实 DOM 正确(本次)③ observe 输出旧。结论:`executeScript({func})` 注入的 func 被 Chrome 缓存成旧(新 SW 却注入旧 func 的 MV3 怪癖),`runtime.reload`/页面 reload/MCP 重连均不清,**只有 chrome://extensions 移除重加**。
+- **附带价值**:证明本 session 合并的 observe 修复逻辑(≥#87)在真实 DOM 正确——已尽重载前一切可验手段;找**新** naming/blindspot 缺陷须真新 scan(重载后)。
+- 桶:0 代码缺陷;环境阻塞三重确认 + #87 真实 DOM 逻辑验证通过。
