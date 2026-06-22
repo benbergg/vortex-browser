@@ -356,7 +356,22 @@ export function registerNetworkHandlers(
       if (!includeResources) merged = merged.filter((e) => API_TYPES.has(e.type ?? ""));
       // pattern 过滤(debug_read 必带 pattern;缺省则不滤)。
       if (pattern) merged = merged.filter((e) => e.url.includes(pattern));
-      return merged.sort((a, b) => a.startTime - b.startTime);
+      // status 范围过滤:debug_read filter.statusMin/statusMax 文档化(schema network:
+      // {pattern,statusMin/Max}),但此前 getLogs 漏读 → 求「仅失败请求」却混入 200
+      // (silent-false 结果,2026-06-20 白盒+DAST)。status 缺失的条目(RT 摘要无 status)
+      // 在设了下/上限时一并排除,语义同 network.filter。
+      const statusMin = args.statusMin as number | undefined;
+      const statusMax = args.statusMax as number | undefined;
+      if (statusMin != null) merged = merged.filter((e) => e.status != null && e.status >= statusMin);
+      if (statusMax != null) merged = merged.filter((e) => e.status != null && e.status <= statusMax);
+      merged.sort((a, b) => a.startTime - b.startTime);
+      // tail(dispatch 写成 limit):取末 N 条 = 最近 N 个请求。文档化(顶层 tail)但
+      // 此前 getLogs 漏读 → tail=N 求最近 N 却返回全部(silent no-op)。
+      const limit = args.limit as number | undefined;
+      if (limit != null && limit >= 0 && merged.length > limit) {
+        merged = merged.slice(merged.length - limit);
+      }
+      return merged;
     },
 
     [NetworkActions.GET_ERRORS]: async (args, tabId) => {

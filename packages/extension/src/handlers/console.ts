@@ -166,6 +166,13 @@ export function registerConsoleHandlers(
       if (level && level !== "all") {
         logs = logs.filter((l) => l.level === level);
       }
+      // tail(dispatch 把 debug_read 顶层 tail 写成 limit):取末 N 条 = 最近 N 条日志。
+      // 文档化但此前 getLogs 漏读 → tail=N 求最近 N 却返回全部(silent no-op,与 network
+      // getLogs 同类,2026-06-20)。
+      const limit = args.limit as number | undefined;
+      if (limit != null && limit >= 0 && logs.length > limit) {
+        logs = logs.slice(logs.length - limit);
+      }
       return logs;
     },
 
