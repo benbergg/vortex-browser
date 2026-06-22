@@ -130,7 +130,10 @@ describe("EVALUATE page-side func — host object 展开 (BUG-001 + BUG-005)", (
   // V2 关键守卫:防假绿 — func 源码不能引用模块函数
   it("func 序列化安全:源码不引用 normalizeEvaluateResult", async () => {
     const fn = await captureEvaluateFunc();
-    expect(fn.toString()).not.toMatch(/normalizeEvaluateResult/);
+    // 剥离行/块注释后再断言:func 用独立名 expandHost 内联,normalizeEvaluateResult 仅出现在
+    // 解释性注释(「与 module-level normalizeEvaluateResult 行为一致」),裸正则误匹配注释 → 假阳。
+    const src = fn.toString().replace(/\/\/.*$/gm, "").replace(/\/\*[\s\S]*?\*\//g, "");
+    expect(src).not.toMatch(/normalizeEvaluateResult/);
   });
 
   it("plain object 展开直通", async () => {

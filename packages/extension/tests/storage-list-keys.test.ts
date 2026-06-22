@@ -144,7 +144,10 @@ describe("GET_LOCAL_STORAGE page-side func — 自包含 + 真注入 (B3-2 V2)",
   // V2 关键守卫:防 V1 假绿 —— func 源码不能引用 summarizeStorage
   it("func 序列化安全:源码不引用模块函数 summarizeStorage", async () => {
     const fn = await captureGetLocalStorageFunc();
-    expect(fn.toString()).not.toMatch(/summarizeStorage/);
+    // 剥离行/块注释后再断言:func 已内联实现,summarizeStorage 仅出现在解释性注释
+    // (「不能调模块级 summarizeStorage」),裸正则会误匹配注释 → 假阳。只查真实代码引用。
+    const src = fn.toString().replace(/\/\/.*$/gm, "").replace(/\/\*[\s\S]*?\*\//g, "");
+    expect(src).not.toMatch(/summarizeStorage/);
   });
 
   it("传 key='a' + 不传 mode → { result: '1' } (单值旧契约不破)", async () => {
