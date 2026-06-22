@@ -23,6 +23,10 @@ describe("scan func 内联 detectBlindspot 与纯函数一致", () => {
     expect(src).toContain("__scrollerRows > __rendered * 2");
     // A2-fb-div 纯 div 虚拟列表(react-window/virtuoso/PrimeReact VirtualScroller)内联
     expect(src).toContain("[inline detectDivVirtualScroller]");
+    // 页面级滚动容器排除内联(防 <main>/body 等整页滚动区误报全渲染表为虚拟,
+    // 2026-06-22 react-aria FP):scroller 为 main/body/scrollingElement/近视口高 → 跳过。
+    expect(src).toMatch(/__pageLevel/);
+    expect(src).toMatch(/__scroller\.tagName\s*===\s*"MAIN"/);
   });
   it("纯函数对 grid aria-rowcount=1000/rendered=10 → virtual(行为基线)", () => {
     document.body.innerHTML = `<div role="grid" aria-rowcount="1000">${"<div role='row'></div>".repeat(10)}</div>`;

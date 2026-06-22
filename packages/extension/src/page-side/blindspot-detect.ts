@@ -68,11 +68,21 @@ export function detectVirtualByScroll(
   scroller: { scrollHeight: number; clientHeight: number },
   renderedRows: number,
   rowHeight: number,
+  // 页面级滚动容器(body/html/main/scrollingElement 或近视口高):scrollHeight 反映整页非该列表,
+  // estTotal 不可信 → 直接跳过(react-aria docs props 表 37 行全渲染却被误报 ~186/37,2026-06-22)。
+  isPageLevelScroller: boolean,
   // 滚动祖先 DOM 内实际行数(li/tr/role=row)。默认等于 renderedRows(向后兼容:
   // 不传时视为「祖先只含本列表」,闸不触发)。调用方应传真实测量值。
   scrollerRowCount: number = renderedRows,
 ): Blindspot | null {
   if (renderedRows < 3 || rowHeight < 4) return null;
+  // 页面级滚动容器(body/html/main/scrollingElement,或近视口高的整页滚动区)的 scrollHeight
+  // 反映**整页内容**而非该列表——estTotal=scrollH/行高 会把整页高度误当列表行数,普通全渲染
+  // 文档表被误报为虚拟列表(react-aria DatePicker docs 的 props 表 37 行全渲染,却因滚动祖先是
+  // <main>(scrollH 5967=整页)被误报 virtual ~186/37,2026-06-22 dogfood)。本估算启发式只在
+  // **有界专用滚动视口**(虚拟列表的常态:sizer 撑出 scrollHeight 的 overflow 容器)下可靠;
+  // 页面级 window-scroller 虚拟列表通常设 aria-rowcount,由 ARIA 路径覆盖。
+  if (isPageLevelScroller) return null;
   const sh = scroller.scrollHeight;
   const ch = scroller.clientHeight;
   if (ch <= 0 || sh < ch * 4) return null;
