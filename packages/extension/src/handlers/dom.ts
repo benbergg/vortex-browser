@@ -501,7 +501,15 @@ export function registerDomHandlers(
             el.dispatchEvent(new MouseEvent("mousedown", mouseDown));
             try { el.dispatchEvent(new PointerEvent("pointerup", { ...ptrInit, buttons: 0 })); } catch { /* */ }
             el.dispatchEvent(new MouseEvent("mouseup", mouseUp));
-            el.click();
+            // 原生 .click() 仅 HTMLElement 有,SVGElement(<g role=slider>/<rect> 等)、MathML
+            // 等无此方法 → 裸调抛 "X.click is not a function"(2026-06-22 APG multi-thumb
+            // slider dogfood)。有则调(触发表单提交/锚点跳转等默认动作),无则派发合成 click
+            // 事件触发监听器(非 HTML 元素无默认 click 动作,事件已够)。
+            if (typeof (el as { click?: unknown }).click === "function") {
+              el.click();
+            } else {
+              el.dispatchEvent(new MouseEvent("click", mouseUp));
+            }
             // GAP-G(N0062): 派发后采集效果信号(await windowMs 窗口)。success 恒 true,effect
             // 仅作旁证;__effectToken 为空(未 opt-in / 模块未就绪)时不带 effect,保持零开销。
             const __effect = __effectToken && __ce ? await __ce.end(__effectToken) : undefined;
