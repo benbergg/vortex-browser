@@ -88,3 +88,38 @@ export function detectVirtualByScroll(
   }
   return null;
 }
+
+/**
+ * A2-fb-div 纯 div 虚拟列表检测(react-window/react-virtuoso/PrimeReact VirtualScroller 等:
+ * 容器与行都是无 table/ul/[role] 语义的纯 div,detectVirtualByScroll 的语义候选/行选择器整类漏扫)。
+ * 入参为疑似滚动容器。判据(与 detectVirtualByScroll 共享判定门,同 estTotal 公式):
+ *  ① 强滚动:overflowY auto/scroll 且 scrollHeight ≥ clientHeight×4(普通内容达不到)
+ *  ② 渲染窗口:内部存在某容器有 ≥3 个等高(±2px)重复子项,且等高占比 ≥70%(排除异构布局)
+ *  ③ estTotal(scrollH/rowH)远大于渲染数(虚拟本质=只渲染窗口;全量渲染列表 estTotal≈渲染 不触发)。
+ * 廉价 scrollHeight 门先于 getComputedStyle,使可在全 div 上遍历调用而不爆开销。confidence:low。
+ */
+export function detectDivVirtualScroller(scroller: HTMLElement): Blindspot | null {
+  const sh = scroller.scrollHeight;
+  const ch = scroller.clientHeight;
+  if (ch <= 0 || sh < ch * 4) return null; // 廉价强滚动门(先于 getComputedStyle)
+  const oy = getComputedStyle(scroller).overflowY;
+  if (oy !== "auto" && oy !== "scroll") return null; // 确认裁剪滚动(排除内容自然撑高不裁剪的)
+  // 找渲染窗口:内部某 div 的直接子元素 ≥3 且高度近似一致(等高重复行=列表的特征)。
+  let rows: Element[] = [];
+  for (const w of Array.from(scroller.querySelectorAll("div"))) {
+    const kids = Array.from(w.children);
+    if (kids.length < 3) continue;
+    const h0 = kids[0].getBoundingClientRect().height;
+    if (h0 < 4) continue;
+    const uni = kids.filter((n) => Math.abs(n.getBoundingClientRect().height - h0) <= 2);
+    if (uni.length >= 3 && uni.length >= kids.length * 0.7 && uni.length > rows.length) rows = uni;
+  }
+  if (rows.length < 3) return null;
+  const rendered = rows.length;
+  const rowH = rows[0].getBoundingClientRect().height;
+  const estTotal = Math.round(sh / rowH);
+  if (estTotal > rendered && estTotal >= Math.max(rendered * 2, rendered + 20)) {
+    return { kind: "virtual", total: estTotal, rendered, confidence: "low" };
+  }
+  return null;
+}

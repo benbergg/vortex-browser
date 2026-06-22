@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-import { describe, it, expect } from "vitest";
-import { detectBlindspot, detectVirtualByScroll } from "../src/page-side/blindspot-detect.js";
+import { describe, it, expect, beforeEach } from "vitest";
+import { detectBlindspot, detectVirtualByScroll, detectDivVirtualScroller } from "../src/page-side/blindspot-detect.js";
 
 function withRect(el: Element, width: number, height: number) {
   Object.defineProperty(el, "getBoundingClientRect", {
@@ -8,6 +8,31 @@ function withRect(el: Element, width: number, height: number) {
     configurable: true,
   });
   return el as HTMLElement;
+}
+
+// jsdom 无布局:为 scroller 注入 scrollHeight/clientHeight,为子项注入等高 rect。
+function makeDivScroller(opts: {
+  scrollHeight: number;
+  clientHeight: number;
+  overflowY?: string;
+  childCount: number;
+  childHeight: number | number[];
+}): HTMLElement {
+  const sc = document.createElement("div");
+  if (opts.overflowY) sc.style.overflowY = opts.overflowY;
+  Object.defineProperty(sc, "scrollHeight", { value: opts.scrollHeight, configurable: true });
+  Object.defineProperty(sc, "clientHeight", { value: opts.clientHeight, configurable: true });
+  const content = document.createElement("div");
+  for (let i = 0; i < opts.childCount; i++) {
+    const item = document.createElement("div");
+    item.textContent = `Item #${i}`;
+    const h = Array.isArray(opts.childHeight) ? opts.childHeight[i] : opts.childHeight;
+    withRect(item, 300, h);
+    content.appendChild(item);
+  }
+  sc.appendChild(content);
+  document.body.appendChild(sc);
+  return sc;
 }
 
 describe("detectBlindspot", () => {
@@ -93,5 +118,36 @@ describe("detectVirtualByScroll (A2-fb 非 ARIA 虚拟化)", () => {
       rendered: 12,
       confidence: "low",
     });
+  });
+});
+
+describe("detectDivVirtualScroller (A2-fb-div 纯 div 虚拟列表)", () => {
+  beforeEach(() => {
+    document.body.innerHTML = "";
+  });
+  it("PrimeReact VirtualScroller 式(div容器+8等高div项/scrollH 5000000/clientH 198) → virtual ~100000 低置信", () => {
+    const sc = makeDivScroller({ scrollHeight: 5000000, clientHeight: 198, overflowY: "auto", childCount: 8, childHeight: 50 });
+    expect(detectDivVirtualScroller(sc)).toEqual({ kind: "virtual", total: 100000, rendered: 8, confidence: "low" });
+  });
+  it("非裁剪容器(overflowY visible 即便强滚动) → 不报（负例）", () => {
+    const sc = makeDivScroller({ scrollHeight: 5000000, clientHeight: 198, overflowY: "visible", childCount: 8, childHeight: 50 });
+    expect(detectDivVirtualScroller(sc)).toBeNull();
+  });
+  it("普通弱滚动 div 列表(scrollH 500/clientH 400,ratio<4) → 不报（负例:强滚动门）", () => {
+    const sc = makeDivScroller({ scrollHeight: 500, clientHeight: 400, overflowY: "auto", childCount: 10, childHeight: 50 });
+    expect(detectDivVirtualScroller(sc)).toBeNull();
+  });
+  it("全量渲染等高列表(50项全在DOM/scrollH 2500/clientH 400,estTotal≈渲染) → 不报（负例）", () => {
+    // sh=2500 ch=400 → 6.25x 强滚动,但 50项全渲染,estTotal=50=rendered 不>>
+    const sc = makeDivScroller({ scrollHeight: 2500, clientHeight: 400, overflowY: "auto", childCount: 50, childHeight: 50 });
+    expect(detectDivVirtualScroller(sc)).toBeNull();
+  });
+  it("异构高度子项(非等高重复) → 不报（负例:非列表）", () => {
+    const sc = makeDivScroller({ scrollHeight: 5000000, clientHeight: 198, overflowY: "auto", childCount: 8, childHeight: [50, 120, 30, 200, 80, 50, 300, 40] });
+    expect(detectDivVirtualScroller(sc)).toBeNull();
+  });
+  it("子项过少(<3) → 不报（负例）", () => {
+    const sc = makeDivScroller({ scrollHeight: 5000000, clientHeight: 198, overflowY: "scroll", childCount: 2, childHeight: 50 });
+    expect(detectDivVirtualScroller(sc)).toBeNull();
   });
 });
