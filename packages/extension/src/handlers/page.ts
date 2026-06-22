@@ -216,6 +216,10 @@ export function registerPageHandlers(router: ActionRouter, debuggerMgr: Debugger
           : null;
       await chrome.tabs.update(tid, { url });
       let degraded = false;
+      // networkidle 退化信号:与 LOAD 超时的 degraded 对齐。awaitIdle 超时(网络永不
+      // 空闲)时若只 console.warn 而不 surface,agent 收到与「真达成 idle」无法区分的
+      // 成功响应,误以为网络已空闲(silent-false-success / sibling 不对称,2026-06-20)。
+      let networkIdleTimedOut = false;
       if (waitForLoad) {
         if (waitUntil === "domcontentloaded") {
           // DOM 解析完成即返回,不等子资源(NAV-1)。dclPromise 已在 update 前挂好监听。
@@ -238,8 +242,9 @@ export function registerPageHandlers(router: ActionRouter, debuggerMgr: Debugger
             await awaitIdle(debuggerMgr, tid, { timeout: idleTimeout, idleTime: 500 });
           } catch (err) {
             const msg = err instanceof Error ? err.message : String(err);
-            // graceful 降级：保留 navigate 成功语义
+            // graceful 降级：保留 navigate 成功语义,但 surface 信号(对齐 load-degrade)。
             console.warn(`[vortex] navigate waitUntil=networkidle degraded to load after ${idleTimeout}ms: ${msg}`);
+            networkIdleTimedOut = true;
           }
         }
       }
@@ -249,6 +254,7 @@ export function registerPageHandlers(router: ActionRouter, debuggerMgr: Debugger
         title: tab.title,
         status: tab.status,
         ...(degraded ? { degraded: true } : {}),
+        ...(networkIdleTimedOut ? { networkIdleTimedOut: true } : {}),
       };
     },
 
