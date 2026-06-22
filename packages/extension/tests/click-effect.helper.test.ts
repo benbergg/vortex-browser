@@ -360,4 +360,77 @@ describe("click-effect page-side module (__vortexClickEffect)", () => {
       }
     });
   });
+
+  // 裸 ARIA role 选择器([role='alert'] 等)语义上既被瞬态 toast 用,也被常驻正文内容块
+  // 误用(文档站说明框 div.callout role=alert,760×106 完全可见、position:relative 在正常流)。
+  // sr-only 尺寸滤拦不住这类大尺寸可见块 → 每次 click 误报 userFeedback:"toast"
+  // (2026-06-22 shoelace.style/components/select dogfood 实测:开 sl-select 下拉误报 toast)。
+  // 区分信号:真 toast 恒为定位浮层(自身或祖先 position fixed/absolute/sticky),文档内容块
+  // 在正常流(static/relative)。仅对裸 role 选择器加定位门;框架专属 .class 选择器(bootstrap
+  // .toast 自身常 static、容器才 fixed)不受此门约束,保持精确检测。
+  describe("collectFeedback 裸 role 选择器要求定位浮层(in-flow role=alert 内容块回归 — shoelace callout)", () => {
+    function stubGeom(el: Element, w: number, h: number): void {
+      (el as any).checkVisibility = () => true;
+      (el as any).getBoundingClientRect = () => ({
+        width: w, height: h, top: 0, left: 0, right: w, bottom: h, x: 0, y: 0, toJSON() {},
+      });
+    }
+
+    it("in-flow role=alert 内容块(position:relative,正常流,大尺寸) → toastHit 空, userFeedback != toast", async () => {
+      const ns = await load();
+      const callout = document.createElement("div");
+      callout.setAttribute("role", "alert");
+      callout.style.position = "relative";
+      callout.textContent = "This component works with standard forms";
+      document.body.appendChild(callout);
+      stubGeom(callout, 760, 106);
+      const t = ns.begin("#b", 10);
+      const eff = (await ns.end(t)) as any;
+      expect(eff.toastHit).toEqual([]);
+      expect(eff.userFeedback).not.toBe("toast");
+    });
+
+    it("定位浮层 role=alert(position:fixed) 真 toast → userFeedback=toast", async () => {
+      const ns = await load();
+      const toast = document.createElement("div");
+      toast.setAttribute("role", "alert");
+      toast.style.position = "fixed";
+      toast.textContent = "已保存";
+      document.body.appendChild(toast);
+      stubGeom(toast, 200, 40);
+      const t = ns.begin("#b", 10);
+      const eff = (await ns.end(t)) as any;
+      expect(eff.toastHit).toContain("[role='alert']");
+      expect(eff.userFeedback).toBe("toast");
+    });
+
+    it("role=alert 自身 static 但祖先 position:fixed → 仍计为 toast(浮层容器内)", async () => {
+      const ns = await load();
+      const container = document.createElement("div");
+      container.style.position = "fixed";
+      const alert = document.createElement("div");
+      alert.setAttribute("role", "alert");
+      alert.textContent = "提示";
+      container.appendChild(alert);
+      document.body.appendChild(container);
+      stubGeom(alert, 180, 36);
+      const t = ns.begin("#b", 10);
+      const eff = (await ns.end(t)) as any;
+      expect(eff.toastHit).toContain("[role='alert']");
+      expect(eff.userFeedback).toBe("toast");
+    });
+
+    it("框架类选择器(.toast,position:static)不受定位门约束 → 仍检测为 toast", async () => {
+      const ns = await load();
+      const toast = document.createElement("div");
+      toast.className = "toast"; // bootstrap toast item 自身常 static,容器才 fixed
+      toast.textContent = "Bootstrap toast";
+      document.body.appendChild(toast);
+      stubGeom(toast, 250, 48);
+      const t = ns.begin("#b", 10);
+      const eff = (await ns.end(t)) as any;
+      expect(eff.toastHit).toContain(".toast");
+      expect(eff.userFeedback).toBe("toast");
+    });
+  });
 });
