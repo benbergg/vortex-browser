@@ -4,6 +4,7 @@ import {
   registerKeyboardHandlers,
   parseKeyExpression,
   keyToCode,
+  editingCommandsForKey,
 } from "../src/handlers/keyboard.js";
 
 /**
@@ -109,6 +110,32 @@ describe("keyToCode 标点 → 合法物理码", () => {
     expect(keyToCode("1")).toBe("Digit1");
     expect(keyToCode("Meta")).toBe("MetaLeft");
     expect(keyToCode("Enter")).toBe("Enter");
+  });
+});
+
+// macOS 编辑快捷键(Cmd+A 全选等)经 OS NSResponder 键绑定解析,合成 CDP 事件绕过 OS →
+// 命令不触发(Cmd+A 返回 success 却不全选,2026-06-23 Quill dogfood R15 实证)。须随 keyDown
+// 显式传 commands 字段。editingCommandsForKey 计算该字段;dispatch 级 IS_MAC 串联由 macOS live 验证。
+describe("editingCommandsForKey (macOS 编辑命令补偿)", () => {
+  it("macOS Cmd+A(KeyA + Meta) → selectAll", () => {
+    expect(editingCommandsForKey("KeyA", 4, true)).toEqual(["selectAll"]);
+  });
+  it("非 macOS 一律 undefined(Win/Linux Ctrl+A 由 Chrome 内部解析,无须附 commands)", () => {
+    expect(editingCommandsForKey("KeyA", 4, false)).toBeUndefined();
+    expect(editingCommandsForKey("KeyA", 2, false)).toBeUndefined();
+  });
+  it("macOS 无 Meta 不附(Ctrl+A 在 mac 非全选;无修饰是打字)", () => {
+    expect(editingCommandsForKey("KeyA", 0, true)).toBeUndefined();
+    expect(editingCommandsForKey("KeyA", 2, true)).toBeUndefined(); // Ctrl
+  });
+  it("macOS 叠加 Ctrl/Alt/Shift 的 Meta 组合不附(避免误触别的命令)", () => {
+    expect(editingCommandsForKey("KeyA", 4 | 8, true)).toBeUndefined(); // Cmd+Shift+A
+    expect(editingCommandsForKey("KeyA", 4 | 1, true)).toBeUndefined(); // Cmd+Alt+A
+    expect(editingCommandsForKey("KeyA", 4 | 2, true)).toBeUndefined(); // Cmd+Ctrl+A
+  });
+  it("非 selectAll 键暂不在表内(扩展点)→ undefined", () => {
+    expect(editingCommandsForKey("KeyC", 4, true)).toBeUndefined();
+    expect(editingCommandsForKey("KeyS", 4, true)).toBeUndefined();
   });
 });
 

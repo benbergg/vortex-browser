@@ -79,6 +79,44 @@ const MODIFIERS: Record<string, number> = {
   Cmd: 4, Command: 4, Win: 4, Windows: 4, Super: 4, Option: 1, Opt: 1,
 };
 
+// 当前浏览器宿主是否 macOS。macOS 的编辑类键盘快捷键(Cmd+A 全选等)经 OS 的
+// NSResponder 键绑定层解析成编辑命令,而合成的 CDP Input.dispatchKeyEvent **绕过 OS**
+// → 命令不会自动触发(Cmd+A 返回 success 却不全选,2026-06-23 Quill dogfood R15 实证)。
+// 须随 keyDown 显式传 `commands` 字段(对齐 Playwright macEditingCommands 做法)。
+const IS_MAC: boolean = (() => {
+  try {
+    const uad = (navigator as unknown as { userAgentData?: { platform?: string } })
+      .userAgentData;
+    if (uad?.platform) return uad.platform === "macOS";
+    return /Mac/i.test(navigator.platform || navigator.userAgent || "");
+  } catch {
+    return false;
+  }
+})();
+
+/**
+ * macOS 下某 (物理码, 修饰键) 组合对应的编辑命令(CDP `commands` 字段值)。非 macOS 或
+ * 非编辑快捷键返回 undefined。仅处理纯 Meta(Cmd)且不叠加 Ctrl/Alt/Shift 的编辑快捷键,
+ * 避免误触别的命令。当前仅 Cmd+A→selectAll(R15 实证的静默失败点);此表是后续 mac 编辑
+ * 命令(copy/cut/paste/undo 等)的扩展点,新增时须各自实测命令名正确再加。
+ *
+ * isMac 显式入参(而非直接读 IS_MAC)便于单测;生产调用方传 IS_MAC。
+ */
+export function editingCommandsForKey(
+  code: string,
+  modifiers: number,
+  isMac: boolean,
+): string[] | undefined {
+  if (!isMac) return undefined;
+  const alt = (modifiers & 1) !== 0;
+  const ctrl = (modifiers & 2) !== 0;
+  const meta = (modifiers & 4) !== 0;
+  const shift = (modifiers & 8) !== 0;
+  if (!meta || ctrl || alt || shift) return undefined;
+  if (code === "KeyA") return ["selectAll"];
+  return undefined;
+}
+
 async function getActiveTabId(tabId?: number): Promise<number> {
   if (tabId) return tabId;
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -180,6 +218,10 @@ async function dispatchKey(
   // 也不插。Shift-only 等带修饰键的大小写场景仍走 type/fill。(2026-06-13 EP dogfood A3)
   const isPrintable = modifiers === 0 && [...key].length === 1;
 
+  // macOS 编辑快捷键(Cmd+A 等)须随 keyDown 显式传 commands,否则合成事件不触发编辑命令
+  // (见 IS_MAC / editingCommandsForKey 注释)。非 macOS / 非编辑快捷键时为 undefined,不附字段。
+  const commands = editingCommandsForKey(physicalCode, modifiers, IS_MAC);
+
   await debuggerMgr.sendCommand(tabId, "Input.dispatchKeyEvent", {
     type: "keyDown",
     key,
@@ -188,6 +230,7 @@ async function dispatchKey(
     nativeVirtualKeyCode: vk,
     modifiers,
     ...(isPrintable ? { text: key, unmodifiedText: key } : {}),
+    ...(commands ? { commands } : {}),
   });
 
   await debuggerMgr.sendCommand(tabId, "Input.dispatchKeyEvent", {
