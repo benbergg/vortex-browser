@@ -1,0 +1,11 @@
+{
+  "fixture": "tree-switcher-toggle",
+  "path": "/synth/tree-switcher-toggle.html",
+  "tier": "medium",
+  "frames": "main",
+  "entries": [
+    { "id": "toggle-expanded", "interactive": true, "expectedName": "collapse", "expectedRole": "button", "pattern": "tree-switcher-toggle", "note": "可展开 treeitem(aria-expanded=true)的 switcher → 独立 button \"collapse\"(R25)" },
+    { "id": "toggle-collapsed", "interactive": true, "expectedName": "expand", "expectedRole": "button", "pattern": "tree-switcher-toggle", "note": "折叠 treeitem(aria-expanded=false)的 switcher → button \"expand\"" },
+    { "id": "leaf-content", "interactive": true, "expectedName": "Leaf C", "expectedRole": "treeitem", "pattern": "tree-switcher-toggle", "note": "叶子(switcher-noop,无 aria-expanded)不出 toggle" }
+  ]
+}
