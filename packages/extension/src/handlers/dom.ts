@@ -444,6 +444,35 @@ export function registerDomHandlers(
                 },
               };
             }
+            // 坐标敏感控件(role=slider / input[type=range]):值由指针 clientX/Y 命中位置
+            // 计算,合成 el.click() 的 clientX=clientY=0 → 控件按位置 0 取最小值,值不变却
+            // 返回 success → silent success(Shoelace sl-rating / 原生 range / canvas slider)。
+            // 这类控件不带 vortexReactClickable(非 React onClick 桩,纯坐标驱动),故 react-clickable
+            // 门漏掉。CDP real mouse 点中元素中心 → 落到真实坐标驱动控件改值(中心≈中间档)。
+            // cdpAvailable=false 时不 defer,退回 el.click() 至少触发监听器(无 CDP 不堵路,
+            // 与 submit-intent/react-clickable 同策)。(2026-06-23 shoelace rating dogfood:
+            // 默认 click slider value 恒 0;useRealMouse 中心点击 value=3 实证)
+            // __hasClickMethod 守卫:仅当 el.click() 真会被调(下方 508 行分支)才需 defer——
+            // 无 .click() 方法的 SVG role=slider(<g> 等,APG multi-thumb)走 dispatchEvent
+            // 分支,属 2026-06-22 APG dogfood 既有处理,不在本修复范围内,放行保留其行为。
+            const __hasClickMethod = typeof (el as { click?: unknown }).click === "function";
+            const __roleAttr = (el.getAttribute("role") || "").toLowerCase();
+            const __isCoordSensitive =
+              __hasClickMethod &&
+              (__roleAttr === "slider" ||
+                (__tagLc === "input" && __typeAttr === "range"));
+            if (__isCoordSensitive && cdpAvailable) {
+              return {
+                result: {
+                  deferToCdp: true,
+                  element: {
+                    tag: __tagLc,
+                    id: el.id || undefined,
+                    text: (el as HTMLElement).innerText?.slice(0, 200),
+                  },
+                },
+              };
+            }
             // GAP-G(N0062): 派发前启动效果信号采集(opt-in)。begin 在 focus/dispatch 之前,
             // 捕获点击前 url/activeElement/aria 快照,使后续 focus/dispatch 引起的变化都计入。
             // 经 window.__vortexClickEffect(loadPageSideModule 预注入),禁止 inline 复制逻辑。
