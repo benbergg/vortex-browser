@@ -102,6 +102,69 @@ describe("computeAXOverlay", () => {
     const r = computeAXOverlay({ backendId: 32, role: "slider", name: "" }, node);
     expect(r.valueNow).toBe("50%");
   });
+
+  // CDP UTF-8 双重编码还原(2026-06-23 react-aria DatePicker dogfood):
+  // Chrome Accessibility.getFullAXTree 把 value/valuetext 的 UTF-8 字节当 Latin-1 逐字节
+  // 映射返回(name 不受影响)。例:DOM aria-valuetext="6 – June"(含 U+2013 en-dash)→
+  // CDP 返回 "6 â June" → observe 渲染 mojibake。computeAXOverlay 须还原。
+  // mojibake() 复刻 Chrome 的双重编码:UTF-8 编码后每字节当一个 Latin-1 码位。
+  const mojibake = (s: string): string =>
+    String.fromCharCode(...new TextEncoder().encode(s));
+
+  it("valuetext mojibake(en-dash)还原为原 UTF-8(react-aria spinbutton)", () => {
+    const node = ax({
+      role: { value: "spinbutton" },
+      properties: [{ name: "valuetext", value: { value: mojibake("6 – June") } }],
+    });
+    const r = computeAXOverlay({ backendId: 40, role: "spinbutton", name: "month" }, node);
+    expect(r.valueNow).toBe("6 – June");
+  });
+
+  it("valuetext mojibake(CJK+en-dash)还原(slider 弱 – Weak)", () => {
+    const node = ax({
+      role: { value: "slider" },
+      properties: [{ name: "valuetext", value: { value: mojibake("弱 – Weak") } }],
+    });
+    const r = computeAXOverlay({ backendId: 41, role: "slider", name: "Vol" }, node);
+    expect(r.valueNow).toBe("弱 – Weak");
+  });
+
+  it("node.value.value mojibake 也还原(value 路径,非 valuetext)", () => {
+    const node = ax({ role: { value: "textbox" }, value: { value: mojibake("café — 中文") } });
+    const r = computeAXOverlay({ backendId: 42, role: "textbox", name: "" }, node);
+    expect(r.valueNow).toBe("café — 中文");
+  });
+
+  it("纯 ASCII valuetext 原样返回(无误伤)", () => {
+    const node = ax({
+      role: { value: "slider" },
+      properties: [{ name: "valuetext", value: { value: "6 - June" } }],
+    });
+    const r = computeAXOverlay({ backendId: 43, role: "slider", name: "" }, node);
+    expect(r.valueNow).toBe("6 - June");
+  });
+
+  // 真多字节字符(码位 > 0xFF)说明 CDP 这次没有双重编码(或测试桩传入正常 UTF-16),
+  // 不应被当 mojibake 再解码——护栏 ① 须原样返回,防把正常中文当字节流二次解码成乱码。
+  it("已正常的 UTF-16 valuetext(含真 CJK)不被二次还原(护栏①)", () => {
+    const node = ax({
+      role: { value: "slider" },
+      properties: [{ name: "valuetext", value: { value: "中文 50%" } }],
+    });
+    const r = computeAXOverlay({ backendId: 44, role: "slider", name: "" }, node);
+    expect(r.valueNow).toBe("中文 50%");
+  });
+
+  // 合法 Latin-1 文本(孤立高位字节,非合法 UTF-8 序列)fatal 解码失败 → 原样保留(护栏②)。
+  it("合法 Latin-1 文本(孤立 0xE9)非 UTF-8 序列时原样保留(护栏②)", () => {
+    const node = ax({
+      role: { value: "slider" },
+      // "café" 直接作为已是 UTF-16 的合法字符串:0xE9 孤立,非完整 UTF-8 多字节序列
+      properties: [{ name: "valuetext", value: { value: "café" } }],
+    });
+    const r = computeAXOverlay({ backendId: 45, role: "slider", name: "" }, node);
+    expect(r.valueNow).toBe("café");
+  });
 });
 
 describe("extractCompound", () => {
