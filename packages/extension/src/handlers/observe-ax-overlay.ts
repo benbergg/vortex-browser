@@ -64,8 +64,14 @@ export function computeAXOverlay(
   if (Object.keys(state).length > 0) out.state = state;
 
   const valuetext = getProp(node, "valuetext");
-  if (typeof valuetext === "string" && valuetext) out.valueNow = valuetext;
-  else if (node.value?.value) out.valueNow = String(node.value.value);
+  let rawValue: string | undefined;
+  if (typeof valuetext === "string" && valuetext) rawValue = valuetext;
+  else if (node.value?.value) rawValue = String(node.value.value);
+  // 对齐 page-side getValueInfo 纪律:归一化空白(换行/制表→单空格)+截断 200。
+  // AX node.value.value 对 contentEditable/textarea 给「全文」,无截断会撑爆 observe
+  // 输出 token(长文档编辑器/Notion/工单)且 \n 破坏单行渲染(2026-06-23 prosemirror dogfood)。
+  // slider/range 等短值(如 "50%")不受影响。
+  if (rawValue) out.valueNow = rawValue.replace(/\s+/g, " ").trim().slice(0, 200);
 
   const controls = getRelated(node, "controls").map((r) => r.backendDOMNodeId).filter((x): x is number => x != null);
   if (controls.length) out.controls = controls;
