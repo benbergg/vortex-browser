@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="zh"><head><meta charset="utf-8"><title>nested portal overlay priority</title></head>
+<body>
+<h1>密集页 + rc-trigger 嵌套 portal 弹层(Cascader 截断盲区)</h1>
+<!--
+  复现 2026-06-23 Cascader dogfood R24:antd Cascader/Dropdown 经 rc-trigger 把真正定位
+  (absolute,z 抬升)的弹层嵌在 body 直接子的「static 透明包裹层」下一层:
+    body > div(static wrapper) > div.dropdown(absolute,z:1050) > ul[role=menu] > li[role=menuitemcheckbox]
+  且弹层列用 role=menu 但无 aria-controls 关联 → signal-1 被 isPersistentMenu 当持久导航排除,
+  signal-2 旧版只扫 body 直接子又漏掉整层 portal → 密集页(>80)上选项被 maxElements 截断、observe 完全不可见。
+  修复:signal-2 扫描深度扩到 body 孙(穿透 rc-trigger 透明 wrapper)→ 弹层交互后代前置免遭截断。
+-->
+<nav id="nav"></nav>
+<script>
+  // 90 个导航链接(DOM 序在前,填满 80 cap)
+  var nav = document.getElementById("nav");
+  for (var i = 0; i < 90; i++) {
+    var a = document.createElement("a");
+    a.href = "#link" + i;
+    a.textContent = "导航链接 " + i;
+    a.style.display = "block";
+    nav.appendChild(a);
+  }
+</script>
+<!-- rc-trigger 透明包裹层:position static、z auto(不自带定位/抬升) -->
+<div id="rc-wrapper" style="position:static">
+  <!-- 真正定位的弹层:absolute、视口内、z-index 抬升,嵌在 wrapper 下一层 -->
+  <div id="dropdown" style="position:absolute;top:90px;left:320px;z-index:1050;background:#fff;border:1px solid #ccc;width:160px">
+    <ul role="menu" style="list-style:none;margin:0;padding:0">
+      <li role="menuitemcheckbox" data-vtx-oracle="opt-zhejiang" style="padding:6px;cursor:pointer">Zhejiang</li>
+      <li role="menuitemcheckbox" data-vtx-oracle="opt-jiangsu" style="padding:6px;cursor:pointer">Jiangsu</li>
+    </ul>
+  </div>
+</div>
+</body></html>
