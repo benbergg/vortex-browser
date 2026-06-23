@@ -342,6 +342,11 @@ export const FOCUS_CONTAINER_ROLES = new Set<string>([
 ]);
 export const ATOMIC_INTERACTIVE_SELECTORS =
   "button,a[href],summary,input:not([type=hidden]),select,textarea,label,[role=button],[role=link],[role=textbox],[role=checkbox],[role=radio],[role=tab],[role=menuitem],[role=treeitem],[role=option],[contenteditable],[onclick]";
+// 信号二(portal overlay)「含交互后代」门专用:ATOMIC 基础上补 menuitemcheckbox/menuitemradio。
+// Cascader/多选菜单弹层只含这两类 role(ATOMIC 漏),不补则弹层被判「无交互后代」装饰浮层而不前置。
+// 仅用于 overlay 根判定,不改全局收集语义(blast radius 受守)。collectPortalOverlayRoots 默认值用它。
+export const OVERLAY_DESCENDANT_SELECTORS =
+  ATOMIC_INTERACTIVE_SELECTORS + ",[role=menuitemcheckbox],[role=menuitemradio]";
 export function isFocusContainerOnly(el: Element): boolean {
   const role = el.getAttribute("role")?.trim().split(/\s+/)[0];
   if (role && FOCUS_CONTAINER_ROLES.has(role)) return true;
@@ -475,6 +480,44 @@ export function partitionOverlayFirst(candidates: Element[], overlayRoots: Eleme
   const rest: Element[] = [];
   for (const el of candidates) (inOverlay(el) ? front : rest).push(el);
   return front.length > 0 ? [...front, ...rest] : candidates;
+}
+
+/**
+ * 信号二:portal 弹层根收集(无 ARIA 弹层 role 时的兜底,如 el-select popper)。
+ * 判据:脱流(position absolute/fixed)+ z-index 抬升(>0)+ 可见 + 含交互后代。
+ *
+ * **扫描深度=body 直接子 + 直接子的直接子(body 孙)**:rc-component(antd Cascader/Dropdown/
+ * Popover/Tooltip 等)经 rc-trigger 把真正定位(z 抬升)的弹层嵌在 body 直接子的「static 透明
+ * 包裹层」下一层(`body > div(static) > div.popup(absolute,z:1050)`),只扫 body 直接子会漏掉
+ * 整层 portal → 其交互后代不前置、密集页上遭 maxElements 截断(2026-06-23 Cascader dogfood
+ * R24 实证:role=menu 列又被 isPersistentMenu 排除,signal-1 也漏 → 选项 observe 完全不可见)。
+ * static 透明 wrapper / SPA app-root 自身因不满足 absolute+z>0 不会被误纳,blast radius 受守。
+ * inject func(scanOneFrame)内联同名逻辑,改一处须同步;本导出由 observe-overlay-priority.test.ts 锁守护。
+ */
+export function collectPortalOverlayRoots(
+  body: Element,
+  isVisibleForOverlay: (el: Element) => boolean,
+  atomicSelector: string = OVERLAY_DESCENDANT_SELECTORS,
+  alreadyRoots: Element[] = [],
+): Element[] {
+  const roots: Element[] = [];
+  // body 直接子 + rc-trigger 透明包裹层下一层(body 孙)。
+  const cands: Element[] = [];
+  for (const child of Array.from(body.children)) {
+    cands.push(child);
+    for (const gc of Array.from(child.children)) cands.push(gc);
+  }
+  for (const el of cands) {
+    if (alreadyRoots.includes(el) || roots.includes(el)) continue;
+    const cs = getComputedStyle(el as HTMLElement);
+    if (cs.position !== "fixed" && cs.position !== "absolute") continue;
+    const z = parseInt(cs.zIndex, 10);
+    if (!(z > 0)) continue;
+    if (!isVisibleForOverlay(el)) continue;
+    if (!el.querySelector(atomicSelector)) continue;
+    roots.push(el);
+  }
+  return roots;
 }
 
 /**
@@ -1911,6 +1954,10 @@ async function scanOneFrame(
         ]);
         const ATOMIC_INTERACTIVE_SELECTORS =
           "button,a[href],summary,input:not([type=hidden]),select,textarea,label,[role=button],[role=link],[role=textbox],[role=checkbox],[role=radio],[role=tab],[role=menuitem],[role=treeitem],[role=option],[contenteditable],[onclick]";
+        // 信号二 portal overlay「含交互后代」门专用(补 menuitemcheckbox/menuitemradio,Cascader/
+        // 多选菜单弹层只含这两类 role)。模块级 OVERLAY_DESCENDANT_SELECTORS 同名,改一处须同步。
+        const OVERLAY_DESCENDANT_SELECTORS =
+          ATOMIC_INTERACTIVE_SELECTORS + ",[role=menuitemcheckbox],[role=menuitemradio]";
         const isFocusContainerOnly = (anc: Element): boolean => {
           const role = anc.getAttribute("role")?.trim().split(/\s+/)[0];
           if (role && FOCUS_CONTAINER_ROLES.has(role)) return true;
@@ -2246,17 +2293,27 @@ async function scanOneFrame(
           if (!role || !OVERLAY_POPUP_ROLES.has(role)) continue;
           if (isVisibleForOverlay(el) && isFloatingOverlay(el) && !isPersistentMenu(el, role)) overlayRoots.push(el);
         }
-        // 信号二:body 直接子节点的 portal(脱流 + z-index 抬升 + 含交互后代),
-        // 兜住无 ARIA role 的自定义弹层(如 el-select popper)。
+        // 信号二:portal 弹层(脱流 + z-index 抬升 + 含交互后代),兜住无 ARIA 弹层 role 的
+        // 自定义弹层(如 el-select popper)。扫描深度=body 直接子 + 直接子的直接子(body 孙):
+        // rc-component(antd Cascader/Dropdown/Popover 等)经 rc-trigger 把真正定位(z 抬升)的弹层
+        // 嵌在 body 直接子的 static 透明包裹层下一层,只扫 body 直接子会整层漏掉(2026-06-23
+        // Cascader dogfood R24 实证)。「含交互后代」门用 OVERLAY_DESCENDANT_SELECTORS:在 ATOMIC
+        // 基础上补 menuitemcheckbox/menuitemradio(Cascader/多选菜单弹层只含这两类 role,ATOMIC 漏),
+        // 否则弹层因「无交互后代」被判装饰浮层而不前置。模块级 collectPortalOverlayRoots 同名,改一处须同步。
         if (docBody) {
-          for (const el of Array.from(docBody.children)) {
+          const portalCands: Element[] = [];
+          for (const child of Array.from(docBody.children)) {
+            portalCands.push(child);
+            for (const gc of Array.from(child.children)) portalCands.push(gc);
+          }
+          for (const el of portalCands) {
             if (overlayRoots.includes(el)) continue;
             const cs = getComputedStyle(el as HTMLElement);
             if (cs.position !== "fixed" && cs.position !== "absolute") continue;
             const z = parseInt(cs.zIndex, 10);
             if (!(z > 0)) continue;
             if (!isVisibleForOverlay(el)) continue;
-            if (!el.querySelector(ATOMIC_INTERACTIVE_SELECTORS)) continue;
+            if (!el.querySelector(OVERLAY_DESCENDANT_SELECTORS)) continue;
             overlayRoots.push(el);
           }
         }

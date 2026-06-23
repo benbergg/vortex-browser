@@ -26,6 +26,9 @@ import {
   isOverlayFloating,
   isPersistentNavMenu,
   partitionOverlayFirst,
+  collectPortalOverlayRoots,
+  OVERLAY_DESCENDANT_SELECTORS,
+  ATOMIC_INTERACTIVE_SELECTORS,
 } from "../src/handlers/observe.js";
 
 describe("overlay-priority (DEFECT-1)", () => {
@@ -98,6 +101,98 @@ describe("overlay-priority (DEFECT-1)", () => {
     });
   });
 
+  describe("collectPortalOverlayRoots(信号二:body 直接子 + rc-trigger 嵌套 wrapper 下一层)", () => {
+    const ATOMIC = "a[href],button,[role=option],[role=menuitem],[role=menuitemcheckbox]";
+    const vis = () => true; // jsdom 无布局,注入可见判定(隔离 getBoundingClientRect 限制)
+
+    it("body 直接子 portal(absolute + z>0 + 含交互后代)→ 收集", () => {
+      document.body.innerHTML =
+        `<div id="pop" role="listbox" style="position:absolute;z-index:1050">` +
+        `<div role="option">Jack</div></div>`;
+      const roots = collectPortalOverlayRoots(document.body, vis, ATOMIC);
+      expect(roots.map((e) => (e as HTMLElement).id)).toEqual(["pop"]);
+    });
+
+    it("rc-trigger 嵌套:body > static 透明 wrapper > absolute z 弹层 → 收集弹层(Cascader 实证)", () => {
+      // antd Cascader 结构:body 直接子是 static 透明包裹层,真正定位的 .ant-cascader-dropdown
+      // (absolute,z:1050,role=menu 列)嵌在下一层。只扫 body 直接子会整层漏掉。
+      document.body.innerHTML =
+        `<div id="wrap" style="position:static">` +
+        `<div id="dropdown" style="position:absolute;z-index:1050">` +
+        `<ul role="menu"><li role="menuitemcheckbox">Zhejiang</li><li role="menuitemcheckbox">Jiangsu</li></ul>` +
+        `</div></div>`;
+      const roots = collectPortalOverlayRoots(document.body, vis, ATOMIC);
+      expect(roots.map((e) => (e as HTMLElement).id)).toEqual(["dropdown"]);
+    });
+
+    it("static 透明 wrapper 自身不被误纳(无 absolute/z)", () => {
+      document.body.innerHTML =
+        `<div id="wrap" style="position:static">` +
+        `<div id="dropdown" style="position:absolute;z-index:1050"><button>x</button></div></div>`;
+      const roots = collectPortalOverlayRoots(document.body, vis, ATOMIC);
+      expect(roots.map((e) => (e as HTMLElement).id)).toEqual(["dropdown"]);
+      expect(roots.some((e) => (e as HTMLElement).id === "wrap")).toBe(false);
+    });
+
+    it("SPA app-root(body > div#root static,内含全部交互但无 absolute+z 弹层)→ 不误纳", () => {
+      document.body.innerHTML =
+        `<div id="root" style="position:relative"><main><button>a</button><a href="/x">b</a></main></div>`;
+      expect(collectPortalOverlayRoots(document.body, vis, ATOMIC)).toEqual([]);
+    });
+
+    it("脱流但 z-index auto(z 不 >0)→ 不收集(保 baseline,与直接子门一致)", () => {
+      document.body.innerHTML =
+        `<div style="position:static"><div id="pop" role="menu" style="position:absolute">` +
+        `<div role="menuitem">x</div></div></div>`;
+      expect(collectPortalOverlayRoots(document.body, vis, ATOMIC)).toEqual([]);
+    });
+
+    it("absolute + z>0 但无交互后代 → 不收集(纯装饰浮层)", () => {
+      document.body.innerHTML =
+        `<div style="position:static"><div id="deco" style="position:absolute;z-index:99"><span>纯文本</span></div></div>`;
+      expect(collectPortalOverlayRoots(document.body, vis, ATOMIC)).toEqual([]);
+    });
+
+    it("已在 alreadyRoots(signal-1 已收)→ 去重不重复收集", () => {
+      document.body.innerHTML =
+        `<div id="pop" role="listbox" style="position:absolute;z-index:1050"><div role="option">x</div></div>`;
+      const pop = document.getElementById("pop")!;
+      expect(collectPortalOverlayRoots(document.body, vis, ATOMIC, [pop])).toEqual([]);
+    });
+
+    it("不可见弹层(注入 isVisible=false)→ 不收集", () => {
+      document.body.innerHTML =
+        `<div style="position:static"><div id="pop" style="position:absolute;z-index:1050"><button>x</button></div></div>`;
+      expect(collectPortalOverlayRoots(document.body, () => false, ATOMIC)).toEqual([]);
+    });
+
+    it("弹层只含 menuitemcheckbox(Cascader/多选菜单)→ 默认 OVERLAY_DESCENDANT_SELECTORS 仍收集", () => {
+      // antd Cascader 弹层只含 role=menuitemcheckbox(无 button/a/menuitem)。默认门须认它为交互后代。
+      document.body.innerHTML =
+        `<div style="position:static"><div id="dropdown" style="position:absolute;z-index:1050">` +
+        `<ul role="menu"><li role="menuitemcheckbox">Zhejiang</li></ul></div></div>`;
+      const roots = collectPortalOverlayRoots(document.body, () => true); // 用默认 selector
+      expect(roots.map((e) => (e as HTMLElement).id)).toEqual(["dropdown"]);
+    });
+
+    it("证伪门:菜单弹层用旧 ATOMIC(不含 menuitemcheckbox/radio)→ 漏判(回归守卫)", () => {
+      // 锁住根因:ATOMIC 缺 menuitemcheckbox 时,只含该 role 的 Cascader 弹层被判「无交互后代」漏掉。
+      document.body.innerHTML =
+        `<div style="position:static"><div id="dropdown" style="position:absolute;z-index:1050">` +
+        `<ul role="menu"><li role="menuitemcheckbox">Zhejiang</li></ul></div></div>`;
+      expect(collectPortalOverlayRoots(document.body, () => true, ATOMIC_INTERACTIVE_SELECTORS)).toEqual([]);
+      // 而 OVERLAY_DESCENDANT_SELECTORS 修复它:
+      const fixed = collectPortalOverlayRoots(document.body, () => true, OVERLAY_DESCENDANT_SELECTORS);
+      expect(fixed.map((e) => (e as HTMLElement).id)).toEqual(["dropdown"]);
+    });
+
+    it("OVERLAY_DESCENDANT_SELECTORS = ATOMIC + menuitemcheckbox/radio", () => {
+      expect(OVERLAY_DESCENDANT_SELECTORS).toContain("[role=menuitemcheckbox]");
+      expect(OVERLAY_DESCENDANT_SELECTORS).toContain("[role=menuitemradio]");
+      expect(OVERLAY_DESCENDANT_SELECTORS.startsWith(ATOMIC_INTERACTIVE_SELECTORS)).toBe(true);
+    });
+  });
+
   describe("inject func 内联副本 drift 锁(改一处须同步)", () => {
     const SRC = readFileSync(
       join(dirname(fileURLToPath(import.meta.url)), "..", "src", "handlers", "observe.ts"),
@@ -116,6 +211,14 @@ describe("overlay-priority (DEFECT-1)", () => {
     it("内联保留 portal 信号(body 直接子 + z-index)", () => {
       expect(SRC).toMatch(/docBody\.children/);
       expect(SRC).toMatch(/zIndex/);
+    });
+    it("内联 portal 扫描穿 rc-trigger 透明 wrapper 下一层(body 孙,改一处须同步)", () => {
+      // 内联须遍历 body 直接子的 children(child.children),与模块级 collectPortalOverlayRoots 一致。
+      expect(SRC).toMatch(/for \(const gc of Array\.from\(child\.children\)\)/);
+    });
+    it("内联 portal「含交互后代」门用 OVERLAY_DESCENDANT_SELECTORS(补 menuitemcheckbox/radio)", () => {
+      expect(SRC).toMatch(/querySelector\(OVERLAY_DESCENDANT_SELECTORS\)/);
+      expect(SRC).toMatch(/role=menuitemcheckbox.*role=menuitemradio|menuitemcheckbox/);
     });
     it("内联保留无浮层零漂移(overlayRoots.length === 0 → baseCandidates)", () => {
       expect(SRC).toMatch(/overlayRoots\.length === 0/);

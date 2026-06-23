@@ -1,0 +1,10 @@
+{
+  "fixture": "nested-portal-overlay-priority",
+  "path": "/synth/nested-portal-overlay-priority.html",
+  "tier": "medium",
+  "frames": "main",
+  "entries": [
+    { "id": "opt-zhejiang", "interactive": true, "expectedName": "Zhejiang", "expectedRole": "menuitemcheckbox", "pattern": "nested-portal-overlay-priority", "note": "rc-trigger 嵌套 portal(body > static wrapper > absolute z 弹层)的选项,须经 signal-2 穿透 wrapper + overlay-priority 前置免遭 80 截断" },
+    { "id": "opt-jiangsu", "interactive": true, "expectedName": "Jiangsu", "expectedRole": "menuitemcheckbox", "pattern": "nested-portal-overlay-priority" }
+  ]
+}
