@@ -158,6 +158,13 @@ describe("detectDivVirtualScroller (A2-fb-div 纯 div 虚拟列表)", () => {
     const sc = makeDivScroller({ scrollHeight: 5000000, clientHeight: 198, overflowY: "auto", childCount: 8, childHeight: [50, 120, 30, 200, 80, 50, 300, 40] });
     expect(detectDivVirtualScroller(sc)).toBeNull();
   });
+  it("变高虚拟列表(react-virtuoso 式 7 行 73~107px 成簇/scrollH 970000/clientH 590) → virtual ~10000 低置信", () => {
+    // react-virtuoso 逐项测量行高不一(实测 100k-item demo 行高 73~107px,旧 ±2px 等高门只命中
+    // 2 行 <3 → 整类漏报)。中位数 97,band[58.2,155.2] 全纳 7 行 → 触发。reactdatepicker/virtuoso.dev
+    // 2026-06-23 dogfood R14 实证盲区。
+    const sc = makeDivScroller({ scrollHeight: 970000, clientHeight: 590, overflowY: "auto", childCount: 7, childHeight: [73, 76, 89, 97, 103, 106, 107] });
+    expect(detectDivVirtualScroller(sc)).toEqual({ kind: "virtual", total: 10000, rendered: 7, confidence: "low" });
+  });
   it("子项过少(<3) → 不报（负例）", () => {
     const sc = makeDivScroller({ scrollHeight: 5000000, clientHeight: 198, overflowY: "scroll", childCount: 2, childHeight: 50 });
     expect(detectDivVirtualScroller(sc)).toBeNull();

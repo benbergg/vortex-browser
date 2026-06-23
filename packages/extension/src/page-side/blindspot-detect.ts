@@ -104,9 +104,14 @@ export function detectVirtualByScroll(
  * 容器与行都是无 table/ul/[role] 语义的纯 div,detectVirtualByScroll 的语义候选/行选择器整类漏扫)。
  * 入参为疑似滚动容器。判据(与 detectVirtualByScroll 共享判定门,同 estTotal 公式):
  *  ① 强滚动:overflowY auto/scroll 且 scrollHeight ≥ clientHeight×4(普通内容达不到)
- *  ② 渲染窗口:内部存在某容器有 ≥3 个等高(±2px)重复子项,且等高占比 ≥70%(排除异构布局)
- *  ③ estTotal(scrollH/rowH)远大于渲染数(虚拟本质=只渲染窗口;全量渲染列表 estTotal≈渲染 不触发)。
+ *  ② 渲染窗口:内部存在某容器有 ≥3 个高度成簇的重复子项,且成簇占比 ≥70%(排除异构布局)
+ *  ③ estTotal(scrollH/中位行高)远大于渲染数(虚拟本质=只渲染窗口;全量渲染列表 estTotal≈渲染 不触发)。
  * 廉价 scrollHeight 门先于 getComputedStyle,使可在全 div 上遍历调用而不爆开销。confidence:low。
+ *
+ * 高度成簇用「中位数 band」而非严格等高:react-virtuoso 等变高虚拟列表逐项测量,行高不一
+ * (实测 100k-item demo 行高 73~107px,旧 ±2px 等高门只命中 2 行 <3 → 整类漏报)。
+ * band=[median×0.6, median×1.6] 容纳中等变高行,又靠 ≥70% 占比把异构内容(行高跨度悬殊的
+ * 非列表布局)挡在外面。等高列表方差为 0,median 即行高、band 全纳 → 与旧严格等高行为一致(无回归)。
  */
 export function detectDivVirtualScroller(scroller: HTMLElement): Blindspot | null {
   const sh = scroller.scrollHeight;
@@ -114,20 +119,25 @@ export function detectDivVirtualScroller(scroller: HTMLElement): Blindspot | nul
   if (ch <= 0 || sh < ch * 4) return null; // 廉价强滚动门(先于 getComputedStyle)
   const oy = getComputedStyle(scroller).overflowY;
   if (oy !== "auto" && oy !== "scroll") return null; // 确认裁剪滚动(排除内容自然撑高不裁剪的)
-  // 找渲染窗口:内部某 div 的直接子元素 ≥3 且高度近似一致(等高重复行=列表的特征)。
-  let rows: Element[] = [];
+  // 找渲染窗口:内部某 div 的直接子元素 ≥3 且高度成簇(中位数 band 内的重复行=列表特征)。
+  let bestRows = 0;
+  let bestRowH = 0;
   for (const w of Array.from(scroller.querySelectorAll("div"))) {
     const kids = Array.from(w.children);
     if (kids.length < 3) continue;
-    const h0 = kids[0].getBoundingClientRect().height;
-    if (h0 < 4) continue;
-    const uni = kids.filter((n) => Math.abs(n.getBoundingClientRect().height - h0) <= 2);
-    if (uni.length >= 3 && uni.length >= kids.length * 0.7 && uni.length > rows.length) rows = uni;
+    const heights = kids.map((n) => n.getBoundingClientRect().height);
+    const sorted = [...heights].sort((a, b) => a - b);
+    const median = sorted[Math.floor(sorted.length / 2)];
+    if (median < 4) continue;
+    const inBand = heights.filter((h) => h >= median * 0.6 && h <= median * 1.6).length;
+    if (inBand >= 3 && inBand >= kids.length * 0.7 && inBand > bestRows) {
+      bestRows = inBand;
+      bestRowH = median;
+    }
   }
-  if (rows.length < 3) return null;
-  const rendered = rows.length;
-  const rowH = rows[0].getBoundingClientRect().height;
-  const estTotal = Math.round(sh / rowH);
+  if (bestRows < 3) return null;
+  const rendered = bestRows;
+  const estTotal = Math.round(sh / bestRowH);
   if (estTotal > rendered && estTotal >= Math.max(rendered * 2, rendered + 20)) {
     return { kind: "virtual", total: estTotal, rendered, confidence: "low" };
   }
