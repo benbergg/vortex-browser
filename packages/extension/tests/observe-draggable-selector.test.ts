@@ -53,3 +53,34 @@ describe("observe [draggable=true] selector (@since 2026-06-14 real-site eval)",
     expect(OBSERVE_SRC).not.toMatch(/INTERACTIVE_SELECTORS\s*=\s*\[[\s\S]*?"\[draggable\]"/);
   });
 });
+
+/**
+ * Render-signal wiring lock for [draggable] (2026-06-23 the-internet + SortableJS eval).
+ *
+ * Whitelisting [draggable=true] pools the drag source, but without a render
+ * signal the agent sees a bare `group "A"` indistinguishable from a plain
+ * container — it cannot tell the element can be picked up (vortex_drag
+ * startRef). This locks the entry-construction wiring that reads the explicit
+ * draggable attribute → draggableInteractive, mirroring dropzoneInteractive.
+ * (Behavioral render test lives in mcp observe-tree-render.test.ts.)
+ */
+describe("observe draggableInteractive 渲染信号接线(source-lock)", () => {
+  it("entry 构造:显式 draggable=\"true\" → draggableInteractive 真值", () => {
+    expect(OBSERVE_SRC).toMatch(
+      /getAttribute\("draggable"\)\s*===\s*"true"[\s\S]{0,80}draggableInteractive:\s*true as const/,
+    );
+  });
+
+  it("用 getAttribute 精确匹配显式属性(img/a 隐式默认不误标)", () => {
+    // 必须 getAttribute==="true",不能用 IDL htmlEl.draggable(对 img/a 默认 true 会误标)
+    expect(OBSERVE_SRC).not.toMatch(/htmlEl\.draggable\s*===\s*true\s*\?\s*\{\s*draggableInteractive/);
+  });
+
+  it("透传渲染层:e.draggableInteractive → 输出 entry(compact + full 两路径)", () => {
+    const matches = OBSERVE_SRC.match(
+      /e\.draggableInteractive\s*\?\s*\{\s*draggableInteractive:\s*true as const\s*\}/g,
+    );
+    expect(matches).not.toBeNull();
+    expect(matches!.length).toBeGreaterThanOrEqual(2); // compact + full
+  });
+});

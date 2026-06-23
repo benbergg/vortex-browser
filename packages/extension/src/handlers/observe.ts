@@ -109,6 +109,9 @@ interface ScannedElement {
   /** CDP getEventListeners 确认有 drop/dragenter/dragover 监听器 → 投放区,渲染 [dropzone]。
    * 入池信号(否则无 role/cursor 的 drop 区不可见),与 listenerInteractive 正交。@since dropzone-discovery */
   dropzoneInteractive?: true;
+  /** 显式 draggable=true 拖拽源 → 渲染 [draggable](vortex_drag startRef 源)。[draggable=true]
+   * 已在 INTERACTIVE_SELECTORS 白名单入池,此字段仅透传渲染标识,与 dropzoneInteractive 正交。@since draggable-source */
+  draggableInteractive?: true;
   /** 最近的已收集祖先的 frame-local index；根节点 undefined。@since a11y-tree */
   parentIndex?: number;
   /** role=link 的 href，供 compact 树渲染 /url。@since a11y-tree */
@@ -2542,6 +2545,13 @@ async function scanOneFrame(
             htmlEl.tagName !== "HTML"
               ? { dropzoneInteractive: true as const }
               : {}),
+            // 拖拽源:显式 draggable="true" → 渲染 [draggable] 信号(vortex_drag 的 startRef 源,
+            // 与 [dropzone] 正交)。用 getAttribute 精确匹配显式属性,与白名单 [draggable=true]
+            // selector 一致;img/a 的隐式默认 draggable 不写 DOM 属性,getAttribute 返回 null
+            // 故不会误标(2026-06-23 the-internet/drag_and_drop + SortableJS 评测)。
+            ...(htmlEl.getAttribute("draggable") === "true"
+              ? { draggableInteractive: true as const }
+              : {}),
             ...(__href !== undefined ? { href: __href } : {}),
             ...(__inputCompound !== undefined ? { compound: __inputCompound } : {}),
             ...(__vtxBlind ? { blindspot: __vtxBlind } : {}),
@@ -2948,6 +2958,8 @@ export function registerObserveHandlers(router: ActionRouter, debuggerMgr: Debug
         listenerInteractive?: true;
         /** 投放区(drop/dragenter/dragover 监听)真值信号 → 渲染 [dropzone]。@since dropzone-discovery */
         dropzoneInteractive?: true;
+        /** 拖拽源(显式 draggable=true)真值信号 → 渲染 [draggable]。@since draggable-source */
+        draggableInteractive?: true;
         frameId: number;
         // Issue #21 — populated only when input.includeBoxes && e.inViewport (T4).
         bbox?: [number, number, number, number];
@@ -3059,6 +3071,8 @@ export function registerObserveHandlers(router: ActionRouter, debuggerMgr: Debug
               ...(e.listenerInteractive ? { listenerInteractive: true as const } : {}),
               // 投放区真值信号透传渲染层（→ [dropzone]）。
               ...(e.dropzoneInteractive ? { dropzoneInteractive: true as const } : {}),
+              // 拖拽源真值信号透传渲染层（→ [draggable]）。
+              ...(e.draggableInteractive ? { draggableInteractive: true as const } : {}),
               // a11y-tree: 全局重映射后的父指针 + href（link 元素）。
               ...(globalParentIndex !== undefined ? { parentIndex: globalParentIndex } : {}),
               ...(e.href ? { href: e.href } : {}),
@@ -3103,6 +3117,8 @@ export function registerObserveHandlers(router: ActionRouter, debuggerMgr: Debug
               ...(e.listenerInteractive ? { listenerInteractive: true as const } : {}),
               // 投放区真值信号透传渲染层（→ [dropzone]）。
               ...(e.dropzoneInteractive ? { dropzoneInteractive: true as const } : {}),
+              // 拖拽源真值信号透传渲染层（→ [draggable]）。
+              ...(e.draggableInteractive ? { draggableInteractive: true as const } : {}),
               // a11y-tree: 全局重映射后的父指针 + href（link 元素）。
               ...(globalParentIndex !== undefined ? { parentIndex: globalParentIndex } : {}),
               ...(e.href ? { href: e.href } : {}),
