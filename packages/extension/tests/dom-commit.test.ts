@@ -121,7 +121,7 @@ describe("dom.commit handler (@since 0.4.0)", () => {
     expect(resp.error?.message).toContain("No commit driver");
   });
 
-  it("passes selector + closestSelector + value + timeout + driverId into executeScript args", async () => {
+  it("passes selector + closestSelector + ariaClosest + value + timeout + driverId into executeScript args", async () => {
     executeScript.mockResolvedValue([
       {
         result: {
@@ -153,9 +153,12 @@ describe("dom.commit handler (@since 0.4.0)", () => {
     const call = executeScript.mock.calls[0][0];
     expect(call.args[0]).toBe(".roles");                       // selector
     expect(call.args[1]).toBe(".el-checkbox-group");           // closestSelector
-    expect(call.args[2]).toEqual(["a", "b"]);                  // value
-    expect(call.args[3]).toBe(5000);                           // timeoutMs
-    expect(call.args[4]).toBe("element-plus-checkbox-group");  // driverId
+    // args[2] 是 kind="select" 二段路由用的 aria closestSelector(DEF-006),
+    // checkbox-group 不读它但所有 commit 注入统一携带,故 value 后移到 args[3]。
+    expect(call.args[2]).toMatch(/role="combobox"/);           // ariaClosest
+    expect(call.args[3]).toEqual(["a", "b"]);                  // value
+    expect(call.args[4]).toBe(5000);                           // timeoutMs
+    expect(call.args[5]).toBe("element-plus-checkbox-group");  // driverId
   });
 
   it("maps page-side COMMIT_FAILED result to COMMIT_FAILED error with stage in context", async () => {
