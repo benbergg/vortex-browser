@@ -22,6 +22,8 @@ export interface CompactElement {
   listenerInteractive?: true;
   /** CDP getEventListeners 确认有 drop/dragenter/dragover 监听器 → 渲染 [dropzone]（投放区，vortex_drag endRef 目标）。@since dropzone-discovery */
   dropzoneInteractive?: true;
+  /** HTML5 draggable=true 拖拽源 → 渲染 [draggable]（可被拖起，vortex_drag startRef 源）。与 [dropzone] 正交对称。@since draggable-source */
+  draggableInteractive?: true;
   /** role=link 的 href，渲染 /url: 属性行。@since a11y-tree */
   href?: string;
   /** AX nameSource：名称来源(label/placeholder/title/heuristic 等)。@since ax-overlay */
@@ -432,6 +434,8 @@ export function renderObserveTree(
     const listener = e.listenerInteractive ? " [listener]" : "";
     // 投放区信号：[dropzone] 告知 agent 此元素接受拖放，是 vortex_drag 的 endRef 目标。
     const dropzone = e.dropzoneInteractive ? " [dropzone]" : "";
+    // 拖拽源信号：[draggable] 告知 agent 此元素可被拖起，是 vortex_drag 的 startRef 源（与 dropzone 正交）。
+    const draggable = e.draggableInteractive ? " [draggable]" : "";
     const valueSeg =
       e.valueNow !== undefined
         ? ` value=${/\s/.test(e.valueNow) ? JSON.stringify(e.valueNow) : e.valueNow}`
@@ -483,7 +487,7 @@ export function renderObserveTree(
     const isNew = prevKeys !== null && !prevKeys.has(buildElementKey(e));
     const newPrefix = isNew ? "* " : "";
     lines.push(
-      `${indent}${newPrefix}- ${e.role}${name}${ref}${stateFlags(e.state)}${weak}${cursor}${listener}${dropzone}${valueSeg}${comp}${err}${ctrl}${desc}${offscreenSeg}${blindspotTag(e.blindspot)}${bboxSeg}${hasChildren ? ":" : ""}`,
+      `${indent}${newPrefix}- ${e.role}${name}${ref}${stateFlags(e.state)}${weak}${cursor}${listener}${dropzone}${draggable}${valueSeg}${comp}${err}${ctrl}${desc}${offscreenSeg}${blindspotTag(e.blindspot)}${bboxSeg}${hasChildren ? ":" : ""}`,
     );
     if (hasUrl) lines.push(`${indent}  - /url: ${e.href}`);
     for (const k of kids) emit(k, depth + 1);

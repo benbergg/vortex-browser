@@ -88,4 +88,29 @@ describe("renderObserveTree", () => {
     ]), null);
     expect(body(out)).toBe(`- button "Self" [ref=@e3]`);
   });
+
+  // 拖拽源信号:[draggable] 与投放区 [dropzone] 正交对称——前者是 vortex_drag 的
+  // startRef 源(能被拖起),后者是 endRef 目标(接受投放)。HTML5 draggable=true 控件
+  // (看板卡片/文件管理器/sortable)入池后此前无任何拖拽源标识,agent 无法区分它和
+  // 普通 group 容器(2026-06-23 the-internet/drag_and_drop + SortableJS 评测)。
+  it("draggableInteractive → [draggable] 拖拽源标记(vortex_drag startRef 目标)", () => {
+    const out = renderObserveTree(base([
+      mk({ index: 0, role: "group", name: "看板卡片", draggableInteractive: true }),
+    ]), null);
+    expect(body(out)).toBe(`- group "看板卡片" [ref=@e0] [draggable]`);
+  });
+
+  it("draggable 与 dropzone 正交共存(the-internet A/B 既可拖起又可投放)", () => {
+    const out = renderObserveTree(base([
+      mk({ index: 0, role: "group", name: "A", draggableInteractive: true, dropzoneInteractive: true }),
+    ]), null);
+    expect(body(out)).toBe(`- group "A" [ref=@e0] [dropzone] [draggable]`);
+  });
+
+  it("无 draggableInteractive 不打 [draggable](避免噪声)", () => {
+    const out = renderObserveTree(base([
+      mk({ index: 0, role: "button", name: "普通按钮" }),
+    ]), null);
+    expect(body(out)).not.toContain("[draggable]");
+  });
 });
