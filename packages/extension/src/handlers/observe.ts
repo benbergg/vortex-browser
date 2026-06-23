@@ -2725,7 +2725,8 @@ async function scanOneFrame(
           // [inline detectDivVirtualScroller] A2-fb-div 纯 div 虚拟列表(react-window/react-virtuoso/
           // PrimeReact VirtualScroller:容器与行都无 table/ul/[role] 语义,上面语义路径整类漏扫)。
           // 真源 blindspot-detect.ts detectDivVirtualScroller,改一处须改两处。
-          // 强滚动 div 容器 + 内部 ≥3 等高重复子项 + estTotal>>渲染。廉价 scrollHeight 门先于 getComputedStyle。
+          // 强滚动 div 容器 + 内部 ≥3 高度成簇重复子项 + estTotal>>渲染。廉价 scrollHeight 门先于 getComputedStyle。
+          // 成簇用中位数 band[median×0.6,1.6] 替代严格等高:容纳 react-virtuoso 等变高虚拟列表(逐项测量行高不一)。
           for (const __sc of querySelectorAllDeep("div", document)) {
             if (__seenScrollers.has(__sc)) continue;
             const __sh2 = (__sc as HTMLElement).scrollHeight;
@@ -2733,18 +2734,24 @@ async function scanOneFrame(
             if (__ch2 <= 0 || __sh2 < __ch2 * 4) continue; // 廉价强滚动门
             const __oy2 = getComputedStyle(__sc as HTMLElement).overflowY;
             if (__oy2 !== "auto" && __oy2 !== "scroll") continue; // 确认裁剪滚动
-            let __divRows: Element[] = [];
+            let __divRows = 0;
+            let __divRowH = 0;
             for (const __w of Array.from((__sc as HTMLElement).querySelectorAll("div"))) {
               const __kids = Array.from(__w.children);
               if (__kids.length < 3) continue;
-              const __h0 = __kids[0].getBoundingClientRect().height;
-              if (__h0 < 4) continue;
-              const __uni = __kids.filter((n) => Math.abs(n.getBoundingClientRect().height - __h0) <= 2);
-              if (__uni.length >= 3 && __uni.length >= __kids.length * 0.7 && __uni.length > __divRows.length) __divRows = __uni;
+              const __heights = __kids.map((n) => n.getBoundingClientRect().height);
+              const __sorted = [...__heights].sort((a, b) => a - b);
+              const __median = __sorted[Math.floor(__sorted.length / 2)];
+              if (__median < 4) continue;
+              const __inBand = __heights.filter((h) => h >= __median * 0.6 && h <= __median * 1.6).length;
+              if (__inBand >= 3 && __inBand >= __kids.length * 0.7 && __inBand > __divRows) {
+                __divRows = __inBand;
+                __divRowH = __median;
+              }
             }
-            if (__divRows.length < 3) continue;
-            const __dRendered = __divRows.length;
-            const __dRowH = __divRows[0].getBoundingClientRect().height;
+            if (__divRows < 3) continue;
+            const __dRendered = __divRows;
+            const __dRowH = __divRowH;
             const __dEst = Math.round(__sh2 / __dRowH);
             if (__dEst > __dRendered && __dEst >= Math.max(__dRendered * 2, __dRendered + 20)) {
               __seenScrollers.add(__sc);
