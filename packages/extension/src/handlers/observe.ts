@@ -998,6 +998,40 @@ async function scanOneFrame(
         const normName = (s: string | null | undefined): string =>
           (s ?? "").replace(/\s+/g, " ").trim().slice(0, 80);
 
+        // 取元素后代文本但排除 visibility:hidden / display:none 子树(对齐 ACCNAME 规范:
+        // 隐藏子树不计入可及名)。getAccessibleName 末位兜底刻意用 textContent(绕过
+        // text-overflow:ellipsis 截断,见上方注释)——副作用是连 visibility:hidden 的镜像
+        // 文本也拼进去。Radix header「hover-swap」用 visible + visibility:hidden 两份同文
+        // span,textContent 得 "ThemesThemes";平时 AX overlay(CDP,正确排除 hidden)盖住,
+        // 但 Select/Dialog 打开等致 AX overlay 跳过、回退本启发式时叠字暴露(2026-06-23
+        // radix-ui.com Select-open dogfood)。本函数保留 visibility:visible 元素被 ellipsis
+        // 裁剪的文本(其 computed visibility 仍 visible,不排除),兼顾两者。
+        // perf:叶子(无子元素)走 textContent 快路径;text 超 96(normName 截 80 留余量)
+        // 或访问超 250 元素节点即停,防大容器/深树拖慢扫描热路径。
+        const visibleTextContent = (el: Element): string => {
+          if (el.childElementCount === 0) return el.textContent ?? "";
+          let out = "";
+          let count = 0;
+          const visit = (node: Node): void => {
+            const kids = node.childNodes;
+            for (let i = 0; i < kids.length; i++) {
+              if (out.length > 96 || count > 250) return;
+              const child = kids[i];
+              if (child.nodeType === 3) {
+                out += child.nodeValue || "";
+                continue;
+              }
+              if (child.nodeType !== 1) continue;
+              count++;
+              const cs = getComputedStyle(child as Element);
+              if (cs.visibility === "hidden" || cs.display === "none") continue;
+              visit(child);
+            }
+          };
+          visit(el);
+          return out;
+        };
+
         // <label for=X> 指向零尺寸(visually-hidden)表单控件时,label 是该控件的可见代理。
         // CSS-only 自定义 radio / Mantine Rating 星星把真 radio 设 0x0(被尺寸门跳过),
         // 用 label[for] 关联的可见星星承接点击;label 自身无文本/aria-label → require-name
@@ -1136,7 +1170,7 @@ async function scanOneFrame(
               "input[type=checkbox], input[type=radio]",
             );
             if (wrapsCheckRadio) {
-              const labelText = normName(el.textContent);
+              const labelText = normName(visibleTextContent(el));
               if (labelText) return labelText;
               // 缺陷① (2026-06-07 v4 淘宝评测): <label> 包 radio/checkbox 但
               // labelText 为空 (淘宝 emoji 雪碧图、Element Plus 纯图标 label、
@@ -1187,7 +1221,7 @@ async function scanOneFrame(
           // 用自身 textContent (信息最丰富,标题/价格/销量/店铺名)。先于
           // isContainer 判定,确保"自身有商品信息"不被当容器丢弃。
           const PRODUCT_HINTS = /[\u00a5￥]\d|人付款|回头客|已售|月销/;
-          const text = normName(el.textContent);
+          const text = normName(visibleTextContent(el));
           if (text && PRODUCT_HINTS.test(text)) return text;
           const isContainer =
             el.querySelector(

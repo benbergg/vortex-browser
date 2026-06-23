@@ -45,7 +45,7 @@ describe("缺陷①: <label> 包 radio/checkbox 但无文本 — 通用兜底名
 
   it("现有 labelText 非空时优先返回 labelText (Element Plus '北京' 等场景)", () => {
     expect(OBSERVE_SRC).toMatch(
-      /const labelText = normName\(el\.textContent\);[\s\S]{0,50}?if \(labelText\) return labelText;/,
+      /const labelText = normName\(visibleTextContent\(el\)\);[\s\S]{0,50}?if \(labelText\) return labelText;/,
     );
   });
 

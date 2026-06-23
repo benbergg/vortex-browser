@@ -44,7 +44,7 @@ describe("observe accessible-name — nested-control aria-label + title fallback
 
   it("the LABEL nested-aria block runs before the textContent fallback (so 角标 '1' doesn't win)", () => {
     const labelIdx = OBSERVE_SRC.search(/if \(el\.tagName === "LABEL"\)/);
-    const textIdx = OBSERVE_SRC.search(/const text = normName\(el\.textContent\);/);
+    const textIdx = OBSERVE_SRC.search(/const text = normName\(visibleTextContent\(el\)\);/);
     expect(labelIdx).toBeGreaterThan(0);
     expect(textIdx).toBeGreaterThan(0);
     expect(labelIdx).toBeLessThan(textIdx);
@@ -57,7 +57,7 @@ describe("observe accessible-name — nested-control aria-label + title fallback
   });
 
   it("the title fallback sits after textContent and before iconNameFromClass", () => {
-    const textIdx = OBSERVE_SRC.search(/const text = normName\(el\.textContent\);/);
+    const textIdx = OBSERVE_SRC.search(/const text = normName\(visibleTextContent\(el\)\);/);
     const titleIdx = OBSERVE_SRC.search(/const titleAttr = el\.getAttribute\("title"\);/);
     const classIdx = OBSERVE_SRC.indexOf("const fromIcon = iconNameFromClass(el);");
     expect(textIdx).toBeLessThan(titleIdx);

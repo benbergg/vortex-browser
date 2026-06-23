@@ -76,7 +76,7 @@ describe("observe native checkbox/radio visibility (AB,2026-06-02 dogfood)", () 
       /wrapsCheckRadio\s*=\s*el\.querySelector\(\s*["']input\[type=checkbox\], input\[type=radio\]["']/,
     );
     expect(OBSERVE_SRC).toMatch(
-      /if \(wrapsCheckRadio\)[\s\S]{0,120}normName\(el\.textContent\)[\s\S]{0,60}return labelText/,
+      /if \(wrapsCheckRadio\)[\s\S]{0,160}normName\(visibleTextContent\(el\)\)[\s\S]{0,60}return labelText/,
     );
   });
 
