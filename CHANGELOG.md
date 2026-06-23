@@ -8,8 +8,17 @@
 
 _新工作进入此段；ship 时改为版本号 + 日期。_
 
+---
+
+## [1.1.0] - 2026-06-23
+
+> `@vortex-browser/mcp` + `@vortex-browser/shared` 发布 1.1.0(自 1.0.0 起 203 提交)。
+> 全局更新:`npm install -g @vortex-browser/mcp@1.1.0`。
+
 ### ✨ Added
 
+- **observe 召回嵌套 portal 弹层(Cascader 等)选项免遭截断**(PR #98,`packages/extension/src/handlers/observe.ts`)。信号二 portal overlay 扫描深度扩到 body 孙(穿透 rc-trigger 透明 wrapper)+ 新增 `OVERLAY_DESCENDANT_SELECTORS`(补 menuitemcheckbox/menuitemradio),修复 antd Cascader 等嵌套 portal 弹层选项在密集页被 maxElements 截断、observe 完全不可见。
+- **tree 展开/折叠 switcher surface 成独立 toggle ref**(PR #99,`packages/extension/src/handlers/observe.ts`、`observe-ax-overlay.ts`)。Hybrid 检测(ARIA 门 + curated 类 antd/rc-tree/element-plus + 几何兜底)把树节点展开 toggle 暴露为 `button "expand"`/`"collapse"`,纯 observe agent 可展开/折叠树节点;applyOverlay 对 treeToggle 跳过 AX 改名 + 候选排序紧邻 treeitem 免截断。
 - **descriptor 透明自愈:act 选择器失效时按 role+name 自动重定位(对标 Stagehand self-heal,P0-1)** (`packages/extension/src/lib/snapshot-store.ts`、`resolve-target.ts`、`packages/extension/src/handlers/observe.ts`、`packages/extension/src/page-side/heal-resolve.ts` 新增、`packages/extension/src/action/heal.ts` 新增、`packages/extension/src/handlers/dom.ts`、`packages/shared/src/errors.hints.ts`)。observe 把每元素的 `role`/`name`(含 `aria-label`/`aria-labelledby`/`<label for>`/包裹 label/可见文本,对齐 `getAccessibleName`)随 snapshot 持久化;`vortex_act` 的 CLICK/FILL/TYPE/SELECT/HOVER 经共享 `healAwareGate` 包裹 actionability 门——当存储的选择器命中 0(DOM 在 observe 后重渲染漂移)致门以 `NOT_ATTACHED` 自旋失败、且该 ref 带 descriptor 时,页面侧按 `{role,name}` 重匹配活 DOM(复用 `__vortexDomResolve.queryAllDeep` 穿 open shadow),唯一命中即打瞬态属性 `data-vtx-heal=<进程内单调 token>` 换选择器重跑门+动作,结果带 `healed:true`;**LLM 无感**(仍传同一 `@hash:eN` ref,无需 schema 改动/无需重新 observe)。**优雅降级、绝不静默错选**:多元素同名命中→`AMBIGUOUS_DESCRIPTOR` 拒绝;无命中→`STALE_REF`(均指引重 observe)。happy path(选择器有效)零额外 round-trip,heal 仅失败路径触发。架构=**handler 层 catch-and-heal,不碰承重的 actionability gate probe 内部**(最小化回归面);页面侧匹配纯函数 `heal-resolve.ts`(可单测真源)+ host 侧内联注入体 `__healInlineBody`(inline-gotcha 自包含)由 `new Function` 剥离闭包的对齐测试逐字校验同语义。**Why**: vortex 此前对 stale ref **零工具层自愈**——动态 SPA 在 observe 后重渲染使选择器漂移,act 即 `STALE_SNAPSHOT`,LLM 须重新 observe(一次完整 round-trip + 整页 token);竞品对比确认这是最高 ROI 缺口(Stagehand act 失败自动 re-observe+重试、chrome-devtools 用 backendNodeId 跨快照保持身份)。且 vortex 早有一套 L3 descriptor 消解(`reasoning/`)但跑在 CDP AX 快照、与真实选择器链路不通的死代码,本轮在真实链路上以页面侧匹配落地(不接/不删死代码)。**live 验证(example.com 注入受控 DOM,7 场景全过)抓到一个单测 mock 假绿的真 bug**:`isStaleNotAttached` 读 `err.extras?.lastReason`,而真实 `VtxError` 经 `vtxError` 工厂把 context 嵌在 `err.extra.context.extras.lastReason`(单测把 gate reject 手搓成偏离真实形状的 `{code,extras:{lastReason}}` → 假绿、自愈在真实浏览器永不触发),已修读真实路径 + mock 改用真实 `vtxError` 工厂防再分歧。设计/计划文档:`Knowledge-Library 12-Projects/0010-vortex-竞品对比与descriptor自愈/20260617-*`。已知边界(优雅降级,转 backlog):input 仅经 `placeholder`/`title`/submit `value` 命名时不自愈(降级 STALE_REF);触发面仅"选择器失效 + snapshot 60s TTL 内",条目已 GC 的过期 ref 维持现 `STALE_SNAPSHOT`。
 
 - **工具横向优化批(行业对标 Stagehand / Playwright MCP / Chrome DevTools MCP / browser-use,9 项)** —— 设计/计划文档 `Knowledge-Library 12-Projects/vortex-工具横向优化/20260613-*`。核心洞察:行业成熟方案直接根治 vortex 自己 dogfood 反复踩的 4 族缺陷根因。默认公开面 17→20 工具(+drag/fill_form/query,I15 cap 6000→7500),verify 经 opt-in `--caps=testing` 提升。
