@@ -12,6 +12,35 @@ function getProp(n: CDPAXNode, name: string): unknown {
   return n.properties?.find((p) => p.name === name)?.value?.value;
 }
 
+/**
+ * 还原 Chrome Accessibility.getFullAXTree 对 value/valuetext 类 AXValue 的双重编码。
+ * Chrome 把这些属性的 UTF-8 字节当 Latin-1 逐字节映射成 JS 字符串返回(name 不受影响),
+ * 例:DOM aria-valuetext="弱 – Weak"(U+5F31 U+2013 …)→ CDP 返回 "å¼± â Weak"
+ * (字节 0xE5 0xBC 0xB1 0xE2 0x80 0x93 各自当 Latin-1 码位)。2026-06-23 react-aria
+ * DatePicker dogfood:spinbutton value "6 – June" 被渲染成 "6 â June"。
+ *
+ * 还原:把每个码位当单字节取回原 UTF-8 字节序列,再按 UTF-8 严格解码。
+ * 安全护栏:① 含真正多字节字符(码位 > 0xFF)说明非 mojibake,原样返回;
+ * ② fatal UTF-8 解码失败说明本就是合法 Latin-1 文本(如 "café" 的孤立 0xE9),原样返回。
+ * 仅作用于 value 路径——name/description 经 dogfood 实证未被 Chrome 双重编码。
+ */
+function repairCdpUtf8(s: string): string {
+  let hasHigh = false;
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charCodeAt(i);
+    if (c > 0xff) return s; // 含真多字节字符 → 非 mojibake,原样返回
+    if (c >= 0x80) hasHigh = true;
+  }
+  if (!hasHigh) return s; // 纯 ASCII → 无双重编码可能
+  try {
+    const bytes = new Uint8Array(s.length);
+    for (let i = 0; i < s.length; i++) bytes[i] = s.charCodeAt(i);
+    return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch {
+    return s; // 非合法 UTF-8 字节序列 → 真 Latin-1 文本,保留原值
+  }
+}
+
 function getRelated(n: CDPAXNode, name: string): Array<{ backendDOMNodeId?: number; text?: string }> {
   return n.properties?.find((p) => p.name === name)?.value?.relatedNodes ?? [];
 }
@@ -65,8 +94,9 @@ export function computeAXOverlay(
 
   const valuetext = getProp(node, "valuetext");
   let rawValue: string | undefined;
-  if (typeof valuetext === "string" && valuetext) rawValue = valuetext;
-  else if (node.value?.value) rawValue = String(node.value.value);
+  // CDP 双重编码还原:value/valuetext 的非 ASCII 字符须经 repairCdpUtf8(详见上方注释)。
+  if (typeof valuetext === "string" && valuetext) rawValue = repairCdpUtf8(valuetext);
+  else if (node.value?.value) rawValue = repairCdpUtf8(String(node.value.value));
   // 对齐 page-side getValueInfo 纪律:归一化空白(换行/制表→单空格)+截断 200。
   // AX node.value.value 对 contentEditable/textarea 给「全文」,无截断会撑爆 observe
   // 输出 token(长文档编辑器/Notion/工单)且 \n 破坏单行渲染(2026-06-23 prosemirror dogfood)。
