@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="zh"><head><meta charset="utf-8"><title>tree switcher toggle</title>
+<style>
+  .ant-tree-switcher{display:inline-block;width:24px;height:24px;cursor:pointer;text-align:center}
+  .ant-tree-switcher-noop{cursor:auto}
+  .ant-tree-node-content-wrapper{display:inline-block;cursor:pointer;padding:0 4px}
+  .ant-tree-treenode{display:block;line-height:24px}
+</style></head>
+<body>
+<h1>tree 展开/折叠 switcher 独立 toggle(R25)</h1>
+<!--
+  复现 R25:antd Tree 点 treeitem-title 仅选中、点 switcher caret 才展开。switcher
+  (.ant-tree-switcher,cursor:pointer)此前因祖先 treeitem ∈ ATOMIC 被 cursor:pointer
+  fallback 跨池祖先短路吸收 → 无独立 ref,纯 observe agent 无法展开。
+  修复:可展开 treeitem(有 aria-expanded)内的 curated switcher → surface 成独立
+  button "expand"/"collapse"(role 强制 button,AX overlay 跳过改名)。叶子(无
+  aria-expanded / switcher-noop)不出 toggle。
+-->
+<div role="tree">
+  <div class="ant-tree-treenode" role="treeitem" aria-expanded="true">
+    <span class="ant-tree-switcher ant-tree-switcher_open" data-vtx-oracle="toggle-expanded"><span role="img" aria-label="caret-down">▾</span></span>
+    <span class="ant-tree-node-content-wrapper">Node A (expanded)</span>
+  </div>
+  <div class="ant-tree-treenode" role="treeitem" aria-expanded="false">
+    <span class="ant-tree-switcher ant-tree-switcher_close" data-vtx-oracle="toggle-collapsed"><span role="img" aria-label="caret-right">▸</span></span>
+    <span class="ant-tree-node-content-wrapper">Node B (collapsed)</span>
+  </div>
+  <div class="ant-tree-treenode" role="treeitem">
+    <span class="ant-tree-switcher ant-tree-switcher-noop"></span>
+    <span class="ant-tree-node-content-wrapper" data-vtx-oracle="leaf-content">Leaf C</span>
+  </div>
+</div>
+</body></html>

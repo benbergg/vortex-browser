@@ -171,6 +171,9 @@ export interface OverlayableElement {
   };
   controls?: number[]; owns?: number[]; errorMessage?: string; description?: string;
   tag?: string;
+  /** tree 展开/折叠 toggle(R25):page-side 已定 role=button/name=expand|collapse,
+   *  CDP AX 视 caret 为 presentational(role=img/name="caret-down"),overlay 须跳过覆盖。 */
+  treeToggle?: boolean;
 }
 
 /**
@@ -197,8 +200,10 @@ export function applyOverlay(
       { backendId: backendId!, role: el.role, name: el.name, heuristicInteractive: el.reactClickable === true },
       node,
     );
-    if (ov.role) el.role = ov.role;
-    if (ov.name) el.name = ov.name;
+    // tree 展开/折叠 toggle:保留 page-side 的 role=button/name=expand|collapse,
+    // 不被 CDP AX 的 presentational caret(role=img/name="caret-down")覆盖(R25)。
+    if (ov.role && !el.treeToggle) el.role = ov.role;
+    if (ov.name && !el.treeToggle) el.name = ov.name;
     el.nameSource = ov.nameSource ?? "heuristic";
     if (ov.state) el.state = { ...(el.state ?? {}), ...ov.state };
     if (ov.valueNow !== undefined) el.valueNow = ov.valueNow;

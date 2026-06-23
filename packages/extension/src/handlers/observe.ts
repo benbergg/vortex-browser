@@ -2305,11 +2305,41 @@ async function scanOneFrame(
           }
         }
 
-        const baseCandidates: Element[] = [
-          ...Array.from(nodeList),
-          ...cursorPointerLeaves,
-          ...iconCtaExtras,
-        ];
+        const baseCandidates: Element[] = (() => {
+          const raw: Element[] = [
+            ...Array.from(nodeList),
+            ...cursorPointerLeaves,
+            ...iconCtaExtras,
+          ];
+          // tree 展开/折叠 toggle 排序(R25):cursorPointerLeaves 排在 nodeList 之后,密集树上
+          // toggle 遭 maxElements 截断、与其 treeitem 远隔。把每个 toggle 重排到其 treeitem 紧后,
+          // 二者随后续 overlay/main-content 分区同进退,toggle 与已召回的 treeitem 同框免截断。
+          // 无 toggle → 原数组同序(零漂移)。
+          const toggles: Element[] = [];
+          const rest: Element[] = [];
+          for (const el of raw) (isTreeExpandToggle(el) ? toggles : rest).push(el);
+          if (toggles.length === 0) return raw;
+          const byTreeitem = new Map<Element, Element[]>();
+          for (const t of toggles) {
+            const ti = t.closest('[role="treeitem"]');
+            if (ti) {
+              const arr = byTreeitem.get(ti) || [];
+              arr.push(t);
+              byTreeitem.set(ti, arr);
+            }
+          }
+          const out: Element[] = [];
+          for (const el of rest) {
+            out.push(el);
+            const ts = byTreeitem.get(el);
+            if (ts) {
+              out.push(...ts);
+              byTreeitem.delete(el);
+            }
+          }
+          for (const ts of byTreeitem.values()) out.push(...ts); // treeitem 未入候选的孤儿 toggle 兜底
+          return out;
+        })();
 
         // ── overlay-priority(DEFECT-1):可见浮层的交互后代前置,免遭 maxElements 截断 ──
         // Portal 弹层(下拉/菜单/Modal)挂 body 末尾,DOM 序排最后。密集页(交互元素
@@ -2618,7 +2648,11 @@ async function scanOneFrame(
             if (v) attrs[attrName] = v.slice(0, 160);
           }
 
-          const role = withAX ? getRole(htmlEl) : htmlEl.tagName.toLowerCase();
+          // tree 展开/折叠 toggle(R25):role 强制 button(它是动作控件非装饰 img),name 走
+          // getAccessibleName 的 expand/collapse 分支。treeToggle 标记透传给 applyOverlay,使
+          // AX overlay 不把 role/name 改回 img/"caret-down"(CDP AX 视 caret 为 presentational)。
+          const isTreeTog = isTreeExpandToggle(htmlEl);
+          const role = isTreeTog ? "button" : withAX ? getRole(htmlEl) : htmlEl.tagName.toLowerCase();
           const name = withText ? getAccessibleName(htmlEl) : "";
 
           // 内容卡内「无文本 icon-link 子」(京东客服 16x16 ×60)是冗余噪声,且占
@@ -2762,6 +2796,8 @@ async function scanOneFrame(
             ...(htmlEl.getAttribute("draggable") === "true"
               ? { draggableInteractive: true as const }
               : {}),
+            // tree 展开/折叠 toggle(R25):透传给扩展侧 applyOverlay,跳过 AX role/name 覆盖。
+            ...(isTreeTog ? { treeToggle: true as const } : {}),
             ...(__href !== undefined ? { href: __href } : {}),
             ...(__inputCompound !== undefined ? { compound: __inputCompound } : {}),
             ...(__vtxBlind ? { blindspot: __vtxBlind } : {}),
