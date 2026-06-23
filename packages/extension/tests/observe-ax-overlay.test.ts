@@ -77,6 +77,31 @@ describe("computeAXOverlay", () => {
     const r = computeAXOverlay({ backendId: 13, role: "slider", name: "" }, node);
     expect(r.valueNow).toBe("50%");
   });
+
+  // 2026-06-23 prosemirror.net dogfood:AX node.value.value 对 contentEditable/textarea
+  // 给「全文」(508 字符富文本文档),applyOverlay 无截断覆盖 page-side getValueInfo 已
+  // slice(0,200) 的 valueNow → observe 渲染全文,长文档(Notion/工单)token 爆炸 + \n\n
+  // 破坏单行输出。AX overlay valueNow 须对齐 page-side 纪律:归一化空白 + 截断 200。
+  it("长 value 截断到 200(防长 contentEditable/textarea token 爆炸)", () => {
+    const node = ax({ role: { value: "textbox" }, value: { value: "A".repeat(500) } });
+    const r = computeAXOverlay({ backendId: 30, role: "textbox", name: "" }, node);
+    expect(r.valueNow!.length).toBe(200);
+  });
+
+  it("value 含换行/制表归一化为单空格(防破坏单行渲染)", () => {
+    const node = ax({ role: { value: "textbox" }, value: { value: "Hello\n\nWorld\ttab" } });
+    const r = computeAXOverlay({ backendId: 31, role: "textbox", name: "" }, node);
+    expect(r.valueNow).toBe("Hello World tab");
+  });
+
+  it("短 valuetext 不受截断/归一化影响(slider 50% 保持)", () => {
+    const node = ax({
+      role: { value: "slider" },
+      properties: [{ name: "valuetext", value: { value: "50%" } }],
+    });
+    const r = computeAXOverlay({ backendId: 32, role: "slider", name: "" }, node);
+    expect(r.valueNow).toBe("50%");
+  });
 });
 
 describe("extractCompound", () => {
