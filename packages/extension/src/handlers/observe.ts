@@ -542,6 +542,55 @@ export function isNavMenuRoot(el: Element, role: string): boolean {
   return links >= items.length * 0.6;
 }
 
+// curated 展开图标类(antd/rc-tree/element-plus):switcher caret / expand-icon。
+const TREE_SWITCHER_CLASS_RE =
+  /(?:^|[\s_-])(?:ant-tree-switcher|rc-tree-switcher|el-tree-node__expand-icon)(?:[\s_-]|$)/;
+// noop/leaf 占位(无子可展开):明确非 toggle。
+const TREE_SWITCHER_NOOP_RE = /(?:switcher-noop|is-leaf)/;
+function elClass(n: Element): string {
+  return typeof n.className === "string" ? n.className : n.getAttribute("class") || "";
+}
+
+/**
+ * tree 展开/折叠 switcher 识别(R25 dogfood:antd Tree 点 treeitem-title 仅选中、点 switcher
+ * caret 才展开;switcher 因祖先 treeitem ∈ ATOMIC_INTERACTIVE_SELECTORS 被 cursor:pointer
+ * fallback 的跨池祖先短路吸收 → 无独立 ref,纯 observe agent 无法展开/折叠树节点)。
+ *
+ * Hybrid 检测(用户拍板):① ARIA 门——必在「带 aria-expanded 的 treeitem」内(只对可展开节点
+ * 生效,叶子无 aria-expanded → 零噪声);② curated 类优先(antd/rc-tree/element-plus,排除
+ * noop/is-leaf 占位);③ 几何兜底——curated 漏(未知库)时,treeitem 内 DOM 序首个小图标
+ * (≤32×32)cursor:pointer 非 checkbox 元素(caret 通常是行首最左小图标)。命中者豁免祖先短路、
+ * surface 成独立 toggle ref(naming 见 getAccessibleName:按 treeitem aria-expanded 给 expand/collapse)。
+ * 几何路用注入 getter(cursorOf/rectOf)以便 jsdom 直测;浏览器默认 getComputedStyle/bbox。
+ * inject func 内联同名逻辑,改一处须同步;本导出由 observe-tree-switcher.test.ts 锁守护。
+ */
+export function isTreeExpandToggle(
+  el: Element,
+  cursorOf: (e: Element) => string = (e) => getComputedStyle(e as HTMLElement).cursor,
+  rectOf: (e: Element) => { width: number; height: number } = (e) => e.getBoundingClientRect(),
+): boolean {
+  const treeitem = el.closest('[role="treeitem"]');
+  if (!treeitem || !treeitem.hasAttribute("aria-expanded") || el === treeitem) return false;
+  // checkbox/radio/原生 input 各有独立 ref,不当 toggle。
+  if (el.matches('[role="checkbox"],[role="radio"],input')) return false;
+  // ② curated 类:自身或到 treeitem 的祖先链命中 switcher 类。
+  for (let n: Element | null = el; n && n !== treeitem; n = n.parentElement) {
+    const cls = elClass(n);
+    if (TREE_SWITCHER_NOOP_RE.test(cls)) return false; // noop 占位明确非 toggle
+    if (TREE_SWITCHER_CLASS_RE.test(cls)) return true;
+  }
+  // ③ 几何兜底(未知库):el 是小图标 cursor:pointer,且是 treeitem 内 DOM 序首个这样的非 checkbox 图标。
+  const r = rectOf(el);
+  if (cursorOf(el) !== "pointer" || r.width === 0 || r.width > 32 || r.height > 32) return false;
+  const icons = Array.from(treeitem.querySelectorAll("*")).filter((c) => {
+    if (c === el) return true;
+    if (c.matches('[role="checkbox"],[role="radio"],input')) return false;
+    const cr = rectOf(c);
+    return cursorOf(c) === "pointer" && cr.width > 0 && cr.width <= 32 && cr.height <= 32;
+  });
+  return icons.length > 0 && icons[0] === el;
+}
+
 /**
  * main-content-priority(A-1):文档站「左导航 + 右主内容」布局下,导航(DOM 序在前)
  * 霸占 maxElements 配额、主内容 0 召回(semi.design Select dogfood 实证:154 个 nav
@@ -1096,7 +1145,48 @@ async function scanOneFrame(
           return normName(h.getAttribute("aria-label") || (h as HTMLInputElement).value || "");
         }
 
+        // tree 展开/折叠 switcher 识别(R25)——模块级 isTreeExpandToggle 同名,改一处须同步。
+        // Hybrid:ARIA 门(带 aria-expanded 的 treeitem 内)+ curated 类(antd/rc-tree/element-plus,
+        // 排除 noop/is-leaf 占位)+ 几何兜底(treeitem 内首个 ≤32×32 cursor:pointer 非 checkbox 图标)。
+        // 命中者:① getAccessibleName 给 expand/collapse 名;② 豁免 cursor:pointer fallback 的跨池祖先
+        // 短路(否则被祖先 treeitem ∈ ATOMIC 吞掉无独立 ref,纯 observe agent 无法展开)。
+        const TREE_SWITCHER_CLASS_RE =
+          /(?:^|[\s_-])(?:ant-tree-switcher|rc-tree-switcher|el-tree-node__expand-icon)(?:[\s_-]|$)/;
+        const TREE_SWITCHER_NOOP_RE = /(?:switcher-noop|is-leaf)/;
+        const treeElClass = (n: Element): string =>
+          typeof n.className === "string" ? n.className : n.getAttribute("class") || "";
+        const isTreeExpandToggle = (el: Element): boolean => {
+          const treeitem = el.closest('[role="treeitem"]');
+          if (!treeitem || !treeitem.hasAttribute("aria-expanded") || el === treeitem) return false;
+          if (el.matches('[role="checkbox"],[role="radio"],input')) return false;
+          for (let n: Element | null = el; n && n !== treeitem; n = n.parentElement) {
+            const cls = treeElClass(n);
+            if (TREE_SWITCHER_NOOP_RE.test(cls)) return false;
+            if (TREE_SWITCHER_CLASS_RE.test(cls)) return true;
+          }
+          const r = el.getBoundingClientRect();
+          if (getComputedStyle(el as HTMLElement).cursor !== "pointer" || r.width === 0 || r.width > 32 || r.height > 32)
+            return false;
+          const icons = Array.from(treeitem.querySelectorAll("*")).filter((c) => {
+            if (c === el) return true;
+            if (c.matches('[role="checkbox"],[role="radio"],input')) return false;
+            const cr = c.getBoundingClientRect();
+            return (
+              getComputedStyle(c as HTMLElement).cursor === "pointer" &&
+              cr.width > 0 &&
+              cr.width <= 32 &&
+              cr.height <= 32
+            );
+          });
+          return icons.length > 0 && icons[0] === el;
+        };
         function getAccessibleName(el: HTMLElement): string {
+          // tree 展开 toggle:无文本 caret,按父 treeitem aria-expanded 给动作名(expand/collapse),
+          // 否则落到下方图标/坐标兜底得 "caret-down"/坐标名(R25,agent 一眼识别是展开控件)。
+          if (isTreeExpandToggle(el)) {
+            const ti = el.closest('[role="treeitem"]');
+            return ti?.getAttribute("aria-expanded") === "true" ? "collapse" : "expand";
+          }
           const aria = el.getAttribute("aria-label");
           if (aria) return normName(aria);
           const labelledBy = el.getAttribute("aria-labelledby");
@@ -2003,7 +2093,10 @@ async function scanOneFrame(
               break;
             }
           }
-          if (hasInteractiveAncestor) continue;
+          // tree 展开 toggle 豁免:祖先 treeitem ∈ ATOMIC 本会短路吸收它,但 switcher 是独立动作
+          // (点 title 仅选中、点 switcher 才展开),须 surface 成独立 ref(R25)。只在确有交互祖先
+          // 时调用(限可展开 treeitem 内的 cursor:pointer 小图标子集),开销受控。
+          if (hasInteractiveAncestor && !isTreeExpandToggle(el)) continue;
           const htmlEl = el as HTMLElement;
           // SVG 元素无 offsetWidth/offsetHeight(undefined),退回 getBoundingClientRect 测尺寸,
           // 否则 `undefined === 0` 恒 false 使零尺寸 svg defs/clip 漏过尺寸门。
