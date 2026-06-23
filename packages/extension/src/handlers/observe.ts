@@ -998,6 +998,27 @@ async function scanOneFrame(
         const normName = (s: string | null | undefined): string =>
           (s ?? "").replace(/\s+/g, " ").trim().slice(0, 80);
 
+        // <label for=X> 指向零尺寸(visually-hidden)表单控件时,label 是该控件的可见代理。
+        // CSS-only 自定义 radio / Mantine Rating 星星把真 radio 设 0x0(被尺寸门跳过),
+        // 用 label[for] 关联的可见星星承接点击;label 自身无文本/aria-label → require-name
+        // 门挡掉 → 整控件 observe 隐形(2026-06-23 mantine.dev/core/rating dogfood)。
+        // 从关联控件继承可及名(aria-label/value),让可见 label 通过门并显示语义名。
+        // 限定 control 零尺寸:可见 control 自己召回,label 不代理(防双现)。
+        function labelForHiddenControlName(el: Element): string {
+          if (el.tagName !== "LABEL") return "";
+          const forId = el.getAttribute("for");
+          if (!forId) return "";
+          const root = el.getRootNode() as Document | ShadowRoot;
+          const ctrl =
+            typeof (root as Document).getElementById === "function"
+              ? (root as Document).getElementById(forId)
+              : document.getElementById(forId);
+          if (!ctrl) return "";
+          const h = ctrl as HTMLElement;
+          if (h.offsetWidth !== 0 || h.offsetHeight !== 0) return "";
+          return normName(h.getAttribute("aria-label") || (h as HTMLInputElement).value || "");
+        }
+
         function getAccessibleName(el: HTMLElement): string {
           const aria = el.getAttribute("aria-label");
           if (aria) return normName(aria);
@@ -1019,6 +1040,9 @@ async function scanOneFrame(
             }
             if (parts.length) return normName(parts.join(" "));
           }
+          // <label for=X> 代理零尺寸 control 时,可及名取自关联控件(见 helper 注释)。
+          const __hiddenCtrlName = labelForHiddenControlName(el);
+          if (__hiddenCtrlName) return __hiddenCtrlName;
           if (
             el.tagName === "INPUT" ||
             el.tagName === "TEXTAREA" ||
@@ -1954,7 +1978,9 @@ async function scanOneFrame(
           // 时尝试 icon-only fallback（CSS Modules 类名兜底，如 close/icon button）。
           // controlRoleFromClass:给无 role/无 name 的控件类(vxe-cell--checkbox)入池信号。
           // **不**加 iconFontName——round-12 约束(装饰字体图标不得进门),它只留显示路径。
-          const probe = ariaProbe || textProbe || iconNameFromClass(el) || controlRoleFromClass(el);
+          // labelForHiddenControlName:<label for=零尺寸 control> 从关联控件继承名(同 getAccessibleName),
+          // 让 Mantine Rating 等「可见 label 代理 0x0 radio」的星星过门(否则无名被 require-name 挡)。
+          const probe = ariaProbe || textProbe || iconNameFromClass(el) || controlRoleFromClass(el) || labelForHiddenControlName(el);
           // Require a name to avoid noise from purely decorative
           // cursor:pointer wrappers (e.g. close-button icons handled by
           // event delegation but visually rendered as bare divs).
