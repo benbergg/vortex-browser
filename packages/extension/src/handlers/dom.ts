@@ -1842,10 +1842,21 @@ export function registerDomHandlers(
       if (driver.kind === "checkbox-group") {
         await loadPageSideModule(tid, frameId, "commit-checkbox-group");
       } else if (driver.kind === "select") {
+        // kind="select" 是「select-like 控件」统一入口:不再独占绑定 Element Plus。
+        // 同时加载 EP 专用 driver 与通用 ARIA driver,page-side 按要素结构二段路由
+        // (DEF-006:Headless UI / MUI / Radix / antd / react-select 等非 EP 的
+        // combobox/listbox 此前必须显式 kind="aria-select" 才能命中,代理凭直觉用
+        // kind="select" 100% UNSUPPORTED_TARGET)。
         await loadPageSideModule(tid, frameId, "commit-select");
+        await loadPageSideModule(tid, frameId, "commit-aria-select");
       } else if (driver.kind === "aria-select") {
         await loadPageSideModule(tid, frameId, "commit-aria-select");
       }
+
+      // 通用 ARIA driver 的 closestSelector:kind="select" 二段路由的 EP 未命中回退用。
+      const ariaClosestSelector =
+        findDriver("aria-select")?.closestSelector ??
+        '[role="combobox"], [aria-haspopup="listbox"], [role="listbox"]';
 
       const res = await nativePageQuery<{
         result?: unknown;
@@ -1856,19 +1867,50 @@ export function registerDomHandlers(
       } | undefined>(
         tid,
         frameId,
-        (sel: string, closestSelector: string, val: unknown, timeoutMs: number, driverId: string) => {
+        (
+          sel: string,
+          closestSelector: string,
+          ariaClosest: string,
+          val: unknown,
+          timeoutMs: number,
+          driverId: string,
+        ) => {
+          const w = window as any;
           if (driverId === "element-plus-checkbox-group") {
-            return (window as any).__vortexCommitCheckboxGroup.run(sel, closestSelector, val, timeoutMs);
-          }
-          if (driverId === "element-plus-select") {
-            return (window as any).__vortexCommitSelect.run(sel, closestSelector, val, timeoutMs);
+            return w.__vortexCommitCheckboxGroup.run(sel, closestSelector, val, timeoutMs);
           }
           if (driverId === "generic-aria-select") {
-            return (window as any).__vortexCommitAriaSelect.run(sel, closestSelector, val, timeoutMs);
+            return w.__vortexCommitAriaSelect.run(sel, ariaClosest, val, timeoutMs);
+          }
+          if (driverId === "element-plus-select") {
+            // kind="select" 二段路由:先认 Element Plus el-select(其专属 driver 处理
+            // filterable 虚拟列表等 EP 特有交互),否则回退通用 ARIA combobox/listbox
+            // driver。原生 <select> 不属任一组件 driver,明确指引改用 action "select"。
+            const els = document.querySelectorAll(sel);
+            if (els.length === 0)
+              return { error: `Element not found: ${sel}`, errorCode: "ELEMENT_NOT_FOUND" };
+            if (els.length > 1)
+              return {
+                error: `Selector "${sel}" matched ${els.length} elements`,
+                errorCode: "SELECTOR_AMBIGUOUS",
+                extras: { matchCount: els.length },
+              };
+            const target = els[0] as HTMLElement;
+            if (target.closest(closestSelector) || target.querySelector(closestSelector)) {
+              return w.__vortexCommitSelect.run(sel, closestSelector, val, timeoutMs);
+            }
+            if (target.tagName === "SELECT" || target.closest("select")) {
+              return {
+                error: `Target is a native <select>; kind="select" is for component-library widgets (Element Plus / Headless UI / MUI / Radix / antd …). Use action "select" (vortex_act) or vortex_fill_form without kind.`,
+                errorCode: "UNSUPPORTED_TARGET",
+                extras: { driverId: "element-plus-select", nativeSelect: true },
+              };
+            }
+            return w.__vortexCommitAriaSelect.run(sel, ariaClosest, val, timeoutMs);
           }
           return { error: `Unknown driver id: ${driverId}`, errorCode: "INVALID_PARAMS" };
         },
-        [selector, driver.closestSelector, value as never, timeout, driver.id],
+        [selector, driver.closestSelector, ariaClosestSelector, value as never, timeout, driver.id],
       );
 
       if (res?.error) {
