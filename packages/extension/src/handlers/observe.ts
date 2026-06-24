@@ -408,10 +408,10 @@ const TW_UTILITY_KEYWORDS = new Set<string>([
   "hidden", "contents", "table", "flow-root", "flex-row", "flex-col", "flex-wrap",
   "absolute", "relative", "fixed", "sticky", "static",
   "truncate", "grow", "shrink", "italic", "underline", "uppercase", "lowercase",
-  "capitalize", "antialiased", "rounded", "border", "shadow",
+  "capitalize", "antialiased", "rounded", "border", "shadow", "transition",
 ]);
 const TW_UTILITY_PREFIX_RE =
-  /^-?(?:m|p)[trblxyse]?-\d|^(?:w|h|size|min-w|max-w|min-h|max-h|gap|space-x|space-y|inset|top|bottom|left|right|order|basis|col-span|row-span|grid-cols|grid-rows|text|bg|border|ring|rounded|shadow|opacity|z|leading|tracking|translate|scale|rotate|duration|delay|ease|justify|items|self|place|flex)-/;
+  /^-?(?:m|p)[trblxyse]?-\d|^(?:w|h|size|min-w|max-w|min-h|max-h|gap|space-x|space-y|inset|top|bottom|left|right|order|basis|col-span|row-span|grid-cols|grid-rows|text|bg|border|ring|rounded|shadow|opacity|z|leading|tracking|translate|scale|rotate|skew|origin|font|placeholder|caret|accent|outline|animate|select|resize|appearance|duration|delay|ease|justify|items|self|place|flex|will-change|cursor|transition|content|decoration|snap|overscroll|whitespace|break|columns|aspect|object|pointer-events|touch|hyphens|word|fill|stroke)-/;
 export function isTailwindUtilityClass(token: string): boolean {
   const t = token.toLowerCase();
   // 变体类含冒号分隔符(hover:opacity-75 / md:flex / dark:bg-gray-800 / group-hover:…)——
@@ -864,10 +864,10 @@ async function scanOneFrame(
           "hidden", "contents", "table", "flow-root", "flex-row", "flex-col", "flex-wrap",
           "absolute", "relative", "fixed", "sticky", "static",
           "truncate", "grow", "shrink", "italic", "underline", "uppercase", "lowercase",
-          "capitalize", "antialiased", "rounded", "border", "shadow",
+          "capitalize", "antialiased", "rounded", "border", "shadow", "transition",
         ]);
         const TW_UTILITY_PREFIX_RE =
-          /^-?(?:m|p)[trblxyse]?-\d|^(?:w|h|size|min-w|max-w|min-h|max-h|gap|space-x|space-y|inset|top|bottom|left|right|order|basis|col-span|row-span|grid-cols|grid-rows|text|bg|border|ring|rounded|shadow|opacity|z|leading|tracking|translate|scale|rotate|duration|delay|ease|justify|items|self|place|flex)-/;
+          /^-?(?:m|p)[trblxyse]?-\d|^(?:w|h|size|min-w|max-w|min-h|max-h|gap|space-x|space-y|inset|top|bottom|left|right|order|basis|col-span|row-span|grid-cols|grid-rows|text|bg|border|ring|rounded|shadow|opacity|z|leading|tracking|translate|scale|rotate|skew|origin|font|placeholder|caret|accent|outline|animate|select|resize|appearance|duration|delay|ease|justify|items|self|place|flex|will-change|cursor|transition|content|decoration|snap|overscroll|whitespace|break|columns|aspect|object|pointer-events|touch|hyphens|word|fill|stroke)-/;
         const isTailwindUtilityClass = (token: string): boolean => {
           const t = token.toLowerCase();
           if (t.includes(":")) return true; // 变体类 hover:/md:/dark: 等
