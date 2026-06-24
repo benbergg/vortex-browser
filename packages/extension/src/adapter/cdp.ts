@@ -193,10 +193,18 @@ export async function cdpClickElement(
           }
         }
         if (!force) {
+          // composedContains 穿 shadow:topEl 落在 target 自身 shadow root 内(sl-option 等
+          // 自带 shadow + slotted label 的叶子控件)时,light-DOM el.contains(topEl) 恒 false
+          // → 误判 ELEMENT_OCCLUDED。优先用 resolve(__vortexDomResolve)暴露的穿 shadow 判定。
+          const targetContainsHit = !topEl
+            ? false
+            : resolve?.composedContains
+              ? resolve.composedContains(el, topEl)
+              : el.contains(topEl);
           if (
             topEl &&
             topEl !== el &&
-            !el.contains(topEl) &&
+            !targetContainsHit &&
             !topEl.contains(el) &&
             !sameWidgetDecoration
           ) {

@@ -9,7 +9,12 @@
 // - Defensive guard against double-load (page-side-loader is idempotent, but defend here too)
 // - All checks are sync except Stable (which uses RAF double-sample)
 
-import { queryDeep, deepElementFromPoint, isEnabledElement } from "./shadow-walk.js";
+import {
+  queryDeep,
+  deepElementFromPoint,
+  isEnabledElement,
+  composedContains,
+} from "./shadow-walk.js";
 
 export type ActionabilityFailure =
   | "NOT_ATTACHED"
@@ -137,7 +142,11 @@ export type ActionabilityResult =
   ): { ok: boolean; blocker?: string } {
     const hit = deepElementFromPoint(cx, cy);
     if (!hit) return { ok: false, blocker: "elementFromPoint=null" };
-    if (hit === el || el.contains(hit) || hit.contains(el)) return { ok: true };
+    // composedContains 穿 shadow 边界:hit 落在 target 自身 shadow root 内(sl-option/
+    // sl-menu-item 等自带 shadow + slotted label 的 web-component 叶子控件)时,
+    // el.contains(hit) 不跨 shadow 恒 false → 误判 OBSCURED。改用 composed 树包含判定。
+    if (hit === el || composedContains(el, hit) || hit.contains(el))
+      return { ok: true };
     // 复合输入控件(Element Plus el-select、各类 fake-input combobox)把可见显示层
     // (placeholder / selected-item)作为兄弟节点叠在透明真控件之上。点击经显示层
     // 冒泡仍到达同一 widget,但 hit-test 命中显示层兄弟——既非 target 也非其后代。
