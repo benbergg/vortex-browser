@@ -55,6 +55,10 @@ export interface ClickEffect {
   toastHit: string[];
   /** click 派发后窗口内可见的 dialog/drawer/modal 选择器命中集合（去重后）。空 = 无对话框反馈。 */
   dialogHit: string[];
+  /** 采集时刻 tab 是否处于 hidden（document.visibilityState==='hidden'）。N0041：hidden tab 中
+   *  Chrome background-throttle 可能让 click 的异步 DOM 副作用（动画/延迟 mount）推迟到窗口外，
+   *  使 domMutations:0 成为 throttle 假阳而非真 silent-fail。agent 见此应避免误判放弃。 */
+  tabHidden: boolean;
 }
 
 interface PendingEntry {
@@ -75,11 +79,12 @@ interface PendingEntry {
 }
 
 (function () {
-  // version 3（Task V-2）：bump 自 2，使旧 v2 模块在已加载页被新注入覆盖——本版新增
-  // userFeedback/toastHit/dialogHit 字段,旧模块缺这三个字段,若不 bump,扩展 reload 后
-  // 未硬刷新的页面会读到旧 signature(可能直接把 userFeedback 当 undefined 报 silent-fail
-  // 误判,见计划 Task V-2)。命名空间 + version 守卫,与 actionability / dom-resolve 约定一致。
-  if ((window as unknown as { __vortexClickEffect?: { version?: number } }).__vortexClickEffect?.version === 3) {
+  // version 4（N0041）：bump 自 3，使旧 v3 模块在已加载页被新注入覆盖——本版新增 tabHidden
+  // 字段 + end() 按 visibilityState 分流（hidden 走 MessageChannel busy-poll 避开 background
+  // timer-throttle）。旧 v3 模块缺 tabHidden 且 end() 仍用 setTimeout 轮询,若不 bump,扩展
+  // reload 后未硬刷新页面会读到旧 signature/旧轮询。命名空间 + version 守卫,与 actionability /
+  // dom-resolve 约定一致。（v3=Task V-2 新增 userFeedback/toastHit/dialogHit,v2→v3 同理。）
+  if ((window as unknown as { __vortexClickEffect?: { version?: number } }).__vortexClickEffect?.version === 4) {
     return;
   }
 
@@ -124,6 +129,27 @@ interface PendingEntry {
 
   const clampWindow = (w: unknown): number =>
     typeof w === "number" && isFinite(w) && w >= 0 ? Math.min(w, WINDOW_MAX_MS) : WINDOW_DEFAULT_MS;
+
+  // 单调真实时钟（ms）。hidden 分支 busy-poll 用它累加真实经过时间——performance.now 在 hidden
+  // tab 不冻结，Date.now 兜底（墙钟，亦不冻结）。两者皆非 background-throttle 受害对象。
+  const nowMs = (): number => {
+    try {
+      return typeof performance !== "undefined" && typeof performance.now === "function"
+        ? performance.now()
+        : Date.now();
+    } catch {
+      return Date.now();
+    }
+  };
+
+  // 采集时刻 tab 是否 hidden（document.visibilityState==='hidden'）。读取失败保守判 false。
+  const isTabHidden = (): boolean => {
+    try {
+      return document.visibilityState === "hidden";
+    } catch {
+      return false;
+    }
+  };
 
   const NET_SAMPLE_MAX = 5;
   const NET_URL_MAX = 80;
@@ -277,7 +303,7 @@ interface PendingEntry {
   };
 
   (window as unknown as { __vortexClickEffect: unknown }).__vortexClickEffect = {
-    version: 3,
+    version: 4,
 
     /** 派发前调用：snapshot（url/activeElement/target aria）+ 启动 document 根 observer。返回 token。 */
     begin(sel: string, windowMs: number): string {
@@ -344,6 +370,7 @@ interface PendingEntry {
           userFeedback: "none",
           toastHit: [],
           dialogHit: [],
+          tabHidden: isTabHidden(),
         });
       }
       // 取消 begin 的 TTL 看门狗；下面用本地 pollTimer 自管。
@@ -362,8 +389,15 @@ interface PendingEntry {
         let lastNet = collectNetwork(entry.perfStart).networkRequests;
         let sawNetwork = lastNet > 0;
         let pollTimer: ReturnType<typeof setTimeout>;
+        // hidden 分支的 MessageChannel 端口；finish 时关闭防泄漏。visible 分支保持 undefined。
+        let hiddenPort: MessagePort | undefined;
         const finish = (): void => {
           clearTimeout(pollTimer);
+          try {
+            hiddenPort?.close();
+          } catch {
+            /* ignore */
+          }
           try {
             entry.observer.disconnect();
           } catch {
@@ -399,6 +433,7 @@ interface PendingEntry {
             userFeedback: fb.userFeedback,
             toastHit: fb.toastHit,
             dialogHit: fb.dialogHit,
+            tabHidden: isTabHidden(),
           });
         };
         const step = (): void => {
@@ -417,6 +452,49 @@ interface PendingEntry {
           pollTimer = setTimeout(step, dt);
         };
         if (ceiling <= 0) return finish();
+        // N0041:hidden tab 中 Chrome timer-throttle 把 setTimeout(step,POLL_MS) 拖到秒级 →
+        // end() 阻塞数秒~数十秒(实测 16s)。改用 MessageChannel(不在 background-throttle 列表)
+        // + nowMs(performance.now/Date.now,不冻结)自驱动 busy-poll,以真实经过时间累加 elapsed,
+        // 复用 visible step 等价的网络静默早返/ceiling 判定。visible 路径逐字保留原轮询(零回归)。
+        if (isTabHidden() && typeof MessageChannel !== "undefined") {
+          const mc = new MessageChannel();
+          hiddenPort = mc.port2;
+          let lastTickAt = nowMs();
+          const pump = (): void => {
+            try {
+              mc.port2.postMessage(0);
+            } catch {
+              /* port 已关闭(finish 后)→ 停泵 */
+            }
+          };
+          mc.port1.onmessage = (): void => {
+            // finish 已清理(delete PENDING[token] + close port)→ 拦下 in-flight message,停泵。
+            if (!PENDING[token]) return;
+            const t = nowMs();
+            const realDt = t - lastTickAt;
+            // 节流:真实经过未达 POLL_MS 且未到 ceiling → 继续 busy-poll,不计 step(避免每 macrotask 采集)。
+            if (realDt < POLL_MS && elapsed + realDt < ceiling) {
+              pump();
+              return;
+            }
+            lastTickAt = t;
+            const dt = Math.min(realDt, ceiling - elapsed);
+            const curNet = collectNetwork(entry.perfStart).networkRequests;
+            if (curNet > lastNet) {
+              lastNet = curNet;
+              quietFor = 0;
+            }
+            if (curNet > 0) sawNetwork = true;
+            elapsed += dt;
+            quietFor += dt;
+            if (elapsed >= ceiling) return finish();
+            if (sawNetwork && quietFor >= IDLE_QUIET_MS) return finish();
+            pump();
+          };
+          pump();
+          return;
+        }
+        // visible（或 MessageChannel 不可用降级）:原 setTimeout 自适应轮询,逐字保留。
         const dt0 = Math.min(POLL_MS, ceiling);
         elapsed += dt0;
         quietFor += dt0;
