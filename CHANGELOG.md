@@ -6,7 +6,9 @@
 
 ## [Unreleased]
 
-_新工作进入此段；ship 时改为版本号 + 日期。_
+### 🐛 Fixed
+
+- **click-effect `observeEffect` 在 background-throttled tab 中不再阻塞 / silent-fail(N0041)** (`packages/extension/src/page-side/click-effect.ts`、`packages/extension/tests/click-effect-hidden.test.ts` 新增)。`end()` 的自适应轮询此前用 `setTimeout(step, 150)` 驱动,Chrome 对 hidden/background tab 的 timer-throttle 把它拖到秒级 → `end()` promise 阻塞数秒~数十秒(实机 monkey-patch throttle 实测 **16017ms**),`vortex_act` 整体卡顿 / 30s 超时,并次生 `domMutations:0 / userFeedback:"none"` 的 silent-fail false-positive(agent 误判 click 无效而放弃)。修复(变体3,按 `document.visibilityState` 分流):**visible 路径 setTimeout 轮询逐字不变(零回归)**;hidden 路径改用 **MessageChannel**(不在 Chrome background-throttle 列表)+ `performance.now`/`Date.now`(不冻结)自驱动 busy-poll,以真实经过时间累加 `elapsed`,复用与 visible 等价的网络静默早返/ceiling 判定 → hidden tab 中 `end()` 仍按真实墙钟在 `ceiling` 内返回。新增 `effect.tabHidden: boolean` 让 agent 感知后台 throttle 风险(domMutations:0 可能是 throttle 假阳)。version guard `3→4`(签名变化,防扩展 reload 后旧 signature)。**核实订正三份 dogfood 报告的误归因**:MutationObserver microtask **不**被 throttle(throttle 下 mutation 计数 10/10 准确,`domMutations:0` 是窗口内真无 mutation 的次生现象,非漏计);token 跨 evaluate 经 IIFE 闭包正常存活(非丢失)。触发条件窄(P2 边缘):仅 tab 长时无 vortex 操作 + 窗口后台时 throttle——CDP 持续 attach 会阻止 throttle(实测窗口最小化 195s 仍 setTimeout 满频、rAF 满帧)。**验证**:ext 单测 1521/1521(新增 hidden 分支 5 测);活浏览器 spike 复刻 throttle 场景,修复后 `end()` 耗时 16017ms→**308ms**、`domMutations` 10、`tabHidden:true`。设计文档:`Knowledge-Library 12-Projects/N0041/2026-06-24-*-设计.md`。
 
 ---
 
