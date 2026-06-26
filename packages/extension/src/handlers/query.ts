@@ -222,6 +222,196 @@ export const cssQueryFunc = (
   }
 };
 
+/**
+ * page-side 组件探测函数体。mode=component 注入到 MAIN world。
+ * 参数 args: [selector, componentDepth, maxResults]。
+ * 返回 { components, total, showing } 或 { error, components: [], total: 0 }。
+ *
+ * ⚠ 自包含:注入丢模块作用域,queryAllDeep / safeSerialize 必须内联。
+ * queryAllDeep 逻辑须与 cssQueryFunc / observe.ts 保持一致(改一处同步)。
+ */
+export const componentInspectFunc = (
+  selector: string,
+  componentDepth: number,
+  maxResults: number,
+):
+  | {
+      components: Array<{
+        framework: "vue2" | "vue3" | "react" | "unknown";
+        chain: Array<{ name: string; data: unknown; props: unknown }>;
+        row?: { rowKey: string | number | null; row: unknown; index: number };
+      }>;
+      total: number;
+      showing: number;
+    }
+  | { error: string; components: never[]; total: number } => {
+  try {
+    const SHADOW_WALK_MAX_DEPTH = 8;
+    const queryAllDeep = (sel: string, root: Document | ShadowRoot, depth: number): Element[] => {
+      const acc: Element[] = Array.from(root.querySelectorAll(sel));
+      if (depth >= SHADOW_WALK_MAX_DEPTH) return acc;
+      for (const host of root.querySelectorAll("*")) {
+        const sr = (host as HTMLElement).shadowRoot;
+        if (sr) acc.push(...queryAllDeep(sel, sr, depth + 1));
+      }
+      return acc;
+    };
+
+    // 内联 safeSerialize:深度4 / 数组100 / 节点5000 / 剥响应式 / getter兜底。
+    const MAX_DEPTH = 4;
+    const ARRAY_CAP = 100;
+    const NODE_CAP = 5000;
+    const safeSerialize = (value: unknown, maxDepth: number): unknown => {
+      const seen = new WeakSet<object>();
+      let nodes = 0;
+      const walk = (v: unknown, depth: number): unknown => {
+        if (nodes > NODE_CAP) return "[MaxNodes]";
+        nodes++;
+        if (v === null || v === undefined) return null;
+        const t = typeof v;
+        if (t === "function") return "[Function]";
+        if (t === "string" || t === "number" || t === "boolean") return v;
+        if (t === "bigint") return String(v);
+        if (t === "symbol") return "[Symbol]";
+        if (typeof Node !== "undefined" && v instanceof Node) return "[Element]";
+        if (depth >= maxDepth) return "[MaxDepth]";
+        if (seen.has(v as object)) return "[Circular]";
+        seen.add(v as object);
+        try {
+          if (Array.isArray(v)) {
+            const arr: unknown[] = [];
+            const cap = Math.min(v.length, ARRAY_CAP);
+            for (let i = 0; i < cap; i++) arr.push(walk(v[i], depth + 1));
+            if (v.length > cap) arr.push("[+" + (v.length - cap) + " more]");
+            return arr;
+          }
+          const out: Record<string, unknown> = {};
+          for (const key of Object.keys(v as object)) {
+            if (key === "__ob__" || key.indexOf("__v_") === 0) continue;
+            try {
+              out[key] = walk((v as Record<string, unknown>)[key], depth + 1);
+            } catch {
+              out[key] = "[Unserializable]";
+            }
+          }
+          return out;
+        } finally {
+          seen.delete(v as object);
+        }
+      };
+      return walk(value, 0);
+    };
+
+    // 占位:行探测(Task 2 实现)。本 Task 恒返 undefined。
+    const detectRow = (
+      _startEl: Element,
+      _framework: string,
+      _startInstance: unknown,
+    ): { rowKey: string | number | null; row: unknown; index: number } | undefined => undefined;
+
+    const reactFiberKey = (el: Element): string | null => {
+      for (const k of Object.keys(el)) {
+        if (k.indexOf("__reactFiber$") === 0 || k.indexOf("__reactInternalInstance$") === 0) return k;
+      }
+      return null;
+    };
+
+    // 从命中元素向上找最近的框架实例边界(最多 30 层)。
+    const findBoundary = (
+      el: Element,
+    ): { framework: "vue2" | "vue3" | "react" | "unknown"; instance: unknown } => {
+      let cur: Element | null = el;
+      let hops = 0;
+      while (cur && hops < 30) {
+        const anyEl = cur as unknown as Record<string, unknown>;
+        if (anyEl.__vue__) return { framework: "vue2", instance: anyEl.__vue__ };
+        if (anyEl.__vueParentComponent) return { framework: "vue3", instance: anyEl.__vueParentComponent };
+        const fk = reactFiberKey(cur);
+        if (fk) return { framework: "react", instance: anyEl[fk] };
+        cur = cur.parentElement;
+        hops++;
+      }
+      return { framework: "unknown", instance: null };
+    };
+
+    const walkChain = (
+      framework: string,
+      instance: unknown,
+      depth: number,
+    ): Array<{ name: string; data: unknown; props: unknown }> => {
+      const chain: Array<{ name: string; data: unknown; props: unknown }> = [];
+      if (framework === "vue2") {
+        let inst = instance as any;
+        while (inst && chain.length < depth) {
+          chain.push({
+            name: (inst.$options && (inst.$options.name || inst.$options._componentTag)) || "(anonymous)",
+            data: safeSerialize(inst._data, MAX_DEPTH),
+            props: safeSerialize(inst.$props, MAX_DEPTH),
+          });
+          inst = inst.$parent;
+        }
+      } else if (framework === "vue3") {
+        let vnode = instance as any;
+        while (vnode && chain.length < depth) {
+          chain.push({
+            name: (vnode.type && (vnode.type.name || vnode.type.__name)) || "(anonymous)",
+            data: safeSerialize(vnode.setupState, MAX_DEPTH),
+            props: safeSerialize(vnode.props, MAX_DEPTH),
+          });
+          vnode = vnode.parent;
+        }
+      } else if (framework === "react") {
+        let fiber = instance as any;
+        while (fiber && chain.length < depth) {
+          const ty = fiber.type;
+          if (typeof ty === "function") {
+            chain.push({
+              name: ty.displayName || ty.name || "(anonymous)",
+              data: safeSerialize(fiber.memoizedState, MAX_DEPTH),
+              props: safeSerialize(fiber.memoizedProps, MAX_DEPTH),
+            });
+          }
+          fiber = fiber.return;
+        }
+      }
+      return chain;
+    };
+
+    let matched: Element[];
+    try {
+      matched = queryAllDeep(selector, document, 0);
+    } catch (e) {
+      return { error: "Invalid CSS selector: " + (e instanceof Error ? e.message : String(e)), components: [], total: 0 };
+    }
+
+    const total = matched.length;
+    const limit = Math.min(total, maxResults);
+    const components: Array<{
+      framework: "vue2" | "vue3" | "react" | "unknown";
+      chain: Array<{ name: string; data: unknown; props: unknown }>;
+      row?: { rowKey: string | number | null; row: unknown; index: number };
+    }> = [];
+
+    for (let i = 0; i < limit; i++) {
+      const el = matched[i];
+      const { framework, instance } = findBoundary(el);
+      const chain = walkChain(framework, instance, componentDepth);
+      const entry: {
+        framework: "vue2" | "vue3" | "react" | "unknown";
+        chain: Array<{ name: string; data: unknown; props: unknown }>;
+        row?: { rowKey: string | number | null; row: unknown; index: number };
+      } = { framework, chain };
+      const row = detectRow(el, framework, instance);
+      if (row) entry.row = row;
+      components.push(entry);
+    }
+
+    return { components, total, showing: limit };
+  } catch (e) {
+    return { error: "component inspect error: " + (e instanceof Error ? e.message : String(e)), components: [], total: 0 };
+  }
+};
+
 export function registerQueryHandlers(router: ActionRouter): void {
   router.registerAll({
     [QueryActions.QUERY_PAGE]: async (args, tabId) => {
