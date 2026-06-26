@@ -10,7 +10,15 @@
  *
  * 用法：
  *   node scripts/run-opencode-eval.mjs --brief <path> --cycle-dir <path> [--model <id>]
+ *   node scripts/run-opencode-eval.mjs --mode implement --brief <path> [--cycle-dir <path>] [--model <id>]
  *   node scripts/run-opencode-eval.mjs --selfcheck [--model <id>]
+ *
+ * 模式（--mode，默认 eval）：
+ *   - eval     ：真站评测，产出 anomalies.json + eval-observations.md（既有行为）。
+ *   - implement：把 brief 当 SDD task brief（含完整 TDD 步骤+代码），M3 严格按步骤
+ *                写失败测试→跑红→最小实现→跑绿→按 brief 的 commit message 提交。
+ *                Claude 控制器随后在本侧评审 diff。--cycle-dir 可选（默认
+ *                reports/_opencode-impl/），加 --dangerously-skip-permissions 保证非交互。
  *
  * 模型默认 env MINIMAX_MODEL || 'minimax-cn-coding-plan/MiniMax-M3'。
  * 选 minimax-cn-coding-plan provider 的原因（2026-06-19 实测确认）：
@@ -55,6 +63,26 @@ function resolveModel(args) {
   if (typeof args.model === "string") return args.model;
   return process.env.MINIMAX_MODEL || "minimax-cn-coding-plan/MiniMax-M3";
 }
+
+/** 模式：implement（按 SDD task brief 实现并提交）或 eval（默认，真站评测）。 */
+function resolveMode(args) {
+  return args.mode === "implement" ? "implement" : "eval";
+}
+
+/** implement 模式给 M3 的指令文案：严格按 brief TDD 实现并 commit。 */
+const IMPLEMENT_MESSAGE =
+  "你是实现 subagent。附带文件是一份 SDD task brief,内含完整的 TDD 步骤与可直接落地的代码。" +
+  "严格按 brief 的 Step 顺序执行:① 写失败测试 → ② 跑测试确认失败(用 brief 给的命令) → " +
+  "③ 写最小实现 → ④ 跑测试确认通过 → ⑤ 用 brief 中给出的 commit message 执行 git commit。" +
+  "硬约束:只修改 brief 的 Files 节列出的文件;commit 用 Conventional Commits 中文描述、" +
+  "禁止 Co-Authored-By 等署名;不要跑与本 task 无关的命令、不要改其他文件、不要 git push。" +
+  "完成后用一段话报告:改了哪些文件、测试命令与结果(通过数)、commit hash。";
+
+/** eval 模式给 M3 的指令文案（既有行为）。 */
+const EVAL_MESSAGE =
+  "请严格按附带的 EVAL-BRIEF.md 执行本轮 vortex 真站评测。只用 vortex MCP 工具;" +
+  "evaluate 仅作证据读 DOM 真值,禁止旁路完成交互。完成后产出 brief 中指定路径的双产物:" +
+  "anomalies.json(严格符合 reports/_dogfood/anomalies.schema.json)+ eval-observations.md。";
 
 /** 构造注入后的 env：补齐大写代理 + NO_PROXY + 透传 key。 */
 function buildEnv() {
@@ -184,10 +212,12 @@ function startAttachServer(env) {
 }
 
 function cmdRun(args) {
+  const mode = resolveMode(args);
   const brief = args.brief;
-  const cycleDir = args["cycle-dir"];
+  // eval 模式 cycle-dir 必填；implement 模式可选（默认 reports/_opencode-impl/）。
+  const cycleDir = args["cycle-dir"] || (mode === "implement" ? "reports/_opencode-impl" : undefined);
   if (typeof brief !== "string" || typeof cycleDir !== "string") {
-    console.error("用法: --brief <path> --cycle-dir <path> [--model <id>]");
+    console.error("用法: [--mode implement] --brief <path> [--cycle-dir <path>] [--model <id>]");
     process.exit(2);
   }
   const briefAbs = path.resolve(REPO, brief);
@@ -200,16 +230,15 @@ function cmdRun(args) {
   const logPath = path.join(cycleDirAbs, "m3-session.log");
   const logStream = fs.createWriteStream(logPath, { flags: "w" });
 
-  const message =
-    "请严格按附带的 EVAL-BRIEF.md 执行本轮 vortex 真站评测。只用 vortex MCP 工具；" +
-    "evaluate 仅作证据读 DOM 真值，禁止旁路完成交互。完成后产出 brief 中指定路径的双产物：" +
-    "anomalies.json（严格符合 reports/_dogfood/anomalies.schema.json）+ eval-observations.md。";
+  const message = mode === "implement" ? IMPLEMENT_MESSAGE : EVAL_MESSAGE;
 
   // 起 attach server（失败则降级普通 run，不影响评测）
   const server = startAttachServer(env);
   const cliArgs = ["run", message, "-f", briefAbs, "-m", model, "--print-logs",
+    // implement 模式需 headless 非交互（自动批准未显式拒绝的 edit/bash/commit）。
+    ...(mode === "implement" ? ["--dangerously-skip-permissions"] : []),
     ...(server.url ? ["--attach", server.url] : [])];
-  console.error(`[run-opencode-eval] model=${model} brief=${brief}`);
+  console.error(`[run-opencode-eval] mode=${mode} model=${model} brief=${brief}`);
   console.error(`[run-opencode-eval] NO_PROXY=${env.NO_PROXY}  HTTPS_PROXY=${env.HTTPS_PROXY || "(无)"}`);
   console.error(`[run-opencode-eval] 日志 → ${path.relative(REPO, logPath)}（阻塞，M3 跑完才返回）`);
   // 注意：裸 attach 只连 server 不开会话，需 -c（续最近 session=本轮 run）才能看到任务
