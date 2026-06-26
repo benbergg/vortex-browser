@@ -125,4 +125,31 @@ describe("内联 heal 匹配体 ↔ heal-resolve 真源对齐", () => {
     const desc = { role: "combobox", name: "AB" };
     expect(inlineMatch([select], desc).kind).toBe(matchByDescriptor([select], desc).kind);
   });
+
+  // leaf-preference：嵌套链同名（td>div>span 每层 textContent 相同）→ collapse 到叶 span → 唯一命中
+  it("嵌套链同名 td>div>span: 两实现均 unique（leaf=span）", () => {
+    // 挂到 document.body 确保 contains() 在同一文档树内正常工作
+    const container = document.createElement("div");
+    container.innerHTML = `<table><tbody><tr><td><div class="cell"><span>TS-VAL</span></div></td></tr></tbody></table>`;
+    document.body.appendChild(container);
+    const td = container.querySelector("td")!;
+    const divCell = container.querySelector("div.cell")!;
+    const span = container.querySelector("span")!;
+    const cand = [td, divCell, span]; // 三层均命中同名
+    const desc = { name: "TS-VAL" };
+    expect(inlineMatch(cand, desc).kind).toBe("unique"); // leaf-preference collapse 到 span
+    expect(matchByDescriptor(cand, desc).kind).toBe("unique");
+    expect(inlineMatch(cand, desc).kind).toBe(matchByDescriptor(cand, desc).kind);
+  });
+
+  // leaf-preference：分立同名元素互不包含 → collapse 后仍 ambiguous（安全不变）
+  it("分立同名 button x2: 两实现均 ambiguous（leaf-collapse 不误合分立元素）", () => {
+    const container = document.createElement("div");
+    container.innerHTML = `<button>Dup</button><button>Dup</button>`;
+    document.body.appendChild(container);
+    const btns = Array.from(container.querySelectorAll("button"));
+    const desc = { name: "Dup" };
+    expect(inlineMatch(btns, desc).kind).toBe("ambiguous");
+    expect(matchByDescriptor(btns, desc).kind).toBe("ambiguous");
+  });
 });

@@ -75,6 +75,11 @@ function __inlineMatch(candidates, desc){
   var target=__norm(desc.name); if(!target) return {kind:"none"};
   var hits=candidates.filter(function(el){ return __names(el).indexOf(target)>=0; });
   if(hits.length===0) return {kind:"none"};
+  // 单元格 td>div>span 同文嵌套链 collapse 到叶,使裸单元格能唯一 heal;真正分立同名仍 ambiguous
+  if(hits.length>1){
+    var leaves=hits.filter(function(el){ return !hits.some(function(o){ return o!==el && el.contains(o); }); });
+    if(leaves.length>=1) hits=leaves;
+  }
   if(hits.length>1 && desc.role){
     var narrowed=hits.filter(function(el){ return __roleMatches(el, desc.role); });
     if(narrowed.length>=1) hits=narrowed; }

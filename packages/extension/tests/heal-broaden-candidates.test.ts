@@ -34,6 +34,21 @@ describe("B1 heal 候选集放宽:裸单元格可被名字命中", () => {
     const r = inlineMatch(broad, { name: "订单 A123" });
     expect(r.kind).toBe("unique");
   });
+
+  // leaf-preference：宽候选集含 td>div>span 整条嵌套链，collapse 到唯一叶 span
+  it("嵌套 td>div>span 宽候选集: leaf-preference collapse 到唯一叶 span", () => {
+    const wrap = document.createElement("div");
+    wrap.innerHTML = `<table><tbody><tr><td><div class="cell"><span>2024-01-15</span></div></td></tr></tbody></table>`;
+    document.body.appendChild(wrap);
+    const td = wrap.querySelector("td")!;
+    const divCell = wrap.querySelector("div.cell")!;
+    const span = wrap.querySelector("span")!;
+    // 宽候选集含整条嵌套链（td/div/span 均含同文）
+    const broad = [td, divCell, span];
+    const r = inlineMatch(broad, { name: "2024-01-15" });
+    expect(r.kind).toBe("unique");
+    expect(r.el).toBe(span); // leaf-preference collapse 到最深叶
+  });
 });
 
 const HEAL_SRC = readFileSync(
