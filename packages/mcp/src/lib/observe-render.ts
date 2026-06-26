@@ -409,6 +409,8 @@ export function renderObserveTree(
   }
   const bsLine = blindspotSummary(data.elements, data.frames, snapshotHash);
   if (bsLine) lines.push(bsLine);
+  const modalLine = modalSummary(data.frames);
+  if (modalLine) lines.push(modalLine);
   lines.push("");
 
   // T4-diff: 查找上一快照身份键集合。

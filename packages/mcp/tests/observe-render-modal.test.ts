@@ -3,7 +3,7 @@
  *   对齐 # blindspots: 风格。
  */
 import { describe, it, expect } from "vitest";
-import { renderObserveCompact } from "../src/lib/observe-render.js";
+import { renderObserveCompact, renderObserveTree } from "../src/lib/observe-render.js";
 
 function baseData(overrides: Record<string, unknown> = {}) {
   return {
@@ -53,5 +53,26 @@ describe("observe-render: [behind-modal] tag (filter=all)", () => {
     expect(navLine).toContain("[behind-modal]");
     const okLine = out.split("\n").find((l) => l.includes('"Confirm"'))!;
     expect(okLine).not.toContain("[behind-modal]");
+  });
+});
+
+describe("observe-render: # modal meta (tree —— 真实 observe 工具渲染路径)", () => {
+  // vortex_observe 走 renderObserveTree(server.ts),非 renderObserveCompact。
+  // # modal: 必须加在 tree 路径,否则数据层裁剪生效但 meta 不渲染(2026-06-26 实机 spike 实证)。
+  function treeData(modal?: { name: string; role: string; suppressed: number }) {
+    return {
+      snapshotId: "snap_tree_1",
+      url: "http://x/dialog",
+      elements: [{ index: 0, tag: "button", role: "button", name: "Confirm", frameId: 0 }],
+      frames: [{ frameId: 0, parentFrameId: -1, url: "http://x/dialog", offset: { x: 0, y: 0 }, elementCount: 1, truncated: false, scanned: true, ...(modal ? { modal } : {}) }],
+    };
+  }
+  it("有 active modal → renderObserveTree 顶部输出 # modal: 行", () => {
+    const out = renderObserveTree(treeData({ name: "Tips", role: "dialog", suppressed: 56 }) as never, null);
+    expect(out).toMatch(/# modal: dialog "Tips" \(suppressed 56 background elements\)/);
+  });
+  it("无 modal → renderObserveTree 不出 # modal: 行(零漂移)", () => {
+    const out = renderObserveTree(treeData() as never, null);
+    expect(out).not.toContain("# modal:");
   });
 });
