@@ -215,7 +215,9 @@ export const PUBLIC_TOOLS: ToolDef[] = [
     name: "vortex_debug_read",
     action: "L4.debug_read",
     // request: 用 network 列表里的 reqid 取单请求 status+body（确定性判定）
-    description: "Network pattern REQUIRED. request:reqid→status+body. filter={level|pattern}",
+    // B2: 点明 network/request 自动捕获 POST 请求/响应体,消除"手搓 fetch hook"误用根因
+    // B3-8: 保留 "pattern REQUIRED" 提示(避免 LLM 拉全量网络日志,network-debug-read-limit 测)
+    description: "Read console/network. network pattern REQUIRED; auto-captures POST req+resp bodies (no fetch hook); request: reqid→status+headers+reqBody+respBody.",
     schema: {
       type: "object",
       properties: {

@@ -82,13 +82,17 @@ describe("I15: tools/list budget + count + internalized grep", () => {
     defs.map(d => ({ name: d.name, description: d.description, inputSchema: d.schema })),
   );
 
-  it("tools/list 字节 ≤ 7900 B (mode=component, 实测 7773 留 127B buffer)", () => {
+  it("tools/list 字节 ≤ 8000 B (debug_read 描述强化, 实测 7845 留 155B buffer)", () => {
     // V2 P0 修复 D16: filter 子字段 description 是必要的文档化豁免
     // (handler 已实现 console.ts:160 level / network.ts:305-321 pattern+statusMin/Max),
     // 移除豁免会触发 V2 D16 真发现复发 (LLM 不知可用子字段)。
     // 上限 7900 = 7800 (可验证重放 fingerprint 基线) + ~100 (vortex_query mode=component
     // schema 枚举加 component + description 说明读 Vue/React 实例数据 + 表行对象)。
-    expect(toolsListPayload.length).toBeLessThanOrEqual(7900);
+    // T1-2 残余收口 (B2): 7900 → 8000。vortex_debug_read description 强化,点明
+    // source=network/request 自动捕获 POST 请求/响应体(无需手搓 fetch hook),消除评测员
+    // 误搓 fetch hook 的根因(保留 "pattern REQUIRED" 满足 B3-8)。payload 实测 7845B,
+    // cap +100 留 155B 余量。沿用"加能力调 cap"惯例。
+    expect(toolsListPayload.length).toBeLessThanOrEqual(8000);
   });
 
   it("公开工具数量 = 20（vortex_query 零 LLM 探测: 19 + vortex_query）", () => {
