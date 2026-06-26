@@ -532,6 +532,7 @@ export function registerNetworkHandlers(
         status: entry.status ?? null,
         statusText: entry.statusText ?? null,
         headers: entry.responseHeaders ?? {},
+        requestBody: entry.requestBody ?? null,
         body,
         encoding,
         truncated,

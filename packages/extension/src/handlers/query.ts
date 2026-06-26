@@ -222,6 +222,302 @@ export const cssQueryFunc = (
   }
 };
 
+/**
+ * page-side 组件探测函数体。mode=component 注入到 MAIN world。
+ * 参数 args: [selector, componentDepth, maxResults]。
+ * 返回 { components, total, showing } 或 { error, components: [], total: 0 }。
+ *
+ * ⚠ 自包含:注入丢模块作用域,queryAllDeep / safeSerialize 必须内联。
+ * queryAllDeep 逻辑须与 cssQueryFunc / observe.ts 保持一致(改一处同步)。
+ */
+export const componentInspectFunc = (
+  selector: string,
+  componentDepth: number,
+  maxResults: number,
+):
+  | {
+      components: Array<{
+        framework: "vue2" | "vue3" | "react" | "unknown";
+        chain: Array<{ name: string; data: unknown; props: unknown }>;
+        row?: { rowKey: string | number | null; row: unknown; index: number };
+      }>;
+      total: number;
+      showing: number;
+    }
+  | { error: string; components: never[]; total: number } => {
+  try {
+    const SHADOW_WALK_MAX_DEPTH = 8;
+    const queryAllDeep = (sel: string, root: Document | ShadowRoot, depth: number): Element[] => {
+      const acc: Element[] = Array.from(root.querySelectorAll(sel));
+      if (depth >= SHADOW_WALK_MAX_DEPTH) return acc;
+      for (const host of root.querySelectorAll("*")) {
+        const sr = (host as HTMLElement).shadowRoot;
+        if (sr) acc.push(...queryAllDeep(sel, sr, depth + 1));
+      }
+      return acc;
+    };
+
+    // 内联序列化:深度3 / 数组40 / 剥响应式 / getter兜底。
+    // makeSerializer 工厂:每个 serializer 各带 per-call 上限,且共享一个全局节点预算
+    // (globalBudget),容器循环内命中预算即 break。杜绝在真实应用上展开庞大组件 _data
+    // 导致输出爆炸(实机 spike:vxe-table cell 曾吐 10万字符超 token 限)。
+    const MAX_DEPTH = 3;
+    const ARRAY_CAP = 40;
+    const globalBudget = { n: 0, cap: 3000 };
+    const makeSerializer = (perCallCap: number): ((value: unknown) => unknown) => {
+      const seen = new WeakSet<object>();
+      let local = 0;
+      const over = (): boolean => globalBudget.n >= globalBudget.cap || local >= perCallCap;
+      const walk = (v: unknown, depth: number): unknown => {
+        if (over()) return "[Budget]";
+        globalBudget.n++; local++;
+        if (v === null || v === undefined) return null;
+        const t = typeof v;
+        if (t === "function") return "[Function]";
+        if (t === "string" || t === "number" || t === "boolean") return v;
+        if (t === "bigint") return String(v);
+        if (t === "symbol") return "[Symbol]";
+        if (typeof Node !== "undefined" && v instanceof Node) return "[Element]";
+        if (depth >= MAX_DEPTH) return "[MaxDepth]";
+        if (seen.has(v as object)) return "[Circular]";
+        seen.add(v as object);
+        try {
+          if (Array.isArray(v)) {
+            const arr: unknown[] = [];
+            const cap = Math.min(v.length, ARRAY_CAP);
+            for (let i = 0; i < cap; i++) {
+              if (over()) { arr.push("[Budget]"); break; }
+              arr.push(walk(v[i], depth + 1));
+            }
+            if (v.length > cap) arr.push("[+" + (v.length - cap) + " more]");
+            return arr;
+          }
+          const out: Record<string, unknown> = {};
+          for (const key of Object.keys(v as object)) {
+            if (over()) { out.__vtxTruncated__ = "[Budget]"; break; }
+            if (key === "__ob__" || key.indexOf("__v_") === 0) continue;
+            try {
+              out[key] = walk((v as Record<string, unknown>)[key], depth + 1);
+            } catch {
+              out[key] = "[Unserializable]";
+            }
+          }
+          return out;
+        } finally {
+          seen.delete(v as object);
+        }
+      };
+      return (value: unknown): unknown => walk(value, 0);
+    };
+
+    // 行探测:vxe-table(VxeTable.getRowById,实机确认 ipaas 用 vxe 非 el-table) /
+    // el-table(Vue2 读 store.states.data + DOM tr 索引) / antd Table(React fiber memoizedProps.record)。
+    // vxe:tr[rowid] + getRowById 抗虚拟滚动/固定列(不依赖 DOM 索引,实机 2026-06-26 验证)。
+    // el-table 固定列会复制 tr,DOM 索引法对带 fixed 列的表可能偏移。
+    const detectRow = (
+      startEl: Element,
+      framework: string,
+      startInstance: unknown,
+      ser: (v: unknown) => unknown,
+    ): { rowKey: string | number | null; row: unknown; index: number } | undefined => {
+      try {
+        if (framework === "vue2") {
+          // ① vxe-table:上溯找 VxeTable 实例,用 tr[rowid] + getRowById 取行
+          let vxe: any = startInstance;
+          let vg = 0;
+          while (vxe && vg < 50) {
+            const nm = vxe.$options && (vxe.$options.name || vxe.$options._componentTag);
+            if (nm === "VxeTable") break;
+            vxe = vxe.$parent;
+            vg++;
+          }
+          if (vxe && typeof vxe.getRowById === "function") {
+            const tr = (startEl as Element).closest ? (startEl as Element).closest("tr[rowid]") : null;
+            const rowid = tr ? tr.getAttribute("rowid") : null;
+            if (rowid != null) {
+              const rowObj = vxe.getRowById(rowid);
+              if (rowObj && typeof rowObj === "object") {
+                let index = -1;
+                try { if (typeof vxe.getRowIndex === "function") index = vxe.getRowIndex(rowObj); } catch { /* ignore */ }
+                return { rowKey: rowid, row: ser(rowObj), index };
+              }
+            }
+          }
+          // ② el-table(best-effort,非硬保证):上溯找 ElTable,读 store.states.data + DOM tr 索引。
+          // ⚠ 仅单 tbody 理想化 mock 测过,未经真实「固定列」el-table 实机验证——固定列会渲染
+          // 独立 table/tbody,closest("tr")+同级 TR 索引在多 body 场景可能取错行(错行比缺省更糟)。
+          // 真实硬保证目标是 vxe(getRowById,不依赖 DOM 索引);el-table 站点须实机校准后才可信。
+          let inst = startInstance as any;
+          let table: any = null;
+          let guard = 0;
+          while (inst && guard < 50) {
+            const nm = inst.$options && (inst.$options.name || inst.$options._componentTag);
+            if (nm === "ElTable") { table = inst; break; }
+            inst = inst.$parent;
+            guard++;
+          }
+          if (!table || !table.store || !table.store.states || !Array.isArray(table.store.states.data)) return undefined;
+          const data = table.store.states.data as unknown[];
+          const tr = (startEl as Element).closest ? (startEl as Element).closest("tr") : null;
+          if (!tr || !tr.parentElement) return undefined;
+          const rows = Array.prototype.filter.call(tr.parentElement.children, (c: Element) => c.tagName === "TR") as Element[];
+          const index = rows.indexOf(tr);
+          if (index < 0 || index >= data.length) return undefined;
+          const rowObj = data[index];
+          const rowKeyProp = (table.rowKey || (table.$props && table.$props.rowKey)) as string | undefined;
+          let rowKey: string | number | null = null;
+          if (typeof rowKeyProp === "string" && rowObj && typeof rowObj === "object") {
+            const v = (rowObj as Record<string, unknown>)[rowKeyProp];
+            if (typeof v === "string" || typeof v === "number") rowKey = v;
+          }
+          return { rowKey, row: ser(rowObj), index };
+        }
+        if (framework === "react") {
+          // best-effort:沿 fiber.return 上溯找带 record/row/rowData 的祖先即视为行。
+          // ⚠ 误报边界:非表格上下文(如 <DetailCard record={...}/>)也可能产出伪 row;
+          // 由「最近命中优先 + 表格语义字段名」缓解,但不保证 100% 准。
+          let fiber = startInstance as any;
+          let hops = 0;
+          while (fiber && hops < 40) {
+            const p = fiber.memoizedProps;
+            if (p && typeof p === "object") {
+              const rec = p.record !== undefined ? p.record : (p.row !== undefined ? p.row : p.rowData);
+              if (rec !== undefined && rec !== null && typeof rec === "object") {
+                // rowKey: 优先 fiber props,再回退 record 自带 key/id。实机(antd)发现
+                // record 在 cell fiber 而 rowKey 在上层 row fiber,故 cell 命中时 props
+                // 无 rowKey → 回退 record.key(antd 行键惯例)/record.id。
+                const r = rec as Record<string, unknown>;
+                let rowKey: string | number | null = null;
+                if (typeof p.rowKey === "string" || typeof p.rowKey === "number") rowKey = p.rowKey;
+                else if (typeof p["data-row-key"] === "string" || typeof p["data-row-key"] === "number") rowKey = p["data-row-key"];
+                else if (typeof r.key === "string" || typeof r.key === "number") rowKey = r.key as string | number;
+                else if (typeof r.id === "string" || typeof r.id === "number") rowKey = r.id as string | number;
+                const index = typeof p.index === "number" ? p.index : -1;
+                return { rowKey, row: ser(rec), index };
+              }
+            }
+            fiber = fiber.return;
+            hops++;
+          }
+        }
+        return undefined;
+      } catch {
+        return undefined;
+      }
+    };
+
+    const reactFiberKey = (el: Element): string | null => {
+      for (const k of Object.keys(el)) {
+        if (k.indexOf("__reactFiber$") === 0 || k.indexOf("__reactInternalInstance$") === 0) return k;
+      }
+      return null;
+    };
+
+    // 从命中元素向上找最近的框架实例边界(最多 30 层)。
+    const findBoundary = (
+      el: Element,
+    ): { framework: "vue2" | "vue3" | "react" | "unknown"; instance: unknown } => {
+      let cur: Element | null = el;
+      let hops = 0;
+      while (cur && hops < 30) {
+        const anyEl = cur as unknown as Record<string, unknown>;
+        if (anyEl.__vue__) return { framework: "vue2", instance: anyEl.__vue__ };
+        if (anyEl.__vueParentComponent) return { framework: "vue3", instance: anyEl.__vueParentComponent };
+        const fk = reactFiberKey(cur);
+        if (fk) return { framework: "react", instance: anyEl[fk] };
+        cur = cur.parentElement;
+        hops++;
+      }
+      return { framework: "unknown", instance: null };
+    };
+
+    const walkChain = (
+      framework: string,
+      instance: unknown,
+      depth: number,
+      ser: (v: unknown) => unknown,
+    ): Array<{ name: string; data: unknown; props: unknown }> => {
+      const chain: Array<{ name: string; data: unknown; props: unknown }> = [];
+      if (framework === "vue2") {
+        let inst = instance as any;
+        while (inst && chain.length < depth) {
+          chain.push({
+            name: (inst.$options && (inst.$options.name || inst.$options._componentTag)) || "(anonymous)",
+            data: ser(inst._data),
+            props: ser(inst.$props),
+          });
+          inst = inst.$parent;
+        }
+      } else if (framework === "vue3") {
+        let vnode = instance as any;
+        while (vnode && chain.length < depth) {
+          chain.push({
+            name: (vnode.type && (vnode.type.name || vnode.type.__name)) || "(anonymous)",
+            data: ser(vnode.setupState),
+            props: ser(vnode.props),
+          });
+          vnode = vnode.parent;
+        }
+      } else if (framework === "react") {
+        let fiber = instance as any;
+        while (fiber && chain.length < depth) {
+          const ty = fiber.type;
+          if (typeof ty === "function") {
+            chain.push({
+              name: ty.displayName || ty.name || "(anonymous)",
+              // data 为 React hook 链表原始结构(memoizedState/next/queue),首发只取浅层
+              // (深度3+预算有界),语义噪声较大;深度解析 hooks 留 backlog。
+              data: ser(fiber.memoizedState),
+              props: ser(fiber.memoizedProps),
+            });
+          }
+          fiber = fiber.return;
+        }
+      }
+      return chain;
+    };
+
+    let matched: Element[];
+    try {
+      matched = queryAllDeep(selector, document, 0);
+    } catch (e) {
+      return { error: "Invalid CSS selector: " + (e instanceof Error ? e.message : String(e)), components: [], total: 0 };
+    }
+
+    const total = matched.length;
+    const limit = Math.min(total, maxResults);
+
+    // 边界只解析一次。
+    const boundaries: Array<{ el: Element; framework: "vue2" | "vue3" | "react" | "unknown"; instance: unknown }> = [];
+    for (let i = 0; i < limit; i++) {
+      const el = matched[i];
+      boundaries.push({ el, ...findBoundary(el) });
+    }
+    // 两遍共享同一 globalBudget:① 所有元素的 row 先序列化(row 是首要交付物,优先吃预算,
+    // 行对象小、全部能进);② 再 chain(次要)吃余额。避免单遍时靠后元素的 row 被前面元素的
+    // 重组件 chain 把全局预算耗尽而静默饿死(I-2)。
+    const rows = boundaries.map((b) => detectRow(b.el, b.framework, b.instance, makeSerializer(800)));
+    const components: Array<{
+      framework: "vue2" | "vue3" | "react" | "unknown";
+      chain: Array<{ name: string; data: unknown; props: unknown }>;
+      row?: { rowKey: string | number | null; row: unknown; index: number };
+    }> = boundaries.map((b, i) => {
+      const chain = walkChain(b.framework, b.instance, componentDepth, makeSerializer(400));
+      const entry: {
+        framework: "vue2" | "vue3" | "react" | "unknown";
+        chain: Array<{ name: string; data: unknown; props: unknown }>;
+        row?: { rowKey: string | number | null; row: unknown; index: number };
+      } = { framework: b.framework, chain };
+      if (rows[i]) entry.row = rows[i];
+      return entry;
+    });
+
+    return { components, total, showing: limit };
+  } catch (e) {
+    return { error: "component inspect error: " + (e instanceof Error ? e.message : String(e)), components: [], total: 0 };
+  }
+};
+
 export function registerQueryHandlers(router: ActionRouter): void {
   router.registerAll({
     [QueryActions.QUERY_PAGE]: async (args, tabId) => {
@@ -229,10 +525,10 @@ export function registerQueryHandlers(router: ActionRouter): void {
       const pattern = args.pattern as string | undefined;
 
       // 参数校验
-      if (!mode || (mode !== "text" && mode !== "css")) {
+      if (!mode || (mode !== "text" && mode !== "css" && mode !== "component")) {
         throw vtxError(
           VtxErrorCode.INVALID_PARAMS,
-          `vortex_query: mode must be 'text' or 'css', got ${String(mode)}`,
+          `vortex_query: mode must be 'text', 'css' or 'component', got ${String(mode)}`,
         );
       }
       if (!pattern || typeof pattern !== "string" || !pattern.trim()) {
@@ -272,7 +568,7 @@ export function registerQueryHandlers(router: ActionRouter): void {
           throw vtxError(VtxErrorCode.JS_EXECUTION_ERROR, `query.queryPage text error: ${res.error}`);
         }
         return res;
-      } else {
+      } else if (mode === "css") {
         // css query 模式
         const attr = args.attr as string | string[] | undefined;
         // attr 可以是单个字符串或数组
@@ -302,6 +598,31 @@ export function registerQueryHandlers(router: ActionRouter): void {
         }
         if ("error" in res && res.error) {
           throw vtxError(VtxErrorCode.JS_EXECUTION_ERROR, `query.queryPage css error: ${res.error}`);
+        }
+        return res;
+      } else {
+        // component 模式:注入 componentInspectFunc 取 Vue/React 组件链 + 行数据。
+        // 默认低(5/depth3):组件实例数据比 css/text 重,且全局预算硬兜底防输出爆炸。
+        const maxResults = Math.min((args.maxResults as number | undefined) ?? 5, 10);
+        const componentDepth = Math.min(Math.max((args.componentDepth as number | undefined) ?? 3, 1), 12);
+
+        const results = await chrome.scripting.executeScript({
+          target: buildExecuteTarget(tid, frameId),
+          func: componentInspectFunc,
+          args: [pattern, componentDepth, maxResults],
+          world: "MAIN",
+        });
+
+        const res = results[0]?.result as
+          | { components: unknown[]; total: number; showing: number }
+          | { error: string; components: never[]; total: number }
+          | undefined;
+
+        if (!res) {
+          throw vtxError(VtxErrorCode.JS_EXECUTION_ERROR, "query.queryPage component: executeScript returned no result");
+        }
+        if ("error" in res && res.error) {
+          throw vtxError(VtxErrorCode.JS_EXECUTION_ERROR, `query.queryPage component error: ${res.error}`);
         }
         return res;
       }

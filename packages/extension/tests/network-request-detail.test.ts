@@ -309,4 +309,49 @@ describe("network.getRequestDetail (source=request) — 单请求 status+body", 
     // 前缀可被 atob 解码(不抛错)
     expect(() => atob(body)).not.toThrow();
   });
+
+  it("source=request 返回 requestBody(POST body)", async () => {
+    vi.resetModules();
+    ({ registerNetworkHandlers } = await import("../src/handlers/network.js"));
+    const router = new ActionRouter();
+    let onEventCb: (tabId: number, method: string, params: any) => void = () => {};
+    const debuggerMgr = {
+      onEvent: (cb: any) => { onEventCb = cb; },
+      enableDomain: vi.fn().mockResolvedValue(undefined),
+      isAttached: () => true,
+      sendCommand: vi.fn().mockResolvedValue({ body: '{"ok":true}', base64Encoded: false }),
+    } as any;
+    const nm = { send: vi.fn() } as any;
+    const dispatcher = { emit: vi.fn() } as any;
+    registerNetworkHandlers(router, debuggerMgr, nm, dispatcher);
+
+    await router.dispatch(mkReq("network.subscribe", {}, 42));
+    onEventCb(42, "Network.requestWillBeSent", { requestId: "req-1", request: { url: "https://api/x", method: "POST", headers: {}, postData: '{"q":1}' }, type: "XHR" });
+    onEventCb(42, "Network.responseReceived", { requestId: "req-1", response: { status: 200, statusText: "OK", mimeType: "application/json", headers: {} } });
+
+    const res = await router.dispatch(mkReq("network.getRequestDetail", { requestId: "req-1" }, 42));
+    const detail = res.result as { requestBody: string | null };
+    expect(detail.requestBody).toBe('{"q":1}');
+  });
+
+  it("source=request 无 postData 时 requestBody=null", async () => {
+    vi.resetModules();
+    ({ registerNetworkHandlers } = await import("../src/handlers/network.js"));
+    const router = new ActionRouter();
+    let onEventCb: (tabId: number, method: string, params: any) => void = () => {};
+    const debuggerMgr = {
+      onEvent: (cb: any) => { onEventCb = cb; },
+      enableDomain: vi.fn().mockResolvedValue(undefined),
+      isAttached: () => true,
+      sendCommand: vi.fn().mockResolvedValue({ body: "", base64Encoded: false }),
+    } as any;
+    registerNetworkHandlers(router, debuggerMgr, { send: vi.fn() } as any, { emit: vi.fn() } as any);
+
+    await router.dispatch(mkReq("network.subscribe", {}, 42));
+    onEventCb(42, "Network.requestWillBeSent", { requestId: "req-2", request: { url: "https://api/y", method: "GET", headers: {} }, type: "XHR" });
+    onEventCb(42, "Network.responseReceived", { requestId: "req-2", response: { status: 200, statusText: "OK", mimeType: "application/json", headers: {} } });
+
+    const res = await router.dispatch(mkReq("network.getRequestDetail", { requestId: "req-2" }, 42));
+    expect((res.result as { requestBody: string | null }).requestBody).toBeNull();
+  });
 });
