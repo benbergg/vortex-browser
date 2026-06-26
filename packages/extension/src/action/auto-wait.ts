@@ -145,6 +145,13 @@ export async function waitActionable(
       `Actionability timeout after ${timeout}ms; last reason: OBSCURED ` +
       `(element is covered by an open modal <dialog> in the top layer; the rest of the page is ` +
       `inert while it is open — dismiss the dialog first, e.g. press Escape or click its close button, then retry)`;
+  } else if (lastReason === "NOT_ATTACHED") {
+    message =
+      `Actionability timeout after ${timeout}ms; last reason: NOT_ATTACHED ` +
+      `(element kept detaching — likely a re-rendering SPA, e.g. virtual-scroll table or rich-text editor). ` +
+      `Re-run vortex_observe immediately before act to refresh the ref; for highly dynamic regions ` +
+      `locate via vortex_evaluate (query the live DOM or framework instance, e.g. el.__vueParentComponent); ` +
+      `or raise timeout.`;
   } else {
     message = `Actionability timeout after ${timeout}ms; last reason: ${lastReason ?? "unknown"}`;
   }
