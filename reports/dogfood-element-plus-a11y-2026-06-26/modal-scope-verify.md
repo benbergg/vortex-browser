@@ -55,6 +55,30 @@
 
 待人工跑活浏览器后追加,目录:`reports/dogfood-element-plus-a11y-2026-06-26/screenshots/`。
 
+## 实机验证结果（Claude 承重，2026-06-26，修复构建 1.0.0+mqupkspk / mcp 重建后）
+
+### 发现并修复 2 个 M3 实现 bug（单测/standalone 均未抓到，须活浏览器 spike）
+
+| # | bug | 根因 | 修复 |
+|---|---|---|---|
+| **BUG-1（崩溃）** | 模态打开时 observe 整帧崩 `frame 0 not scanned` | inject func 模态块误用**外层**函数参数名 `filterMode`；inject func 第 5 形参实际叫 `filter` → MAIN-world 作用域无 `filterMode` → minify 成自由变量 `a` → `ReferenceError: a is not defined` | `filterMode`→`filter`（observe.ts L2505/2506）+ source-lock 防回归测试 |
+| **BUG-2（meta 不渲染）** | 裁剪生效但 `# modal:` meta 不出 | `# modal:` 渲染加到了 `renderObserveCompact`，但 vortex_observe 实际走 `renderObserveTree`（server.ts L483）；**计划缺陷**（plan 把渲染+测试都指向 Compact，M3 忠实照做） | renderObserveTree 补 `modalSummary(data.frames)` + 针对 tree 路径的防回归测试 |
+
+定位手段：inject func 包 try/catch 把 stack 塞进 Title + 阶段标记 bisect（`stage=modal`）→ 读 minified 产物锁定 `a`=filterMode。
+
+### 验收（活浏览器 EP dialog，修复后）
+
+- [x] **EP dialog 默认 observe**：只返回模态 3 按钮（Close/Cancel/Confirm）+ 顶部 `# modal: dialog "Tips" (suppressed 421 background elements)`，**不再崩**。
+- [x] **filter=all**：返回全集，背景元素全带 `[behind-modal]`，模态内 3 按钮无标。
+- [x] **非模态零漂移**（select-v2 虚拟列表）：开下拉 → `# blindspots: listbox virtual(~1000/11)` 仍正常、**无 `# modal:`、无 `[behind-modal]`**、选项+全页正常召回。
+- [ ] drawer / message-box / 嵌套对话框 / antd·MUI 跨库：未逐一实机（aria-modal 硬门 + 单测覆盖，留合并后 smoke）。
+- [ ] bench 全量回归：未跑（需 bench harness 加载修复构建）。
+
+### 单测
+
+- extension 全包 **205 文件 / 1566 测试** 全过（含新 source-lock 测试 + modal-scope 12 测试）。
+- mcp 全包 **46 文件 / 530 测试** 全过（含 tree 路径 modal 渲染测试）。
+
 ## 结论
 
-待人工验证后填入。
+模态作用域功能**实机端到端工作**（裁剪 + meta + filter=all 逃生口 + 非模态零漂移），2 个实现 bug 已修复并验证。教训：inject func（承重墙）改动单测/standalone 抓不到，**必须活浏览器 spike**；inject func 内联副本与外层同名参数易混；渲染改动须确认真实调用的渲染函数（observe 走 Tree 非 Compact）。
