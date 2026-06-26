@@ -15,13 +15,14 @@ describe("getToolDefs", () => {
     expect(a).toEqual(b);
   });
 
-  it("returns 20 public tools (vortex_query 零 LLM 探测: 19 + vortex_query)", () => {
+  it("returns 21 public tools (vortex_paste 新增: 20 + vortex_paste)", () => {
     // v2.1 PR-A: 把 v0.5 内部化的 vortex_tab_list + vortex_history
     // promote 回 public（spec 12-Projects/0000-vortex优化/v2.1-实施方案.md §2 §3）。
     // 后端 handler 早就 ready,只是 schemas-public.ts 没复制 schema 块。
     // 工具横向优化 T6: 新增 vortex_drag(元素级 DnD, action=mouse.dragElement)。
     // 工具横向优化 T7: 新增 vortex_fill_form(fields[] 批量填表, 部分成功语义)。
     // 工具横向优化: 新增 vortex_query(零 LLM 探测, text grep + css find)。
+    // vortex_paste 新增(target+text+html+force, action=dom.paste)。
     const names = getToolDefs().map((d) => d.name);
     expect(names.sort()).toEqual([
       "vortex_act",
@@ -36,6 +37,7 @@ describe("getToolDefs", () => {
       "vortex_mouse_drag",
       "vortex_navigate",
       "vortex_observe",
+      "vortex_paste",
       "vortex_press",
       "vortex_query",
       "vortex_screenshot",
@@ -101,12 +103,13 @@ describe("getToolDefs", () => {
     expect(navigate?.returnsImage).toBeUndefined();
   });
 
-  it("has exactly 20 public tools (vortex_query 零 LLM 探测: 19 + vortex_query)", () => {
+  it("has exactly 21 public tools (vortex_paste 新增: 20 + vortex_paste)", () => {
     // v2.1 PR-A 工作量 ≤ 0.3 人天:schemas-public.ts 复制 2 个 schema 块 +
     // 2 段 description 改写,后端零代码改动。
     // 工具横向优化 T7: 新增 vortex_fill_form(fields[] 批量填表, 部分成功语义)。
     // 工具横向优化: 新增 vortex_query(零 LLM 探测, text grep + css find)。
-    expect(getToolDefs().length).toBe(20);
+    // vortex_paste 新增(target+text+html+force, action=dom.paste)。
+    expect(getToolDefs().length).toBe(21);
   });
 });
 

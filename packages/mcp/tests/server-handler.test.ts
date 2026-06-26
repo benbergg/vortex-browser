@@ -61,8 +61,9 @@ describe("handleCallTool routing logic", () => {
     // v0.8 加入 4 个新前缀：js. (vortex_evaluate) / mouse. (vortex_mouse_drag) /
     // file. (vortex_file_upload)。vortex_fill 走 L4.fill 保持不变。
     // 工具横向优化: query. (vortex_query) 零 LLM 探测前缀。
+    // vortex_paste 新增: dom. 前缀(action=dom.paste)。
     for (const def of getToolDefs()) {
-      expect(def.action).toMatch(/^(L4\.|page\.|tab\.|capture\.|keyboard\.|js\.|mouse\.|file\.|query\.)/);
+      expect(def.action).toMatch(/^(L4\.|page\.|tab\.|capture\.|keyboard\.|js\.|mouse\.|file\.|query\.|dom\.)/);
     }
   });
 });

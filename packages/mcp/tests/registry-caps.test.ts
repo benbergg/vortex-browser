@@ -17,14 +17,14 @@ import { getAllToolDefs } from "../src/tools/schemas.js";
 
 describe("registry caps opt-in 机制", () => {
   afterEach(() => {
-    // 每个用例后清空模块级 caps 状态，避免污染其它测试文件（默认面 = 20）。
+    // 每个用例后清空模块级 caps 状态，避免污染其它测试文件（默认面 = 21）。
     setEnabledCaps([]);
   });
 
-  it("默认（无 caps）：getToolDefs 返回 20 个公开工具，且不含任何 cap 标记工具", () => {
+  it("默认（无 caps）：getToolDefs 返回 21 个公开工具，且不含任何 cap 标记工具", () => {
     setEnabledCaps([]);
     const defs = getToolDefs();
-    expect(defs.length).toBe(20);
+    expect(defs.length).toBe(21);
     expect(defs.every((d) => d.cap === undefined)).toBe(true);
   });
 
@@ -34,7 +34,7 @@ describe("registry caps opt-in 机制", () => {
     if (capped.length === 0) {
       // 当前 schemas 无 cap 工具：setEnabledCaps 必须是安全 no-op。
       setEnabledCaps(["testing"]);
-      expect(getToolDefs().length).toBe(20);
+      expect(getToolDefs().length).toBe(21);
       return;
     }
     const cap = capped[0].cap!;
@@ -44,8 +44,8 @@ describe("registry caps opt-in 机制", () => {
     for (const n of expectedNames) {
       expect(names).toContain(n);
     }
-    // 公开面 = 20 + 被提升的工具数
-    expect(getToolDefs().length).toBe(20 + expectedNames.length);
+    // 公开面 = 21 + 被提升的工具数
+    expect(getToolDefs().length).toBe(21 + expectedNames.length);
   });
 
   it("启用 cap 后 getToolDef 可按名解析被提升的工具", () => {
@@ -66,18 +66,18 @@ describe("registry caps opt-in 机制", () => {
     expect(getInternalToolDef(capped[0].name)).toBeDefined();
   });
 
-  it("未知 cap 被忽略，不影响默认面（仍 20）", () => {
+  it("未知 cap 被忽略，不影响默认面（仍 21）", () => {
     setEnabledCaps(["nonexistent-cap-xyz"]);
     const defs = getToolDefs();
-    expect(defs.length).toBe(20);
+    expect(defs.length).toBe(21);
   });
 
   it("setEnabledCaps([]) 可回到默认面（幂等清空）", () => {
     const capped = getAllToolDefs().filter((d) => d.cap);
     if (capped.length === 0) return;
     setEnabledCaps([capped[0].cap!]);
-    expect(getToolDefs().length).toBeGreaterThan(20);
+    expect(getToolDefs().length).toBeGreaterThan(21);
     setEnabledCaps([]);
-    expect(getToolDefs().length).toBe(20);
+    expect(getToolDefs().length).toBe(21);
   });
 });
