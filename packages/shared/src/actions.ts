@@ -44,6 +44,8 @@ export const DomActions = {
   WAIT_SETTLED: "dom.waitSettled",
   /** 对 framework 受控组件（picker/cascader/select 等）提交值：打开→导航→点→确认的完整流程。@since 0.4.0 */
   COMMIT: "dom.commit",
+  /** 富文本粘贴:合成 ClipboardEvent('paste')+构造 DataTransfer,触发编辑器自管的 paste→Markdown 转换。@since 当前版本 */
+  PASTE: "dom.paste",
   WATCH_MUTATIONS: "dom.watchMutations",
   UNWATCH_MUTATIONS: "dom.unwatchMutations",
 } as const;
