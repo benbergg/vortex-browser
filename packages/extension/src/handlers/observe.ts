@@ -483,6 +483,53 @@ export function partitionOverlayFirst(candidates: Element[], overlayRoots: Eleme
 }
 
 /**
+ * 模态作用域(Modal Scoping,N002 T2-2):aria-modal="true" 弹层打开时,ARIA 语义要求 AT 把
+ * 模态外内容视为 inert。observe 默认行为是把模态控件与整页背景平铺混合(Element Plus dialog
+ * 实测:模态 3 按钮混进 56 个背景元素),且与 actionability 的 OBSCURED 口径自相矛盾。
+ * 判据硬门=aria-modal="true"(可见性由 overlayRoots 收集时已保证);role=dialog 无 aria-modal
+ * 的伪模态不裁剪,仍走 overlay-priority 前置。inject func 内联同名逻辑,改一处须同步;本组导出
+ * 由 observe-modal-scope.test.ts 锁守护。
+ */
+export function isModalOverlayRoot(
+  el: Element,
+  getAttr: (e: Element, n: string) => string | null = (e, n) => e.getAttribute(n),
+): boolean {
+  return getAttr(el, "aria-modal") === "true";
+}
+
+/**
+ * 从 overlayRoots(已是可见脱流浮层根)中挑出 active modal:aria-modal=true 的根。多个(嵌套
+ * 对话框 Outer+Inner)取 overlayRoots 中最后一个——信号一按 querySelectorAllDeep 文档序收集,
+ * 后者即 DOM 序更后/更顶层的模态。无模态根返回 null(短路 → 零漂移)。
+ */
+export function selectActiveModal(
+  overlayRoots: Element[],
+  getAttr: (e: Element, n: string) => string | null = (e, n) => e.getAttribute(n),
+): Element | null {
+  let found: Element | null = null;
+  for (const el of overlayRoots) {
+    if (isModalOverlayRoot(el, getAttr)) found = el;
+  }
+  return found;
+}
+
+/**
+ * 把候选裁剪到模态子树:保留 modalRoot 内(含自身)的候选,统计被抑制的背景数。保持候选相对序。
+ */
+export function scopeCandidatesToModal(
+  candidates: Element[],
+  modalRoot: Element,
+): { kept: Element[]; suppressed: number } {
+  const kept: Element[] = [];
+  let suppressed = 0;
+  for (const el of candidates) {
+    if (el === modalRoot || modalRoot.contains(el)) kept.push(el);
+    else suppressed++;
+  }
+  return { kept, suppressed };
+}
+
+/**
  * 信号二:portal 弹层根收集(无 ARIA 弹层 role 时的兜底,如 el-select popper)。
  * 判据:脱流(position absolute/fixed)+ z-index 抬升(>0)+ 可见 + 含交互后代。
  *
