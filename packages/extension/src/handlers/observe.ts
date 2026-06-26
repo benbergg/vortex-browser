@@ -161,6 +161,8 @@ interface FramePageResult {
   truncated: boolean;
   /** 虚拟列表盲区(容器常不被 elements 收集,独立扫描)。@since blindspot */
   blindspots?: Array<{ kind: "virtual"; total: number; rendered: number; name: string; confidence?: "low" }>;
+  /** 模态作用域信号(aria-modal 弹层打开,裁剪了背景)。@since modal-scope */
+  modal?: { name: string; role: string; suppressed: number };
 }
 
 function safeOrigin(url: string | undefined): string | null {
@@ -2352,7 +2354,7 @@ async function scanOneFrame(
           }
         }
 
-        const baseCandidates: Element[] = (() => {
+        let baseCandidates: Element[] = (() => {
           const raw: Element[] = [
             ...Array.from(nodeList),
             ...cursorPointerLeaves,
@@ -2485,6 +2487,40 @@ async function scanOneFrame(
             if (!isVisibleForOverlay(el)) continue;
             if (!el.querySelector(OVERLAY_DESCENDANT_SELECTORS)) continue;
             overlayRoots.push(el);
+          }
+        }
+        // ── 模态作用域(Modal Scoping,N002 T2-2)──
+        // aria-modal=true 弹层打开时,ARIA 要求模态外内容视为 inert。默认裁剪 baseCandidates 到
+        // 模态子树 + 发 # modal: meta;filterMode==='all' 时不裁剪、背景打 behindModal 标(Task 4)。
+        // ⚠ 内联副本:与模块级 selectActiveModal / scopeCandidatesToModal 同步(observe-modal-scope.test.ts 锁)。
+        let __activeModal: Element | null = null;
+        for (const el of overlayRoots) {
+          if (el.getAttribute("aria-modal") === "true") __activeModal = el; // 多个取最后(顶层)
+        }
+        let __modalMeta: { name: string; role: string; suppressed: number } | null = null;
+        // filter=all 逃生口:不裁剪,但记录模态根供元素装配时给背景打 behindModal 标。
+        const __behindModalRoot: Element | null =
+          __activeModal && filterMode === "all" ? __activeModal : null;
+        if (__activeModal && filterMode !== "all") {
+          const __mRoot = __activeModal;
+          const __kept: Element[] = [];
+          let __suppressed = 0;
+          for (const el of baseCandidates) {
+            if (el === __mRoot || __mRoot.contains(el)) __kept.push(el);
+            else __suppressed++;
+          }
+          if (__suppressed > 0) {
+            baseCandidates = __kept;
+            const __nm = __mRoot.getAttribute("aria-label")
+              || (__mRoot.getAttribute("aria-labelledby")
+                  ? (document.getElementById(__mRoot.getAttribute("aria-labelledby")!)?.textContent || "")
+                  : "")
+              || "";
+            __modalMeta = {
+              name: String(__nm).trim().slice(0, 40),
+              role: __mRoot.getAttribute("role") || "dialog",
+              suppressed: __suppressed,
+            };
           }
         }
         const allCandidates: Element[] = ((): Element[] => {
@@ -3007,6 +3043,7 @@ async function scanOneFrame(
           candidateCount: allCandidates.length,
           truncated: elements.length >= max,
           blindspots: pageBlindspots,
+          ...(__modalMeta ? { modal: __modalMeta } : {}),
         };
       },
       args: [maxElements, viewport, includeText, includeAX, filterMode],

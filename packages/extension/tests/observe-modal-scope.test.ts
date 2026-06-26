@@ -80,10 +80,10 @@ describe("modal-scope: source-lock(inject func 内联副本同步)", () => {
     join(dirname(fileURLToPath(import.meta.url)), "../src/handlers/observe.ts"),
     "utf8",
   );
-  it.skip("inject func 内联 aria-modal 检测存在", () => {
+  it("inject func 内联 aria-modal 检测存在", () => {
     expect(src).toMatch(/getAttribute\(["']aria-modal["']\)\s*===\s*["']true["']/);
   });
-  it.skip("inject func 内联 selectActiveModal 同名逻辑存在", () => {
+  it("inject func 内联 selectActiveModal 同名逻辑存在", () => {
     expect(src).toContain("__activeModal");
   });
 });
