@@ -473,10 +473,10 @@ export function registerQueryHandlers(router: ActionRouter): void {
       const pattern = args.pattern as string | undefined;
 
       // 参数校验
-      if (!mode || (mode !== "text" && mode !== "css")) {
+      if (!mode || (mode !== "text" && mode !== "css" && mode !== "component")) {
         throw vtxError(
           VtxErrorCode.INVALID_PARAMS,
-          `vortex_query: mode must be 'text' or 'css', got ${String(mode)}`,
+          `vortex_query: mode must be 'text', 'css' or 'component', got ${String(mode)}`,
         );
       }
       if (!pattern || typeof pattern !== "string" || !pattern.trim()) {
@@ -516,7 +516,7 @@ export function registerQueryHandlers(router: ActionRouter): void {
           throw vtxError(VtxErrorCode.JS_EXECUTION_ERROR, `query.queryPage text error: ${res.error}`);
         }
         return res;
-      } else {
+      } else if (mode === "css") {
         // css query 模式
         const attr = args.attr as string | string[] | undefined;
         // attr 可以是单个字符串或数组
@@ -546,6 +546,30 @@ export function registerQueryHandlers(router: ActionRouter): void {
         }
         if ("error" in res && res.error) {
           throw vtxError(VtxErrorCode.JS_EXECUTION_ERROR, `query.queryPage css error: ${res.error}`);
+        }
+        return res;
+      } else {
+        // component 模式:注入 componentInspectFunc 取 Vue/React 组件链 + 行数据。
+        const maxResults = Math.min((args.maxResults as number | undefined) ?? 10, 20);
+        const componentDepth = Math.min(Math.max((args.componentDepth as number | undefined) ?? 4, 1), 12);
+
+        const results = await chrome.scripting.executeScript({
+          target: buildExecuteTarget(tid, frameId),
+          func: componentInspectFunc,
+          args: [pattern, componentDepth, maxResults],
+          world: "MAIN",
+        });
+
+        const res = results[0]?.result as
+          | { components: unknown[]; total: number; showing: number }
+          | { error: string; components: never[]; total: number }
+          | undefined;
+
+        if (!res) {
+          throw vtxError(VtxErrorCode.JS_EXECUTION_ERROR, "query.queryPage component: executeScript returned no result");
+        }
+        if ("error" in res && res.error) {
+          throw vtxError(VtxErrorCode.JS_EXECUTION_ERROR, `query.queryPage component error: ${res.error}`);
         }
         return res;
       }

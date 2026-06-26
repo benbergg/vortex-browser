@@ -196,3 +196,52 @@ describe("query.queryPage — page-side JS 函数行为", () => {
     expect(matches).toEqual(["Hello", "Hello"]);
   });
 });
+
+describe("query.queryPage — component mode", () => {
+  let router: ActionRouter;
+  let executeScript: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    vi.unstubAllGlobals();
+    router = new ActionRouter();
+    executeScript = vi.fn();
+    vi.stubGlobal("chrome", {
+      tabs: { query: vi.fn().mockResolvedValue([{ id: 42 }]) },
+      webNavigation: { getAllFrames: vi.fn().mockResolvedValue([{ frameId: 0, parentFrameId: -1, url: "https://x/" }]) },
+      scripting: { executeScript },
+      runtime: { getManifest: vi.fn().mockReturnValue({ host_permissions: ["<all_urls>"] }) },
+    });
+    registerQueryHandlers(router);
+  });
+
+  it("component 命中 → 返回 components 数组,executeScript 收到 componentInspectFunc + [selector,depth,max]", async () => {
+    executeScript.mockResolvedValueOnce([{ result: { components: [{ framework: "vue2", chain: [{ name: "C", data: {}, props: {} }] }], total: 1, showing: 1 } }]);
+    const res = await router.dispatch(mkReq("query.queryPage", { mode: "component", pattern: ".cell" }));
+    expect(res.error).toBeUndefined();
+    const result = res.result as { components: unknown[]; total: number };
+    expect(result.total).toBe(1);
+    const call = executeScript.mock.calls[0][0];
+    expect(call.world).toBe("MAIN");
+    expect(call.args[0]).toBe(".cell");
+    expect(call.args[1]).toBe(4);   // componentDepth 默认
+    expect(call.args[2]).toBe(10);  // maxResults 默认
+  });
+
+  it("component maxResults 硬上限 20", async () => {
+    executeScript.mockResolvedValueOnce([{ result: { components: [], total: 0, showing: 0 } }]);
+    await router.dispatch(mkReq("query.queryPage", { mode: "component", pattern: ".x", maxResults: 999 }));
+    expect(executeScript.mock.calls[0][0].args[2]).toBe(20);
+  });
+
+  it("component componentDepth 可覆盖", async () => {
+    executeScript.mockResolvedValueOnce([{ result: { components: [], total: 0, showing: 0 } }]);
+    await router.dispatch(mkReq("query.queryPage", { mode: "component", pattern: ".x", componentDepth: 2 }));
+    expect(executeScript.mock.calls[0][0].args[1]).toBe(2);
+  });
+
+  it("component page-side error → JS_EXECUTION_ERROR", async () => {
+    executeScript.mockResolvedValueOnce([{ result: { error: "boom", components: [], total: 0 } }]);
+    const res = await router.dispatch(mkReq("query.queryPage", { mode: "component", pattern: ".x" }));
+    expect(res.error).toBeDefined();
+  });
+});
