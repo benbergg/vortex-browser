@@ -17,7 +17,7 @@ describe("vortex_paste 公开工具", () => {
     expect((def.schema as any).required).toEqual(expect.arrayContaining(["target", "text"]));
   });
   it("dispatch 路由到 dom.paste", () => {
-    const { action } = dispatchNewTool("vortex_paste", { selector: "#ed", text: "# t" });
-    expect(action).toBe("dom.paste");
+    const result = dispatchNewTool("vortex_paste", { selector: "#ed", text: "# t" });
+    expect(result?.action).toBe("dom.paste");
   });
 });

@@ -383,14 +383,14 @@ export const PUBLIC_TOOLS: ToolDef[] = [
     // 富文本编辑器粘贴：text 是纯文本（Markdown 自动转换），html 是可选的原始 HTML 内容。
     name: "vortex_paste",
     action: "dom.paste",
-    description: "Paste text/html into a rich-text editor.",
+    description: "Paste text/html into editor; Markdown auto-converts.",
     schema: {
       type: "object",
       properties: {
         target: TargetRequired,
-        text: { type: "string" as const },
-        html: { type: "string" as const },
-        force: { type: "boolean" as const },
+        text: { type: "string" },
+        html: { type: "string" },
+        force: { type: "boolean" },
         ...tabFields,
       },
       required: ["target", "text"],
