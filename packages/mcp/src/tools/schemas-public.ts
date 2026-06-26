@@ -391,6 +391,7 @@ export const PUBLIC_TOOLS: ToolDef[] = [
         text: { type: "string" },
         html: { type: "string" },
         force: { type: "boolean" },
+        timeout: { type: "number" },
         ...tabFields,
       },
       required: ["target", "text"],

@@ -22,6 +22,9 @@ describe("B2 自旋期 descriptor 重定位", () => {
     expect(reresolve).toHaveBeenCalledTimes(1);
     expect(switched).toBe(true);
     expect(res.ok).toBe(true);
+    // B2 修复锁：waitActionable 返回的 selector 必须是重定位后的新 selector（curSelector），
+    // 不是入参 selector。修复前此断言 FAIL。
+    expect(res.selector).toBe("[data-vtx-heal=\"h1\"]");
   });
 
   it("未传 reresolve 时维持原超时抛错行为", async () => {

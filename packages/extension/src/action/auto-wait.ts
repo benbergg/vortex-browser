@@ -43,6 +43,8 @@ export interface WaitOptions extends CheckOptions {
 export interface WaitOk {
   ok: true;
   rect: { x: number; y: number; w: number; h: number };
+  /** 实际命中的选择器；自旋期 descriptor 重定位后可能 ≠ 入参 selector。*/
+  selector: string;
 }
 
 /**
@@ -78,7 +80,7 @@ export async function waitActionable(
       options,
     );
     if (result.ok) {
-      return { ok: true, rect: result.rect };
+      return { ok: true, rect: result.rect, selector: curSelector };
     }
     lastReason = result.reason;
     lastExtras = result.extras as Record<string, unknown> | undefined;

@@ -42,7 +42,7 @@ describe("healAwareGate", () => {
   });
 
   it("happy path（gate 直接过）→ 不触发 heal", async () => {
-    gate.mockResolvedValueOnce(undefined);
+    gate.mockResolvedValueOnce({ ok: true, rect: { x: 0, y: 0, w: 1, h: 1 }, selector: "#ok" });
     const out = await healAwareGate(1, 0, "#ok", { timeout: undefined }, undefined,
       { role: "button", name: "S" });
     expect(out).toEqual({ selector: "#ok", healed: false });

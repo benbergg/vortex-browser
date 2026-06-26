@@ -49,7 +49,8 @@ vi.mock("../src/adapter/page-side-loader.js", () => ({
   loadPageSideModule: vi.fn().mockResolvedValue(undefined),
 }));
 vi.mock("../src/action/auto-wait.js", () => ({
-  waitActionable: vi.fn().mockResolvedValue({ ok: true, rect: { x: 0, y: 0, w: 1, h: 1 } }),
+  waitActionable: vi.fn().mockImplementation((_t: unknown, _f: unknown, sel: string) =>
+    Promise.resolve({ ok: true, rect: { x: 0, y: 0, w: 1, h: 1 }, selector: sel })),
 }));
 vi.mock("../src/lib/tab-utils.js", () => ({
   getActiveTabId: vi.fn().mockResolvedValue(1),
@@ -93,5 +94,12 @@ describe("dom.paste handler 运行时", () => {
     const res = await router.dispatch(mkReq({ selector: "#inp", text: "x" }));
     expect(res.error).toBeDefined();
     expect(JSON.stringify(res.error)).toMatch(/fill/i);
+  });
+
+  it("注入无返回值（CSP 阻断）→ JS_EXECUTION_ERROR 而非假成功", async () => {
+    // out?.[0]?.result 为 undefined 时（如 CSP 阻止注入）不应静默返回 success。
+    exec.mockResolvedValue([{}]);
+    const res = await router.dispatch(mkReq({ selector: "#ed", text: "hello" }));
+    expect(res.error?.code).toBe(VtxErrorCode.JS_EXECUTION_ERROR);
   });
 });

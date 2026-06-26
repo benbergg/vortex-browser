@@ -108,8 +108,10 @@ export async function healAwareGate(
     ? () => tryHealSelector(tabId, frameId, descriptor).catch(() => null)
     : undefined;
   try {
-    await waitActionableAutoForce(tabId, frameId, selector, { ...options, reresolve }, force);
-    return { selector, healed: false };
+    // B2 修复：采纳 waitActionableAutoForce 返回的 selector，自旋期 descriptor 重定位后
+    // curSelector 已切换，ok.selector ≠ 入参 selector → healed:true，下游用新选择器。
+    const ok = await waitActionableAutoForce(tabId, frameId, selector, { ...options, reresolve }, force);
+    return { selector: ok.selector, healed: ok.selector !== selector };
   } catch (err) {
     if (descriptor && isStaleNotAttached(err)) {
       const healed = await tryHealSelector(tabId, frameId, descriptor); // 抛 AMBIGUOUS_DESCRIPTOR/STALE_REF
@@ -943,6 +945,13 @@ export function registerDomHandlers(
         ok?: true; isContentEditable?: boolean; before?: string; after?: string;
         changed?: boolean; errorCode?: string; error?: string;
       } | undefined;
+      // 族 A 护栏：注入无返回值（如 CSP 阻断）→ 静默假成功，改为响亮报错。
+      if (r === undefined) {
+        throw vtxError(
+          VtxErrorCode.JS_EXECUTION_ERROR,
+          `paste injection returned no result for ${selector} (injection may be blocked by CSP)`,
+        );
+      }
       if (r?.errorCode) mapPageError(r, selector);
       // 非 contentEditable:提示改用 fill(不假成功)。
       if (r && r.isContentEditable === false) {

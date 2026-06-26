@@ -13,9 +13,12 @@
 //   - userForce 显式 true / false → 不自动重试(用户已表态,尊重显式意图)
 //   - 非 NOT_STABLE 错误(NOT_ATTACHED / NOT_EDITABLE 等语义错误)→ 不重试,
 //     直接抛 —— force 救不了,应引导用户修 selector / 前置条件
+//
+// 返回 WaitOk（含 selector）,让 healAwareGate 感知自旋期 descriptor 重定位后的
+// 实际命中选择器,避免下游仍用已失效的入参 selector 导致 ELEMENT_NOT_FOUND。
 
 import { VtxErrorCode } from "@vortex-browser/shared";
-import { waitActionable, type WaitOptions } from "./auto-wait.js";
+import { waitActionable, type WaitOk, type WaitOptions } from "./auto-wait.js";
 
 export async function waitActionableAutoForce(
   tabId: number,
@@ -23,13 +26,12 @@ export async function waitActionableAutoForce(
   selector: string,
   options: WaitOptions,
   userForce: boolean | undefined,
-): Promise<void> {
+): Promise<WaitOk> {
   try {
-    await waitActionable(tabId, frameId, selector, { ...options, force: userForce });
+    return await waitActionable(tabId, frameId, selector, { ...options, force: userForce });
   } catch (err) {
     if ((err as { code?: string })?.code === VtxErrorCode.NOT_STABLE && userForce === undefined) {
-      await waitActionable(tabId, frameId, selector, { ...options, force: true });
-      return;
+      return await waitActionable(tabId, frameId, selector, { ...options, force: true });
     }
     throw err;
   }
