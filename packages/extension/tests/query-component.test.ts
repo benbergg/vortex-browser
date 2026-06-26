@@ -96,11 +96,11 @@ describe("componentInspectFunc — safeSerialize 边界(经 vue2 _data 注入)",
     expect(r.components[0].chain[0].data.obj.self).toBe("[Circular]");
   });
 
-  it("超深度 → [MaxDepth]", () => {
+  it("超深度 → [MaxDepth] (MAX_DEPTH=3)", () => {
     mountWithData({ l1: { l2: { l3: { l4: { l5: "deep" } } } } });
     const r = componentInspectFunc(".s", 4, 10) as Ok;
-    // depth: data(0)->l1(1)->l2(2)->l3(3)->l4(4=MaxDepth)
-    expect(r.components[0].chain[0].data.l1.l2.l3.l4).toBe("[MaxDepth]");
+    // depth: data(0)->l1(1)->l2(2)->l3(3=MaxDepth)
+    expect(r.components[0].chain[0].data.l1.l2.l3).toBe("[MaxDepth]");
   });
 
   it("函数 → [Function]、DOM → [Element]", () => {
@@ -119,18 +119,29 @@ describe("componentInspectFunc — safeSerialize 边界(经 vue2 _data 注入)",
     expect(r.components[0].chain[0].data.boom).toBe("[Unserializable]");
   });
 
-  it("数组超 100 项 → 截断 + [+N more]", () => {
+  it("数组超 40 项 → 截断 + [+N more] (ARRAY_CAP=40)", () => {
     mountWithData({ arr: Array.from({ length: 150 }, (_, i) => i) });
     const r = componentInspectFunc(".s", 4, 10) as Ok;
     const arr = r.components[0].chain[0].data.arr as any[];
-    expect(arr.length).toBe(101); // 100 项 + 1 个 "[+50 more]"
-    expect(arr[100]).toBe("[+50 more]");
+    expect(arr.length).toBe(41); // 40 项 + 1 个 "[+110 more]"
+    expect(arr[40]).toBe("[+110 more]");
   });
 
   it("剥 Vue 响应式键 __ob__", () => {
     mountWithData({ real: 1, __ob__: { dep: {} } });
     const r = componentInspectFunc(".s", 4, 10) as Ok;
     expect(r.components[0].chain[0].data).toEqual({ real: 1 });
+  });
+
+  it("巨型宽对象 → 预算截断,输出有界(防输出爆炸)", () => {
+    const wide: any = {};
+    for (let i = 0; i < 5000; i++) wide["k" + i] = i;
+    mountWithData(wide);
+    const r = componentInspectFunc(".s", 4, 10) as Ok;
+    const data = r.components[0].chain[0].data as Record<string, unknown>;
+    // chain serializer per-call 400 → 远小于 5000 键,必命中预算 break + __truncated__ 标记
+    expect(Object.keys(data).length).toBeLessThan(500);
+    expect(data.__truncated__).toBe("[Budget]");
   });
 });
 
@@ -190,18 +201,59 @@ describe("componentInspectFunc — 行探测", () => {
     expect(r.components[0].row.rowKey).toBe(20);
   });
 
-  it("React antd Table: fiber.memoizedProps.record → 行对象", () => {
+  it("Vue2 vxe-table: 命中单元格 → VxeTable.getRowById(tr[rowid]) 取行", () => {
+    // 实机确认 ipaas 用 vxe-table:tr[rowid] + getRowById,不依赖 DOM 索引
+    const tableEl = document.createElement("div");
+    const rowData: Record<string, any> = { id: 99, code: "tagSceneList", name: "标签场景列表" };
+    (tableEl as any).__vue__ = {
+      $options: { name: "VxeTable" },
+      _data: {}, $props: {},
+      getRowById: (rid: string) => (rid === "row_5" ? rowData : null),
+      getRowIndex: (r: any) => (r === rowData ? 2 : -1),
+      $parent: null,
+    };
+    const tr = document.createElement("tr");
+    tr.className = "vxe-body--row";
+    tr.setAttribute("rowid", "row_5");
+    const cell = document.createElement("td");
+    cell.className = "vxe-cell";
+    tr.appendChild(cell);
+    tableEl.appendChild(tr);
+    document.body.appendChild(tableEl);
+
+    const r = componentInspectFunc(".vxe-cell", 4, 10) as Ok;
+    expect(r.components[0].row).toBeDefined();
+    expect(r.components[0].row.rowKey).toBe("row_5");
+    expect(r.components[0].row.row).toEqual({ id: 99, code: "tagSceneList", name: "标签场景列表" });
+    expect(r.components[0].row.index).toBe(2);
+  });
+
+  it("React antd Table: cell fiber 有 record(无 rowKey)→ rowKey 回退 record.key", () => {
+    // 实机 antd(2026-06-26):record 在 cell fiber,rowKey 不在此 fiber,但 record 自带 key
     const el = document.createElement("td");
     el.className = "antd-cell";
-    const rowFiber = { type: function BodyRow() {}, memoizedProps: { record: { id: 7, title: "x" }, rowKey: "id", index: 3 }, memoizedState: null, return: null };
-    const cellFiber = { type: "td", memoizedProps: {}, memoizedState: null, return: rowFiber };
+    const cellFiber = { type: function Cell() {}, memoizedProps: { record: { key: "1", name: "John", age: 32 }, index: 0 }, memoizedState: null, return: null };
     (el as any)["__reactFiber$z"] = cellFiber;
     document.body.appendChild(el);
 
     const r = componentInspectFunc(".antd-cell", 4, 10) as Ok;
+    expect(r.components[0].framework).toBe("react");
     expect(r.components[0].row).toBeDefined();
-    expect(r.components[0].row.row).toEqual({ id: 7, title: "x" });
-    expect(r.components[0].row.index).toBe(3);
+    expect(r.components[0].row.row).toEqual({ key: "1", name: "John", age: 32 });
+    expect(r.components[0].row.index).toBe(0);
+    expect(r.components[0].row.rowKey).toBe("1"); // 回退 record.key
+  });
+
+  it("React: fiber props 显式 rowKey 优先于 record.key", () => {
+    const el = document.createElement("td");
+    el.className = "antd-cell2";
+    const cellFiber = { type: function Cell() {}, memoizedProps: { record: { key: "rk", id: 7 }, rowKey: "explicit", index: 2 }, memoizedState: null, return: null };
+    (el as any)["__reactFiber$z"] = cellFiber;
+    document.body.appendChild(el);
+
+    const r = componentInspectFunc(".antd-cell2", 4, 10) as Ok;
+    expect(r.components[0].row.rowKey).toBe("explicit");
+    expect(r.components[0].row.index).toBe(2);
   });
 
   it("非表格上下文 → row 缺省(不报错)", () => {

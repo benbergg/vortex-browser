@@ -223,14 +223,14 @@ describe("query.queryPage — component mode", () => {
     const call = executeScript.mock.calls[0][0];
     expect(call.world).toBe("MAIN");
     expect(call.args[0]).toBe(".cell");
-    expect(call.args[1]).toBe(4);   // componentDepth 默认
-    expect(call.args[2]).toBe(10);  // maxResults 默认
+    expect(call.args[1]).toBe(3);  // componentDepth 默认
+    expect(call.args[2]).toBe(5);  // maxResults 默认
   });
 
-  it("component maxResults 硬上限 20", async () => {
+  it("component maxResults 硬上限 10", async () => {
     executeScript.mockResolvedValueOnce([{ result: { components: [], total: 0, showing: 0 } }]);
     await router.dispatch(mkReq("query.queryPage", { mode: "component", pattern: ".x", maxResults: 999 }));
-    expect(executeScript.mock.calls[0][0].args[2]).toBe(20);
+    expect(executeScript.mock.calls[0][0].args[2]).toBe(10);
   });
 
   it("component componentDepth 可覆盖", async () => {

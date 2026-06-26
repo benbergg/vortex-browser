@@ -257,16 +257,20 @@ export const componentInspectFunc = (
       return acc;
     };
 
-    // 内联 safeSerialize:深度4 / 数组100 / 节点5000 / 剥响应式 / getter兜底。
-    const MAX_DEPTH = 4;
-    const ARRAY_CAP = 100;
-    const NODE_CAP = 5000;
-    const safeSerialize = (value: unknown, maxDepth: number): unknown => {
+    // 内联序列化:深度3 / 数组40 / 剥响应式 / getter兜底。
+    // makeSerializer 工厂:每个 serializer 各带 per-call 上限,且共享一个全局节点预算
+    // (globalBudget),容器循环内命中预算即 break。杜绝在真实应用上展开庞大组件 _data
+    // 导致输出爆炸(实机 spike:vxe-table cell 曾吐 10万字符超 token 限)。
+    const MAX_DEPTH = 3;
+    const ARRAY_CAP = 40;
+    const globalBudget = { n: 0, cap: 3000 };
+    const makeSerializer = (perCallCap: number): ((value: unknown) => unknown) => {
       const seen = new WeakSet<object>();
-      let nodes = 0;
+      let local = 0;
+      const over = (): boolean => globalBudget.n >= globalBudget.cap || local >= perCallCap;
       const walk = (v: unknown, depth: number): unknown => {
-        if (nodes > NODE_CAP) return "[MaxNodes]";
-        nodes++;
+        if (over()) return "[Budget]";
+        globalBudget.n++; local++;
         if (v === null || v === undefined) return null;
         const t = typeof v;
         if (t === "function") return "[Function]";
@@ -274,19 +278,23 @@ export const componentInspectFunc = (
         if (t === "bigint") return String(v);
         if (t === "symbol") return "[Symbol]";
         if (typeof Node !== "undefined" && v instanceof Node) return "[Element]";
-        if (depth >= maxDepth) return "[MaxDepth]";
+        if (depth >= MAX_DEPTH) return "[MaxDepth]";
         if (seen.has(v as object)) return "[Circular]";
         seen.add(v as object);
         try {
           if (Array.isArray(v)) {
             const arr: unknown[] = [];
             const cap = Math.min(v.length, ARRAY_CAP);
-            for (let i = 0; i < cap; i++) arr.push(walk(v[i], depth + 1));
+            for (let i = 0; i < cap; i++) {
+              if (over()) { arr.push("[Budget]"); break; }
+              arr.push(walk(v[i], depth + 1));
+            }
             if (v.length > cap) arr.push("[+" + (v.length - cap) + " more]");
             return arr;
           }
           const out: Record<string, unknown> = {};
           for (const key of Object.keys(v as object)) {
+            if (over()) { out.__truncated__ = "[Budget]"; break; }
             if (key === "__ob__" || key.indexOf("__v_") === 0) continue;
             try {
               out[key] = walk((v as Record<string, unknown>)[key], depth + 1);
@@ -299,20 +307,43 @@ export const componentInspectFunc = (
           seen.delete(v as object);
         }
       };
-      return walk(value, 0);
+      return (value: unknown): unknown => walk(value, 0);
     };
 
-    // 行探测:el-table(Vue2 读 store.states.data + DOM tr 索引) / antd Table(React fiber memoizedProps.record)。
-    // ⚠ store.states.data 路径与 rowKey 取法须实机 spike 确认(见计划「实机 spike」节);
-    // el-table 固定列会复制 tr,DOM 索引法对带 fixed 列的表可能偏移 → spike 校准。
+    // 行探测:vxe-table(VxeTable.getRowById,实机确认 ipaas 用 vxe 非 el-table) /
+    // el-table(Vue2 读 store.states.data + DOM tr 索引) / antd Table(React fiber memoizedProps.record)。
+    // vxe:tr[rowid] + getRowById 抗虚拟滚动/固定列(不依赖 DOM 索引,实机 2026-06-26 验证)。
+    // el-table 固定列会复制 tr,DOM 索引法对带 fixed 列的表可能偏移。
     const detectRow = (
       startEl: Element,
       framework: string,
       startInstance: unknown,
+      ser: (v: unknown) => unknown,
     ): { rowKey: string | number | null; row: unknown; index: number } | undefined => {
       try {
         if (framework === "vue2") {
-          // 上溯实例链找 ElTable
+          // ① vxe-table:上溯找 VxeTable 实例,用 tr[rowid] + getRowById 取行
+          let vxe: any = startInstance;
+          let vg = 0;
+          while (vxe && vg < 50) {
+            const nm = vxe.$options && (vxe.$options.name || vxe.$options._componentTag);
+            if (nm === "VxeTable") break;
+            vxe = vxe.$parent;
+            vg++;
+          }
+          if (vxe && typeof vxe.getRowById === "function") {
+            const tr = (startEl as Element).closest ? (startEl as Element).closest("tr[rowid]") : null;
+            const rowid = tr ? tr.getAttribute("rowid") : null;
+            if (rowid != null) {
+              const rowObj = vxe.getRowById(rowid);
+              if (rowObj && typeof rowObj === "object") {
+                let index = -1;
+                try { if (typeof vxe.getRowIndex === "function") index = vxe.getRowIndex(rowObj); } catch { /* ignore */ }
+                return { rowKey: rowid, row: ser(rowObj), index };
+              }
+            }
+          }
+          // ② el-table:上溯实例链找 ElTable,读 store.states.data + DOM tr 索引
           let inst = startInstance as any;
           let table: any = null;
           let guard = 0;
@@ -336,7 +367,7 @@ export const componentInspectFunc = (
             const v = (rowObj as Record<string, unknown>)[rowKeyProp];
             if (typeof v === "string" || typeof v === "number") rowKey = v;
           }
-          return { rowKey, row: safeSerialize(rowObj, MAX_DEPTH), index };
+          return { rowKey, row: ser(rowObj), index };
         }
         if (framework === "react") {
           let fiber = startInstance as any;
@@ -346,11 +377,17 @@ export const componentInspectFunc = (
             if (p && typeof p === "object") {
               const rec = p.record !== undefined ? p.record : (p.row !== undefined ? p.row : p.rowData);
               if (rec !== undefined && rec !== null && typeof rec === "object") {
+                // rowKey: 优先 fiber props,再回退 record 自带 key/id。实机(antd)发现
+                // record 在 cell fiber 而 rowKey 在上层 row fiber,故 cell 命中时 props
+                // 无 rowKey → 回退 record.key(antd 行键惯例)/record.id。
+                const r = rec as Record<string, unknown>;
                 let rowKey: string | number | null = null;
                 if (typeof p.rowKey === "string" || typeof p.rowKey === "number") rowKey = p.rowKey;
                 else if (typeof p["data-row-key"] === "string" || typeof p["data-row-key"] === "number") rowKey = p["data-row-key"];
+                else if (typeof r.key === "string" || typeof r.key === "number") rowKey = r.key as string | number;
+                else if (typeof r.id === "string" || typeof r.id === "number") rowKey = r.id as string | number;
                 const index = typeof p.index === "number" ? p.index : -1;
-                return { rowKey, row: safeSerialize(rec, MAX_DEPTH), index };
+                return { rowKey, row: ser(rec), index };
               }
             }
             fiber = fiber.return;
@@ -392,6 +429,7 @@ export const componentInspectFunc = (
       framework: string,
       instance: unknown,
       depth: number,
+      ser: (v: unknown) => unknown,
     ): Array<{ name: string; data: unknown; props: unknown }> => {
       const chain: Array<{ name: string; data: unknown; props: unknown }> = [];
       if (framework === "vue2") {
@@ -399,8 +437,8 @@ export const componentInspectFunc = (
         while (inst && chain.length < depth) {
           chain.push({
             name: (inst.$options && (inst.$options.name || inst.$options._componentTag)) || "(anonymous)",
-            data: safeSerialize(inst._data, MAX_DEPTH),
-            props: safeSerialize(inst.$props, MAX_DEPTH),
+            data: ser(inst._data),
+            props: ser(inst.$props),
           });
           inst = inst.$parent;
         }
@@ -409,8 +447,8 @@ export const componentInspectFunc = (
         while (vnode && chain.length < depth) {
           chain.push({
             name: (vnode.type && (vnode.type.name || vnode.type.__name)) || "(anonymous)",
-            data: safeSerialize(vnode.setupState, MAX_DEPTH),
-            props: safeSerialize(vnode.props, MAX_DEPTH),
+            data: ser(vnode.setupState),
+            props: ser(vnode.props),
           });
           vnode = vnode.parent;
         }
@@ -421,8 +459,8 @@ export const componentInspectFunc = (
           if (typeof ty === "function") {
             chain.push({
               name: ty.displayName || ty.name || "(anonymous)",
-              data: safeSerialize(fiber.memoizedState, MAX_DEPTH),
-              props: safeSerialize(fiber.memoizedProps, MAX_DEPTH),
+              data: ser(fiber.memoizedState),
+              props: ser(fiber.memoizedProps),
             });
           }
           fiber = fiber.return;
@@ -449,13 +487,14 @@ export const componentInspectFunc = (
     for (let i = 0; i < limit; i++) {
       const el = matched[i];
       const { framework, instance } = findBoundary(el);
-      const chain = walkChain(framework, instance, componentDepth);
+      // row 是首要交付物,先序列化(独立 serializer,优先吃全局预算);chain 次之(预算更紧)。
+      const row = detectRow(el, framework, instance, makeSerializer(800));
+      const chain = walkChain(framework, instance, componentDepth, makeSerializer(400));
       const entry: {
         framework: "vue2" | "vue3" | "react" | "unknown";
         chain: Array<{ name: string; data: unknown; props: unknown }>;
         row?: { rowKey: string | number | null; row: unknown; index: number };
       } = { framework, chain };
-      const row = detectRow(el, framework, instance);
       if (row) entry.row = row;
       components.push(entry);
     }
@@ -550,8 +589,9 @@ export function registerQueryHandlers(router: ActionRouter): void {
         return res;
       } else {
         // component 模式:注入 componentInspectFunc 取 Vue/React 组件链 + 行数据。
-        const maxResults = Math.min((args.maxResults as number | undefined) ?? 10, 20);
-        const componentDepth = Math.min(Math.max((args.componentDepth as number | undefined) ?? 4, 1), 12);
+        // 默认低(5/depth3):组件实例数据比 css/text 重,且全局预算硬兜底防输出爆炸。
+        const maxResults = Math.min((args.maxResults as number | undefined) ?? 5, 10);
+        const componentDepth = Math.min(Math.max((args.componentDepth as number | undefined) ?? 3, 1), 12);
 
         const results = await chrome.scripting.executeScript({
           target: buildExecuteTarget(tid, frameId),
