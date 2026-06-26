@@ -3343,6 +3343,8 @@ export function registerObserveHandlers(router: ActionRouter, debuggerMgr: Debug
         candidateCount?: number;
         /** 虚拟列表盲区(容器未收集时的 frame 级信号)。@since blindspot */
         blindspots?: Array<{ kind: "virtual"; total: number; rendered: number; name: string; confidence?: "low" }>;
+        /** 模态作用域信号。@since modal-scope */
+        modal?: { name: string; role: string; suppressed: number };
       }> = [];
 
       for (const s of scans) {
@@ -3495,6 +3497,7 @@ export function registerObserveHandlers(router: ActionRouter, debuggerMgr: Debug
           scanned: true,
           candidateCount: s.page.candidateCount,
           ...(s.page.blindspots && s.page.blindspots.length ? { blindspots: s.page.blindspots } : {}),
+          ...(s.page.modal ? { modal: s.page.modal } : {}),
         });
       }
 

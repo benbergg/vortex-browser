@@ -79,6 +79,8 @@ interface CompactFrame {
   candidateCount?: number;
   /** 虚拟列表盲区(容器未被收集为元素时的 frame 级信号)。@since blindspot */
   blindspots?: Array<{ kind: "virtual"; total: number; rendered: number; name: string; confidence?: "low" }>;
+  /** 模态作用域信号(aria-modal 弹层裁剪了背景)。@since modal-scope */
+  modal?: { name: string; role: string; suppressed: number };
 }
 
 interface CompactObserve {
@@ -267,6 +269,17 @@ function blindspotSummary(
   return parts.length ? `# blindspots: ${parts.join("; ")}` : null;
 }
 
+/** 模态作用域 meta 行:首个带 modal 的 frame → # modal:。对齐 # blindspots: 风格。 */
+function modalSummary(frames?: CompactFrame[]): string | null {
+  for (const f of frames ?? []) {
+    if (f.modal) {
+      const nm = f.modal.name ? ` "${f.modal.name}"` : "";
+      return `# modal: ${f.modal.role}${nm} (suppressed ${f.modal.suppressed} background elements)`;
+    }
+  }
+  return null;
+}
+
 /** 截断量化 meta 行:per truncated frame。追加到 scanNotes。 */
 function pushTruncationNotes(frames: CompactFrame[] | undefined, scanNotes: string[]): void {
   for (const f of frames ?? []) {
@@ -293,6 +306,8 @@ export function renderObserveCompact(
   }
   const bsLine = blindspotSummary(data.elements, data.frames, snapshotHash);
   if (bsLine) lines.push(bsLine);
+  const modalLine = modalSummary(data.frames);
+  if (modalLine) lines.push(modalLine);
   lines.push("");
 
   // T4-diff: 查找上一快照身份键集合（不存在/过期则 null → 不 diff）。
