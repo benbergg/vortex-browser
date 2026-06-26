@@ -380,10 +380,13 @@ export const PUBLIC_TOOLS: ToolDef[] = [
     },
   },
   {
-    // 富文本编辑器粘贴：text 是纯文本（Markdown 自动转换），html 是可选的原始 HTML 内容。
+    // 富文本编辑器粘贴：经合成 paste 事件把 text(纯文本)/html(可选)插入编辑器。
+    // Markdown 是否转富文本取决于编辑器：部分编辑器自动转，部分(如语雀 Lake,
+    // 对合成 isTrusted=false 事件不自动转)插入字面 markdown 并由其 UI 转换按钮转换。
+    // 故描述只承诺「插入」,不承诺自动转换(2026-06-26 Lake 实机 spike 实证)。
     name: "vortex_paste",
     action: "dom.paste",
-    description: "Paste text/html into editor; Markdown auto-converts.",
+    description: "Paste text/html into a rich-text editor.",
     schema: {
       type: "object",
       properties: {

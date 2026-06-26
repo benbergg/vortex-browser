@@ -100,6 +100,17 @@ vortex_paste({
 - spike 步骤：observe 定位 Lake 编辑器 → `vortex_paste` 灌一段含 `# 标题` / 表格的 Markdown → 截图 + 回读 textContent 确认是否转换为富文本结构。
 - 若 Lake 拒收合成事件 → 升级方案 T 并重测；若接受 → 首版收口。
 
+#### 验证结果（2026-06-26 实机 spike，真实登录态语雀 Lake `div.ne-engine`）
+
+**硬风险已兑现（部分）**：
+- ✅ `dom.paste` handler 生效；合成 `ClipboardEvent('paste')` **能把 text/plain 插入 Lake**（内容改变、未被 isTrusted 拒收，回读护栏判 success）。
+- ❌ **Lake 不对合成事件执行 Markdown 转换**：`# 标题` / `| 表格 |` 以**字面纯文本**插入（0 个 `h1`、0 个 `table`，`hasLiteralHash/Pipe=true`）。带正确光标（`selInEditor=true`）重测结论不变 → **非缺光标，是 Lake 对 Markdown 转换路径校验 `isTrusted`**。
+- 门控旁记：空文档「选模板」空状态浮层使 actionability 报 `OBSCURED`，需 `force:true` 跳质量门（粘贴只需聚焦+派发，合理）。
+
+**结论（含用户澄清）**：方案 S（合成 paste）对 Lake **成功插入 markdown 文本**。Lake 本身对粘贴的 markdown **不自动转换**，而是**在 UI 顶部显示「转换」按钮**由用户点击转换（用户 2026-06-26 确认）——即「插入字面 markdown + 由编辑器转换按钮转换」是 Lake 的预期路径，方案 S 已达成可用闭环。**故方案 T（可信 CDP 粘贴）不再需要**，不另立计划。
+
+**已落实处置**：公开描述从过度承诺的 "Markdown auto-converts" 软化为 **"Paste text/html into a rich-text editor."**（只承诺插入，不承诺自动转换）。族 A 回读护栏只判 `after !== before`（能识别「完全拒收」→ NO_EFFECT，识别不了「转换 vs 字面」）——在 Lake「插入即可用、转换交给 UI 按钮」前提下，此粒度已足够，不再追加转换检测。
+
 ---
 
 ## 2. 缺口二设计：动态 SPA act 自愈增强
