@@ -139,9 +139,42 @@ describe("componentInspectFunc — safeSerialize 边界(经 vue2 _data 注入)",
     mountWithData(wide);
     const r = componentInspectFunc(".s", 4, 10) as Ok;
     const data = r.components[0].chain[0].data as Record<string, unknown>;
-    // chain serializer per-call 400 → 远小于 5000 键,必命中预算 break + __truncated__ 标记
+    // chain serializer per-call 400 → 远小于 5000 键,必命中预算 break + __vtxTruncated__ 标记
     expect(Object.keys(data).length).toBeLessThan(500);
-    expect(data.__truncated__).toBe("[Budget]");
+    expect(data.__vtxTruncated__).toBe("[Budget]");
+  });
+
+  it("I-2: 多元素时靠后元素的 row 不被前面 chain 耗尽全局预算饿死", () => {
+    // 10 个 el-table 单元格,各自 chain 序列化同一 ElTable 的大 _data(吃满全局预算 3000);
+    // 两遍序列化保证所有 row(首要交付物)先于 chain 序列化 → 全部完整。
+    const tableEl = document.createElement("div");
+    const big: any = {};
+    for (let i = 0; i < 500; i++) big["k" + i] = i; // 撑大 _data,让 chain 吃预算
+    const data = Array.from({ length: 10 }, (_, i) => ({ id: i, name: "r" + i }));
+    (tableEl as any).__vue__ = {
+      $options: { name: "ElTable" }, _data: big, $props: { rowKey: "id" }, rowKey: "id",
+      store: { states: { data } }, $parent: null,
+    };
+    const tbody = document.createElement("tbody");
+    for (let i = 0; i < 10; i++) {
+      const tr = document.createElement("tr");
+      const td = document.createElement("td");
+      td.className = "budcell";
+      tr.appendChild(td);
+      tbody.appendChild(tr);
+    }
+    tableEl.appendChild(tbody);
+    document.body.appendChild(tableEl);
+
+    const r = componentInspectFunc(".budcell", 4, 10) as Ok;
+    expect(r.components).toHaveLength(10);
+    // 全部 10 行完整(非 "[Budget]"),含最后一个
+    for (let i = 0; i < 10; i++) {
+      expect(r.components[i].row).toBeDefined();
+      expect((r.components[i].row.row as any).id).toBe(i);
+    }
+    // 场景有效性自证:全局预算确被 chain 耗尽 → 靠后元素 chain 退化为 [Budget]
+    expect(r.components[9].chain[0].data).toBe("[Budget]");
   });
 });
 

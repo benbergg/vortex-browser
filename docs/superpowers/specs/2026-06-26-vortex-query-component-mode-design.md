@@ -39,7 +39,7 @@
 |---|---|
 | `mode: "component"` | 与 `text`/`css` 并列新枚举 |
 | `pattern` | CSS 选择器（复用现字段；component 模式下即 selector） |
-| `componentDepth?` | 上溯层数，默认 `4` |
+| `componentDepth?` | 上溯层数，默认 `3`（实机订正，原 4） |
 | `maxResults?` | 复用 |
 | `tabFields` | 复用 |
 
@@ -69,24 +69,25 @@
 3. **上溯链取数**（至多 `componentDepth` 层）：
    - Vue2：`{ name: inst.$options.name || inst.$options._componentTag, data: safeSerialize(inst._data), props: safeSerialize(inst.$props) }`；climb `inst = inst.$parent`
    - Vue3：`{ name: vnode.type.name || vnode.type.__name, data: safeSerialize(vnode.setupState), props: safeSerialize(vnode.props) }`；climb `vnode = vnode.parent`
-   - React：跳过 host fiber（`typeof fiber.type !== "function"` 且非 class）；取 `{ name: fiber.type.displayName || fiber.type.name, props: safeSerialize(fiber.memoizedProps), data: safeSerialize(shallowState(fiber.memoizedState)) }`；climb `fiber = fiber.return`
-4. **行数据探测**（库相关，**实现期 spike 驱动**）：
-   - **Vue2 + Element UI（硬保证）**：上溯到 `$options.name === "ElTable"` 实例 → `inst.store.states.data` 行数组；`$index` 取自最近的行作用域。**精确路径实机确认**。
-   - **React + antd Table（硬保证）**：行对象在行组件 `memoizedProps` 的 `record`/`row`/`rowData`/`children` 之一；rowKey 取 `rowKey`/`key`。
+   - React：跳过 host fiber（`typeof fiber.type !== "function"`）；取 `{ name: fiber.type.displayName || fiber.type.name, props: ser(fiber.memoizedProps), data: ser(fiber.memoizedState) }`；climb `fiber = fiber.return`。注：`data` 为 hook 链表原始结构（首发只取浅层，由深度3+预算有界）
+4. **行数据探测**（库相关）—— **实机 spike(2026-06-26)订正,实现数值见此节**：
+   - **Vue2 + vxe-table（硬保证）**：ipaas 实际用 vxe-table（N002 误标 el-table）。上溯到 `$options.name === "VxeTable"` → `tr[rowid]` + `inst.getRowById(rowid)` 取行，`index` 用 `inst.getRowIndex(row)`。**不依赖 DOM 索引，抗虚拟滚动/固定列,实机验证通过**（rowKey=rowid）。
+   - **React + antd Table（硬保证）**：沿 `fiber.return` 找带 `record`/`row`/`rowData` 的祖先；rowKey 优先 `memoizedProps.rowKey`/`data-row-key`，**回退 `record.key`/`record.id`**（实机发现 record 在 cell fiber、rowKey 在 row fiber，故须回退）。实机验证通过（rowKey="1"）。
+   - **Vue2 + Element UI el-table（best-effort,非硬保证）**：上溯 `ElTable` → `store.states.data` + `closest("tr")` 同级索引。**仅理想化 mock 测过,未经真实「固定列」el-table 实机验证**（固定列渲染独立 table/tbody，索引可能取错行，错行比缺省更糟）→ 降级 best-effort，站点须实机校准后才可信。
    - 其余表格库 best-effort，拿不到则 `row` 缺省，不报错。
 
-### 3.4 承重件 `safeSerialize(value, depth=4)`
+### 3.4 承重件 序列化（`makeSerializer` 工厂）—— 实机 spike 订正
 
-最易爆，独立纯函数 + 重单测：
+实机 spike 发现单一 `safeSerialize` 在真实 vxe-table 组件 `_data` 上**输出爆炸**（曾吐 10 万字符超 token 限）。改为 `makeSerializer(perCallCap)` 工厂 + **全局节点预算**，独立纯函数 + 重单测：
 
-- 深度上限（默认 4），超出 → `"[MaxDepth]"`
-- `function` → `"[Function]"`
-- DOM `Node`/`Element` → `"[Element]"`
-- 循环引用 → `"[Circular]"`（WeakSet 追踪）
-- 数组截断（默认 100 项），超出附 `"[+N more]"`
-- 剥 Vue 响应式内部键（`__ob__`、`__v_*`）
-- 单字段 try/catch：getter 抛错 → `"[Unserializable]"`
-- 全局节点数上限兜底（防超大对象，如 5000 节点）
+- **全局节点预算 `globalBudget.cap = 3000`**：所有 serializer 共享,容器循环内命中即 break，硬封顶整次调用输出。
+- **两遍序列化**：先序列化所有元素的 `row`（首要交付物，优先吃预算），再 chain（次要吃余额）→ 高 maxResults 时靠后元素的 row 不被前面 chain 饿死。
+- 深度上限 `MAX_DEPTH = 3`，超出 → `"[MaxDepth]"`（原设计 4，实测组件内部过深，降到 3）
+- 数组截断 `ARRAY_CAP = 40`，超出附 `"[+N more]"`（原设计 100）
+- `function` → `"[Function]"`；DOM `Node` → `"[Element]"`；循环引用 → `"[Circular]"`（WeakSet 路径追踪 add/finally-delete）
+- 剥 Vue 响应式内部键（`__ob__`、`__v_*`）；getter 抛错 per-key try/catch → `"[Unserializable]"`
+- 对象超预算 break 时附 `"__vtxTruncated__": "[Budget]"` 标记；预算耗尽统一返 `"[Budget]"`
+- handler 默认：component `maxResults` 默认 `5` / 上限 `10`、`componentDepth` 默认 `3`（原设计 10/20/4，因组件数据重 + 预算硬兜底而调低）
 
 ### 3.5 降级与错误
 
@@ -119,4 +120,6 @@
 - slot_scope 闭包 proxy（仅当 store 路径在某些组件拿不到时再考虑）。
 - React hooks 链深度序列化（首发只取浅层）。
 - AG-Grid / 其他表格库行探测硬保证。
+- el-table（含固定列）真实站点实机校准后从 best-effort 升回硬保证。
+- 大体积 POST body：`GET_REQUEST_DETAIL` 现依赖 `requestWillBeSent` 内联 `postData`，CDP 对大 body 仅置 `hasPostData` 不带 `postData` → 需补 `Network.getRequestPostData` 兜底（M-2）。
 - 独立 `vortex_component` 工具（如未来 query 描述过载再拆）。

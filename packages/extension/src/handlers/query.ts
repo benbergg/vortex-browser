@@ -294,7 +294,7 @@ export const componentInspectFunc = (
           }
           const out: Record<string, unknown> = {};
           for (const key of Object.keys(v as object)) {
-            if (over()) { out.__truncated__ = "[Budget]"; break; }
+            if (over()) { out.__vtxTruncated__ = "[Budget]"; break; }
             if (key === "__ob__" || key.indexOf("__v_") === 0) continue;
             try {
               out[key] = walk((v as Record<string, unknown>)[key], depth + 1);
@@ -343,7 +343,10 @@ export const componentInspectFunc = (
               }
             }
           }
-          // ② el-table:上溯实例链找 ElTable,读 store.states.data + DOM tr 索引
+          // ② el-table(best-effort,非硬保证):上溯找 ElTable,读 store.states.data + DOM tr 索引。
+          // ⚠ 仅单 tbody 理想化 mock 测过,未经真实「固定列」el-table 实机验证——固定列会渲染
+          // 独立 table/tbody,closest("tr")+同级 TR 索引在多 body 场景可能取错行(错行比缺省更糟)。
+          // 真实硬保证目标是 vxe(getRowById,不依赖 DOM 索引);el-table 站点须实机校准后才可信。
           let inst = startInstance as any;
           let table: any = null;
           let guard = 0;
@@ -370,6 +373,9 @@ export const componentInspectFunc = (
           return { rowKey, row: ser(rowObj), index };
         }
         if (framework === "react") {
+          // best-effort:沿 fiber.return 上溯找带 record/row/rowData 的祖先即视为行。
+          // ⚠ 误报边界:非表格上下文(如 <DetailCard record={...}/>)也可能产出伪 row;
+          // 由「最近命中优先 + 表格语义字段名」缓解,但不保证 100% 准。
           let fiber = startInstance as any;
           let hops = 0;
           while (fiber && hops < 40) {
@@ -459,6 +465,8 @@ export const componentInspectFunc = (
           if (typeof ty === "function") {
             chain.push({
               name: ty.displayName || ty.name || "(anonymous)",
+              // data 为 React hook 链表原始结构(memoizedState/next/queue),首发只取浅层
+              // (深度3+预算有界),语义噪声较大;深度解析 hooks 留 backlog。
               data: ser(fiber.memoizedState),
               props: ser(fiber.memoizedProps),
             });
@@ -478,26 +486,31 @@ export const componentInspectFunc = (
 
     const total = matched.length;
     const limit = Math.min(total, maxResults);
+
+    // 边界只解析一次。
+    const boundaries: Array<{ el: Element; framework: "vue2" | "vue3" | "react" | "unknown"; instance: unknown }> = [];
+    for (let i = 0; i < limit; i++) {
+      const el = matched[i];
+      boundaries.push({ el, ...findBoundary(el) });
+    }
+    // 两遍共享同一 globalBudget:① 所有元素的 row 先序列化(row 是首要交付物,优先吃预算,
+    // 行对象小、全部能进);② 再 chain(次要)吃余额。避免单遍时靠后元素的 row 被前面元素的
+    // 重组件 chain 把全局预算耗尽而静默饿死(I-2)。
+    const rows = boundaries.map((b) => detectRow(b.el, b.framework, b.instance, makeSerializer(800)));
     const components: Array<{
       framework: "vue2" | "vue3" | "react" | "unknown";
       chain: Array<{ name: string; data: unknown; props: unknown }>;
       row?: { rowKey: string | number | null; row: unknown; index: number };
-    }> = [];
-
-    for (let i = 0; i < limit; i++) {
-      const el = matched[i];
-      const { framework, instance } = findBoundary(el);
-      // row 是首要交付物,先序列化(独立 serializer,优先吃全局预算);chain 次之(预算更紧)。
-      const row = detectRow(el, framework, instance, makeSerializer(800));
-      const chain = walkChain(framework, instance, componentDepth, makeSerializer(400));
+    }> = boundaries.map((b, i) => {
+      const chain = walkChain(b.framework, b.instance, componentDepth, makeSerializer(400));
       const entry: {
         framework: "vue2" | "vue3" | "react" | "unknown";
         chain: Array<{ name: string; data: unknown; props: unknown }>;
         row?: { rowKey: string | number | null; row: unknown; index: number };
-      } = { framework, chain };
-      if (row) entry.row = row;
-      components.push(entry);
-    }
+      } = { framework: b.framework, chain };
+      if (rows[i]) entry.row = rows[i];
+      return entry;
+    });
 
     return { components, total, showing: limit };
   } catch (e) {
