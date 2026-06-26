@@ -75,6 +75,11 @@ function __inlineMatch(candidates, desc){
   var target=__norm(desc.name); if(!target) return {kind:"none"};
   var hits=candidates.filter(function(el){ return __names(el).indexOf(target)>=0; });
   if(hits.length===0) return {kind:"none"};
+  // 单元格 td>div>span 同文嵌套链 collapse 到叶,使裸单元格能唯一 heal;真正分立同名仍 ambiguous
+  if(hits.length>1){
+    var leaves=hits.filter(function(el){ return !hits.some(function(o){ return o!==el && el.contains(o); }); });
+    if(leaves.length>=1) hits=leaves;
+  }
   if(hits.length>1 && desc.role){
     var narrowed=hits.filter(function(el){ return __roleMatches(el, desc.role); });
     if(narrowed.length>=1) hits=narrowed; }
@@ -105,11 +110,20 @@ export async function tryHealSelector(
       // 收集候选：scan 全文档可交互元素（穿 open shadow 复用 dom-resolve）。
       const qad = (window as any).__vortexDomResolve?.queryAllDeep;
       if (!qad) return { kind: "none" };
-      const candidates = qad("a,button,input,select,textarea,[role],[onclick],[tabindex]") as Element[];
+      const NARROW = "a,button,input,select,textarea,[role],[onclick],[tabindex]";
+      // B1:虚拟表格单元格常是裸 <td>/<div>(无 role/onclick/tabindex),窄集永远捞不到 →
+      // 必然 STALE_REF。窄集按 name 零命中时回退宽集(追加 td/th/li/[class])再匹配一次,
+      // 歧义仍由 AMBIGUOUS_DESCRIPTOR 护栏拒绝,不引入误选。
+      const BROAD = NARROW + ",td,th,li,[class]";
       // 注入内联匹配体（与真源对齐）。
       // eslint-disable-next-line no-new-func
       const match = new Function("candidates", "desc", `${inlineBody}; return __inlineMatch(candidates, desc);`);
-      const r = match(candidates, desc) as { kind: string; el?: Element };
+      let candidates = qad(NARROW) as Element[];
+      let r = match(candidates, desc) as { kind: string; el?: Element };
+      if (r.kind === "none") {
+        candidates = qad(BROAD) as Element[];
+        r = match(candidates, desc) as { kind: string; el?: Element };
+      }
       if (r.kind === "unique" && r.el) {
         (r.el as HTMLElement).setAttribute(attr, tok);
         return { kind: "unique", selector: `[${attr}="${tok}"]` };

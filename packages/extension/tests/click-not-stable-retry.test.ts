@@ -66,7 +66,7 @@ describe("vortex_act click NOT_STABLE 自动 force=true 重试 (对齐 FILL BUG-
   it("契约 1: 默认 (无 force) — NOT_STABLE → 自动 force=true 重试, 二次成功不报错", async () => {
     waitActionableMock
       .mockRejectedValueOnce(vtxError(VtxErrorCode.NOT_STABLE, "Element not stable after 2000ms", { selector: "button#s" }))
-      .mockResolvedValueOnce(undefined);
+      .mockResolvedValueOnce({ ok: true, rect: { x: 0, y: 0, w: 1, h: 1 }, selector: "button#s" });
 
     const resp = await router.dispatch(mkReq({ selector: "button#s", useRealMouse: true, tabId: 42 }));
 
@@ -77,7 +77,7 @@ describe("vortex_act click NOT_STABLE 自动 force=true 重试 (对齐 FILL BUG-
   });
 
   it("契约 2: 显式 force=true — 一次成功, 不触发重试", async () => {
-    waitActionableMock.mockResolvedValueOnce(undefined);
+    waitActionableMock.mockResolvedValueOnce({ ok: true, rect: { x: 0, y: 0, w: 1, h: 1 }, selector: "button#s" });
 
     const resp = await router.dispatch(mkReq({ selector: "button#s", useRealMouse: true, force: true, tabId: 42 }));
 

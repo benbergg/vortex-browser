@@ -349,6 +349,10 @@ export function dispatchNewTool(
       return null;
     }
 
+    case "vortex_paste":
+      // target 已由 server.ts 翻译成 selector / index+snapshotId；text/html 随 params 透传。
+      return { action: "dom.paste", params };
+
     default:
       return null;
   }

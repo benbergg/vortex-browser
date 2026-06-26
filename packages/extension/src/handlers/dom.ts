@@ -102,9 +102,16 @@ export async function healAwareGate(
   force: boolean | undefined,
   descriptor: { role?: string; name: string } | undefined,
 ): Promise<{ selector: string; healed: boolean }> {
+  // B2:首跑 gate 即注入自旋期重定位(descriptor 存在才有意义),让高频重渲染元素
+  // 在 2s 超时前就被按名重新锁定,而非死等超时后才一次性 heal。
+  const reresolve = descriptor
+    ? () => tryHealSelector(tabId, frameId, descriptor).catch(() => null)
+    : undefined;
   try {
-    await waitActionableAutoForce(tabId, frameId, selector, options, force);
-    return { selector, healed: false };
+    // B2 修复：采纳 waitActionableAutoForce 返回的 selector，自旋期 descriptor 重定位后
+    // curSelector 已切换，ok.selector ≠ 入参 selector → healed:true，下游用新选择器。
+    const ok = await waitActionableAutoForce(tabId, frameId, selector, { ...options, reresolve }, force);
+    return { selector: ok.selector, healed: ok.selector !== selector };
   } catch (err) {
     if (descriptor && isStaleNotAttached(err)) {
       const healed = await tryHealSelector(tabId, frameId, descriptor); // 抛 AMBIGUOUS_DESCRIPTOR/STALE_REF
@@ -884,6 +891,82 @@ export function registerDomHandlers(
       } finally {
         await readDialogCapturedAndDisarm(tid, frameId);
       }
+    },
+
+    [DomActions.PASTE]: async (args, tabId) => {
+      const __t = resolveTarget(args);
+      // let 声明：gate 自愈后用 __heal.selector 重绑，下游所有引用统一用 selector。
+      let selector = __t.selector;
+      const text = args.text as string;
+      const html = args.html as string | undefined;
+      if (text == null) throw vtxError(VtxErrorCode.INVALID_PARAMS, "Missing required param: text");
+      const tid = await getActiveTabId(__t.boundTabId ?? (args.tabId as number | undefined) ?? tabId);
+      const frameId = __t.boundFrameId ?? (args.frameId as number | undefined);
+      if (frameId != null) await ensureFrameAttached(tid, frameId);
+
+      // gate + descriptor 自愈(needsEditable:true,contenteditable 也算可编辑)。
+      const __heal = await healAwareGate(
+        tid, frameId, selector,
+        { timeout: args.timeout as number | undefined, needsEditable: true },
+        args.force as boolean | undefined,
+        __t.descriptor,
+      );
+      selector = __heal.selector;
+
+      await loadPageSideModule(tid, frameId, "dom-resolve");
+      // MAIN world 单次注入:解析→聚焦→构造 DataTransfer→派发合成 paste→回读。
+      // MAIN world 必需:DataTransfer/ClipboardEvent 须是页面 realm 对象,
+      // 否则页面监听器读 e.clipboardData 跨 realm 取不到数据。
+      const out = await chrome.scripting.executeScript({
+        target: buildExecuteTarget(tid, frameId),
+        world: "MAIN",
+        func: (sel: string, txt: string, htmlPayload: string | null) => {
+          const els = (window as any).__vortexDomResolve.queryAllDeep(sel) as Element[];
+          if (els.length === 0) return { errorCode: "ELEMENT_NOT_FOUND", error: `Element not found: ${sel}` };
+          const el = els[0] as HTMLElement;
+          if (!el.isContentEditable) {
+            return {
+              ok: true, isContentEditable: false,
+              error: `Element ${sel} is not contentEditable; vortex_paste is for rich-text editors — use vortex_fill for inputs/textareas`,
+            };
+          }
+          el.focus();
+          const before = el.textContent ?? "";
+          const dt = new DataTransfer();
+          dt.setData("text/plain", txt);
+          if (htmlPayload != null) dt.setData("text/html", htmlPayload);
+          el.dispatchEvent(new ClipboardEvent("paste", { clipboardData: dt, bubbles: true, cancelable: true }));
+          const after = el.textContent ?? "";
+          return { ok: true, isContentEditable: true, before, after, changed: after !== before };
+        },
+        args: [selector, text, html ?? null],
+      });
+      const r = out?.[0]?.result as {
+        ok?: true; isContentEditable?: boolean; before?: string; after?: string;
+        changed?: boolean; errorCode?: string; error?: string;
+      } | undefined;
+      // 族 A 护栏：注入无返回值（如 CSP 阻断）→ 静默假成功，改为响亮报错。
+      if (r === undefined) {
+        throw vtxError(
+          VtxErrorCode.JS_EXECUTION_ERROR,
+          `paste injection returned no result for ${selector} (injection may be blocked by CSP)`,
+        );
+      }
+      if (r?.errorCode) mapPageError(r, selector);
+      // 非 contentEditable:提示改用 fill(不假成功)。
+      if (r && r.isContentEditable === false) {
+        throw vtxError(VtxErrorCode.INVALID_TARGET, r.error ?? `Element ${selector} is not contentEditable; use vortex_fill`);
+      }
+      // 族 A 回读护栏:非空文本派发后内容未变 → 编辑器拒收(很可能校验 isTrusted)。
+      if (text !== "" && r?.changed === false) {
+        throw vtxError(
+          VtxErrorCode.NO_EFFECT,
+          `Element ${selector} rejected synthetic paste (contentEditable unchanged; editor may gate on isTrusted — try vortex_fill, or a future trusted-paste escalation)`,
+          { selector, extras: { attempted: text } },
+        );
+      }
+      const result = { success: true, pasted: text.length, path: "synthetic-clipboard" };
+      return __heal.healed ? { ...result, healed: true } : result;
     },
 
     [DomActions.FILL]: async (args, tabId) => {

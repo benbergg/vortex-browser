@@ -36,11 +36,15 @@ const RETRY_INTERVAL_MS: Record<ActionabilityFailure, number> = {
 export interface WaitOptions extends CheckOptions {
   /** Default 2000ms. */
   timeout?: number;
+  /** B2:持续 NOT_ATTACHED 达阈值时按 descriptor 重定位,返回新 selector(无则 null)。@since 当前版本 */
+  reresolve?: () => Promise<string | null>;
 }
 
 export interface WaitOk {
   ok: true;
   rect: { x: number; y: number; w: number; h: number };
+  /** 实际命中的选择器；自旋期 descriptor 重定位后可能 ≠ 入参 selector。*/
+  selector: string;
 }
 
 /**
@@ -61,18 +65,37 @@ export async function waitActionable(
   let lastReason: ActionabilityFailure | null = null;
   let lastExtras: Record<string, unknown> | undefined;
 
+  // B2:descriptor 重定位阈值。持续 NOT_ATTACHED 累计超过此值即按 descriptor 重定位
+  // (而非死等整个 timeout 后才自愈一次),应对虚拟表格/富文本高频重渲染。
+  const RERESOLVE_AFTER_MS = 500;
+  let curSelector = selector;
+  let notAttachedSince: number | null = null;
+  let reresolved = false;
+
   while (Date.now() - start < timeout) {
     const result: ActionabilityResult = await checkActionability(
       tabId,
       frameId,
-      selector,
+      curSelector,
       options,
     );
     if (result.ok) {
-      return { ok: true, rect: result.rect };
+      return { ok: true, rect: result.rect, selector: curSelector };
     }
     lastReason = result.reason;
     lastExtras = result.extras as Record<string, unknown> | undefined;
+
+    if (result.reason === "NOT_ATTACHED" && options.reresolve && !reresolved) {
+      const now = Date.now();
+      if (notAttachedSince === null) notAttachedSince = now;
+      else if (now - notAttachedSince >= RERESOLVE_AFTER_MS) {
+        const next = await options.reresolve();
+        reresolved = true; // 每跑 gate 最多重定位一次,避免抖动无限重定位
+        if (next) { curSelector = next; notAttachedSince = null; continue; }
+      }
+    } else if (result.reason !== "NOT_ATTACHED") {
+      notAttachedSince = null;
+    }
 
     const interval = RETRY_INTERVAL_MS[result.reason];
     if (interval < 0) {
@@ -85,14 +108,14 @@ export async function waitActionable(
           ? (lastExtras?.ariaValueWidget as string | undefined)
           : undefined;
       const message = ariaValueWidget
-        ? `NOT_EDITABLE on selector "${selector}" (role=${ariaValueWidget} is an ARIA value widget ` +
+        ? `NOT_EDITABLE on selector "${curSelector}" (role=${ariaValueWidget} is an ARIA value widget ` +
           `with no fillable input — set its value with vortex_press Arrow/Home/End keys after focusing it, ` +
           `or drag the thumb with vortex_mouse_drag; do not use vortex_fill)`
-        : `${result.reason} on selector "${selector}"`;
+        : `${result.reason} on selector "${curSelector}"`;
       throw vtxError(
         mapToVtxCode(result.reason),
         message,
-        { selector, extras: lastExtras },
+        { selector: curSelector, extras: lastExtras },
       );
     }
     await new Promise((r) => setTimeout(r, interval));
@@ -124,6 +147,13 @@ export async function waitActionable(
       `Actionability timeout after ${timeout}ms; last reason: OBSCURED ` +
       `(element is covered by an open modal <dialog> in the top layer; the rest of the page is ` +
       `inert while it is open — dismiss the dialog first, e.g. press Escape or click its close button, then retry)`;
+  } else if (lastReason === "NOT_ATTACHED") {
+    message =
+      `Actionability timeout after ${timeout}ms; last reason: NOT_ATTACHED ` +
+      `(element kept detaching — likely a re-rendering SPA, e.g. virtual-scroll table or rich-text editor). ` +
+      `Re-run vortex_observe immediately before act to refresh the ref; for highly dynamic regions ` +
+      `locate via vortex_evaluate (query the live DOM or framework instance, e.g. el.__vueParentComponent); ` +
+      `or raise timeout.`;
   } else {
     message = `Actionability timeout after ${timeout}ms; last reason: ${lastReason ?? "unknown"}`;
   }
@@ -131,7 +161,7 @@ export async function waitActionable(
     lastReasonIsStability ? VtxErrorCode.NOT_STABLE : VtxErrorCode.TIMEOUT,
     message,
     {
-      selector,
+      selector: curSelector,
       extras: { lastReason, ...(lastExtras ?? {}) },
     },
   );

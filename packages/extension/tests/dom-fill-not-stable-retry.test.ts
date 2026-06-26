@@ -78,7 +78,7 @@ describe("vortex_fill NOT_STABLE 自动 force=true 重试 (BUG-011 N0060 方案 
     // 第一次: NOT_STABLE; 第二次 (force=true): 成功
     waitActionableMock
       .mockRejectedValueOnce(vtxError(VtxErrorCode.NOT_STABLE, "Element not stable after 5000ms (last reason: NOT_STABLE)", { selector: "#kw" }))
-      .mockResolvedValueOnce(undefined);
+      .mockResolvedValueOnce({ ok: true, rect: { x: 0, y: 0, w: 1, h: 1 }, selector: "#kw" });
 
     const resp = await router.dispatch(
       mkReq({ selector: "#kw", value: "iPhone 16" }),
@@ -93,7 +93,7 @@ describe("vortex_fill NOT_STABLE 自动 force=true 重试 (BUG-011 N0060 方案 
   });
 
   it("契约 2: 显式 force=true — 直接 force, 一次成功, 不触发重试", async () => {
-    waitActionableMock.mockResolvedValueOnce(undefined);
+    waitActionableMock.mockResolvedValueOnce({ ok: true, rect: { x: 0, y: 0, w: 1, h: 1 }, selector: "#kw" });
 
     const resp = await router.dispatch(
       mkReq({ selector: "#kw", value: "iPhone 16", force: true }),

@@ -30,7 +30,8 @@ import { ActionRouter } from "../src/lib/router.js";
 import { registerDomHandlers } from "../src/handlers/dom.js";
 
 vi.mock("../src/action/auto-wait.js", () => ({
-  waitActionable: vi.fn().mockResolvedValue(undefined),
+  waitActionable: vi.fn().mockImplementation((_t: unknown, _f: unknown, sel: string) =>
+    Promise.resolve({ ok: true, rect: { x: 0, y: 0, w: 1, h: 1 }, selector: sel })),
 }));
 vi.mock("../src/adapter/page-side-loader.js", () => ({
   loadPageSideModule: vi.fn().mockResolvedValue(undefined),

@@ -66,6 +66,9 @@
 // /shouldRecover record/verify/autoRecover),必须文档化让 LLM 知道 record→fingerprint
 // /verify→drift 的契约,沿 vortex_debug_read.filter 单点豁免先例。payload 实测
 // 7718B,cap +300 至 7800 留 82B 余量。沿用"加能力微调 cap 不压缩字符"惯例。
+//
+// vortex_paste 新增: 7800 → 8100 B。vortex_paste 新增(target+text+html+force schema),
+// payload 实测 8045B,cap +300 至 8100 留 55B 余量。沿用"加能力微调 cap 不压缩字符"惯例。
 
 import { describe, it, expect, afterEach } from "vitest";
 import { COMMIT_KINDS } from "@vortex-browser/shared";
@@ -77,19 +80,19 @@ describe("I15: tools/list budget + count + internalized grep", () => {
     defs.map(d => ({ name: d.name, description: d.description, inputSchema: d.schema })),
   );
 
-  it("tools/list 字节 ≤ 7800 B (可验证重放 fingerprint, 实测 7718 留 82B buffer)", () => {
+  it("tools/list 字节 ≤ 8100 B (vortex_paste 新增, 实测 8045 留 55B buffer)", () => {
     // V2 P0 修复 D16: filter 子字段 description 是必要的文档化豁免
     // (handler 已实现 console.ts:160 level / network.ts:305-321 pattern+statusMin/Max),
     // 移除豁免会触发 V2 D16 真发现复发 (LLM 不知可用子字段)。
-    // 上限 7800 = 7500 (vortex_query 基线) + ~301 (fingerprint schema+description)。
-    expect(toolsListPayload.length).toBeLessThanOrEqual(7800);
+    // 上限 8100 = 7800 (fingerprint 基线) + ~300 (vortex_paste schema+description)。
+    expect(toolsListPayload.length).toBeLessThanOrEqual(8100);
   });
 
-  it("公开工具数量 = 20（vortex_query 零 LLM 探测: 19 + vortex_query）", () => {
-    expect(defs.length).toBe(20);
+  it("公开工具数量 = 21（vortex_paste 新增: 20 + vortex_paste）", () => {
+    expect(defs.length).toBe(21);
   });
 
-  it("20 个公开工具名匹配 spec L4 §1.1+§1.2 + 工具横向优化 T6+T7+vortex_query", () => {
+  it("21 个公开工具名匹配 spec L4 §1.1+§1.2 + 工具横向优化 T6+T7+vortex_query+vortex_paste", () => {
     const names = defs.map(d => d.name).sort();
     expect(names).toEqual([
       "vortex_act",
@@ -104,6 +107,7 @@ describe("I15: tools/list budget + count + internalized grep", () => {
       "vortex_mouse_drag",
       "vortex_navigate",
       "vortex_observe",
+      "vortex_paste",
       "vortex_press",
       "vortex_query",
       "vortex_screenshot",
@@ -267,22 +271,22 @@ describe("Bug F regression: vortex_observe surface must expose frames", () => {
   });
 });
 
-// caps opt-in：默认面 verify 不进 tools/list；--caps=testing 时提升进公开面（21）。
+// caps opt-in：默认面 verify 不进 tools/list；--caps=testing 时提升进公开面（22）。
 // 守住「cap 工具默认零回归 + opt-in 后可见」双向不变量。
 describe("I15-caps: vortex_verify 仅在 --caps=testing 时进 tools/list", () => {
   afterEach(() => setEnabledCaps([]));
 
-  it("默认面仍 20，不含 vortex_verify", () => {
+  it("默认面仍 21，不含 vortex_verify", () => {
     setEnabledCaps([]);
     const defs = getToolDefs();
-    expect(defs.length).toBe(20);
+    expect(defs.length).toBe(21);
     expect(defs.map((d) => d.name)).not.toContain("vortex_verify");
   });
 
-  it("--caps=testing 时公开面 = 21 且含 vortex_verify", () => {
+  it("--caps=testing 时公开面 = 22 且含 vortex_verify", () => {
     setEnabledCaps(["testing"]);
     const names = getToolDefs().map((d) => d.name);
-    expect(getToolDefs().length).toBe(21);
+    expect(getToolDefs().length).toBe(22);
     expect(names).toContain("vortex_verify");
   });
 });

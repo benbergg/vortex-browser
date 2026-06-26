@@ -114,6 +114,11 @@ export function matchByDescriptor(
 
   let hits = candidates.filter((el) => elementNames(el).includes(target));
   if (hits.length === 0) return { kind: "none" };
+  // 单元格 td>div>span 同文嵌套链 collapse 到叶,使裸单元格能唯一 heal;真正分立同名仍 ambiguous
+  if (hits.length > 1) {
+    const leaves = hits.filter((el) => !hits.some((o) => o !== el && el.contains(o)));
+    if (leaves.length >= 1) hits = leaves;
+  }
   if (hits.length > 1 && desc.role) {
     const narrowed = hits.filter((el) => roleMatches(el, desc.role!));
     if (narrowed.length >= 1) hits = narrowed;
