@@ -102,8 +102,13 @@ export async function healAwareGate(
   force: boolean | undefined,
   descriptor: { role?: string; name: string } | undefined,
 ): Promise<{ selector: string; healed: boolean }> {
+  // B2:首跑 gate 即注入自旋期重定位(descriptor 存在才有意义),让高频重渲染元素
+  // 在 2s 超时前就被按名重新锁定,而非死等超时后才一次性 heal。
+  const reresolve = descriptor
+    ? () => tryHealSelector(tabId, frameId, descriptor).catch(() => null)
+    : undefined;
   try {
-    await waitActionableAutoForce(tabId, frameId, selector, options, force);
+    await waitActionableAutoForce(tabId, frameId, selector, { ...options, reresolve }, force);
     return { selector, healed: false };
   } catch (err) {
     if (descriptor && isStaleNotAttached(err)) {
