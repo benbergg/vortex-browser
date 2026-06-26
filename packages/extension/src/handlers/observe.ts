@@ -2493,7 +2493,8 @@ async function scanOneFrame(
         }
         // ── 模态作用域(Modal Scoping,N002 T2-2)──
         // aria-modal=true 弹层打开时,ARIA 要求模态外内容视为 inert。默认裁剪 baseCandidates 到
-        // 模态子树 + 发 # modal: meta;filterMode==='all' 时不裁剪、背景打 behindModal 标(Task 4)。
+        // 模态子树 + 发 # modal: meta;filter==='all' 时不裁剪、背景打 behindModal 标(Task 4)。
+        // ⚠ inject func 第 5 形参名是 `filter`(非外层的 filterMode);误用 filterMode 会 ReferenceError。
         // ⚠ 内联副本:与模块级 selectActiveModal / scopeCandidatesToModal 同步(observe-modal-scope.test.ts 锁)。
         let __activeModal: Element | null = null;
         for (const el of overlayRoots) {
@@ -2502,8 +2503,8 @@ async function scanOneFrame(
         let __modalMeta: { name: string; role: string; suppressed: number } | null = null;
         // filter=all 逃生口:不裁剪,但记录模态根供元素装配时给背景打 behindModal 标。
         const __behindModalRoot: Element | null =
-          __activeModal && filterMode === "all" ? __activeModal : null;
-        if (__activeModal && filterMode !== "all") {
+          __activeModal && filter === "all" ? __activeModal : null;
+        if (__activeModal && filter !== "all") {
           const __mRoot = __activeModal;
           const __kept: Element[] = [];
           let __suppressed = 0;

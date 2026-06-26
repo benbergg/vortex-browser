@@ -86,4 +86,12 @@ describe("modal-scope: source-lock(inject func 内联副本同步)", () => {
   it("inject func 内联 selectActiveModal 同名逻辑存在", () => {
     expect(src).toContain("__activeModal");
   });
+  it("inject func 模态块用 inject 形参 filter(非外层 filterMode)防 ReferenceError", () => {
+    // inject func 第 5 形参名是 `filter`(func 签名 L731);只有外层 scanOneFrame 才叫 filterMode。
+    // 模态块若误用 filterMode → inject MAIN-world 作用域无此变量 → minify 成自由变量 `a`
+    // → ReferenceError: a is not defined → 模态打开时 observe 整帧崩(2026-06-26 实机 spike 实证)。
+    expect(src).toMatch(/__activeModal && filter === "all"/);
+    expect(src).toMatch(/__activeModal && filter !== "all"/);
+    expect(src).not.toMatch(/__activeModal && filterMode/);
+  });
 });
