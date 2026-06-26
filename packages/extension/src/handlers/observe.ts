@@ -144,6 +144,8 @@ interface ScannedElement {
   };
   /** 盲区降级信号:虚拟列表/canvas/closed-shadow。@since blindspot */
   blindspot?: { kind: "virtual" | "canvas" | "shadow"; total?: number; rendered?: number; confidence?: "low" };
+  /** 模态弹层外的背景元素(filter=all 逃生口信号)。@since modal-scope */
+  behindModal?: boolean;
   _sel: string;
 }
 
@@ -2884,6 +2886,10 @@ async function scanOneFrame(
             ...(__href !== undefined ? { href: __href } : {}),
             ...(__inputCompound !== undefined ? { compound: __inputCompound } : {}),
             ...(__vtxBlind ? { blindspot: __vtxBlind } : {}),
+            // filter=all 逃生口:背景元素带 behindModal=true,渲染 [behind-modal] 提示。
+            ...(__behindModalRoot && !(el === __behindModalRoot || __behindModalRoot.contains(el))
+              ? { behindModal: true }
+              : {}),
             _sel: buildSelector(htmlEl),
           });
         }
@@ -3319,6 +3325,8 @@ export function registerObserveHandlers(router: ActionRouter, debuggerMgr: Debug
         };
         /** 盲区降级信号(compact 也透传)。@since blindspot */
         blindspot?: { kind: "virtual" | "canvas" | "shadow"; total?: number; rendered?: number; confidence?: "low" };
+        /** 模态弹层外的背景元素(filter=all 逃生口信号)。@since modal-scope */
+        behindModal?: boolean;
       };
       type FullElementOut = Omit<ScannedElement, "_sel"> & {
         frameId: number;
@@ -3422,6 +3430,7 @@ export function registerObserveHandlers(router: ActionRouter, debuggerMgr: Debug
               ...(e.description ? { description: e.description } : {}),
               ...(e.compound ? { compound: e.compound } : {}),
               ...(e.blindspot ? { blindspot: e.blindspot } : {}),
+              ...(e.behindModal ? { behindModal: true as const } : {}),
               frameId: s.frameId,
               ...(bboxTuple ? { bbox: bboxTuple } : {}),
             });
@@ -3468,6 +3477,7 @@ export function registerObserveHandlers(router: ActionRouter, debuggerMgr: Debug
               ...(e.description ? { description: e.description } : {}),
               ...(e.compound ? { compound: e.compound } : {}),
               ...(e.blindspot ? { blindspot: e.blindspot } : {}),
+              ...(e.behindModal ? { behindModal: true as const } : {}),
               frameId: s.frameId,
               ref,
               suggestedUsage: {

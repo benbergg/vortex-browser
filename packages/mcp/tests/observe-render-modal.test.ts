@@ -34,3 +34,24 @@ describe("observe-render: # modal meta", () => {
     expect(out).not.toContain("# modal:");
   });
 });
+
+describe("observe-render: [behind-modal] tag (filter=all)", () => {
+  it("背景元素带 behindModal=true → 行尾渲染 [behind-modal]", () => {
+    const data = {
+      snapshotId: "snap_test_2",
+      url: "https://example.com/dialog",
+      title: "Dialog Demo",
+      viewport: { width: 1440, height: 788, scrollY: 0, scrollHeight: 2000 },
+      elements: [
+        { ref: "@a:e0", role: "button", name: "Confirm", state: {} },
+        { ref: "@a:e1", role: "link", name: "nav", state: {}, behindModal: true },
+      ],
+      frames: [{ frameId: 0, parentFrameId: -1, url: "https://example.com/dialog", elementCount: 2, truncated: false, scanned: true }],
+    };
+    const out = renderObserveCompact(data as never, null);
+    const navLine = out.split("\n").find((l) => l.includes('"nav"'))!;
+    expect(navLine).toContain("[behind-modal]");
+    const okLine = out.split("\n").find((l) => l.includes('"Confirm"'))!;
+    expect(okLine).not.toContain("[behind-modal]");
+  });
+});

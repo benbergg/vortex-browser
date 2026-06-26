@@ -65,6 +65,8 @@ export interface CompactElement {
   offScreenActionable?: boolean;
   /** 盲区降级信号:虚拟列表/canvas/closed-shadow。@since blindspot */
   blindspot?: { kind: "virtual" | "canvas" | "shadow"; total?: number; rendered?: number; confidence?: "low" };
+  /** 模态弹层外的背景元素(filter=all 逃生口)。@since modal-scope */
+  behindModal?: boolean;
 }
 
 interface CompactFrame {
@@ -339,7 +341,7 @@ export function renderObserveCompact(
     const newPrefix = isNew ? "* " : "";
 
     lines.push(
-      `${newPrefix}${refOf(el, snapshotHash)} [${el.role}]${name}${stateFlags(el.state)}${valueSeg}${offscreenSeg}${blindspotTag(el.blindspot)}${bboxSeg}`,
+      `${newPrefix}${refOf(el, snapshotHash)} [${el.role}]${name}${stateFlags(el.state)}${valueSeg}${offscreenSeg}${blindspotTag(el.blindspot)}${el.behindModal ? " [behind-modal]" : ""}${bboxSeg}`,
     );
   }
 
@@ -502,7 +504,7 @@ export function renderObserveTree(
     const isNew = prevKeys !== null && !prevKeys.has(buildElementKey(e));
     const newPrefix = isNew ? "* " : "";
     lines.push(
-      `${indent}${newPrefix}- ${e.role}${name}${ref}${stateFlags(e.state)}${weak}${cursor}${listener}${dropzone}${draggable}${valueSeg}${comp}${err}${ctrl}${desc}${offscreenSeg}${blindspotTag(e.blindspot)}${bboxSeg}${hasChildren ? ":" : ""}`,
+      `${indent}${newPrefix}- ${e.role}${name}${ref}${stateFlags(e.state)}${weak}${cursor}${listener}${dropzone}${draggable}${valueSeg}${comp}${err}${ctrl}${desc}${offscreenSeg}${blindspotTag(e.blindspot)}${e.behindModal ? " [behind-modal]" : ""}${bboxSeg}${hasChildren ? ":" : ""}`,
     );
     if (hasUrl) lines.push(`${indent}  - /url: ${e.href}`);
     for (const k of kids) emit(k, depth + 1);
