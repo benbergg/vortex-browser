@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="zh"><head><meta charset="utf-8"><title>modal scope suppress background</title></head>
+<body>
+<h1>模态作用域(N002 T2-2):aria-modal=true 弹层开 → 裁剪背景</h1>
+<!--
+  复现 N002 T2-2 Element Plus dialog 实测:模态 3 按钮混进 56 个背景元素。
+  修复:观察 aria-modal=true → 裁剪 baseCandidates 到模态子树 + 发 # modal: meta;
+        filter=all 背景带 [behind-modal];role=dialog 无 aria-modal 走前置(零漂移)。
+
+  页面结构:
+    - <main> 内 12 个导航链接(背景,默认应被裁掉)
+    - 1 个 dialog(aria-modal=true)内 2 按钮(模态内,应保留)
+    - 1 个 dialog(无 aria-modal,pseudo-modal)内 2 按钮(走 overlay-priority 前置)
+    - 1 个 listbox(<select>)非模态(应保留,走 overlay-priority 前置)
+-->
+<main id="main">
+  <a href="#l1">nav link 1</a>
+  <a href="#l2">nav link 2</a>
+  <a href="#l3">nav link 3</a>
+  <a href="#l4">nav link 4</a>
+  <a href="#l5">nav link 5</a>
+  <a href="#l6">nav link 6</a>
+  <a href="#l7">nav link 7</a>
+  <a href="#l8">nav link 8</a>
+  <a href="#l9">nav link 9</a>
+  <a href="#l10">nav link 10</a>
+  <a href="#l11">nav link 11</a>
+  <a href="#l12">nav link 12</a>
+</main>
+
+<!-- 真模态:aria-modal=true → 应触发裁剪 -->
+<div id="modal" role="dialog" aria-modal="true" aria-label="Tips"
+     style="position:fixed;top:80px;left:200px;z-index:9999;background:#fff;border:2px solid #333;padding:16px;width:280px">
+  <h2>Tips</h2>
+  <button data-vtx-oracle="modal-confirm" style="margin:6px">Confirm</button>
+  <button data-vtx-oracle="modal-cancel" style="margin:6px">Cancel</button>
+</div>
+
+<!-- 伪模态:role=dialog 但无 aria-modal → 走 overlay-priority 前置,不裁剪 -->
+<div id="pseudo" role="dialog" aria-label="Hint"
+     style="position:fixed;top:400px;left:200px;z-index:9998;background:#eee;border:1px dashed #999;padding:8px;width:200px">
+  <button data-vtx-oracle="pseudo-ok" style="margin:4px">OK</button>
+  <button data-vtx-oracle="pseudo-apply" style="margin:4px">Apply</button>
+</div>
+
+<!-- 普通浮层:select listbox,非模态 → 走 overlay-priority 前置 -->
+<div id="lb" role="listbox" aria-label="select"
+     style="position:absolute;top:600px;left:200px;background:#fff;border:1px solid #ccc;padding:4px;width:160px">
+  <div role="option" data-vtx-oracle="lb-a">Alpha</div>
+  <div role="option" data-vtx-oracle="lb-b">Beta</div>
+</div>
+</body></html>

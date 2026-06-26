@@ -1,0 +1,12 @@
+{
+  "fixture": "modal-scope-suppress-background",
+  "path": "/synth/modal-scope-suppress-background.html",
+  "tier": "medium",
+  "frames": "main",
+  "entries": [
+    { "id": "modal-confirm", "interactive": true, "expectedName": "Confirm", "expectedRole": "button", "pattern": "modal-scope-suppress-background", "note": "aria-modal=true 弹层内的 Confirm 按钮(默认 observe 应召回,模态作用域裁剪后背景被抑制)" },
+    { "id": "modal-cancel", "interactive": true, "expectedName": "Cancel", "expectedRole": "button", "pattern": "modal-scope-suppress-background", "note": "aria-modal=true 弹层内的 Cancel 按钮(默认 observe 应召回)" },
+    { "id": "pseudo-ok", "interactive": true, "expectedName": "OK", "expectedRole": "button", "pattern": "modal-scope-suppress-background", "note": "对照:role=dialog 无 aria-modal 的伪模态按钮(走 overlay-priority 前置,不裁剪)" },
+    { "id": "pseudo-apply", "interactive": true, "expectedName": "Apply", "expectedRole": "button", "pattern": "modal-scope-suppress-background", "note": "对照:role=dialog 无 aria-modal 的伪模态按钮(零漂移:应可见)" }
+  ]
+}
