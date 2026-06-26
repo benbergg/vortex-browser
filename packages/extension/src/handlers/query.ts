@@ -302,12 +302,66 @@ export const componentInspectFunc = (
       return walk(value, 0);
     };
 
-    // 占位:行探测(Task 2 实现)。本 Task 恒返 undefined。
+    // 行探测:el-table(Vue2 读 store.states.data + DOM tr 索引) / antd Table(React fiber memoizedProps.record)。
+    // ⚠ store.states.data 路径与 rowKey 取法须实机 spike 确认(见计划「实机 spike」节);
+    // el-table 固定列会复制 tr,DOM 索引法对带 fixed 列的表可能偏移 → spike 校准。
     const detectRow = (
-      _startEl: Element,
-      _framework: string,
-      _startInstance: unknown,
-    ): { rowKey: string | number | null; row: unknown; index: number } | undefined => undefined;
+      startEl: Element,
+      framework: string,
+      startInstance: unknown,
+    ): { rowKey: string | number | null; row: unknown; index: number } | undefined => {
+      try {
+        if (framework === "vue2") {
+          // 上溯实例链找 ElTable
+          let inst = startInstance as any;
+          let table: any = null;
+          let guard = 0;
+          while (inst && guard < 50) {
+            const nm = inst.$options && (inst.$options.name || inst.$options._componentTag);
+            if (nm === "ElTable") { table = inst; break; }
+            inst = inst.$parent;
+            guard++;
+          }
+          if (!table || !table.store || !table.store.states || !Array.isArray(table.store.states.data)) return undefined;
+          const data = table.store.states.data as unknown[];
+          const tr = (startEl as Element).closest ? (startEl as Element).closest("tr") : null;
+          if (!tr || !tr.parentElement) return undefined;
+          const rows = Array.prototype.filter.call(tr.parentElement.children, (c: Element) => c.tagName === "TR") as Element[];
+          const index = rows.indexOf(tr);
+          if (index < 0 || index >= data.length) return undefined;
+          const rowObj = data[index];
+          const rowKeyProp = (table.rowKey || (table.$props && table.$props.rowKey)) as string | undefined;
+          let rowKey: string | number | null = null;
+          if (typeof rowKeyProp === "string" && rowObj && typeof rowObj === "object") {
+            const v = (rowObj as Record<string, unknown>)[rowKeyProp];
+            if (typeof v === "string" || typeof v === "number") rowKey = v;
+          }
+          return { rowKey, row: safeSerialize(rowObj, MAX_DEPTH), index };
+        }
+        if (framework === "react") {
+          let fiber = startInstance as any;
+          let hops = 0;
+          while (fiber && hops < 40) {
+            const p = fiber.memoizedProps;
+            if (p && typeof p === "object") {
+              const rec = p.record !== undefined ? p.record : (p.row !== undefined ? p.row : p.rowData);
+              if (rec !== undefined && rec !== null && typeof rec === "object") {
+                let rowKey: string | number | null = null;
+                if (typeof p.rowKey === "string" || typeof p.rowKey === "number") rowKey = p.rowKey;
+                else if (typeof p["data-row-key"] === "string" || typeof p["data-row-key"] === "number") rowKey = p["data-row-key"];
+                const index = typeof p.index === "number" ? p.index : -1;
+                return { rowKey, row: safeSerialize(rec, MAX_DEPTH), index };
+              }
+            }
+            fiber = fiber.return;
+            hops++;
+          }
+        }
+        return undefined;
+      } catch {
+        return undefined;
+      }
+    };
 
     const reactFiberKey = (el: Element): string | null => {
       for (const k of Object.keys(el)) {

@@ -160,3 +160,56 @@ describe("componentInspectFunc — 上溯起点与深度", () => {
     expect(r.components[0].chain.map(c => c.name)).toEqual(["L0", "L1"]);
   });
 });
+
+describe("componentInspectFunc — 行探测", () => {
+  it("Vue2 el-table: 命中单元格 → 从 store.states.data 取行 + rowKey", () => {
+    // 构造 <table><tbody><tr>(0) <tr>(1, 内含 .cell)</tbody></table>
+    const tableEl = document.createElement("div");
+    (tableEl as any).__vue__ = {
+      $options: { name: "ElTable" },
+      _data: {}, $props: { rowKey: "id" },
+      rowKey: "id",
+      store: { states: { data: [{ id: 10, name: "a" }, { id: 20, name: "b" }] } },
+      $parent: null,
+    };
+    const tbody = document.createElement("tbody");
+    const tr0 = document.createElement("tr");
+    const tr1 = document.createElement("tr");
+    const cell = document.createElement("td");
+    cell.className = "cell";
+    tr1.appendChild(cell);
+    tbody.appendChild(tr0);
+    tbody.appendChild(tr1);
+    tableEl.appendChild(tbody);
+    document.body.appendChild(tableEl);
+
+    const r = componentInspectFunc(".cell", 4, 10) as Ok;
+    expect(r.components[0].row).toBeDefined();
+    expect(r.components[0].row.index).toBe(1);
+    expect(r.components[0].row.row).toEqual({ id: 20, name: "b" });
+    expect(r.components[0].row.rowKey).toBe(20);
+  });
+
+  it("React antd Table: fiber.memoizedProps.record → 行对象", () => {
+    const el = document.createElement("td");
+    el.className = "antd-cell";
+    const rowFiber = { type: function BodyRow() {}, memoizedProps: { record: { id: 7, title: "x" }, rowKey: "id", index: 3 }, memoizedState: null, return: null };
+    const cellFiber = { type: "td", memoizedProps: {}, memoizedState: null, return: rowFiber };
+    (el as any)["__reactFiber$z"] = cellFiber;
+    document.body.appendChild(el);
+
+    const r = componentInspectFunc(".antd-cell", 4, 10) as Ok;
+    expect(r.components[0].row).toBeDefined();
+    expect(r.components[0].row.row).toEqual({ id: 7, title: "x" });
+    expect(r.components[0].row.index).toBe(3);
+  });
+
+  it("非表格上下文 → row 缺省(不报错)", () => {
+    const el = document.createElement("div");
+    el.className = "norow";
+    (el as any).__vue__ = { $options: { name: "Plain" }, _data: {}, $props: {}, $parent: null };
+    document.body.appendChild(el);
+    const r = componentInspectFunc(".norow", 4, 10) as Ok;
+    expect(r.components[0].row).toBeUndefined();
+  });
+});
