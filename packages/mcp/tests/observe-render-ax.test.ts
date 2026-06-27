@@ -10,7 +10,7 @@ describe("renderObserveTree AX 语义段", () => {
         compound: { role: "listbox", count: 240, options: ["中国","美国"] } },
       { index: 1, tag: "input", role: "textbox", name: "请输入", frameId: 0, nameSource: "placeholder" },
       { index: 2, tag: "input", role: "textbox", name: "邮箱", frameId: 0, errorMessage: "格式不正确" },
-      { index: 3, tag: "div", role: "tab", name: "详情", frameId: 0, controls: [0] },
+      { index: 3, tag: "div", role: "tab", name: "详情", frameId: 0, controls: [{ index: 0 }] },
     ]};
     const out = renderObserveTree(data as any, "h1", false);
     expect(out).toContain("compound=(listbox count=240 options=中国|美国)");

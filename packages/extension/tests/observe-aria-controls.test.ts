@@ -1,23 +1,16 @@
 // @vitest-environment jsdom
 /**
- * Description: N0002 B008 — aria-controls / aria-owns 关联采集。
- *   collapse / accordion / tab / menu 触发器在 DOM 上写 aria-controls="region-id"
- *   (或 aria-owns 同语义, 常见 popover / listbox 父级) 关联到目标 region。
- *   observe 真实路径(scanOneFrame elements.push)未填充 controls 字段,
- *   渲染层 type + 输出都齐了, 只差采集。
- *   本测试直测: 元素有 aria-controls="id" → elements.controls 数组含目标下标。
- *   (集成测试走 vortex_observe, 本测试聚焦 controls 关联算法。)
+ * Description: N0002 B008 + B009 — aria-controls / aria-owns 关联采集。
+ *   B008: aria-controls 拆 id list, 在 collectedEls 找下标, 填 elements.controls。
+ *   B009: 找不到下标时, 用 {id:"ghost"} 字符串 fallback, agent 至少看到关联 id
+ *     (目标 region/tabpanel/listbox 非 interactive 不在 collectedEls)。
+ *   本测试直测内联副本 collect 路径算法, 与 observe.ts 内联副本必须同步。
  */
 import { describe, it, expect } from "vitest";
-import { buildSelector } from "../src/handlers/observe.js";
 
-/**
- * 模拟 scanOneFrame 收集后第二轮 controls pass 的算法(与 observe.ts 内联副本同步)。
- * 接受 elements + collectedEls, 写入 elements[i].controls。
- * 注:实际生产代码在 observe.ts:3080+;本函数为算法独立版本供单测, 与内联副本必须同步。
- */
+/** 与 observe.ts 内联副本同步的 collect 路径算法。 */
 function computeControls(
-  elements: Array<{ controls?: number[] }>,
+  elements: Array<{ controls?: Array<{ id?: string; index?: number }> }>,
   collectedEls: Element[],
 ): void {
   for (let i = 0; i < collectedEls.length; i++) {
@@ -28,23 +21,29 @@ function computeControls(
     if (ctrlAttr) allIds.push(...ctrlAttr.split(/\s+/).filter(Boolean));
     if (ownsAttr) allIds.push(...ownsAttr.split(/\s+/).filter(Boolean));
     if (allIds.length === 0) continue;
-    const idxList: number[] = [];
-    const seen = new Set<number>();
+    const ctrlList: Array<{ id?: string; index?: number }> = [];
+    const seenIdx = new Set<number>();
+    const seenId = new Set<string>();
     for (const id of allIds) {
+      if (seenId.has(id)) continue;
+      let found = -1;
       for (let j = 0; j < collectedEls.length; j++) {
-        if (collectedEls[j].id === id && !seen.has(j)) {
-          idxList.push(j);
-          seen.add(j);
-          break;
-        }
+        if (collectedEls[j].id === id) { found = j; break; }
       }
+      if (found >= 0 && !seenIdx.has(found)) {
+        ctrlList.push({ index: found });
+        seenIdx.add(found);
+      } else if (found < 0) {
+        ctrlList.push({ id });
+      }
+      seenId.add(id);
     }
-    if (idxList.length > 0) elements[i].controls = idxList;
+    if (ctrlList.length > 0) elements[i].controls = ctrlList;
   }
 }
 
-describe("observe-aria-controls: computeControls (N0002 B008)", () => {
-  it("button aria-controls=region-id → controls 数组含 region 下标", () => {
+describe("observe-aria-controls: B008 + B009 (N0002)", () => {
+  it("B008: button aria-controls=region-id → [{index:1}]", () => {
     document.body.innerHTML = `
       <button id="trigger" aria-controls="region">Click</button>
       <div id="region">Content</div>
@@ -52,43 +51,59 @@ describe("observe-aria-controls: computeControls (N0002 B008)", () => {
     const trigger = document.querySelector("#trigger")!;
     const region = document.querySelector("#region")!;
     const collectedEls: Element[] = [trigger, region];
-    const elements: Array<{ controls?: number[] }> = [{}, {}];
+    const elements: Array<{ controls?: Array<{ id?: string; index?: number }> }> = [{}, {}];
     computeControls(elements, collectedEls);
-    expect(elements[0].controls).toEqual([1]);
+    expect(elements[0].controls).toEqual([{ index: 1 }]);
     expect(elements[1].controls).toBeUndefined();
+  });
+
+  it("B009: aria-controls 指向非 collectedEls 元素 → [{id:'ghost'}] fallback", () => {
+    // B009 关键场景: 目标元素(region/tabpanel)非 interactive, 不在 collectedEls。
+    // 旧 B008 修复: 静默丢关联。修复后: 记 {id:"ghost"}, agent 至少看到关联。
+    document.body.innerHTML = `<button id="trigger" aria-controls="tabpanel-1">Click</button>`;
+    const trigger = document.querySelector("#trigger")!;
+    const collectedEls: Element[] = [trigger];
+    const elements: Array<{ controls?: Array<{ id?: string; index?: number }> }> = [{}];
+    computeControls(elements, collectedEls);
+    expect(elements[0].controls).toEqual([{ id: "tabpanel-1" }]);
+  });
+
+  it("B008+B009 混合: 一部分已收集 + 一部分 ghost", () => {
+    document.body.innerHTML = `
+      <button id="trigger" aria-controls="region1 tabpanel-1 region2">Click</button>
+      <div id="region1">A</div>
+    `;
+    const trigger = document.querySelector("#trigger")!;
+    const region1 = document.querySelector("#region1")!;
+    const collectedEls: Element[] = [trigger, region1];
+    const elements: Array<{ controls?: Array<{ id?: string; index?: number }> }> = [{}, {}];
+    computeControls(elements, collectedEls);
+    // region1 在 collectedEls (index=1), tabpanel-1 + region2 不在 → ghost
+    expect(elements[0].controls).toEqual([{ index: 1 }, { id: "tabpanel-1" }, { id: "region2" }]);
   });
 
   it("无 aria-controls → controls 字段不写(undefined)", () => {
     document.body.innerHTML = `<button id="t">Click</button><div id="r">C</div>`;
     const els = Array.from(document.querySelectorAll("*"));
-    const elements: Array<{ controls?: number[] }> = els.map(() => ({}));
+    const elements: Array<{ controls?: Array<{ id?: string; index?: number }> }> = els.map(() => ({}));
     computeControls(elements, els);
     expect(elements.every((e) => e.controls === undefined)).toBe(true);
   });
 
-  it("aria-controls 多 id (space-separated) → 全部映射, 按 id 顺序", () => {
+  it("aria-controls 多 id (space-separated) → 按 id 顺序", () => {
     document.body.innerHTML = `
       <button id="t" aria-controls="r1 r2 r3">X</button>
       <div id="r1">A</div><div id="r2">B</div><div id="r3">C</div>
     `;
     const els = Array.from(document.querySelectorAll("*"));
-    const elements: Array<{ controls?: number[] }> = els.map(() => ({}));
+    const elements: Array<{ controls?: Array<{ id?: string; index?: number }> }> = els.map(() => ({}));
     computeControls(elements, els);
     const tIdx = els.indexOf(document.querySelector("#t")!);
     expect(elements[tIdx].controls).toEqual([
-      els.indexOf(document.querySelector("#r1")!),
-      els.indexOf(document.querySelector("#r2")!),
-      els.indexOf(document.querySelector("#r3")!),
+      { index: els.indexOf(document.querySelector("#r1")!) },
+      { index: els.indexOf(document.querySelector("#r2")!) },
+      { index: els.indexOf(document.querySelector("#r3")!) },
     ]);
-  });
-
-  it("aria-controls 指向不在 collectedEls 的 id → 静默忽略", () => {
-    document.body.innerHTML = `<button id="t" aria-controls="ghost">X</button>`;
-    const els = Array.from(document.querySelectorAll("*"));
-    const elements: Array<{ controls?: number[] }> = els.map(() => ({}));
-    computeControls(elements, els);
-    const tIdx = els.indexOf(document.querySelector("#t")!);
-    expect(elements[tIdx].controls).toBeUndefined(); // 找不到, 不写字段
   });
 
   it("aria-owns 同样支持(popover / listbox 父级)", () => {
@@ -97,12 +112,12 @@ describe("observe-aria-controls: computeControls (N0002 B008)", () => {
       <div id="opt1">A</div><div id="opt2">B</div>
     `;
     const els = Array.from(document.querySelectorAll("*"));
-    const elements: Array<{ controls?: number[] }> = els.map(() => ({}));
+    const elements: Array<{ controls?: Array<{ id?: string; index?: number }> }> = els.map(() => ({}));
     computeControls(elements, els);
     const lbIdx = els.indexOf(document.querySelector("#listbox")!);
     expect(elements[lbIdx].controls).toEqual([
-      els.indexOf(document.querySelector("#opt1")!),
-      els.indexOf(document.querySelector("#opt2")!),
+      { index: els.indexOf(document.querySelector("#opt1")!) },
+      { index: els.indexOf(document.querySelector("#opt2")!) },
     ]);
   });
 
@@ -112,13 +127,12 @@ describe("observe-aria-controls: computeControls (N0002 B008)", () => {
       <div id="a">A</div><div id="b">B</div>
     `;
     const els = Array.from(document.querySelectorAll("*"));
-    const elements: Array<{ controls?: number[] }> = els.map(() => ({}));
+    const elements: Array<{ controls?: Array<{ id?: string; index?: number }> }> = els.map(() => ({}));
     computeControls(elements, els);
     const tIdx = els.indexOf(document.querySelector("#t")!);
-    // aria-controls 顺序: [aIdx], aria-owns 加 [bIdx, aIdx(去重)]
     expect(elements[tIdx].controls).toEqual([
-      els.indexOf(document.querySelector("#a")!),
-      els.indexOf(document.querySelector("#b")!),
+      { index: els.indexOf(document.querySelector("#a")!) },
+      { index: els.indexOf(document.querySelector("#b")!) },
     ]);
   });
 
@@ -129,11 +143,11 @@ describe("observe-aria-controls: computeControls (N0002 B008)", () => {
       <div id="dup">Second</div>
     `;
     const els = Array.from(document.querySelectorAll("*"));
-    const elements: Array<{ controls?: number[] }> = els.map(() => ({}));
+    const elements: Array<{ controls?: Array<{ id?: string; index?: number }> }> = els.map(() => ({}));
     computeControls(elements, els);
     const tIdx = els.indexOf(document.querySelector("#t")!);
     const firstDup = document.querySelectorAll("#dup")[0];
-    expect(elements[tIdx].controls).toEqual([els.indexOf(firstDup)]);
+    expect(elements[tIdx].controls).toEqual([{ index: els.indexOf(firstDup) }]);
   });
 
   it("空格多余/tab 分隔: split(/\\s+/) 正确处理", () => {
@@ -142,12 +156,12 @@ describe("observe-aria-controls: computeControls (N0002 B008)", () => {
       <div id="a">A</div><div id="b">B</div>
     `;
     const els = Array.from(document.querySelectorAll("*"));
-    const elements: Array<{ controls?: number[] }> = els.map(() => ({}));
+    const elements: Array<{ controls?: Array<{ id?: string; index?: number }> }> = els.map(() => ({}));
     computeControls(elements, els);
     const tIdx = els.indexOf(document.querySelector("#t")!);
     expect(elements[tIdx].controls).toEqual([
-      els.indexOf(document.querySelector("#a")!),
-      els.indexOf(document.querySelector("#b")!),
+      { index: els.indexOf(document.querySelector("#a")!) },
+      { index: els.indexOf(document.querySelector("#b")!) },
     ]);
   });
 });

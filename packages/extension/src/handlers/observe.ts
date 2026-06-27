@@ -126,8 +126,11 @@ interface ScannedElement {
   offScreenActionable?: boolean;
   /** AX nameSource：名称来源(label/placeholder/title/heuristic 等)。@since ax-overlay */
   nameSource?: string;
-  /** aria-controls 指向的 frame-local 元素下标列表。@since ax-overlay */
-  controls?: number[];
+  /** aria-controls / aria-owns 关联。@since B008: number[] 指向已收集元素下标。
+   *  @since B009: 含 id 字符串 fallback — 当目标元素(region/tabpanel/listbox)非 interactive
+   *  不在 collectedEls 时, 仍记 id 字符串, agent 至少看到关联 id 可 querySelector 找目标。
+   *  type 改 Array<{id?: string; index?: number}> 保持 B008 ref + 加 id。 */
+  controls?: Array<{ id?: string; index?: number }>;
   /** aria-owns 指向的 frame-local 元素下标列表。@since ax-overlay */
   owns?: number[];
   /** aria-errormessage 或 aria-describedby(错误)关联文本。@since ax-overlay */
@@ -3119,13 +3122,14 @@ async function scanOneFrame(
           }
         }
 
-        // N0002 B008:aria-controls 关联。aria-controls="id1 id2" 拆 id list,在 collectedEls
-        // 中找下标,填 elements[i].controls。渲染输出 controls=@ref:ex,@ref:ey 标记,
-        // agent 知道 button 控制哪个 region(disclosure / accordion / tab / menu 触发器)。
-        // 多 id 支持:ARIA spec 允许 space-separated 多个目标。aria-owns 同步支持(popover
-        // / listbox 父级)——同关联语义, agent 看到 button → region 链。
-        // id 在 collectedEls 找不到 → 静默忽略(不报 "未找到"——目标元素可能 inert / 离屏
-        // 不在收集范围,与 a11y tree 一致)。
+        // N0002 B008 + B009:aria-controls / aria-owns 关联。
+        //  - B008: 拆 id list, 在 collectedEls 中找下标, 填 elements[i].controls = [{index:N}, ...]。
+        //  - B009: 找不到下标时, 用 {id:"ghost"} 字符串, agent 至少看到关联 id 可 querySelector 找。
+        //   原因: aria-controls 常指向 region / tabpanel / listbox 容器, 这些是非 interactive
+        //   元素不在 collectedEls (filter=interactive 跳过, filter=all 也只多收表格行)。
+        //   旧逻辑 idxList 空 → 字段不写, 静默丢关联。
+        //  - aria-owns 同支持(popover / listbox 父级)。
+        //  - 多 id space-separated 顺序保留, 去重同下标(同 id 重复 + controls+owns 合并)。
         {
           const __idSet = new Set<string>();
           for (let i = 0; i < collectedEls.length; i++) {
@@ -3136,21 +3140,28 @@ async function scanOneFrame(
             if (__controlsAttr) __allIds.push(...__controlsAttr.split(/\s+/).filter(Boolean));
             if (__ownsAttr) __allIds.push(...__ownsAttr.split(/\s+/).filter(Boolean));
             if (__allIds.length === 0) continue;
-            const __idxList: number[] = [];
-            const __seen = new Set<number>();
+            const __ctrlList: Array<{ id?: string; index?: number }> = [];
+            const __seenIdx = new Set<number>();
+            const __seenId = new Set<string>();
             for (const __id of __allIds) {
+              if (__idSet.has(__id) || __seenId.has(__id)) continue;
               // 在 collectedEls 中通过 id 找。注意 id 必须唯一(id-uniqueness 已在
               // observe-id-uniqueness.test.ts 锁),若重复取第一个。
-              if (__idSet.has(__id)) continue;
+              let __found = -1;
               for (let j = 0; j < collectedEls.length; j++) {
-                if (collectedEls[j].id === __id && !__seen.has(j)) {
-                  __idxList.push(j);
-                  __seen.add(j);
-                  break;
-                }
+                if (collectedEls[j].id === __id) { __found = j; break; }
               }
+              if (__found >= 0 && !__seenIdx.has(__found)) {
+                __ctrlList.push({ index: __found });
+                __seenIdx.add(__found);
+              } else if (__found < 0) {
+                // B009: 目标不在 collectedEls(非 interactive region / tabpanel / listbox),
+                // 仍记 id 字符串, agent 至少看到关联。
+                __ctrlList.push({ id: __id });
+              }
+              __seenId.add(__id);
             }
-            if (__idxList.length > 0) elements[i].controls = __idxList;
+            if (__ctrlList.length > 0) elements[i].controls = __ctrlList;
           }
         }
 

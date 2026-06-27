@@ -33,8 +33,10 @@ export interface CompactElement {
   href?: string;
   /** AX nameSource：名称来源(label/placeholder/title/heuristic 等)。@since ax-overlay */
   nameSource?: string;
-  /** aria-controls 指向的全局元素下标列表。@since ax-overlay */
-  controls?: number[];
+  /** aria-controls / aria-owns 关联。@since B008: 指向已收集元素下标。
+   *  @since B009: 加 id 字符串 fallback — 目标非 collectedEls(region/tabpanel)时
+   *  用 {id:"ghost"} 暴露, agent 至少看到关联 id。 */
+  controls?: Array<{ id?: string; index?: number }>;
   /** aria-owns 指向的全局元素下标列表。@since ax-overlay */
   owns?: number[];
   /** aria-errormessage 关联文本。@since ax-overlay */
@@ -517,8 +519,12 @@ export function renderObserveTree(
       comp = ` compound=(${role}${extra})`;
     }
     const err = e.errorMessage ? ` error=${JSON.stringify(e.errorMessage)}` : "";
+    // N0002 B008 + B009: aria-controls / aria-owns 渲染。
+    //  - {index:N} → @ref:eN (已收集元素, agent 可直接 click)
+    //  - {id:"ghost"} → #ghost (非 collectedEls, agent 可 querySelector)
+    //  - 混合: controls=@ref:e0,#tabpanel-1,@ref:e2
     const ctrl = e.controls?.length
-      ? ` controls=${e.controls.map((i) => refOf({ ...e, index: i }, snapshotHash)).join(",")}`
+      ? ` controls=${e.controls.map((c) => c.index !== undefined ? refOf({ ...e, index: c.index }, snapshotHash) : `#${c.id}`).join(",")}`
       : "";
     const desc = e.description ? ` desc=${JSON.stringify(e.description.slice(0, 60))}` : "";
     // T4-viewport: 视口外元素追加 [offscreen] 标记（inViewport===false 明确屏外才打）。
