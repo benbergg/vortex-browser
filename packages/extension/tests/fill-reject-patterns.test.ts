@@ -26,7 +26,7 @@ describe("FILL_REJECT_PATTERNS registry", () => {
       expect(p.fixExample).not.toMatch(/vortex_dom_commit/);
       expect(p.suggestedTool).toMatch(/vortex_fill/);
       expect(p.fixExample).toMatch(/vortex_fill/);
-      expect(p.fixExample).toMatch(/kind:/);
+      expect(p.fixExample).toMatch(/widget:/);
     }
   });
 
