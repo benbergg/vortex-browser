@@ -505,7 +505,7 @@ export async function handleCallTool(
     const fields = params.fields as Array<{
       target: string;
       value: unknown;
-      kind?: string;
+      widget?: string;
       force?: boolean;
     }>;
     const tabId = params.tabId as number | undefined;
@@ -556,14 +556,15 @@ export async function handleCallTool(
         continue;
       }
 
-      // 复用 vortex_fill dispatch 逻辑：kind 存在 → dom.commit；否则 → dom.fill
+      // 复用 vortex_fill dispatch 逻辑：widget 存在 → dom.commit；否则 → dom.fill。
+      // 面向 LLM 的字段名是 widget，映射回 kind 下发给 extension dom.commit driver。
       let action: string;
-      if (!field.kind) {
+      if (!field.widget) {
         action = "dom.fill";
         fieldParams.value = field.value;
       } else {
         action = "dom.commit";
-        fieldParams.kind = field.kind;
+        fieldParams.kind = field.widget;
         // 结构化 value 可能被 client 序列化为 JSON 字符串，还原
         const raw = field.value;
         if (typeof raw === "string") {

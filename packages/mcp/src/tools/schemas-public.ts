@@ -407,7 +407,7 @@ export const PUBLIC_TOOLS: ToolDef[] = [
     // 内部由 server.ts 特殊处理（逐 field 串行调 L4.fill/dom.commit），不走单次 sendRequest。
     name: "vortex_fill_form",
     action: "L4.fill_form",
-    description: "Batch-fill multiple fields; partial-success per field. kind=cascader/select/daterange for widgets.",
+    description: "Batch-fill multiple fields; partial-success per field. widget=cascader/select/daterange for composite widgets.",
     schema: {
       type: "object",
       properties: {
@@ -418,7 +418,7 @@ export const PUBLIC_TOOLS: ToolDef[] = [
             properties: {
               target: TargetRequired,
               value: {},
-              kind: { enum: [...COMMIT_KINDS] },
+              widget: { enum: [...COMMIT_KINDS] },
               force: { type: "boolean" as const },
             },
             required: ["target", "value"],

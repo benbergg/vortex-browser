@@ -27,11 +27,11 @@ describe("vortex_fill_form: schema 注册", () => {
     expect(items.properties?.value).toBeDefined();
   });
 
-  it("vortex_fill_form schema.fields.items 支持可选 kind", () => {
+  it("vortex_fill_form schema.fields.items 支持可选 widget", () => {
     const def = getToolDef("vortex_fill_form");
     const props = (def!.schema as { properties: Record<string, any> }).properties;
     const items = props.fields.items as Record<string, any>;
-    expect(items.properties?.kind).toBeDefined();
+    expect(items.properties?.widget).toBeDefined();
   });
 
   it("vortex_fill_form schema.required 包含 fields", () => {
