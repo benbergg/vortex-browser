@@ -3714,10 +3714,15 @@ export function registerObserveHandlers(router: ActionRouter, debuggerMgr: Debug
               // 缺陷② (2026-06-07 v4 淘宝评测): 透传 offScreenActionable
               // 标记, agent 可区分 on-screen / off-screen-but-actionable
               // 两类。page-side 已生成 (observe.ts:1443), 此处补 push。
-              offScreenActionable: e.offScreenActionable,
-              attrs: e.attrs,
-              ...(e.state ? { state: e.state } : {}),
-              ...(e.valueNow !== undefined ? { valueNow: e.valueNow } : {}),
+offScreenActionable: e.offScreenActionable,
+               attrs: e.attrs,
+               ...(e.state ? { state: e.state } : {}),
+               ...(e.valueNow !== undefined ? { valueNow: e.valueNow } : {}),
+               // N0002 B006: slider/progressbar valuemin/max 独立透传(R7 page-side 路径设)。
+               ...(e.valueMin !== undefined ? { valueMin: e.valueMin } : {}),
+               ...(e.valueMax !== undefined ? { valueMax: e.valueMax } : {}),
+               // N0002 B010/B016: aria-keyshortcuts 显式键盘快捷键透传。
+               ...(e.keyshortcuts ? { keyshortcuts: e.keyshortcuts } : {}),
               // BUG-010 N0060 京东评测: 透传 reactClickable + clickHint,
               // 评测者读 clickHint 知该 ref 需用 vortex_mouse_drag / useRealMouse=true。
               ...(e.reactClickable
@@ -3821,3 +3826,4 @@ export function registerObserveHandlers(router: ActionRouter, debuggerMgr: Debug
     },
   });
 }
+
