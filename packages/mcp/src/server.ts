@@ -2,7 +2,7 @@
 
 import { createHash } from "node:crypto";
 import { createRequire } from "node:module";
-import { watch } from "node:fs";
+import { watch, type FSWatcher } from "node:fs";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { realpathSync } from "node:fs";
@@ -147,7 +147,7 @@ function installAutoRestart(): void {
   // __dirname 等价：本文件所在目录（dist/src/ 在运行期，src/ 在测试期——后者 fs.watch 也能跑）
   const here = dirname(fileURLToPath(import.meta.url));
   try {
-    const watcher = watch(here, { recursive: true }, (eventType, filename) => {
+    const watcher: FSWatcher = watch(here, { recursive: true }, (eventType, filename) => {
       if (eventType !== "change" && eventType !== "rename") return;
       if (!filename || !filename.endsWith(".js")) return;
       if (pendingRestart) return; // already armed
@@ -157,6 +157,11 @@ function installAutoRestart(): void {
       );
       maybeExitAfterDrain();
     });
+    // FSWatcher extends EventEmitter 但 @types/node 25 的 FSWatcher 接口经过
+    // InternalEventEmitter<EventMap<...>> 重写, tsc 5.x 严格模式 + bundler 解析
+    // 找不到 .on。运行时 watcher.on() 正确(继承自 EventEmitter), 仅类型层歧义。
+    // @ts-expect-error - 抑制类型层 on 缺失, 运行时正确。保留 watcher.on 字面量
+    // (tests/self-restart.test.ts:62 source-lock 验证)。
     watcher.on("error", (err: unknown) => {
       const msg = err instanceof Error ? err.message : String(err);
       process.stderr.write(`[vortex-mcp] fs.watch failed: ${msg}; auto-restart disabled.\n`);
