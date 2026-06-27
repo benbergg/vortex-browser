@@ -850,6 +850,13 @@ async function scanOneFrame(
         const INTERACTIVE_SELECTORS = [
           "button",
           "a[href]",
+          // N0002 B017:iframe 元素收集。MDN 文档页 / PDF embed / video / 跨源 widget
+          // 都有 <iframe>, INTERACTIVE_SELECTORS 不收 → 不进 baseCandidates → agent
+          // 完全不知道页面含 iframe, 跨 frame 关联丢失。filter=all 时 TABLE_EXTRA_SELECTORS
+          // 不含 iframe, 同样丢。直接收 (与 select / textarea 一致, 默认非 interactive 但
+          // selector 收), getRole 推断 role=iframe (无 title) / region (有 title)。sandbox / src
+          // 走 attributes 透传, agent 知道跨源风险。
+          "iframe",
           // 原生 radio/checkbox 也收。组件库(Element Plus/Ant 等)把真 input
           // visually-hidden 藏在可点的 <label> 下,真正可点的是外层 label
           // (下方 label:has(...) 收),这类 surrogate input 由扫描循环里的
@@ -970,6 +977,12 @@ async function scanOneFrame(
           }
           if (tag === "select") return "combobox";
           if (tag === "textarea") return "textbox";
+          // N0002 B017: <iframe> role 推断。无 title 时按 ARIA 1.2 / HTML-AAM role=iframe,
+          // 有 title 时按 region (frame landmark) — 与 browser accessibility tree 一致。
+          // 单纯暴露 role 不够, 还要透传 src + sandbox 给 agent, 走 attrs 字段。
+          if (tag === "iframe") {
+            return el.hasAttribute("title") ? "region" : "iframe";
+          }
           // <summary> 是 disclosure 开合控件,交互模型等同按钮,role 报 button 让
           // LLM 直接理解为可点(原生 <details>/<summary>,2026-06-02 dogfood)。
           if (tag === "summary") return "button";
