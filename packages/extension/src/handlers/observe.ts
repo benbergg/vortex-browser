@@ -97,6 +97,12 @@ interface ScannedElement {
   state?: { checked?: boolean | "mixed"; selected?: boolean; active?: boolean; disabled?: boolean; expanded?: boolean; required?: boolean; current?: boolean; invalid?: boolean; sort?: "ascending" | "descending" | "none"; haspopup?: string; readonly?: boolean };
   /** 值域控件(slider/spinbutton/progressbar/meter 及原生 range/number/progress)的当前值,如 "30" 或 "30/100"。@since dogfood 2026-06-02 */
   valueNow?: string;
+  /** 值域控件最小值/最大值。@since N0002 B006 — agent 看到 slider "0" 不知范围, 加 min/max 字段。 */
+  valueMin?: string;
+  valueMax?: string;
+  /** aria-keyshortcuts 显式声明的键盘快捷键(空格分隔), 渲染 [keyshortcuts=...] 标记。
+   *  @since N0002 B010/B016 — 让 AT 用户知道 "⌘K" 触发的可访问名。 */
+  keyshortcuts?: string;
   /** BUG-010 N0060 京东评测: el 含 onClick 桩 / cursor:pointer 时标 true,
    * 提示 LLM 评测者该 ref 走真实 mouse (vortex_mouse_drag 或 useRealMouse=true)
    * 兜底, 不要直接 el.click() (isTrusted=false 拦截)。 */
@@ -1944,11 +1950,13 @@ async function scanOneFrame(
             tag === "progress" ||
             tag === "meter";
           if (!VALUE_ROLES.has(role) && !isNativeValue) return undefined;
+          // N0002 B006: 同时返回 min/max 给 elements.valueMin / elements.valueMax,
+          // 即便 valuetext 命中也输出 min/max(原逻辑只输出 valuetext 字符串, agent 丢范围)。
+          // 优先 aria-valuetext(更人性化, 如 "中" / "$50"), fallback valuenow。
+          // B006 修复: valuetext 不再短路 min/max 返回——三字段独立输出。
           const valueText = el.getAttribute("aria-valuetext");
-          // 归一化空白(换行/制表 → 单空格)再截断,避免破坏单行输出;render 侧
-          // 对含空格的值加引号。
-          if (valueText) return valueText.replace(/\s+/g, " ").trim().slice(0, 40);
           let now = el.getAttribute("aria-valuenow");
+          let min = el.getAttribute("aria-valuemin");
           let max = el.getAttribute("aria-valuemax");
           if ((now == null || now === "") && isNativeValue) {
             // indeterminate <progress>(无 value 属性,.position === -1)进度未知,
@@ -1961,8 +1969,16 @@ async function scanOneFrame(
             now = v != null ? String(v) : null;
             const m = (el as HTMLProgressElement | HTMLMeterElement | HTMLInputElement).getAttribute("max");
             if (m != null && m !== "") max = m;
+            const mn = (el as HTMLInputElement | HTMLMeterElement).getAttribute("min");
+            if (mn != null && mn !== "") min = mn;
           }
           if (now == null || now === "") return undefined;
+          // 归一化空白(换行/制表 → 单空格)再截断,避免破坏单行输出;render 侧
+          // 对含空格的值加引号。
+          if (valueText) return valueText.replace(/\s+/g, " ").trim().slice(0, 40);
+          // valueMin / valueMax 写全局, render 侧读 el.valueMin/valueMax
+          // 注入体收集时另设 (N0002 B006): 在 collect 路径额外读 el.getAttribute("aria-valuemin/max")
+          // 并赋给 elements.valueMin/valueMax, 不依赖 getValueInfo 返回结构。
           return max != null && max !== "" ? `${now}/${max}` : `${now}`;
         }
 
@@ -3020,6 +3036,32 @@ async function scanOneFrame(
             attrs,
             ...(state ? { state } : {}),
             ...(valueNow !== undefined ? { valueNow } : {}),
+            // N0002 B006: slider/progressbar valuemin/max 独立字段。即 valuetext 命中也输出——
+            // 原逻辑 valuetext 短路返回, agent 拿到 "0" 不知 min=0/max=100, 无法判断 "0" 含义。
+            // 原生 range/number input 也走此字段(aria-valuenow 风格属性 HTML5 input 没,
+            // 走 .min/.max IDL 属性)。
+            ...(() => {
+              const __vm = htmlEl.getAttribute("aria-valuemin");
+              const __vM = htmlEl.getAttribute("aria-valuemax");
+              const __vr: { valueMin?: string; valueMax?: string } = {};
+              if (__vm != null && __vm !== "") __vr.valueMin = __vm;
+              if (__vM != null && __vM !== "") __vr.valueMax = __vM;
+              if (htmlEl.tagName === "INPUT" && (htmlEl as HTMLInputElement).type === "range") {
+                const __ie = htmlEl as HTMLInputElement;
+                if (!__vr.valueMin && __ie.min) __vr.valueMin = __ie.min;
+                if (!__vr.valueMax && __ie.max) __vr.valueMax = __ie.max;
+              }
+              return Object.keys(__vr).length > 0 ? __vr : {};
+            })(),
+            // N0002 B010/B016: aria-keyshortcuts 显式键盘快捷键(空格分隔)。
+            // Next.js / antd / Radix 文档站全 0, 但 LLM 已知 key shortcuts 时可提示用户
+            // 减少发现成本。trim 后非空才写。
+            ...(() => {
+              const __ks = htmlEl.getAttribute("aria-keyshortcuts");
+              if (__ks == null) return {};
+              const __trim = __ks.trim();
+              return __trim ? { keyshortcuts: __trim } : {};
+            })(),
             ...(reactMarker
               ? { reactClickable: true as const, clickHint: reactMarker.clickHint }
               : {}),

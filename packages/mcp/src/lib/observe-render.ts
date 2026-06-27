@@ -8,6 +8,11 @@ export interface CompactElement {
   state?: { checked?: boolean | "mixed"; selected?: boolean; active?: boolean; disabled?: boolean; required?: boolean; expanded?: boolean; current?: boolean; invalid?: boolean; sort?: "ascending" | "descending" | "none"; haspopup?: string; readonly?: boolean; /** aria-level,树形/标题层级(0=outermost)。@since N0002 B001 */ level?: number };
   // 值域控件(slider/spinbutton/progressbar/meter 等)的当前值,如 "30" / "30/100"。
   valueNow?: string;
+  // 值域控件 min/max。@since N0002 B006 — 即 valuetext=now 场景也输出。
+  valueMin?: string;
+  valueMax?: string;
+  // aria-keyshortcuts 显式键盘快捷键。@since N0002 B010/B016。
+  keyshortcuts?: string;
   frameId: number;
   // Issue #21 — visual-grounding. Optional tuple [x, y, w, h] in integer px,
   // frame-local viewport coordinates. Present only when caller passes
@@ -333,6 +338,11 @@ export function renderObserveCompact(
       el.valueNow !== undefined
         ? ` value=${/\s/.test(el.valueNow) ? JSON.stringify(el.valueNow) : el.valueNow}`
         : "";
+    // N0002 B006: 独立 valuemin/max 段, 即 valuetext=now 场景也输出。
+    const valueMinSeg = el.valueMin !== undefined ? ` [valuemin=${el.valueMin}]` : "";
+    const valueMaxSeg = el.valueMax !== undefined ? ` [valuemax=${el.valueMax}]` : "";
+    // N0002 B010/B016: 键盘快捷键段。
+    const keyshortcutsSeg = el.keyshortcuts ? ` [keyshortcuts=${el.keyshortcuts}]` : "";
     // T4-viewport: 视口外元素追加 [offscreen] 标记，提示 LLM 需要先滚动。
     // inViewport===false（明确屏外）才打标记；undefined（旧快照）保持兼容不打。
     const offscreenSeg = el.inViewport === false ? " [offscreen]" : "";
@@ -343,7 +353,7 @@ export function renderObserveCompact(
     const newPrefix = isNew ? "* " : "";
 
     lines.push(
-      `${newPrefix}${refOf(el, snapshotHash)} [${el.role}]${name}${stateFlags(el.state)}${valueSeg}${offscreenSeg}${blindspotTag(el.blindspot)}${el.behindModal ? " [behind-modal]" : ""}${bboxSeg}`,
+      `${newPrefix}${refOf(el, snapshotHash)} [${el.role}]${name}${stateFlags(el.state)}${valueSeg}${valueMinSeg}${valueMaxSeg}${keyshortcutsSeg}${offscreenSeg}${blindspotTag(el.blindspot)}${el.behindModal ? " [behind-modal]" : ""}${bboxSeg}`,
     );
   }
 
@@ -461,6 +471,15 @@ export function renderObserveTree(
       e.valueNow !== undefined
         ? ` value=${/\s/.test(e.valueNow) ? JSON.stringify(e.valueNow) : e.valueNow}`
         : "";
+    // N0002 B006: 独立 min/max 段。值域控件(slider/progressbar/meter)即使 valuetext
+    // 命中也输出——valuetext=now 的场景(如 "0") agent 仍要知道范围 0-100。
+    // 与 valueNow 拼写区分: value=0 [valuemin=0] [valuemax=100]。
+    const valueMinSeg = e.valueMin !== undefined ? ` [valuemin=${e.valueMin}]` : "";
+    const valueMaxSeg = e.valueMax !== undefined ? ` [valuemax=${e.valueMax}]` : "";
+    // N0002 B010/B016: 显式键盘快捷键渲染(空格分隔多键)。
+    // 例: ⌘K 触发搜索按钮 aria-keyshortcuts="Meta+K" → 渲染 [keyshortcuts=Meta+K]。
+    // 仅当 keyshortcuts 非空才输出, 与其它 state 标记同段。
+    const keyshortcutsSeg = e.keyshortcuts ? ` [keyshortcuts=${e.keyshortcuts}]` : "";
     const bboxSeg =
       includeBoxes && e.bbox !== undefined ? ` bbox=[${e.bbox.join(",")}]` : "";
     const kids = childrenOf.get(e.index) ?? [];
@@ -508,7 +527,7 @@ export function renderObserveTree(
     const isNew = prevKeys !== null && !prevKeys.has(buildElementKey(e));
     const newPrefix = isNew ? "* " : "";
     lines.push(
-      `${indent}${newPrefix}- ${e.role}${name}${ref}${stateFlags(e.state)}${weak}${cursor}${listener}${dropzone}${draggable}${valueSeg}${comp}${err}${ctrl}${desc}${offscreenSeg}${blindspotTag(e.blindspot)}${e.behindModal ? " [behind-modal]" : ""}${bboxSeg}${hasChildren ? ":" : ""}`,
+      `${indent}${newPrefix}- ${e.role}${name}${ref}${stateFlags(e.state)}${weak}${cursor}${listener}${dropzone}${draggable}${valueSeg}${valueMinSeg}${valueMaxSeg}${keyshortcutsSeg}${comp}${err}${ctrl}${desc}${offscreenSeg}${blindspotTag(e.blindspot)}${e.behindModal ? " [behind-modal]" : ""}${bboxSeg}${hasChildren ? ":" : ""}`,
     );
     if (hasUrl) lines.push(`${indent}  - /url: ${e.href}`);
     for (const k of kids) emit(k, depth + 1);
