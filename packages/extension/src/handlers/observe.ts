@@ -568,6 +568,30 @@ export function isReadonlyScrollTag(
 }
 
 /**
+ * N0002 B005:treeitem 嵌套深度推断。Element Plus / antd Tree 等组件忘记在 DOM 写
+ *   aria-level,但 DOM 嵌套 group → treeitem 嵌套能反映层级。沿 [role=tree] 祖先
+ *   上溯,每穿过一个 [role=group] 累加 1。tree 顶层 level=1,嵌 1 个 group = 2,嵌 2 = 3。
+ *   aria-level attribute 优先(更准确,作者显式声明),此函数仅作 fallback。
+ *   无 [role=tree] 祖先 → undefined(非树形控件,不输出 level)。
+ *   注入体(scanOneFrame)内联同名逻辑,改一处须同步;本导出由 observe-treeitem-level.test.ts 锁守护。
+ * @author qingwa
+ */
+export function inferTreeitemLevel(
+  el: Element,
+  closest: (sel: string) => Element | null = (s) => el.closest(s),
+): number | undefined {
+  const treeRoot = closest("[role=tree]");
+  if (!treeRoot) return undefined;
+  let level = 1;
+  let n: Element | null = el.parentElement;
+  while (n && n !== treeRoot) {
+    if (n.getAttribute("role") === "group") level++;
+    n = n.parentElement;
+  }
+  return level;
+}
+
+/**
  * 从 overlayRoots(已是可见脱流浮层根)中挑出 active modal:aria-modal=true 的根。多个(嵌套
  * 对话框 Outer+Inner)取 overlayRoots 中最后一个——信号一按 querySelectorAllDeep 文档序收集,
  * 后者即 DOM 序更后/更顶层的模态。无模态根返回 null(短路 → 零漂移)。
@@ -1850,6 +1874,20 @@ async function scanOneFrame(
           const ariaLevel = el.getAttribute("aria-level");
           if (ariaLevel != null && ariaLevel !== "" && !isNaN(Number(ariaLevel))) {
             s.level = Number(ariaLevel);
+          } else if (el.getAttribute("role") === "treeitem") {
+            // N0002 B005: treeitem 嵌套深度 fallback。EP / antd Tree 在 DOM 上未写
+            // aria-level, 但 group→treeitem 嵌套能反映层级。沿 [role=tree] 祖先上溯
+            // 每穿过 [role=group] 累加 1。注入体内联:与模块级 inferTreeitemLevel 同步。
+            let __lvl = 1;
+            const __treeRoot = el.closest("[role=tree]");
+            if (__treeRoot) {
+              let __n = el.parentElement;
+              while (__n && __n !== __treeRoot) {
+                if (__n.getAttribute("role") === "group") __lvl++;
+                __n = __n.parentElement;
+              }
+              s.level = __lvl;
+            }
           }
           return Object.keys(s).length > 0 ? s : undefined;
         }
