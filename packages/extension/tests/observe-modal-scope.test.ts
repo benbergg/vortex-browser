@@ -14,6 +14,7 @@ import {
   isModalOverlayRoot,
   selectActiveModal,
   scopeCandidatesToModal,
+  isModalLikeOverlay,
 } from "../src/handlers/observe.js";
 
 function el(html: string): HTMLElement {
@@ -93,5 +94,55 @@ describe("modal-scope: source-lock(inject func 内联副本同步)", () => {
     expect(src).toMatch(/__activeModal && filter === "all"/);
     expect(src).toMatch(/__activeModal && filter !== "all"/);
     expect(src).not.toMatch(/__activeModal && filterMode/);
+  });
+});
+
+describe("modal-scope: isModalLikeOverlay (N0002 B002 — 多信号 modal 判定)", () => {
+  // 构造 mock Element:对象字面量带 getAttribute + getBoundingClientRect,viewport 固定 1440x800。
+  // 之所以用对象字面量而非真实 DOM:getBoundingClientRect 在 jsdom 里恒返回 0,无法覆盖覆盖门逻辑。
+  const VIEW = { w: 1440, h: 800 };
+  type MockEl = {
+    getAttribute: (n: string) => string | null;
+    getBoundingClientRect: () => { width: number; height: number };
+  };
+  const mockEl = (attrs: Record<string, string | null>, w: number, h: number): MockEl => ({
+    getAttribute: (n: string) => (n in attrs ? attrs[n] ?? null : null),
+    getBoundingClientRect: () => ({ width: w, height: h } as DOMRect),
+  });
+
+  it("aria-modal=true(任意尺寸,小 220x300 也算) → true", () => {
+    const e = mockEl({ "aria-modal": "true" }, 220, 300);
+    expect(isModalLikeOverlay(e as unknown as Element, undefined, () => VIEW)).toBe(true);
+  });
+
+  it("role=dialog 无 aria-modal,小尺寸 600x400(伪模态) → true(语义门)", () => {
+    const e = mockEl({ role: "dialog" }, 600, 400);
+    expect(isModalLikeOverlay(e as unknown as Element, undefined, () => VIEW)).toBe(true);
+  });
+
+  it("role=alertdialog 无 aria-modal,小尺寸 → true", () => {
+    const e = mockEl({ role: "alertdialog" }, 500, 350);
+    expect(isModalLikeOverlay(e as unknown as Element, undefined, () => VIEW)).toBe(true);
+  });
+
+  it("无 role 无 aria-modal,但全屏 1440x788(0.82 宽,0.985 高) → true(覆盖门)", () => {
+    const e = mockEl({}, 1440, 788);
+    expect(isModalLikeOverlay(e as unknown as Element, undefined, () => VIEW)).toBe(true);
+  });
+
+  it("无 role 无 aria-modal,小尺寸 220x300(el-select popper) → false", () => {
+    const e = mockEl({}, 220, 300);
+    expect(isModalLikeOverlay(e as unknown as Element, undefined, () => VIEW)).toBe(false);
+  });
+
+  it("role 多个空格分词 + 第一 token 为 dialog → 仍判 true", () => {
+    const e = mockEl({ role: "dialog  extra tokens" }, 100, 100);
+    expect(isModalLikeOverlay(e as unknown as Element, undefined, () => VIEW)).toBe(true);
+  });
+
+  it("aria-modal=true 时 getBoundingClientRect 异常/未挂载不影响结果(短路在前)", () => {
+    const e = mockEl({ "aria-modal": "true" }, 0, 0);
+    // 即使宽高为 0,aria-modal=true 短路优先 → true
+    expect(isModalLikeOverlay(e as unknown as Element, undefined, () => VIEW)).toBe(true);
   });
 });
