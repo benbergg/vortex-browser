@@ -3077,6 +3077,41 @@ async function scanOneFrame(
           }
         }
 
+        // N0002 B008:aria-controls 关联。aria-controls="id1 id2" 拆 id list,在 collectedEls
+        // 中找下标,填 elements[i].controls。渲染输出 controls=@ref:ex,@ref:ey 标记,
+        // agent 知道 button 控制哪个 region(disclosure / accordion / tab / menu 触发器)。
+        // 多 id 支持:ARIA spec 允许 space-separated 多个目标。aria-owns 同步支持(popover
+        // / listbox 父级)——同关联语义, agent 看到 button → region 链。
+        // id 在 collectedEls 找不到 → 静默忽略(不报 "未找到"——目标元素可能 inert / 离屏
+        // 不在收集范围,与 a11y tree 一致)。
+        {
+          const __idSet = new Set<string>();
+          for (let i = 0; i < collectedEls.length; i++) {
+            const __el = collectedEls[i];
+            const __controlsAttr = __el.getAttribute("aria-controls");
+            const __ownsAttr = __el.getAttribute("aria-owns");
+            const __allIds: string[] = [];
+            if (__controlsAttr) __allIds.push(...__controlsAttr.split(/\s+/).filter(Boolean));
+            if (__ownsAttr) __allIds.push(...__ownsAttr.split(/\s+/).filter(Boolean));
+            if (__allIds.length === 0) continue;
+            const __idxList: number[] = [];
+            const __seen = new Set<number>();
+            for (const __id of __allIds) {
+              // 在 collectedEls 中通过 id 找。注意 id 必须唯一(id-uniqueness 已在
+              // observe-id-uniqueness.test.ts 锁),若重复取第一个。
+              if (__idSet.has(__id)) continue;
+              for (let j = 0; j < collectedEls.length; j++) {
+                if (collectedEls[j].id === __id && !__seen.has(j)) {
+                  __idxList.push(j);
+                  __seen.add(j);
+                  break;
+                }
+              }
+            }
+            if (__idxList.length > 0) elements[i].controls = __idxList;
+          }
+        }
+
         // AX-overlay: 给每个收集元素打 frame-local 下标标记,供扩展侧 DOM.getDocument
         // 关联到 backendDOMNodeId。与 observe-ax-overlay.ts STAMP_MARKERS 同语义(内联副本)。
         for (let i = 0; i < collectedEls.length; i++) {
