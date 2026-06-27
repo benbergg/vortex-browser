@@ -502,6 +502,72 @@ export function isModalOverlayRoot(
 }
 
 /**
+ * N0002 B002:多信号 modal 判定。isModalOverlayRoot(仅 aria-modal=true)是硬门,但漏掉
+ *   1) role=dialog/alertdialog 但没标 aria-modal(老代码库常见,antd 老 Dialog / shadcn AlertDialog
+ *      默认无 aria-modal,仅 role);
+ *   2) 全屏 overlay(Element Plus `.el-overlay` 罩层)——挡 el-dialog 整屏,但 el-dialog 自身
+ *      才有 role,罩层无任何 ARIA 信号,只能靠尺寸判断。
+ * 三门按顺序:aria-modal 严格门 → role 语义门 → 覆盖门(全屏,>=80% 视口宽高)。
+ * 覆盖门须配「含交互后代」,由 overlayRoots 收集阶段保证,本函数只判单元素尺寸不再查子元素。
+ * inject func(scanOneFrame)内联同名逻辑,改一处须同步;本导出由 observe-modal-scope.test.ts 锁守护。
+ * @author qingwa
+ */
+export function isModalLikeOverlay(
+  el: Element,
+  getAttr: (e: Element, n: string) => string | null = (e, n) => e.getAttribute(n),
+  viewport: () => { w: number; h: number } = () => ({ w: innerWidth, h: innerHeight }),
+): boolean {
+  if (getAttr(el, "aria-modal") === "true") return true;
+  const role = (getAttr(el, "role") || "").trim().split(/\s+/)[0];
+  if (role === "dialog" || role === "alertdialog") return true;
+  const r = el.getBoundingClientRect();
+  const { w, h } = viewport();
+  return r.width >= w * 0.8 && r.height >= h * 0.8;
+}
+
+/**
+ * N0002 B004:大页 candidate 遍历的时间预算早退。密集型 SPA(antd Pro / bytenew 工单详情)
+ * 单帧可扫到 4000+ 候选,后续评估循环累加主线程耗时 → Tab 卡顿。
+ * 修复:遍历带 max + budgetMs 双门控,max 命中或超时即停止收集。
+ * 本导出是纯函数版供单测;scanOneFrame 注入体内联同名逻辑由人工后续接入。
+ * inject func(scanOneFrame)内联同名逻辑,改一处须同步;本导出由 observe-time-budget.test.ts 锁守护。
+ * @author qingwa
+ */
+export function collectWithBudget<T>(
+  cands: T[],
+  max: number,
+  budgetMs: number,
+  now: () => number,
+): { processed: number; timeBudgetHit: boolean; limit: number } {
+  const t0 = now();
+  let i = 0;
+  let timeBudgetHit = false;
+  for (; i < cands.length; i++) {
+    if (i >= max) break;
+    if (now() - t0 > budgetMs) {
+      timeBudgetHit = true;
+      break;
+    }
+  }
+  return { processed: i, timeBudgetHit, limit: max };
+}
+
+/**
+ * N0002 B003:pre/code/samp/kbd 的 tabindex=0 仅用于聚焦滚动(常见 dev 文档站 Prism/
+ * highlight.js 给 <pre> 加 tabindex="0" 让人能滚长代码块),不是真正可交互控件。
+ * 例外:contenteditable="true"——罕见的 Monaco/CodeMirror 把 pre 设为可编辑,保留为控件。
+ * inject func(scanOneFrame)内联同名逻辑,改一处须同步;本导出由 observe-readonly-tag.test.ts 锁守护。
+ * @author qingwa
+ */
+export function isReadonlyScrollTag(
+  tag: string,
+  contenteditable: string | null,
+): boolean {
+  if (contenteditable === "true") return false;
+  return tag === "pre" || tag === "code" || tag === "samp" || tag === "kbd";
+}
+
+/**
  * 从 overlayRoots(已是可见脱流浮层根)中挑出 active modal:aria-modal=true 的根。多个(嵌套
  * 对话框 Outer+Inner)取 overlayRoots 中最后一个——信号一按 querySelectorAllDeep 文档序收集,
  * 后者即 DOM 序更后/更顶层的模态。无模态根返回 null(短路 → 零漂移)。
@@ -1596,8 +1662,10 @@ async function scanOneFrame(
           required?: boolean;
           current?: boolean;
           invalid?: boolean;
-          sort?: "ascending" | "descending" | "none";
-          haspopup?: string;
+            sort?: "ascending" | "descending" | "none";
+            haspopup?: string;
+            /** aria-level, tree/heading 层级数字 (0=outermost 合法值). N0002 B001. */
+            level?: number;
         } | undefined {
           const s: {
             checked?: boolean;
@@ -1610,6 +1678,7 @@ async function scanOneFrame(
             invalid?: boolean;
             sort?: "ascending" | "descending" | "none";
             haspopup?: string;
+            level?: number;
           } = {};
           let cur: Element | null = el;
           for (let i = 0; i < 3 && cur; i++, cur = cur.parentElement) {
@@ -1772,6 +1841,15 @@ async function scanOneFrame(
               ariaHaspopup === "dialog"
                 ? ariaHaspopup
                 : "menu";
+          }
+          // aria-level: tree/treeitem/heading 层级数字。CDP AX tree properties.level
+          // 反映原生 ARIA 树深度。Element Plus / antd Tree 树形组件忘记在 DOM 上写
+          // aria-level 时, observe 拿不到, agent 无法判断节点深度 + 多层缩进难分辨。
+          // !isNaN 守护:非数字字符串("3.5"/"abc") 拒绝。0 是合法值(outermost),保留。
+          // 仅查自身——aria-level 按 ARIA 惯例落在角色元素自身,上溯会把父级层数错配。
+          const ariaLevel = el.getAttribute("aria-level");
+          if (ariaLevel != null && ariaLevel !== "" && !isNaN(Number(ariaLevel))) {
+            s.level = Number(ariaLevel);
           }
           return Object.keys(s).length > 0 ? s : undefined;
         }
@@ -2498,7 +2576,26 @@ async function scanOneFrame(
         // ⚠ 内联副本:与模块级 selectActiveModal / scopeCandidatesToModal 同步(observe-modal-scope.test.ts 锁)。
         let __activeModal: Element | null = null;
         for (const el of overlayRoots) {
-          if (el.getAttribute("aria-modal") === "true") __activeModal = el; // 多个取最后(顶层)
+          // N0002 B002:多信号 modal 判定内联副本(与模块级 isModalLikeOverlay 同步)。
+          // 仅 aria-modal=true 硬门漏掉 antd 老 Dialog / Element Plus .el-overlay 罩层
+          // / shadcn AlertDialog(默认无 aria-modal 仅 role 或仅尺寸)。三门并集:
+          // aria-modal 严格门 → role=dialog/alertdialog 语义门 → 视口≥80% 覆盖门。
+          // 覆盖门需"含交互后代"由 overlayRoots 收集阶段保证。
+          let __isModal = false;
+          if (el.getAttribute("aria-modal") === "true") {
+            __isModal = true;
+          } else {
+            const __role = (el.getAttribute("role") || "").trim().split(/\s+/)[0];
+            if (__role === "dialog" || __role === "alertdialog") {
+              __isModal = true;
+            } else {
+              const __r = el.getBoundingClientRect();
+              if (__r.width >= innerWidth * 0.8 && __r.height >= innerHeight * 0.8) {
+                __isModal = true;
+              }
+            }
+          }
+          if (__isModal) __activeModal = el; // 多个取最后(顶层)
         }
         let __modalMeta: { name: string; role: string; suppressed: number } | null = null;
         // filter=all 逃生口:不裁剪,但记录模态根供元素装配时给背景打 behindModal 标。
@@ -2566,7 +2663,7 @@ async function scanOneFrame(
           inViewport: boolean;
           occludedBy?: string;
           attrs: Record<string, string>;
-          state?: { checked?: boolean; selected?: boolean; active?: boolean; disabled?: boolean; expanded?: boolean; required?: boolean; current?: boolean; invalid?: boolean; sort?: "ascending" | "descending" | "none"; haspopup?: string };
+          state?: { checked?: boolean; selected?: boolean; active?: boolean; disabled?: boolean; expanded?: boolean; required?: boolean; current?: boolean; invalid?: boolean; sort?: "ascending" | "descending" | "none"; haspopup?: string; level?: number };
           /** 值域控件当前值,如 "30" 或 "30/100"(getValueInfo 严格限定值域控件)。 */
           valueNow?: string;
           /** 最近的已收集祖先的 frame-local index；根节点 undefined。@since a11y-tree */
@@ -2578,9 +2675,32 @@ async function scanOneFrame(
         // a11y-tree: 与 elements 下标对齐的 DOM 元素引用数组，供二次遍历建树。
         const collectedEls: Element[] = [];
 
+        // N0002 B004: candidate 遍历加 8s 时间预算。密集 SPA 单帧 4000+ 候选,后续
+        // getBoundingClientRect/getComputedStyle/checkVisibility/elementFromPoint 累加
+        // 主线程耗时 → Tab 卡顿 + 30s MCP 超时。早退保证 worst-case 也回,truncated 信号
+        // 双门 (max 或 timeBudgetHit)。内联副本,与模块级 collectWithBudget 同步。
+        const __t0 = performance.now();
+        let __timeBudgetHit = false;
         for (const el of allCandidates) {
           if (elements.length >= max) break;
+          if (performance.now() - __t0 > 8000) {
+            __timeBudgetHit = true;
+            break;
+          }
           const htmlEl = el as HTMLElement;
+          // N0002 B003:pre/code/samp/kbd 的 tabindex=0 仅用于聚焦滚动(dev 文档站
+          // Prism/highlight.js/shiki 给代码块加 tabindex=0 让人能滚),不是交互控件。
+          // 误入池会把 HTML 源码当可访问名、挤占 maxElements 截断预算把真控件挤掉
+          // (Tailwind 首页实测 6 个 pre + truncated 80/120)。contenteditable 例外
+          // (罕见的 Monaco/CodeMirror 把 pre 设为可编辑,保留为控件)。⚠ 内联实现:
+          // 注入体丢模块作用域,不能调模块级 isReadonlyScrollTag(由该导出 + 单测守护同义)。
+          const __roTag = htmlEl.tagName.toLowerCase();
+          if (
+            htmlEl.getAttribute("contenteditable") !== "true" &&
+            (__roTag === "pre" || __roTag === "code" || __roTag === "samp" || __roTag === "kbd")
+          ) {
+            continue;
+          }
           const rect = htmlEl.getBoundingClientRect();
           if (rect.width === 0 || rect.height === 0) continue;
 
@@ -3048,7 +3168,9 @@ async function scanOneFrame(
           },
           elements,
           candidateCount: allCandidates.length,
-          truncated: elements.length >= max,
+          // N0002 B004: truncated 双门 — max 截断 OR 时间预算命中。Agent 据此判断是
+          // 正常 maxElements 限制还是大页性能降级,前者调小参数即可、后者需换 query 通道。
+          truncated: elements.length >= max || __timeBudgetHit,
           blindspots: pageBlindspots,
           ...(__modalMeta ? { modal: __modalMeta } : {}),
         };
