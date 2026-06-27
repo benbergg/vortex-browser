@@ -59,17 +59,17 @@ describe("dispatchNewTool", () => {
     expect(params).not.toHaveProperty("idleMs");
   });
 
-  it("vortex_fill kind:cascader → dom.commit", () => {
-    const { action } = dispatchNewTool("vortex_fill", { kind: "cascader", value: "x" })!;
+  it("vortex_fill widget:cascader → dom.commit", () => {
+    const { action } = dispatchNewTool("vortex_fill", { widget: "cascader", value: "x" })!;
     expect(action).toBe("dom.commit");
   });
 
-  it("vortex_fill kind:checkbox-group → dom.commit", () => {
-    const { action } = dispatchNewTool("vortex_fill", { kind: "checkbox-group", value: ["a"] })!;
+  it("vortex_fill widget:checkbox-group → dom.commit", () => {
+    const { action } = dispatchNewTool("vortex_fill", { widget: "checkbox-group", value: ["a"] })!;
     expect(action).toBe("dom.commit");
   });
 
-  it("vortex_fill 无 kind → dom.fill", () => {
+  it("vortex_fill 无 widget → dom.fill", () => {
     const { action } = dispatchNewTool("vortex_fill", { value: "x" })!;
     expect(action).toBe("dom.fill");
   });
@@ -299,30 +299,30 @@ describe("dispatchNewTool", () => {
   // JSON 字符串，dom.commit driver 期望 string[] / {values} → `Array.isArray` 判否
   // 报 "value must be a non-empty label path array"。修复:结构化 kind 的字符串
   // value 先 JSON.parse 还原。Element Plus cascader e2e 实证。
-  it("vortex_fill(kind=cascader, value 为 JSON 字符串数组) 解析回数组", () => {
+  it("vortex_fill(widget=cascader, value 为 JSON 字符串数组) 解析回数组", () => {
     const { action, params } = dispatchNewTool("vortex_fill", {
       target: "@e1",
-      kind: "cascader",
+      widget: "cascader",
       value: '["Guide","Disciplines","Consistency"]',
     })!;
     expect(action).toBe("dom.commit");
     expect(params.value).toEqual(["Guide", "Disciplines", "Consistency"]);
-    expect(params.kind).toBe("cascader");
+    expect(params.kind).toBe("cascader"); // 映射回 kind 下发 extension
   });
 
-  it("vortex_fill(kind=checkbox-group, value 为 JSON 字符串对象) 解析回对象", () => {
+  it("vortex_fill(widget=checkbox-group, value 为 JSON 字符串对象) 解析回对象", () => {
     const { params } = dispatchNewTool("vortex_fill", {
       target: "@e1",
-      kind: "checkbox-group",
+      widget: "checkbox-group",
       value: '{"values":["A","B"]}',
     })!;
     expect(params.value).toEqual({ values: ["A", "B"] });
   });
 
-  it("vortex_fill(kind=select, 单值普通字符串) 不被 JSON.parse 误伤", () => {
+  it("vortex_fill(widget=select, 单值普通字符串) 不被 JSON.parse 误伤", () => {
     const { params } = dispatchNewTool("vortex_fill", {
       target: "@e1",
-      kind: "select",
+      widget: "select",
       value: "北京", // 非 JSON,保持原字符串
     })!;
     expect(params.value).toBe("北京");

@@ -65,16 +65,17 @@ export function dispatchNewTool(
       return { action, params: idleMs != null ? { [idleKey]: idleMs, ...rest } : rest };
     }
     case "vortex_fill": {
-      const { kind, value, ...rest } = params;
-      if (!kind) {
+      const { widget, value, ...rest } = params;
+      if (!widget) {
         // 纯文本 fill：value 是字符串数据，原样透传（不 parse，避免误把
         // 形似 JSON 的文本当结构化值）。
         return { action: "dom.fill", params: { value, ...rest } };
       }
-      // 结构化 kind：dom.commit driver 期望 cascader=string[] /
+      // 面向 LLM 的参数名是 widget；extension 的 dom.commit driver 仍按 kind 取参，
+      // 此处映射回 kind 下发。结构化 widget：dom.commit driver 期望 cascader=string[] /
       // checkbox-group={values:string[]} / 多选 select=string[] 等结构化值，
       // 但 client 已把它序列化成 JSON 字符串，此处还原。
-      return { action: "dom.commit", params: { kind, value: parseStructuredValue(value), ...rest } };
+      return { action: "dom.commit", params: { kind: widget, value: parseStructuredValue(value), ...rest } };
     }
     case "vortex_evaluate": {
       const { async: isAsync, ...rest } = params;

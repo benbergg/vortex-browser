@@ -368,13 +368,13 @@ export const PUBLIC_TOOLS: ToolDef[] = [
   {
     name: "vortex_fill",
     action: "L4.fill",
-    description: "Fill form field; kind=cascader/select/daterange for widgets.",
+    description: "Fill field; widget=cascader/select/daterange for widgets.",
     schema: {
       type: "object",
       properties: {
         target: TargetRequired,
         value: {},
-        kind: { enum: [...COMMIT_KINDS] },
+        widget: { enum: [...COMMIT_KINDS] },
         force: { type: "boolean" },
         ...tabFields,
       },

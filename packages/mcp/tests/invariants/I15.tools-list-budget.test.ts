@@ -208,16 +208,16 @@ describe("I15: tools/list budget + count + internalized grep", () => {
 // 的 CommitKind 之间必须严格一致。把 COMMIT_KINDS 拆到 @vortex-browser/shared
 // 作为单一真值源后，下面三条测试 lock 公开/内部 schema 与 shared 数组一致，
 // 任何一边私自加值/减值都会断在 CI。
-describe("H-7: vortex_fill.kind enum stays in sync with shared COMMIT_KINDS", () => {
-  it("public vortex_fill.kind.enum == COMMIT_KINDS", () => {
+describe("H-7: vortex_fill.widget enum stays in sync with shared COMMIT_KINDS", () => {
+  it("public vortex_fill.widget.enum == COMMIT_KINDS", () => {
     const fill = getToolDefs().find(d => d.name === "vortex_fill")!;
-    const enumVals = (fill.schema as { properties: { kind: { enum: string[] } } }).properties.kind.enum;
+    const enumVals = (fill.schema as { properties: { widget: { enum: string[] } } }).properties.widget.enum;
     expect([...enumVals].sort()).toEqual([...COMMIT_KINDS].sort());
   });
 
-  it("internal vortex_fill.kind.enum == COMMIT_KINDS", () => {
+  it("internal vortex_fill.widget.enum == COMMIT_KINDS", () => {
     const fill = getInternalToolDef("vortex_fill")!;
-    const enumVals = (fill.schema as { properties: { kind: { enum: string[] } } }).properties.kind.enum;
+    const enumVals = (fill.schema as { properties: { widget: { enum: string[] } } }).properties.widget.enum;
     expect([...enumVals].sort()).toEqual([...COMMIT_KINDS].sort());
   });
 });

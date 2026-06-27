@@ -44,9 +44,9 @@ describe("vortex_fill force — public schema (BUG-011)", () => {
     expect(required.includes("force")).toBe(false);
   });
 
-  it("force does not collide with existing fill params (target/value/kind/tabId/frameId)", () => {
+  it("force does not collide with existing fill params (target/value/widget/tabId/frameId)", () => {
     expect(Object.keys(props)).toEqual(
-      expect.arrayContaining(["target", "value", "kind", "force"]),
+      expect.arrayContaining(["target", "value", "widget", "force"]),
     );
   });
 });
