@@ -5,7 +5,7 @@ export interface CompactElement {
   tag: string;
   role: string;
   name: string;
-  state?: { checked?: boolean | "mixed"; selected?: boolean; active?: boolean; disabled?: boolean; required?: boolean; expanded?: boolean; current?: boolean; invalid?: boolean; sort?: "ascending" | "descending" | "none"; haspopup?: string; readonly?: boolean };
+  state?: { checked?: boolean | "mixed"; selected?: boolean; active?: boolean; disabled?: boolean; required?: boolean; expanded?: boolean; current?: boolean; invalid?: boolean; sort?: "ascending" | "descending" | "none"; haspopup?: string; readonly?: boolean; /** aria-level,树形/标题层级(0=outermost)。@since N0002 B001 */ level?: number };
   // 值域控件(slider/spinbutton/progressbar/meter 等)的当前值,如 "30" / "30/100"。
   valueNow?: string;
   frameId: number;
@@ -85,7 +85,7 @@ interface CompactFrame {
   modal?: { name: string; role: string; suppressed: number };
 }
 
-interface CompactObserve {
+export interface CompactObserve {
   snapshotId: string;
   url: string;
   title?: string;
@@ -217,6 +217,8 @@ function stateFlags(state?: CompactElement["state"]): string {
   // aria-haspopup:点击弹出的弹层类型(menu/listbox/tree/grid/dialog)。冒号语法
   // [haspopup:menu] 让 agent 预判点击后出现弹层(bench parser 自 AC 起容忍冒号)。
   if (state.haspopup) flags.push(`haspopup:${state.haspopup}`);
+  // aria-level:树形结构(tree/treeitem)与 heading 的层级数字。!=null 保留 0(outermost 合法值)。
+  if (state.level != null) flags.push(`level=${state.level}`);
   return flags.length ? " " + flags.map((f) => `[${f}]`).join(" ") : "";
 }
 
