@@ -54,14 +54,14 @@ export function dispatchNewTool(
       return { action: "page.wait", params: { ...rest } };
     }
     case "vortex_wait_idle": {
-      const { kind, idleMs, ...rest } = params;
-      const action = kind === "network"
+      const { until, idleMs, ...rest } = params;
+      const action = until === "network"
         ? "page.waitForNetworkIdle"
-        : kind === "dom"
+        : until === "dom"
         ? "dom.waitSettled"
         : "page.waitForXhrIdle";
       // idleMs → idleTime（network/xhr）或 quietMs（dom）
-      const idleKey = kind === "dom" ? "quietMs" : "idleTime";
+      const idleKey = until === "dom" ? "quietMs" : "idleTime";
       return { action, params: idleMs != null ? { [idleKey]: idleMs, ...rest } : rest };
     }
     case "vortex_fill": {

@@ -286,11 +286,11 @@ function pageTools(): ToolDef[] {
     {
       name: "vortex_wait_idle",
       action: "page.waitForXhrIdle",
-      description: "Wait for network/XHR/DOM idle. kind: 'xhr' (default) | 'network' | 'dom'.",
+      description: "Wait for network/XHR/DOM idle. until: 'xhr' (default) | 'network' | 'dom'.",
       schema: {
         type: "object",
         properties: {
-          kind: {
+          until: {
             type: "string",
             enum: ["xhr", "network", "dom"],
             default: "xhr",

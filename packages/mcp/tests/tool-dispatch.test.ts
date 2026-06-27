@@ -32,29 +32,29 @@ describe("dispatchNewTool", () => {
     expect(action).toBe("page.back");
   });
 
-  it("vortex_wait_idle kind:dom → dom.waitSettled", () => {
-    const { action } = dispatchNewTool("vortex_wait_idle", { kind: "dom" })!;
+  it("vortex_wait_idle until:dom → dom.waitSettled", () => {
+    const { action } = dispatchNewTool("vortex_wait_idle", { until: "dom" })!;
     expect(action).toBe("dom.waitSettled");
   });
 
-  it("vortex_wait_idle kind:network → page.waitForNetworkIdle", () => {
-    const { action } = dispatchNewTool("vortex_wait_idle", { kind: "network" })!;
+  it("vortex_wait_idle until:network → page.waitForNetworkIdle", () => {
+    const { action } = dispatchNewTool("vortex_wait_idle", { until: "network" })!;
     expect(action).toBe("page.waitForNetworkIdle");
   });
 
-  it("vortex_wait_idle kind:xhr → page.waitForXhrIdle", () => {
-    const { action } = dispatchNewTool("vortex_wait_idle", { kind: "xhr" })!;
+  it("vortex_wait_idle until:xhr → page.waitForXhrIdle", () => {
+    const { action } = dispatchNewTool("vortex_wait_idle", { until: "xhr" })!;
     expect(action).toBe("page.waitForXhrIdle");
   });
 
   it("vortex_wait_idle idleMs 映射到 idleTime（xhr）", () => {
-    const { params } = dispatchNewTool("vortex_wait_idle", { kind: "xhr", idleMs: 300 })!;
+    const { params } = dispatchNewTool("vortex_wait_idle", { until: "xhr", idleMs: 300 })!;
     expect(params.idleTime).toBe(300);
     expect(params).not.toHaveProperty("idleMs");
   });
 
   it("vortex_wait_idle idleMs 映射到 quietMs（dom）", () => {
-    const { params } = dispatchNewTool("vortex_wait_idle", { kind: "dom", idleMs: 500 })!;
+    const { params } = dispatchNewTool("vortex_wait_idle", { until: "dom", idleMs: 500 })!;
     expect(params.quietMs).toBe(500);
     expect(params).not.toHaveProperty("idleMs");
   });
