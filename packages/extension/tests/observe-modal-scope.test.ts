@@ -111,6 +111,17 @@ describe("modal-scope: source-lock(inject func 内联副本同步)", () => {
     // "tabpanel")，仅显示结构 — 与 dialog 容器不同,无需 modal-scope 特殊处理。
     expect(src).toMatch(/\[role=tabpanel\]/);
   });
+
+  it("R5 B013: TABLE_EXTRA_SELECTORS 含 table 元素让 table 容器自身召回", () => {
+    // R5 评测发现:真站或注入的 <table aria-label="..."> 容器在 observe
+    // 输出中完全丢失(只显示 row/cell/columnheader,2026-06-28 a11y 评测
+    // R5 B013)。Agent 看到 row "Product Sales" 但不知是哪个 table 上下文。
+    // 修复:原生 table 元素加 TABLE_EXTRA_SELECTORS(filter=all 时收集),
+    // 与 tr/td/th/[role=row]/[role=cell]/[role=columnheader] 等表结构
+    // 角色一起召回。getRole 返 "table"(HTML-AAM),无 cursor:pointer 时
+    // 不被 react-clickable 误标。
+    expect(src).toMatch(/TABLE_EXTRA_SELECTORS[\s\S]*?["']table,/);
+  });
   it("inject func 模态块用 inject 形参 filter(非外层 filterMode)防 ReferenceError", () => {
     // inject func 第 5 形参名是 `filter`(func 签名 L731);只有外层 scanOneFrame 才叫 filterMode。
     // 模态块若误用 filterMode → inject MAIN-world 作用域无此变量 → minify 成自由变量 `a`

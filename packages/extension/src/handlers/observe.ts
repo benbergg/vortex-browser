@@ -2090,7 +2090,12 @@ async function scanOneFrame(
         // structural roles that table-heavy pages expose (rows / cells /
         // column headers) so LLMs can reference data grid coordinates.
         const TABLE_EXTRA_SELECTORS =
-          "tr,td,th,[role=row],[role=cell],[role=columnheader],[role=rowheader],[role=gridcell]";
+          // R5 B013 修复: 原生 <table> 元素加入,让 table 容器自身召回
+          // (此前只收 tr/td/th/row 角色,Agent 看到 row "Product Sales"
+          // 但不知是哪个 table 上下文)。filter=all 时 table 容器与内部
+          // row/cell/columnheader 一起召回,getRole 返 "table" 自然
+          // 与行/单元格区分,无 cursor:pointer 不被 react-clickable 误标。
+          "table,tr,td,th,[role=row],[role=cell],[role=columnheader],[role=rowheader],[role=gridcell]";
         const ROOT_SELECTORS =
           filter === "all"
             ? `${INTERACTIVE_SELECTORS},${TABLE_EXTRA_SELECTORS}`
