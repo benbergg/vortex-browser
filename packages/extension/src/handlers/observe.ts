@@ -888,6 +888,15 @@ async function scanOneFrame(
           // 让 baseCandidates 收集 — getRole 返 "tabpanel" 自然不会与
           // tab 混淆,无 cursor:pointer 时不会被 react-clickable 误标。
           "[role=tabpanel]",
+          // R7 B016 修复: [role=progressbar] / [role=meter] 加入
+          // INTERACTIVE_SELECTORS。WAI-ARIA 标准进度/量度元素,任何 upload
+          // progress / 评分 / loading bar 都用。历史上无 [role=progressbar]
+          // → 进度条完全丢失,Agent 看不到 65% / 100% 这种关键状态。
+          // 进度/量度元素不交互(无 cursor:pointer 时),getRole 返
+          // "progressbar"/"meter" 自然不与 button 混淆。valuenow/min/max
+          // 走 valueNow/valuemin/max 已有的值域字段。
+          "[role=progressbar]",
+          "[role=meter]",
           "[role=menuitem]",
           "[role=treeitem]",
           "[role=option]",

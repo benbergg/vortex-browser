@@ -122,6 +122,19 @@ describe("modal-scope: source-lock(inject func 内联副本同步)", () => {
     // 不被 react-clickable 误标。
     expect(src).toMatch(/TABLE_EXTRA_SELECTORS[\s\S]*?["']table,/);
   });
+
+  it("R7 B016: INTERACTIVE_SELECTORS 含 [role=progressbar] / [role=meter]", () => {
+    // R7 评测发现:真站或注入的 <div role="progressbar" aria-valuenow="65">
+    // 进度条元素在 observe 输出中完全丢失(2026-06-28 a11y 评测 R7 B016)。
+    // Agent 看不到 "65% / 100%" 这种关键状态。WAI-ARIA 标准进度/量度元素
+    // (progressbar / meter),任何 upload progress / 评分 / loading bar 都用。
+    // 修复:加 [role=progressbar] 和 [role=meter] 进 INTERACTIVE_SELECTORS。
+    // 不交互(无 cursor:pointer 时),getRole 返 "progressbar"/"meter"
+    // 自然不与 button 混淆。valuenow/min/max 走已有 valueNow/valuemin/max
+    // 字段(observe-render.ts 已渲染 [valuemin=0] [valuemax=100] value=X)。
+    expect(src).toMatch(/\[role=progressbar\]/);
+    expect(src).toMatch(/\[role=meter\]/);
+  });
   it("inject func 模态块用 inject 形参 filter(非外层 filterMode)防 ReferenceError", () => {
     // inject func 第 5 形参名是 `filter`(func 签名 L731);只有外层 scanOneFrame 才叫 filterMode。
     // 模态块若误用 filterMode → inject MAIN-world 作用域无此变量 → minify 成自由变量 `a`
