@@ -3131,6 +3131,22 @@ async function scanOneFrame(
             // T3 discovery: pre-scan CDP getEventListeners 标记的纯 addEventListener
             // 元素带 data-vtx-listener → 渲染 [listener] 真值信号(此处属性尚存,清理在后)。
             ...(htmlEl.hasAttribute("data-vtx-listener") ? { listenerInteractive: true as const } : {}),
+            // R6 B015 修复:aria-errormessage 关联文本(错误信息)。
+            // AX 路径(observe-ax-overlay.ts computeAXOverlay)读 CDP relatedNodes.text,
+            // 但 Chrome CDP 经常不填该字段(实测)→ out.errorMessage 空。
+            // 修复:page-side 兜底,跟 aria-describedby / aria-controls 一样,
+            // 拆 id list → document.getElementById 找元素 → 取 textContent。
+            // AX 路径仍设 errorMessage(若 CDP 填了),本兜底仅在 AX 失败时兜底
+            // (applyOverlay 250 行 `if (ov.errorMessage)` 跳过空值,保留 page-side 值)。
+            ...(() => {
+              const __em = htmlEl.getAttribute("aria-errormessage");
+              if (!__em) return {};
+              const __id = __em.split(/\s+/).filter(Boolean)[0];
+              if (!__id) return {};
+              const __el = document.getElementById(__id);
+              const __txt = __el?.textContent?.replace(/\s+/g, " ").trim() ?? "";
+              return __txt ? { errorMessage: __txt.slice(0, 200) } : {};
+            })(),
             // 投放区:data-vtx-dropzone(drop/dragenter/dragover 监听)→ 渲染 [dropzone] 信号,
             // 与 [listener] 正交(同一元素可兼具)。body/html 排除全局 file-drop 误标。
             ...(htmlEl.hasAttribute("data-vtx-dropzone") &&
