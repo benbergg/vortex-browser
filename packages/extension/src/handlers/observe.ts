@@ -1021,6 +1021,21 @@ async function scanOneFrame(
           // controls 分组),语义不同,必须分别召回。
           "[role=group]",
           "fieldset",
+          // R17 B027 修复: [role=search] 容器加入 INTERACTIVE_SELECTORS。
+          // R16 修复 group 后,ARIA search landmark 容器仍丢失
+          // (2026-06-28 a11y 评测 R17 B027)。search 是 W3C ARIA 8 大
+          // landmark(banner/main/navigation/search/form/contentinfo/
+          // complementary/application)之一,屏幕阅读器用户按快捷键跳
+          // landmark 搜索功能位。DuckDuckGo 首页 1 <div role="search">
+          // (aria-label="利用 DuckDuckGo 搜索网络内容")包裹搜索 combobox +
+          // 搜索模式 radiogroup + AI 设置按钮 — 容器 0 召回,Agent 看到
+          // 搜索 combobox 不知属 search landmark。修复:[role=search] 加
+          // INTERACTIVE_SELECTORS,与 radiogroup/tablist/toolbar 同模式
+          // (虽然 search 是 landmark,但 R10 region landmark 已修,search
+          // 形态更接近 group/radiogroup — 包裹交互控件集合)。search 不
+          // 交互(无 cursor:pointer 时),getRole 返 "search" 自然不与
+          // combobox/button 混淆。
+          "[role=search]",
           "[role=menuitem]",
           "[role=treeitem]",
           "[role=option]",

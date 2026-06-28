@@ -251,7 +251,7 @@ describe("modal-scope: source-lock(inject func 内联副本同步)", () => {
     expect(src).toMatch(/\[role=grid\]/);
   });
 
-  it("R16 B026: INTERACTIVE_SELECTORS 含 [role=group] + fieldset 让 group/fieldset 容器自身召回", () => {
+it("R16 B026: INTERACTIVE_SELECTORS 含 [role=group] + fieldset 让 group/fieldset 容器自身召回", () => {
     // R16 评测发现:R15 修复 grid 后,HTML <fieldset>/ARIA [role=group]
     // 容器仍丢失(2026-06-28 a11y 评测 R16 B026)。W3C WAI Grouping
     // Controls 教程 5 fieldset(Output format / I want to receive /
@@ -262,15 +262,31 @@ describe("modal-scope: source-lock(inject func 内联副本同步)", () => {
     // disclosure/TreeSection 等分组。控件组分组信息丢失 → agent 拿不到
     // form section 边界,跨组同名 input 极易选错(典型:3 个 text input
     // 跨多组,不知哪个属 Shipping)。修复:[role=group] 加
-    // INTERACTIVE_SELECTORS 捕获显式 role=\"group\";同时加 fieldset
-    // 元素选择器捕获 <fieldset>(HTML-AAM 隐式 role=group,attribute 无
-    // role 字符串)。两者分别命中,联合覆盖两类 group 容器。group 不交互
-    // (无 cursor:pointer 时),getRole 返 \"group\" 自然不与 radio/button
-    // 混淆。注意:R10 B020 已修 [role=region],region 是 landmark 命名
-    // 容器;group 是非 landmark 命名容器(用于 form controls 分组),
-    // 语义不同,必须分别召回。
+    // INTERACTIVE_SELECTORS,自动覆盖 <fieldset>(HTML-AAM 隐式 role=
+    // group)+ 显式 role=group 两种。group 不交互(无 cursor:pointer 时),
+    // getRole 返 \"group\" 自然不与 radio/button 混淆。注意:R10 B020
+    // 已修 [role=region],region 是 landmark 命名容器;group 是非
+    // landmark 命名容器(用于 form controls 分组),语义不同,必须分别
+    // 召回。
     expect(src).toMatch(/\[role=group\]/);
     expect(src).toMatch(/\bfieldset\b/);
+  });
+
+  it("R17 B027: INTERACTIVE_SELECTORS 含 [role=search] 让 search landmark 容器自身召回", () => {
+    // R17 评测发现:R16 修复 group 后,ARIA search landmark 容器仍
+    // 丢失(2026-06-28 a11y 评测 R17 B027)。search 是 W3C ARIA 8 大
+    // landmark(banner/main/navigation/search/form/contentinfo/
+    // complementary/application)之一,屏幕阅读器用户按快捷键跳
+    // landmark 搜索功能位。DuckDuckGo 首页 1 <div role=\"search\">
+    // (aria-label=\"利用 DuckDuckGo 搜索网络内容\")包裹搜索 combobox +
+    // 搜索模式 radiogroup + AI 设置按钮 — 容器 0 召回,Agent 看到
+    // 搜索 combobox 不知属 search landmark。修复:[role=search] 加
+    // INTERACTIVE_SELECTORS,与 radiogroup/tablist/toolbar 同模式
+    // (虽然 search 是 landmark,但 R10 region landmark 已修,search
+    // 形态更接近 group/radiogroup — 包裹交互控件集合)。search 不
+    // 交互(无 cursor:pointer 时),getRole 返 \"search\" 自然不与
+    // combobox/button 混淆。
+    expect(src).toMatch(/\[role=search\]/);
   });
   it("inject func 模态块用 inject 形参 filter(非外层 filterMode)防 ReferenceError", () => {
     // inject func 第 5 形参名是 `filter`(func 签名 L731);只有外层 scanOneFrame 才叫 filterMode。
