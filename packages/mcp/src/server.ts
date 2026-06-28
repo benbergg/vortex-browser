@@ -144,6 +144,14 @@ function maybeExitAfterDrain(): void {
 
 function installAutoRestart(): void {
   if (!AUTO_RESTART) return;
+  // supervised 下生命周期由 supervisor 接管,child 不自杀(否则与 supervisor 抢重启,
+  // 且 child exit 会被 supervisor 当作崩溃二次拉起)。见 0010 设计文档。
+  if (process.env.VORTEX_MCP_SUPERVISED === "1") {
+    process.stderr.write(
+      "[vortex-mcp] supervised mode; self-restart watcher disabled (supervisor owns lifecycle).\n",
+    );
+    return;
+  }
   // __dirname 等价：本文件所在目录（dist/src/ 在运行期，src/ 在测试期——后者 fs.watch 也能跑）
   const here = dirname(fileURLToPath(import.meta.url));
   try {
