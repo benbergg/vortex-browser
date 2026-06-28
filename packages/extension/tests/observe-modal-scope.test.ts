@@ -185,6 +185,21 @@ describe("modal-scope: source-lock(inject func 内联副本同步)", () => {
     // 返 "radiogroup" 自然不与 radio/button 混淆。
     expect(src).toMatch(/\[role=radiogroup\]/);
   });
+
+  it("R12 B022: INTERACTIVE_SELECTORS 含 [role=tablist] 让 tablist 容器自身召回", () => {
+    // R12 评测发现:R11 修复 radiogroup 后,ARIA 1.2 tabs pattern 的
+    // 容器 tablist 仍丢失(2026-06-28 a11y 评测 R12 B022)。tab 元素本身
+    // 已在 INTERACTIVE_SELECTORS,Agent 看到 4 个 sibling tab 不知属哪个
+    // tablist(react-aria Tabs 站 2 个可见 tablist 全部 0 召回:
+    // Settings/4-tab + Files/3-tab 各 aria-label + aria-orientation 关键
+    // 状态被丢)。tablist 携带 aria-label / aria-orientation /
+    // aria-multiselectable,屏幕阅读器用此判 group 边界 — 容器不在 →
+    // agent 拿不到 tab 间关系,跨 tablist 同名 tab 选错,WAI-ARIA tabs
+    // pattern 的 roving tabindex 完全无法推理。修复:[role=tablist] 加
+    // INTERACTIVE_SELECTORS,与 radiogroup 同模式。tablist 不交互(无
+    // cursor:pointer 时),getRole 返 "tablist" 自然不与 tab 混淆。
+    expect(src).toMatch(/\[role=tablist\]/);
+  });
   it("inject func 模态块用 inject 形参 filter(非外层 filterMode)防 ReferenceError", () => {
     // inject func 第 5 形参名是 `filter`(func 签名 L731);只有外层 scanOneFrame 才叫 filterMode。
     // 模态块若误用 filterMode → inject MAIN-world 作用域无此变量 → minify 成自由变量 `a`

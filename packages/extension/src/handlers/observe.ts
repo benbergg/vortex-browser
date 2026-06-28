@@ -941,6 +941,20 @@ async function scanOneFrame(
           // radiogroup 不交互(无 cursor:pointer 时),getRole 返
           // "radiogroup" 自然不与 radio/button 混淆。
           "[role=radiogroup]",
+          // R12 B022 修复: [role=tablist] 容器加入 INTERACTIVE_SELECTORS。
+          // R11 修复 radiogroup 后,ARIA 1.2 tabs pattern 的容器 tablist
+          // 仍丢失(2026-06-28 a11y 评测 R12 B022)。tab 元素本身已在
+          // INTERACTIVE_SELECTORS,Agent 看到 4 个 sibling tab 不知属哪个
+          // tablist(react-aria Tabs 站 2 个可见 tablist 全部 0 召回:
+          // Settings/4-tab + Files/3-tab 各 aria-label + aria-orientation
+          // 关键状态被丢)。tablist 携带 aria-label / aria-orientation
+          // / aria-multiselectable,屏幕阅读器用此判 group 边界 — 容器
+          // 不在 → agent 拿不到 tab 间关系,跨 tablist 同名 tab 选错,
+          // WAI-ARIA tabs pattern 的 roving tabindex 完全无法推理。修复:
+          // [role=tablist] 加 INTERACTIVE_SELECTORS,与 radiogroup 同模式。
+          // tablist 不交互(无 cursor:pointer 时),getRole 返 "tablist"
+          // 自然不与 tab 混淆。
+          "[role=tablist]",
           "[role=menuitem]",
           "[role=treeitem]",
           "[role=option]",
