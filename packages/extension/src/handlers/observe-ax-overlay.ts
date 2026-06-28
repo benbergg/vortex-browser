@@ -90,6 +90,22 @@ export function computeAXOverlay(
   if (getProp(node, "required") === true) state.required = true;
   if (getProp(node, "readonly") === true) state.readonly = true;
   if (getProp(node, "invalid") === true || getProp(node, "invalid") === "true") state.invalid = true;
+  // R1 B003: aria-autocomplete=list/both/none/inline, combobox 自动补全语义。
+  // CDP properties.autocomplete 与 aria-autocomplete 对齐,仅取合法 token。
+  const autocomplete = getProp(node, "autocomplete");
+  if (
+    autocomplete === "list" ||
+    autocomplete === "both" ||
+    autocomplete === "none" ||
+    autocomplete === "inline"
+  ) {
+    state.autocomplete = autocomplete;
+  }
+  // R1 B004: aria-pressed 是 toggle button 标准状态,AX 同源,独立标 [pressed]
+  // 而非合并到 [active](2026-06-28 a11y 评测 R1 B004)。仅 true 输出,false/缺省不发。
+  if (getProp(node, "pressed") === true || getProp(node, "pressed") === "true") {
+    state.pressed = true;
+  }
   if (Object.keys(state).length > 0) out.state = state;
 
   const valuetext = getProp(node, "valuetext");

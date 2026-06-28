@@ -5,7 +5,7 @@ export interface CompactElement {
   tag: string;
   role: string;
   name: string;
-  state?: { checked?: boolean | "mixed"; selected?: boolean; active?: boolean; disabled?: boolean; required?: boolean; expanded?: boolean; current?: boolean; invalid?: boolean; sort?: "ascending" | "descending" | "none"; haspopup?: string; readonly?: boolean; /** aria-level,树形/标题层级(0=outermost)。@since N0002 B001 */ level?: number };
+  state?: { checked?: boolean | "mixed"; selected?: boolean; active?: boolean; disabled?: boolean; required?: boolean; expanded?: boolean; current?: boolean; invalid?: boolean; sort?: "ascending" | "descending" | "none"; haspopup?: string; readonly?: boolean; /** aria-level,树形/标题层级(0=outermost)。@since N0002 B001 */ level?: number; /** aria-autocomplete=list/both/none/inline, combobox 自动补全语义。@since R1 B003 */ autocomplete?: "list" | "both" | "none" | "inline"; /** aria-pressed=true, toggle button 标准状态(与 [active] 不同源)。@since R1 B004 */ pressed?: boolean };
   // 值域控件(slider/spinbutton/progressbar/meter 等)的当前值,如 "30" / "30/100"。
   valueNow?: string;
   // 值域控件 min/max。@since N0002 B006 — 即 valuetext=now 场景也输出。
@@ -217,6 +217,12 @@ function stateFlags(state?: CompactElement["state"]): string {
   if (state.expanded) flags.push("expanded");
   if (state.current) flags.push("current");
   if (state.invalid) flags.push("invalid");
+  // R1 B003: aria-autocomplete=list/both/none/inline, combobox 自动补全语义。
+  // 仅 combobox/searchbox 实际使用,其他 role 即使有 aria-autocomplete 也输出(不挑剔)。
+  if (state.autocomplete) flags.push(`autocomplete=${state.autocomplete}`);
+  // R1 B004: aria-pressed=true 是 toggle button 标准状态(与 [active] 区分)。
+  // 仅在 true 时发, false/缺省不发(避免噪声,与 [checked] / [selected] 同模式)。
+  if (state.pressed === true) flags.push("pressed");
   // aria-sort:可排序列当前方向。asc/desc 含方向,none=可排未排(标 sortable)。
   if (state.sort === "ascending") flags.push("sort:asc");
   else if (state.sort === "descending") flags.push("sort:desc");

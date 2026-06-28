@@ -32,9 +32,29 @@ describe("observe UI state extraction (@since 0.4.0 O-8)", () => {
     expect(OBSERVE_SRC).toMatch(/aria-selected/);
   });
 
-  it("derives active from class 'is-active' OR aria-pressed", () => {
+  it("derives active from class 'is-active' (aria-pressed 已独立为 [pressed], R1 B004)", () => {
+    // R1 B004 修复:aria-pressed 不再合并到 [active]。aria-pressed 是 toggle button
+    // 标准状态(MUI ToggleButton/Bold/Italic),[active] 来自 aria-activedescendant
+    // 虚拟焦点 + is-active 类(表达"一组里当前激活那个")——两者同源不同义。
     expect(OBSERVE_SRC).toMatch(/is-active/);
+    // active 派生不再含 aria-pressed
+    expect(OBSERVE_SRC).not.toMatch(/is-active"\)\s*\|\|\s*\(selfAria && cur\.getAttribute\("aria-pressed"\)/);
+  });
+
+  it("derives pressed from aria-pressed=true (R1 B004)", () => {
+    // aria-pressed=true 是 toggle button 标准状态,独立标 [pressed] 而非合并
+    // 到 [active](2026-06-28 a11y 评测 R1 B004)。
     expect(OBSERVE_SRC).toMatch(/aria-pressed/);
+    expect(OBSERVE_SRC).toMatch(/s\.pressed = true/);
+  });
+
+  it("derives autocomplete from aria-autocomplete (R1 B003)", () => {
+    // combobox 自动补全语义:MUI Autocomplete / WAI-ARIA combobox pattern 必报
+    // 字段。list=弹 listbox,both=inline+list,inline=inline 提示,none=无补全。
+    // 仅取合法 token,其他值丢弃(2026-06-28 a11y 评测 R1 B003)。
+    expect(OBSERVE_SRC).toMatch(/getAttribute\("aria-autocomplete"\)/);
+    expect(OBSERVE_SRC).toMatch(/"list" \|\| ariaAutocomplete === "both" \|\| ariaAutocomplete === "none" \|\| ariaAutocomplete === "inline"/);
+    expect(OBSERVE_SRC).toMatch(/s\.autocomplete = ariaAutocomplete/);
   });
 
   it("aria-checked/selected/pressed 仅读元素自身(i===0),不上溯祖先误归子控件", () => {

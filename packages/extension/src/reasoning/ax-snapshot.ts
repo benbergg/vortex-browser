@@ -86,6 +86,18 @@ async function toAXNode(n: CDPAXNode, index: number): Promise<AXNode> {
   if (readonly === true) properties.readonly = true;
   const level = getProp(n, "level");
   if (typeof level === "number") properties.level = level;
+  // R1 B003: aria-autocomplete=list/both/none/inline, combobox 自动补全语义。
+  // CDP properties.autocomplete 与 aria-autocomplete 对齐,仅取合法 token 避免
+  // 误把无关 props 误判为 autocomplete。
+  const autocomplete = getProp(n, "autocomplete");
+  if (
+    autocomplete === "list" ||
+    autocomplete === "both" ||
+    autocomplete === "none" ||
+    autocomplete === "inline"
+  ) {
+    properties.autocomplete = autocomplete;
+  }
 
   const node: AXNode = {
     ref: `@e${index}`,

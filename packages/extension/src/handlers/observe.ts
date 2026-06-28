@@ -1712,6 +1712,10 @@ async function scanOneFrame(
             haspopup?: string;
             /** aria-level, tree/heading 层级数字 (0=outermost 合法值). N0002 B001. */
             level?: number;
+            /** aria-autocomplete=list/both/none/inline, combobox 自动补全语义. R1 B003. */
+            autocomplete?: "list" | "both" | "none" | "inline";
+            /** aria-pressed=true, toggle button 标准状态. R1 B004. */
+            pressed?: boolean;
         } | undefined {
           const s: {
             checked?: boolean;
@@ -1725,6 +1729,8 @@ async function scanOneFrame(
             sort?: "ascending" | "descending" | "none";
             haspopup?: string;
             level?: number;
+            autocomplete?: "list" | "both" | "none" | "inline";
+            pressed?: boolean;
           } = {};
           let cur: Element | null = el;
           for (let i = 0; i < 3 && cur; i++, cur = cur.parentElement) {
@@ -1747,9 +1753,19 @@ async function scanOneFrame(
               }
             }
             if (s.active === undefined) {
-              if (cls.includes("is-active") || (selfAria && cur.getAttribute("aria-pressed") === "true")) {
+              // aria-pressed 不再合并到 [active](R1 B004):aria-pressed 是 toggle
+              // button 标准状态(Bold/Italic/MUI ToggleButton),与 [active] 不同源
+              // (active 来自 aria-activedescendant 虚拟焦点 + is-active 类,表达
+              // "一组里当前激活的那个")。aria-pressed 在下方独立判为 [pressed]。
+              if (cls.includes("is-active")) {
                 s.active = true;
               }
+            }
+            // R1 B004: aria-pressed=true 独立标 [pressed](toggle button)。
+            // 仅查自身(aria-pressed 按 ARIA 惯例落在角色元素自身),与 aria-checked
+            // / aria-selected 同 i===0 门控。
+            if (s.pressed === undefined && selfAria && cur.getAttribute("aria-pressed") === "true") {
+              s.pressed = true;
             }
           }
           // AE: 该元素被某控件的 aria-activedescendant 指向 = 当前虚拟焦点(键盘
@@ -1887,6 +1903,14 @@ async function scanOneFrame(
               ariaHaspopup === "dialog"
                 ? ariaHaspopup
                 : "menu";
+          }
+          // R1 B003: aria-autocomplete=list/both/none/inline, combobox 自动补全
+          // 语义。MUI Autocomplete / WAI-ARIA combobox pattern 必报字段——list=弹
+          // listbox、both=inline+list、inline=inline 提示、none=无补全。仅取合法
+          // token,其他值丢弃避免误导(2026-06-28 a11y 评测 R1)。
+          const ariaAutocomplete = el.getAttribute("aria-autocomplete");
+          if (ariaAutocomplete === "list" || ariaAutocomplete === "both" || ariaAutocomplete === "none" || ariaAutocomplete === "inline") {
+            s.autocomplete = ariaAutocomplete;
           }
           // aria-level: tree/treeitem/heading 层级数字。CDP AX tree properties.level
           // 反映原生 ARIA 树深度。Element Plus / antd Tree 树形组件忘记在 DOM 上写

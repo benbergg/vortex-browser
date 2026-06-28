@@ -16,6 +16,8 @@ export interface AXNode {
     required?: boolean;
     readonly?: boolean;
     level?: number;
+    /** aria-autocomplete=list/both/none/inline, combobox 自动补全语义。@since R1 B003 */
+    autocomplete?: "list" | "both" | "none" | "inline";
   };
   bounds?: { x: number; y: number; w: number; h: number };
   parentRef?: string;
@@ -80,6 +82,10 @@ export interface AXOverlayInfo {
   state?: {
     checked?: boolean | "mixed"; selected?: boolean; disabled?: boolean;
     expanded?: boolean; required?: boolean; readonly?: boolean; invalid?: boolean;
+    /** aria-autocomplete=list/both/none, combobox 自动补全语义。@since R1 B003 */
+    autocomplete?: "list" | "both" | "none" | "inline";
+    /** aria-pressed=true, toggle button 状态(与 [active] 同源不同义)。@since R1 B004 */
+    pressed?: boolean;
   };
   valueNow?: string;
   controls?: number[];      // 目标 backendDOMNodeId(后续 remap 到 index)

@@ -1,8 +1,18 @@
 /**
- * Description: N0002 B001 — renderObserveTree 渲染 aria-level 字段。
- *   树形结构(aria-tree / treeitem)与 heading(role=heading + aria-level)需要把层级数字
- *   透给 agent,否则 LLM 看一堆同 role "treeitem" 无法判断父子层级关系。
- *   渲染:[level=2] 与 [haspopup:menu] / [sort:asc] 等同段,贴近现有 flag 风格。
+ * Description: N0002 R1 — renderObserveTree/renderObserveCompact 渲染
+ *   [autocomplete=...] 与 [pressed] 两个新 a11y 状态字段。
+ *
+ *   背景(MUI Autocomplete/各种 a11y 标准角色):
+ *   - aria-autocomplete=list/both/none 是 combobox 必报字段,缺它 agent
+ *     不知 combobox 弹 listbox 还是 inline;
+ *   - aria-pressed=true/false 是 toggle button 的标准状态(MUI ToggleButton、
+ *     aria-pressed 字体的 Bold/Italic 按钮),与 [active] 语义不同(active
+ *     来自 aria-activedescendant/is-active)。历史 observe.ts:1750 把
+ *     aria-pressed 合并到 active 丢 toggle 语义,本次独立。
+ *
+ *   渲染:与 [level=2] / [haspopup:menu] 同段,贴近现有 flag 风格。
+ *   - [autocomplete=list] [autocomplete=both] [autocomplete=none]
+ *   - [pressed] (true 时输出,false 不输出避免噪声,与 checked 同步)
  */
 import { describe, it, expect } from "vitest";
 import { renderObserveTree, renderObserveCompact } from "./observe-render.js";
@@ -12,7 +22,7 @@ function mkEl(overrides: Partial<CompactElement>): CompactElement {
   return {
     index: 0,
     tag: "div",
-    role: "treeitem",
+    role: "combobox",
     name: "",
     frameId: 0,
     ...overrides,
@@ -28,56 +38,66 @@ function mkObserve(elements: CompactElement[]): CompactObserve {
   };
 }
 
-describe("observe-render: aria-level 渲染 (N0002 B001)", () => {
-  it("treeitem 带 state:{level:2} → 输出行含 [level=2]", () => {
+describe("observe-render: aria-autocomplete 渲染 (N0002 R1 B003)", () => {
+  it("combobox + state:{autocomplete:'list'} → 输出行含 [autocomplete=list]", () => {
     const out = renderObserveTree(
-      mkObserve([mkEl({ index: 0, name: "Root", state: { level: 2 } })]),
+      mkObserve([mkEl({ index: 0, name: "Country", state: { autocomplete: "list" } })]),
       null,
     );
-    expect(out).toMatch(/\[level=2\]/);
+    expect(out).toMatch(/\[autocomplete=list\]/);
   });
 
-  it("treeitem 不带 level → 输出行不含 [level=", () => {
+  it("combobox + state:{autocomplete:'both'} → [autocomplete=both]", () => {
     const out = renderObserveTree(
-      mkObserve([mkEl({ index: 0, name: "Plain", state: { selected: true } })]),
+      mkObserve([mkEl({ index: 0, name: "Tag", state: { autocomplete: "both" } })]),
       null,
     );
-    expect(out).not.toMatch(/\[level=/);
+    expect(out).toMatch(/\[autocomplete=both\]/);
   });
 
-  it("state 完全缺省 → 输出行不含 [level=", () => {
-    const out = renderObserveTree(mkObserve([mkEl({ index: 0, name: "NoState" })]), null);
-    expect(out).not.toMatch(/\[level=/);
-  });
-
-  it("level=0 仍渲染(0 是合法 aria-level,表示 outermost)", () => {
+  it("combobox 不带 autocomplete → 不含 [autocomplete=", () => {
     const out = renderObserveTree(
-      mkObserve([mkEl({ index: 0, name: "Outermost", state: { level: 0 } })]),
+      mkObserve([mkEl({ index: 0, name: "Plain" })]),
       null,
     );
-    expect(out).toMatch(/\[level=0\]/);
+    expect(out).not.toMatch(/\[autocomplete=/);
   });
 
-  it("level 与其他 state flag 共存(checked) → 两个 flag 都出现", () => {
+  it("renderObserveCompact 同样渲染 autocomplete(统一 CompactElement 形状)", () => {
+    const out = renderObserveCompact(
+      mkObserve([mkEl({ index: 0, name: "C", state: { autocomplete: "list" } })]),
+      null,
+    );
+    expect(out).toMatch(/\[autocomplete=list\]/);
+  });
+});
+
+describe("observe-render: aria-pressed 独立渲染 (N0002 R1 B004)", () => {
+  it("button + state:{pressed:true} → 输出行含 [pressed]", () => {
     const out = renderObserveTree(
       mkObserve([
-        mkEl({
-          index: 0,
-          name: "Checked treeitem",
-          state: { level: 3, checked: true },
-        }),
+        { ...mkEl({ index: 0, name: "Bold", role: "button" }), state: { pressed: true } },
       ]),
       null,
     );
-    expect(out).toMatch(/\[level=3\]/);
-    expect(out).toMatch(/\[checked\]/);
+    expect(out).toMatch(/\[pressed\]/);
   });
 
-  it("renderObserveCompact 同样渲染 level(非 tree 路径也需,因 CompactElement 是统一形状)", () => {
-    const out = renderObserveCompact(
-      mkObserve([mkEl({ index: 0, name: "C", state: { level: 4 } })]),
+  it("button 不带 pressed → 不含 [pressed]", () => {
+    const out = renderObserveTree(
+      mkObserve([mkEl({ index: 0, name: "Plain", role: "button" })]),
       null,
     );
-    expect(out).toMatch(/\[level=4\]/);
+    expect(out).not.toMatch(/\[pressed\]/);
+  });
+
+  it("renderObserveCompact 同样渲染 pressed", () => {
+    const out = renderObserveCompact(
+      mkObserve([
+        { ...mkEl({ index: 0, name: "Italic", role: "button" }), state: { pressed: true } },
+      ]),
+      null,
+    );
+    expect(out).toMatch(/\[pressed\]/);
   });
 });

@@ -165,6 +165,63 @@ describe("computeAXOverlay", () => {
     const r = computeAXOverlay({ backendId: 45, role: "slider", name: "" }, node);
     expect(r.valueNow).toBe("café");
   });
+
+  // R1 B003: aria-autocomplete=list/both/none/inline, combobox 自动补全语义。
+  // CDP properties.autocomplete 与 aria-autocomplete 对齐(2026-06-28 a11y 评测)。
+  it("AX autocomplete=list → state.autocomplete=list", () => {
+    const node = ax({
+      role: { value: "combobox" },
+      properties: [{ name: "autocomplete", value: { value: "list" } }],
+    });
+    const r = computeAXOverlay({ backendId: 50, role: "combobox", name: "Country" }, node);
+    expect(r.state?.autocomplete).toBe("list");
+  });
+
+  it("AX autocomplete=both → state.autocomplete=both", () => {
+    const node = ax({
+      role: { value: "combobox" },
+      properties: [{ name: "autocomplete", value: { value: "both" } }],
+    });
+    const r = computeAXOverlay({ backendId: 51, role: "combobox", name: "Tag" }, node);
+    expect(r.state?.autocomplete).toBe("both");
+  });
+
+  it("AX autocomplete=非法值丢弃, 不误标(R1 B003 防御)", () => {
+    const node = ax({
+      role: { value: "combobox" },
+      properties: [{ name: "autocomplete", value: { value: "garbage" } }],
+    });
+    const r = computeAXOverlay({ backendId: 52, role: "combobox", name: "X" }, node);
+    expect(r.state?.autocomplete).toBeUndefined();
+  });
+
+  // R1 B004: aria-pressed 是 toggle button 标准状态,AX 同源,独立标 [pressed]。
+  it("AX pressed=true(布尔) → state.pressed=true", () => {
+    const node = ax({
+      role: { value: "button" },
+      properties: [{ name: "pressed", value: { value: true } }],
+    });
+    const r = computeAXOverlay({ backendId: 60, role: "button", name: "Bold" }, node);
+    expect(r.state?.pressed).toBe(true);
+  });
+
+  it("AX pressed=true(字符串) → state.pressed=true", () => {
+    const node = ax({
+      role: { value: "button" },
+      properties: [{ name: "pressed", value: { value: "true" } }],
+    });
+    const r = computeAXOverlay({ backendId: 61, role: "button", name: "Bold" }, node);
+    expect(r.state?.pressed).toBe(true);
+  });
+
+  it("AX pressed=false/缺省不标 [pressed](避免噪声, 与 checked 同步)", () => {
+    const node = ax({
+      role: { value: "button" },
+      properties: [{ name: "pressed", value: { value: "false" } }],
+    });
+    const r = computeAXOverlay({ backendId: 62, role: "button", name: "Plain" }, node);
+    expect(r.state?.pressed).toBeUndefined();
+  });
 });
 
 describe("extractCompound", () => {
