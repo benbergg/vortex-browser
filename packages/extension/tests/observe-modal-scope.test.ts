@@ -170,6 +170,21 @@ describe("modal-scope: source-lock(inject func 内联副本同步)", () => {
     // getRole 返 "region" 自然不与 button 混淆。
     expect(src).toMatch(/\[role=region\]/);
   });
+
+  it("R11 B021: INTERACTIVE_SELECTORS 含 [role=radiogroup] 让 radiogroup 容器自身召回", () => {
+    // R11 评测发现:R10 修复 region 后,ARIA 1.2 radio pattern 的容器
+    // radiogroup 仍丢失(2026-06-28 a11y 评测 R11 B021)。Agent 看到
+    // radio "Apple" [checked] 不知属哪个 group(react-aria Tree 站 6 个
+    // radiogroup 全部 0 召回:style / selectionMode / selectionBehavior
+    // 各 aria-label 关键状态被丢;W3C APG 官方 radio 范例 2 个 radiogroup
+    // 也丢)。radiogroup 携带 aria-label / aria-required / aria-disabled,
+    // 屏幕阅读器把整组作为 landmark 播报 — 容器不在 → agent 拿不到 group
+    // context,跨组同名 radio(Apple/Pear/Orange 多个 demo)极易选错。
+    // 修复:[role=radiogroup] 加 INTERACTIVE_SELECTORS,与 listbox/menu/
+    // region 同模式。radiogroup 不交互(无 cursor:pointer 时),getRole
+    // 返 "radiogroup" 自然不与 radio/button 混淆。
+    expect(src).toMatch(/\[role=radiogroup\]/);
+  });
   it("inject func 模态块用 inject 形参 filter(非外层 filterMode)防 ReferenceError", () => {
     // inject func 第 5 形参名是 `filter`(func 签名 L731);只有外层 scanOneFrame 才叫 filterMode。
     // 模态块若误用 filterMode → inject MAIN-world 作用域无此变量 → minify 成自由变量 `a`

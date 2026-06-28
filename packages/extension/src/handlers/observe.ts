@@ -927,6 +927,20 @@ async function scanOneFrame(
           // 等同模式。region 不交互(无 cursor:pointer 时),getRole 返
           // "region" 自然不与 button 混淆。
           "[role=region]",
+          // R11 B021 修复: [role=radiogroup] 容器加入 INTERACTIVE_SELECTORS。
+          // R10 修复 region 后,ARAI 1.2 radio pattern 的容器 radiogroup
+          // 仍丢失(2026-06-28 a11y 评测 R11 B021)。Agent 看到
+          // radio "Apple" [checked] 不知属哪个 group(react-aria Tree 站
+          // 6 个 radiogroup 全部 0 召回:style / selectionMode /
+          // selectionBehavior 各 aria-label 关键状态被丢;W3C APG 官方
+          // radio 范例 2 个 radiogroup 也丢)。radiogroup 携带 aria-label
+          // / aria-required / aria-disabled,屏幕阅读器把整组作为 landmark
+          // 播报 — 容器不在 → agent 拿不到 group context,跨组同名 radio
+          // (Apple/Pear/Orange 多个 demo)极易选错。修复:[role=radiogroup]
+          // 加 INTERACTIVE_SELECTORS,与 listbox/menu/region 同模式。
+          // radiogroup 不交互(无 cursor:pointer 时),getRole 返
+          // "radiogroup" 自然不与 radio/button 混淆。
+          "[role=radiogroup]",
           "[role=menuitem]",
           "[role=treeitem]",
           "[role=option]",
