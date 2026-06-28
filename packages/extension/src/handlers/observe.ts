@@ -897,6 +897,16 @@ async function scanOneFrame(
           // 走 valueNow/valuemin/max 已有的值域字段。
           "[role=progressbar]",
           "[role=meter]",
+          // R8 B018 修复: [role=listbox] 容器加入 INTERACTIVE_SELECTORS。
+          // 历史上仅 [role=option] 在,Agent 看到 option "Red" [selected] 但
+          // 不知是哪个 listbox 上下文(2026-06-28 a11y 评测 R8 B018)。原生
+          // <select> 走 getRole 返 "combobox" 不命中(原生 select 是
+          // 独立分支,978 行),ARIA [role=listbox] 容器丢失。
+          // 修复:[role=listbox] 加入,与 [role=option] 一起召回,
+          // 走 extractCompound 输出 count + options(R2 B006 已加 truncated)。
+          // listbox 不交互(无 cursor:pointer 时),与 progressbar/table
+          // 同模式。
+          "[role=listbox]",
           "[role=menuitem]",
           "[role=treeitem]",
           "[role=option]",

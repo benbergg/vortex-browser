@@ -135,6 +135,18 @@ describe("modal-scope: source-lock(inject func 内联副本同步)", () => {
     expect(src).toMatch(/\[role=progressbar\]/);
     expect(src).toMatch(/\[role=meter\]/);
   });
+
+  it("R8 B018: INTERACTIVE_SELECTORS 含 [role=listbox] 让 listbox 容器自身召回", () => {
+    // R8 评测发现:真站或注入的 <ul role="listbox" aria-multiselectable="true">
+    // 容器在 observe 输出中完全丢失(只显示 4 个 option,2026-06-28 a11y
+    // 评测 R8 B018)。Agent 看到 option "Red" [selected] 但不知是哪个
+    // listbox 上下文(Colors? Sizes?)。修复:[role=listbox] 加
+    // INTERACTIVE_SELECTORS,与 [role=option] 一起召回;走 extractCompound
+    // 输出 count + options(R2 B006 已加 truncated)。与 R4 B011 tabpanel
+    // / R5 B013 table / R7 B016 progressbar 同模式:listbox 不交互
+    // (无 cursor:pointer 时),getRole 返 "listbox" 自然不与 button 混淆。
+    expect(src).toMatch(/\[role=listbox\]/);
+  });
   it("inject func 模态块用 inject 形参 filter(非外层 filterMode)防 ReferenceError", () => {
     // inject func 第 5 形参名是 `filter`(func 签名 L731);只有外层 scanOneFrame 才叫 filterMode。
     // 模态块若误用 filterMode → inject MAIN-world 作用域无此变量 → minify 成自由变量 `a`
