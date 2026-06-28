@@ -3695,6 +3695,12 @@ export function registerObserveHandlers(router: ActionRouter, debuggerMgr: Debug
               ...(e.behindModal ? { behindModal: true as const } : {}),
               frameId: s.frameId,
               ...(bboxTuple ? { bbox: bboxTuple } : {}),
+              // N0002 B006: slider/progressbar valuemin/max 独立透传(R7 page-side 路径设)。
+              // compact 路径此前漏透传, 仅 full 路径有 — 修.
+              ...(e.valueMin !== undefined ? { valueMin: e.valueMin } : {}),
+              ...(e.valueMax !== undefined ? { valueMax: e.valueMax } : {}),
+              // N0002 B010/B016: aria-keyshortcuts 显式键盘快捷键透传。
+              ...(e.keyshortcuts ? { keyshortcuts: e.keyshortcuts } : {}),
             });
           } else {
             // v0.6 full 结构：携带 ref 字符串（@eN / @fNeM）+ suggestedUsage 直接给
