@@ -232,6 +232,24 @@ describe("modal-scope: source-lock(inject func 内联副本同步)", () => {
     // 此处只补纯 [role=tree](非 treegrid 形式)。
     expect(src).toMatch(/\[role=tree\]/);
   });
+
+  it("R15 B025: INTERACTIVE_SELECTORS 含 [role=grid] 让 div 形式 grid 容器自身召回", () => {
+    // R15 评测发现:R14 修复 tree 后,ARIA 1.2 grid pattern 的容器 grid
+    // (非 <table> 元素)仍丢失(2026-06-28 a11y 评测 R15 B025)。<table>
+    // 元素已被 TABLE_EXTRA_SELECTORS(R5 B013)捕获,但 <div role=\"grid\">
+    // 形式漏(W3C APG Layout Grid 例 3 grid 全部 <div> + 0 召回:
+    // grid1_label/grid2_label/grid3_label 各 aria-labelledby 关键状态
+    // 被丢)。row/gridcell 子元素已在,Agent 看到 6 gridcell 不知属哪个
+    // grid。grid 携带 aria-labelledby / aria-multiselectable,屏幕阅读器
+    // 按方向键 roving tabindex — 容器不在 → agent 拿不到 grid 间关系,
+    // 跨 grid 同名 row 选错,Layout Grid pattern 的 arrow key 导航完全
+    // 无法推理。修复:[role=grid] 加 INTERACTIVE_SELECTORS(而非
+    // TABLE_EXTRA_SELECTORS,因为 grid 不是 <table>,且现有
+    // TABLE_EXTRA_SELECTORS 已含 <table> 元素会兜底 table+role=grid
+    // 形式)。grid 不交互(无 cursor:pointer 时),getRole 返 \"grid\"
+    // 自然不与 row/gridcell 混淆。
+    expect(src).toMatch(/\[role=grid\]/);
+  });
   it("inject func 模态块用 inject 形参 filter(非外层 filterMode)防 ReferenceError", () => {
     // inject func 第 5 形参名是 `filter`(func 签名 L731);只有外层 scanOneFrame 才叫 filterMode。
     // 模态块若误用 filterMode → inject MAIN-world 作用域无此变量 → minify 成自由变量 `a`

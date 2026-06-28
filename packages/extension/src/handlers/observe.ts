@@ -985,6 +985,22 @@ async function scanOneFrame(
           // TABLE_EXTRA_SELECTORS(R5 B013),此处只补纯 [role=tree](非
           // treegrid 形式)。
           "[role=tree]",
+          // R15 B025 修复: [role=grid] 容器加入 INTERACTIVE_SELECTORS。
+          // R14 修复 tree 后,ARIA 1.2 grid pattern 的容器 grid(非
+          // table 元素)仍丢失(2026-06-28 a11y 评测 R15 B025)。<table>
+          // 元素已被 TABLE_EXTRA_SELECTORS(R5 B013)捕获,但 <div role=
+          // "grid"> 形式漏(W3C APG Layout Grid 例 3 grid 全部 <div> + 0
+          // 召回:grid1_label/grid2_label/grid3_label 各 aria-labelledby
+          // 关键状态被丢)。row/gridcell 子元素已在,Agent 看到 6 gridcell
+          // 不知属哪个 grid。grid 携带 aria-labelledby / aria-multiselectable,
+          // 屏幕阅读器按方向键 roving tabindex — 容器不在 → agent 拿不到
+          // grid 间关系,跨 grid 同名 row 选错,Layout Grid pattern 的 arrow
+          // key 导航完全无法推理。修复:[role=grid] 加 INTERACTIVE_SELECTORS
+          // (而非 TABLE_EXTRA_SELECTORS,因为 grid 不是 <table>,且现有
+          // TABLE_EXTRA_SELECTORS 已含 <table> 元素会兜底 table+role=grid
+          // 形式)。grid 不交互(无 cursor:pointer 时),getRole 返 "grid"
+          // 自然不与 row/gridcell 混淆。
+          "[role=grid]",
           "[role=menuitem]",
           "[role=treeitem]",
           "[role=option]",
