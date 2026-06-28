@@ -66,4 +66,13 @@ describe("MCP server self-restart contract (@since 0.4.0)", () => {
   it("watch only reacts to .js files (avoid triggering on .map / .d.ts noise)", () => {
     expect(SERVER_SRC).toMatch(/filename\.endsWith\(["']\.js["']\)/);
   });
+
+  it("supervised 模式下禁用自重启(由 supervisor 接管生命周期)", () => {
+    expect(SERVER_SRC).toMatch(/VORTEX_MCP_SUPERVISED["']?\s*===\s*["']1["']/);
+    // 守卫必须在 AUTO_RESTART 检查之后、fs.watch 之前 early-return
+    const supervisedIdx = SERVER_SRC.indexOf("VORTEX_MCP_SUPERVISED");
+    const watchIdx = SERVER_SRC.indexOf("watch(here,");
+    expect(supervisedIdx).toBeGreaterThan(0);
+    expect(supervisedIdx).toBeLessThan(watchIdx);
+  });
 });
