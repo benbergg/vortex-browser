@@ -2717,6 +2717,17 @@ async function scanOneFrame(
             };
           }
         }
+        // R3 B010 修复: 真 modal 容器 (role=dialog aria-modal=true) 自身
+        // 不在 INTERACTIVE_SELECTORS(只收 button/link/input 等),进不了
+        // baseCandidates → modal-scope 裁剪/注入都对"已在 baseCandidates
+        // 的元素"生效 → activeModal 自身在 observe 输出中**完全丢失**。
+        // 修复:filter==="all" 时(背景元素已保留),把 __activeModal 显式
+        // unshift 进 baseCandidates 头部。精准:仅真 modal 进,普通嵌套
+        // dialog(无 aria-modal)不被识别为 activeModal,不受影响,避免污染。
+        // dialog 自身不会被 [behind-modal] 标(它就是 __behindModalRoot)。
+        if (filter === "all" && __activeModal && !baseCandidates.includes(__activeModal)) {
+          baseCandidates = [__activeModal, ...baseCandidates];
+        }
         const allCandidates: Element[] = ((): Element[] => {
           // 两层正交排序(组合 overlay-priority + main-content-priority):
           // ① 浮层(DEFECT-1):可见浮层内元素前置免遭截断;

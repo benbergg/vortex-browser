@@ -87,6 +87,19 @@ describe("modal-scope: source-lock(inject func 内联副本同步)", () => {
   it("inject func 内联 selectActiveModal 同名逻辑存在", () => {
     expect(src).toContain("__activeModal");
   });
+  it("R3 B010 修复: activeModal 显式注入 baseCandidates,dialog 容器自身召回", () => {
+    // R3 评测发现:role=dialog aria-modal=true 的 modal 容器在 observe 输出
+    // 中完全丢失(只显示内部 button/link)。INTERACTIVE_SELECTORS 不含
+    // [role=dialog],dialog 容器不进 baseCandidates;modal-scope 裁剪/dialog
+    // 注入只对"已在 baseCandidates 的元素"生效 → activeModal 永不显示。
+    // 修复:在 modal-scope 步骤,filter==="all" 时把 __activeModal 显式
+    // unshift 进 baseCandidates 头部,精准(只真 modal 进,普通 dialog 不污染)。
+    // 字符串契约:__activeModal && !baseCandidates.includes(__activeModal)
+    // 模式,新代码应包含此注入语句。
+    expect(src).toMatch(
+      /__activeModal.*baseCandidates\.unshift|baseCandidates\.unshift\(__activeModal\)|baseCandidates = \[__activeModal.*baseCandidates\]/s,
+    );
+  });
   it("inject func 模态块用 inject 形参 filter(非外层 filterMode)防 ReferenceError", () => {
     // inject func 第 5 形参名是 `filter`(func 签名 L731);只有外层 scanOneFrame 才叫 filterMode。
     // 模态块若误用 filterMode → inject MAIN-world 作用域无此变量 → minify 成自由变量 `a`
