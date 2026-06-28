@@ -37,6 +37,9 @@ import { fileURLToPath } from "node:url";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(__dirname, "..");
 const MCP_SERVER = path.join(REPO, "packages/mcp/dist/src/server.js");
+// opencode 经常驻 supervisor 启动 vortex(免重连:改 MCP 代码 build 后 supervisor
+// 自动重启 child 保连接)。supervisor 把 server.js 作为子进程拉起,二者都需存在。
+const MCP_SUPERVISOR = path.join(REPO, "packages/mcp/dist/src/supervisor.js");
 const NO_PROXY_VALUE = "localhost,127.0.0.1,::1";
 // 固定 server 端口：实跑时让 opencode run 在此端口起 server，便于另开终端
 // `opencode attach http://localhost:<port>` 实时观看任务 TUI（可用 env 覆盖）。
@@ -162,7 +165,8 @@ function cmdSelfcheck(args) {
   const env = buildEnv();
   const checks = [];
 
-  checks.push({ name: "vortex MCP server.js 存在", ok: fs.existsSync(MCP_SERVER), detail: MCP_SERVER });
+  checks.push({ name: "vortex MCP supervisor.js 存在", ok: fs.existsSync(MCP_SUPERVISOR), detail: MCP_SUPERVISOR });
+  checks.push({ name: "vortex MCP server.js 存在(supervisor 的 child)", ok: fs.existsSync(MCP_SERVER), detail: MCP_SERVER });
   const ma = modelAvailable(model);
   checks.push({ name: `模型可用: ${model}`, ok: ma.ok, detail: ma.reason || "在 opencode models 列表中" });
   checks.push({ name: "NO_PROXY 含 localhost", ok: env.NO_PROXY.includes("localhost"), detail: env.NO_PROXY });
@@ -177,8 +181,8 @@ function cmdSelfcheck(args) {
   checks.push({ name: "端点真实可达(连通+鉴权)", ok: probe.ok, detail: probe.reason, soft: !!probe.soft });
 
   for (const c of checks) console.error(`${c.ok ? (c.soft ? "○" : "✓") : "✗"} ${c.name} — ${c.detail}`);
-  // 硬性：server.js + 模型在列表 + 端点真实可达（非软跳过时）
-  const hardFail = !checks[0].ok || !checks[1].ok || (!probe.ok && !probe.soft);
+  // 硬性：supervisor.js + server.js + 模型在列表 + 端点真实可达（非软跳过时）
+  const hardFail = !checks[0].ok || !checks[1].ok || !checks[2].ok || (!probe.ok && !probe.soft);
   console.log(JSON.stringify({ selfcheck: true, model, pass: !hardFail, checks }, null, 2));
   process.exit(hardFail ? 1 : 0);
 }
