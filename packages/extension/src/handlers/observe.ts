@@ -909,7 +909,7 @@ async function scanOneFrame(
           "[role=listbox]",
           // R9 B019 修复: [role=menu] 容器加入 INTERACTIVE_SELECTORS。
           // R8 B018 修复 listbox 时漏了 menu — 同一类"下拉容器"(WAI-ARIA
-          // menu pattern,button [haspopup:menu] controls=menu 关联),但
+          // menu pattern,button [haspopup=menu] controls=menu 关联),但
           // [role=menu] 容器在 observe 输出中完全丢失(2026-06-28 a11y
           // 评测 R9 B019)。Agent 看到 button "Open menu" controls=#r9-menu
           // 但不知 menu 内部结构(Cut/Copy/Paste)。修复:[role=menu] 加
@@ -917,6 +917,16 @@ async function scanOneFrame(
           // extractCompound 输出 count + options。menu 不交互(无
           // cursor:pointer 时),getRole 返 "menu" 自然不与 button 混淆。
           "[role=menu]",
+          // R10 B020 修复: [role=region] 容器加入 INTERACTIVE_SELECTORS。
+          // R9 修复后 listbox/menu/dialog/tabpanel/table/progressbar
+          // 都召回,但 [role=region] (WAI-ARIA landmark 容器,用于
+          // disclosure/fieldset/分组)仍丢失(2026-06-28 a11y 评测 R10
+          // B020)。Agent 看到 button "Show details" [expanded] controls=
+          // #r10-panel 但 region 容器整体不见,不知 panel 内容范围。
+          // 修复:[role=region] 加 INTERACTIVE_SELECTORS,与 listbox/menu
+          // 等同模式。region 不交互(无 cursor:pointer 时),getRole 返
+          // "region" 自然不与 button 混淆。
+          "[role=region]",
           "[role=menuitem]",
           "[role=treeitem]",
           "[role=option]",

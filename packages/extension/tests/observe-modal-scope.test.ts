@@ -158,6 +158,18 @@ describe("modal-scope: source-lock(inject func 内联副本同步)", () => {
     // 一起召回,走 extractCompound 输出 count + options。
     expect(src).toMatch(/\[role=menu\]/);
   });
+
+  it("R10 B020: INTERACTIVE_SELECTORS 含 [role=region] 让 region 容器自身召回", () => {
+    // R10 评测发现:R9 修复后 listbox/menu/dialog/tabpanel/table/progressbar
+    // 都召回,但 [role=region] (WAI-ARIA landmark 容器,用于
+    // disclosure/fieldset/分组)仍丢失(2026-06-28 a11y 评测 R10 B020)。
+    // Agent 看到 button "Show details" [expanded] controls=#r10-panel
+    // 但 region 容器整体不见,不知 panel 内容范围。修复:[role=region]
+    // 加 INTERACTIVE_SELECTORS,与 listbox/menu/dialog/tabpanel/table
+    // /progressbar 同模式。region 不交互(无 cursor:pointer 时),
+    // getRole 返 "region" 自然不与 button 混淆。
+    expect(src).toMatch(/\[role=region\]/);
+  });
   it("inject func 模态块用 inject 形参 filter(非外层 filterMode)防 ReferenceError", () => {
     // inject func 第 5 形参名是 `filter`(func 签名 L731);只有外层 scanOneFrame 才叫 filterMode。
     // 模态块若误用 filterMode → inject MAIN-world 作用域无此变量 → minify 成自由变量 `a`
