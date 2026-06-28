@@ -26,6 +26,8 @@ export interface SupervisorDeps {
   drainTimeoutMs?: number;
   /** SIGTERM 后等待子进程退出的超时(默认 3s),超时 SIGKILL。 */
   killTimeoutMs?: number;
+  /** 新 child 完成 initialize 握手的超时(默认等于 drainTimeoutMs),超时 SIGKILL 并重试。 */
+  reinitTimeoutMs?: number;
 }
 
 export interface SupervisorHandle {
@@ -40,10 +42,14 @@ const LIST_CHANGED: JsonRpcMessage = {
   method: "notifications/tools/list_changed",
 };
 
+/** 新 child 初始化失败的最大重试次数,超出后放弃并对缓冲请求合成错误。 */
+const MAX_INIT_RETRIES = 3;
+
 export function createSupervisor(deps: SupervisorDeps): SupervisorHandle {
   const spawnFn = deps.spawnFn ?? nodeSpawn;
   const drainTimeoutMs = deps.drainTimeoutMs ?? 10_000;
   const killTimeoutMs = deps.killTimeoutMs ?? 3_000;
+  const reinitTimeoutMs = deps.reinitTimeoutMs ?? drainTimeoutMs;
 
   let child: ChildProcess | null = null;
   const upstream = new LineFramer(); // Claude → supervisor
@@ -55,6 +61,8 @@ export function createSupervisor(deps: SupervisorDeps): SupervisorHandle {
 
   // 在飞请求 id 集合(Claude→child 的 request,收到对应响应即移除)
   const inflight = new Set<string | number>();
+  // I1:forceDrain 已对这些 id 合成过 error,若子进程随后发来真实响应则丢弃,避免 double-response
+  const abortedIds = new Set<string | number>();
 
   // 状态机标志
   let restarting = false;
@@ -64,9 +72,13 @@ export function createSupervisor(deps: SupervisorDeps): SupervisorHandle {
   let pendingAgain = false;
   let restartReason = "";
   let stopped = false;
+  /** I3:新 child 初始化失败的连续次数(成功后归零)。 */
+  let initRetryCount = 0;
   const requestBuffer: string[] = [];
   let drainTimer: ReturnType<typeof setTimeout> | null = null;
   let killTimer: ReturnType<typeof setTimeout> | null = null;
+  /** I3:新 child 完成 initialize 的看门狗计时器。 */
+  let reinitTimer: ReturnType<typeof setTimeout> | null = null;
 
   const log = (s: string): void => void process.stderr.write(`[supervisor] ${s}\n`);
 
@@ -99,7 +111,13 @@ export function createSupervisor(deps: SupervisorDeps): SupervisorHandle {
         continue;
       }
       if (isResponse(msg) && msg.id != null) {
-        inflight.delete(msg.id as string | number);
+        const msgId = msg.id as string | number;
+        // I1:已被 forceDrain 中止的 id,丢弃子进程在 SIGTERM 宽限期内发来的迟到真实响应
+        if (abortedIds.has(msgId)) {
+          abortedIds.delete(msgId);
+          continue;
+        }
+        inflight.delete(msgId);
         maybeStartRestart(); // 响应回来可能完成排空
       }
       // raw 逐字节转发,避免重序列化差异
@@ -109,16 +127,75 @@ export function createSupervisor(deps: SupervisorDeps): SupervisorHandle {
 
   function onChildExit(code: number | null): void {
     if (killTimer) { clearTimeout(killTimer); killTimer = null; }
+    // I2:stopped 检查必须先于 restarting 分支;否则 stop() 后仍会拉起新 child 导致泄漏
+    if (stopped) return;
     if (restarting) {
-      // 预期内重启:老 child 退出后接力 spawn 新 child
-      continueRestartAfterChildExit();
+      if (awaitingChildInit) {
+        // 新 child 在初始化期间崩溃或被 watchdog SIGKILL
+        handleNewChildCrash(code);
+      } else {
+        // 预期内重启:老 child 退出后接力 spawn 新 child
+        continueRestartAfterChildExit();
+      }
       return;
     }
-    if (stopped) return;
     // 意外崩溃:拉起来(视作一次重启,最终发 list_changed)
     log(`child exited unexpectedly (code=${code}); respawning`);
     inflight.clear(); // 崩溃时在飞响应已丢,清空避免卡排空
+    // C1:先将 child 置 null 再调 doTriggerRestart:doRestart 的存活判断将走 else 分支
+    //    直接调 continueRestartAfterChildExit(),避免对已退出进程调 kill() 不抛异常
+    //    导致状态机永久死锁(restarting/bufferingUpstream 卡 true、无新 child)。
+    child = null;
     doTriggerRestart("child-crash");
+  }
+
+  /**
+   * I3:新 child 在初始化阶段失败(崩溃 or watchdog 超时后被 SIGKILL)。
+   * 带指数退避重试;耗尽次数后对所有缓冲请求合成 JSON-RPC error。
+   */
+  function handleNewChildCrash(code: number | null): void {
+    // 清理看门狗(watchdog 触发场景下此处已为 null;普通崩溃场景由此处清)
+    if (reinitTimer) { clearTimeout(reinitTimer); reinitTimer = null; }
+    child = null;
+    initRetryCount++;
+    if (initRetryCount >= MAX_INIT_RETRIES) {
+      log(`新 child 已连续初始化失败 ${initRetryCount} 次;放弃重启并对缓冲请求合成错误响应`);
+      abortBufferedRequests();
+      // 重置状态机:supervisor 保持存活,等待下一次成功构建触发的重启
+      restarting = false;
+      awaitingChildInit = false;
+      bufferingUpstream = false;
+      wantRestart = false;
+      pendingAgain = false;
+      initRetryCount = 0;
+      return;
+    }
+    const delay = Math.min(200 * Math.pow(2, initRetryCount - 1), 5_000);
+    log(`新 child 崩溃(code=${code});将在 ${delay}ms 后第 ${initRetryCount}/${MAX_INIT_RETRIES} 次重试`);
+    setTimeout(() => {
+      if (stopped) return;
+      continueRestartAfterChildExit();
+    }, delay);
+  }
+
+  /** I3:对 requestBuffer 中全部请求合成 JSON-RPC error 并清空缓冲区。 */
+  function abortBufferedRequests(): void {
+    for (const raw of requestBuffer) {
+      try {
+        const parsed = JSON.parse(raw) as JsonRpcMessage;
+        if (isRequest(parsed) && parsed.id != null) {
+          writeToClaude({
+            jsonrpc: "2.0",
+            id: parsed.id,
+            error: {
+              code: -32000,
+              message: "vortex MCP child failed to restart; request aborted, please retry",
+            },
+          });
+        }
+      } catch { /* 忽略格式错误的帧 */ }
+    }
+    requestBuffer.length = 0;
   }
 
   // ---- 重启状态机 ----
@@ -143,6 +220,8 @@ export function createSupervisor(deps: SupervisorDeps): SupervisorHandle {
     if (restarting || !wantRestart) return;
     log(`drain timeout; force-restart, ${inflight.size} inflight aborted`);
     for (const id of inflight) {
+      // I1:记录已中止的 id;后续子进程发来的迟到真实响应将在 onChildData 中被丢弃
+      abortedIds.add(id);
       writeToClaude({
         jsonrpc: "2.0",
         id,
@@ -158,14 +237,25 @@ export function createSupervisor(deps: SupervisorDeps): SupervisorHandle {
     wantRestart = false;
     bufferingUpstream = true;
     log(`restarting child (reason=${restartReason})`);
-    if (child) {
+    // C1:仅当子进程确认存活时才发 SIGTERM。
+    //    exitCode/signalCode 任意非 null 表示进程已退出;kill() 对已退出进程返回 false 不抛异常,
+    //    依赖 catch 分支的老逻辑会导致状态机永久阻塞。
+    if (child && child.exitCode === null && child.signalCode === null) {
       const dying = child;
       killTimer = setTimeout(() => {
         log("child did not exit in time; SIGKILL");
         try { dying.kill("SIGKILL"); } catch { /* already gone */ }
       }, killTimeoutMs);
-      try { dying.kill("SIGTERM"); } catch { continueRestartAfterChildExit(); }
+      try {
+        dying.kill("SIGTERM");
+      } catch {
+        // SIGTERM 抛异常:进程已消失,无需等 exit 事件
+        // C1(Minor #1):清理 killTimer 避免 SIGKILL 空打悬挂计时器
+        if (killTimer) { clearTimeout(killTimer); killTimer = null; }
+        continueRestartAfterChildExit();
+      }
     } else {
+      // child 已退出或为 null(崩溃/crash 场景),直接续行
       continueRestartAfterChildExit();
     }
   }
@@ -175,11 +265,33 @@ export function createSupervisor(deps: SupervisorDeps): SupervisorHandle {
     spawnChild();
     awaitingChildInit = true;
     // 重放 initialize;新 child 的 init 响应由 onChildData 吞掉 → onChildReinitialized
-    if (initRequestRaw) writeRawToChild(initRequestRaw);
-    else { awaitingChildInit = false; onChildReinitialized(); } // 无握手材料(异常):直接收尾
+    if (initRequestRaw) {
+      writeRawToChild(initRequestRaw);
+      // I3:臂初始化看门狗,防止新 child 永远挂起不回复 initialize
+      if (reinitTimer) clearTimeout(reinitTimer);
+      reinitTimer = setTimeout(onReinitTimeout, reinitTimeoutMs);
+    } else {
+      awaitingChildInit = false;
+      onChildReinitialized(); // 无握手材料(异常):直接收尾
+    }
+  }
+
+  /** I3:新 child 超时未回复 initialize,SIGKILL 后由 onChildExit 触发重试逻辑。 */
+  function onReinitTimeout(): void {
+    reinitTimer = null;
+    log(`新 child 超时未完成 initialize (${reinitTimeoutMs}ms); SIGKILL`);
+    if (child) {
+      // SIGKILL 后 onChildExit(restarting=true, awaitingChildInit=true) 将调 handleNewChildCrash
+      try { child.kill("SIGKILL"); } catch { /* already gone */ }
+    }
   }
 
   function onChildReinitialized(): void {
+    // I3:清看门狗并重置重试计数(成功握手即归零)
+    if (reinitTimer) { clearTimeout(reinitTimer); reinitTimer = null; }
+    initRetryCount = 0;
+    // I1:新 child 就绪后清 abortedIds,旧 child 的迟到响应窗口已关闭
+    abortedIds.clear();
     if (initializedRaw) writeRawToChild(initializedRaw);
     for (const raw of requestBuffer) writeRawToChild(raw); // flush 缓冲请求
     requestBuffer.length = 0;
@@ -217,6 +329,8 @@ export function createSupervisor(deps: SupervisorDeps): SupervisorHandle {
       stopped = true;
       if (drainTimer) clearTimeout(drainTimer);
       if (killTimer) clearTimeout(killTimer);
+      // I3:stop 时清理看门狗,避免 supervisor 停止后仍触发重试逻辑
+      if (reinitTimer) { clearTimeout(reinitTimer); reinitTimer = null; }
       if (child) { try { child.kill("SIGTERM"); } catch { /* ignore */ } }
     },
     getChildPid(): number | undefined { return child?.pid; },
