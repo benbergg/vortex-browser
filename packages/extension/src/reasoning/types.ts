@@ -96,6 +96,8 @@ export interface AXOverlayInfo {
     role: string;
     count?: number;
     options?: string[];
+    /** R2 B006: options 截断时被隐藏的 option 数(原 4 上限提至 6,>6 透明截断) */
+    truncated?: number;
     /** date/time 格式串(如 YYYY-MM-DD)或 file input 当前文件名/None */
     formatHint?: string;
     /** range/number input 的最小值约束 */

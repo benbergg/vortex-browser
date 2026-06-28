@@ -225,7 +225,7 @@ describe("computeAXOverlay", () => {
 });
 
 describe("extractCompound", () => {
-  it("combobox/listbox: 取前4 option 文本 + count", () => {
+  it("combobox/listbox: 5 options 全部列出(R2 B006 上限 6,5 个未截断)", () => {
     const byNodeId = new Map<string, CDPAXNode>([
       ["sel", ax({ nodeId: "sel", role: { value: "combobox" }, childIds: ["lb"] })],
       ["lb", ax({ nodeId: "lb", role: { value: "listbox" }, childIds: ["o1","o2","o3","o4","o5"] })],
@@ -235,7 +235,39 @@ describe("extractCompound", () => {
     const c = extractCompound(byNodeId.get("sel")!, byNodeId);
     expect(c?.role).toBe("listbox");
     expect(c?.count).toBe(5);
-    expect(c?.options).toEqual(["中国","美国","日本","英国"]);
+    // R2 B006: 5 < 6 上限,全部列出,truncated:undefined(没被截断)
+    expect(c?.options).toEqual(["中国","美国","日本","英国","德国"]);
+    expect(c?.truncated).toBeUndefined();
+  });
+
+  // R2 B006: listbox options 上限从 4 提到 6,>6 标 truncated:true + hidden
+  // 表示还有更多。原 4 上限 + count=6 真实数据的"6 个只列 4 个"在 observe
+  // 输出中误导 agent 漏掉后段(2026-06-28 a11y 评测 R2 B006,react-aria ListBox
+  // 6 个 options 只列前 4 个,Panda/Snake 不可见)。
+  it("R2 B006: 6 options 全部列出(原 4 上限提至 6)", () => {
+    const byNodeId = new Map<string, CDPAXNode>([
+      ["sel", ax({ nodeId: "sel", role: { value: "combobox" }, childIds: ["lb"] })],
+      ["lb", ax({ nodeId: "lb", role: { value: "listbox" }, childIds: ["o1","o2","o3","o4","o5","o6"] })],
+      ...["Aardvark","Cat","Dog","Kangaroo","Panda","Snake"].map((t, i) =>
+        [`o${i+1}`, ax({ nodeId: `o${i+1}`, role: { value: "option" }, name: { value: t } })] as const),
+    ]);
+    const c = extractCompound(byNodeId.get("sel")!, byNodeId);
+    expect(c?.count).toBe(6);
+    expect(c?.options).toEqual(["Aardvark","Cat","Dog","Kangaroo","Panda","Snake"]);
+    expect(c?.truncated).toBeUndefined();
+  });
+
+  it("R2 B006: 8 options → 列前 6 + truncated:true(透明截断)", () => {
+    const byNodeId = new Map<string, CDPAXNode>([
+      ["sel", ax({ nodeId: "sel", role: { value: "combobox" }, childIds: ["lb"] })],
+      ["lb", ax({ nodeId: "lb", role: { value: "listbox" }, childIds: ["o1","o2","o3","o4","o5","o6","o7","o8"] })],
+      ...Array.from({length: 8}, (_, i) => `O${i+1}`).map((t, i) =>
+        [`o${i+1}`, ax({ nodeId: `o${i+1}`, role: { value: "option" }, name: { value: t } })] as const),
+    ]);
+    const c = extractCompound(byNodeId.get("sel")!, byNodeId);
+    expect(c?.count).toBe(8);
+    expect(c?.options).toEqual(["O1","O2","O3","O4","O5","O6"]);
+    expect(c?.truncated).toBe(2);
   });
 
   it("非复合控件返回 undefined", () => {

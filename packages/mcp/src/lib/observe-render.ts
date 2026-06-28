@@ -48,6 +48,8 @@ export interface CompactElement {
     role: string;
     count?: number;
     options?: string[];
+    /** R2 B006: listbox options 被截断时被隐藏的 option 数(原 4 上限提至 6,>6 透明截断) */
+    truncated?: number;
     /** date/time 格式串或 file input 当前文件名/None */
     formatHint?: string;
     /** range/number input 最小值约束 */
@@ -520,7 +522,10 @@ export function renderObserveTree(
         // combobox/listbox 等:count + options(原有逻辑)
         const countSeg = c.count != null ? ` count=${c.count}` : "";
         const optSeg = c.options?.length ? ` options=${c.options.join("|")}` : "";
-        extra = `${countSeg}${optSeg}`;
+        // R2 B006: options 被截断时追加 "+N more" 提示,Agent 据此知后段未列。
+        // 真实 options 数 = 列出的 + truncated。
+        const truncSeg = c.truncated ? ` +${c.truncated} more` : "";
+        extra = `${countSeg}${optSeg}${truncSeg}`;
       }
       comp = ` compound=(${role}${extra})`;
     }

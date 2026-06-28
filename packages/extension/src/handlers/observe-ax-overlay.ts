@@ -260,13 +260,30 @@ export function extractCompound(
   }
   if (!listbox) return undefined;
   const optionIds = listbox.childIds ?? [];
+  // R2 B006: options 上限从 4 提到 6(2026-06-28 a11y 评测 R2)。原 4 上限 + 真实
+  // count=6+ 时 observe 输出"6 个只列 4 个",Agent 看 count 与 options 长度矛盾
+  // 误以为后段被丢或已筛选;提到 6 后多数场景(react-aria ListBox 默认 6 个 options)
+  // 完整展示。>6 仍截断,但加 truncated:N 透明告诉 agent 还有 N 个未列。
+  const OPTIONS_LIMIT = 6;
   const options: string[] = [];
+  let totalOptions = 0;
   for (const oid of optionIds) {
     const o = byNodeId.get(oid);
     const nm = (o?.name?.value ?? "").trim();
     if (o?.role?.value === "option" && nm) {
-      if (options.length < 4) options.push(nm);
+      totalOptions++;
+      if (options.length < OPTIONS_LIMIT) options.push(nm);
     }
   }
-  return { role: "listbox", count: optionIds.length, options };
+  // R2 B006: 仅当实际 listbox options 数 > 列出的 options 数时,标 truncated:N。
+  // 渲染层据此追加 "+N more" 提示,避免 Agent 误以为 options 是完整列表。
+  const out: NonNullable<AXOverlayInfo["compound"]> = {
+    role: "listbox",
+    count: optionIds.length,
+    options,
+  };
+  if (totalOptions > options.length) {
+    out.truncated = totalOptions - options.length;
+  }
+  return out;
 }

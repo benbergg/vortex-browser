@@ -101,3 +101,45 @@ describe("observe-render: aria-pressed 独立渲染 (N0002 R1 B004)", () => {
     expect(out).toMatch(/\[pressed\]/);
   });
 });
+
+describe("observe-render: listbox options 截断提示 (N0002 R2 B006)", () => {
+  function mkListboxEl(opts: Partial<CompactElement>): CompactElement {
+    return { index: 0, tag: "div", role: "listbox", name: "Favorite animal", frameId: 0, ...opts };
+  }
+
+  it("count=6 options 全列 6 个,无 truncated 提示", () => {
+    const out = renderObserveTree(
+      mkObserve([
+        mkListboxEl({
+          compound: {
+            role: "listbox",
+            count: 6,
+            options: ["Aardvark", "Cat", "Dog", "Kangaroo", "Panda", "Snake"],
+          },
+        }),
+      ]),
+      null,
+    );
+    expect(out).toMatch(/options=Aardvark\|Cat\|Dog\|Kangaroo\|Panda\|Snake/);
+    expect(out).not.toMatch(/\+6 more/);
+    expect(out).not.toMatch(/\+0 more/);
+  });
+
+  it("count=8 options 截到 6 + '+2 more'(R2 B006 透明截断)", () => {
+    const out = renderObserveTree(
+      mkObserve([
+        mkListboxEl({
+          compound: {
+            role: "listbox",
+            count: 8,
+            options: ["O1", "O2", "O3", "O4", "O5", "O6"],
+            truncated: 2,
+          },
+        }),
+      ]),
+      null,
+    );
+    expect(out).toMatch(/options=O1\|O2\|O3\|O4\|O5\|O6/);
+    expect(out).toMatch(/\+2 more/);
+  });
+});
