@@ -1001,6 +1001,26 @@ async function scanOneFrame(
           // 形式)。grid 不交互(无 cursor:pointer 时),getRole 返 "grid"
           // 自然不与 row/gridcell 混淆。
           "[role=grid]",
+          // R16 B026 修复: [role=group] + fieldset 容器加入 INTERACTIVE_SELECTORS。
+          // R15 修复 grid 后,HTML <fieldset>/ARIA [role=group] 容器仍丢失
+          // (2026-06-28 a11y 评测 R16 B026)。W3C WAI Grouping Controls 教程
+          // 5 fieldset(Output format / I want to receive / Shipping
+          // Address / Billing Address / Which course ...)+ <legend> 命名
+          // 全部 0 召回,Agent 看到 3 radio(Text/CSV/HTML)不知属 Output
+          // format fieldset 容器。fieldset 携带 <legend>(HTML-AAM 隐式
+          // role=group),是 form controls 分组标准模式;ARIA 1.2 group role
+          // 也用于 disclosure/TreeSection 等分组。控件组分组信息丢失 → agent
+          // 拿不到 form section 边界,跨组同名 input 极易选错(典型:3 个
+          // text input 跨多组,不知哪个属 Shipping)。修复:[role=group] 加
+          // INTERACTIVE_SELECTORS 捕获显式 role="group";同时加 fieldset
+          // 元素选择器捕获 <fieldset>(HTML-AAM 隐式 role=group,attribute
+          // 无 role 字符串)。两者分别命中,联合覆盖两类 group 容器。group
+          // 不交互(无 cursor:pointer 时),getRole 返 "group" 自然不与
+          // radio/button 混淆。注意:R10 B020 已修 [role=region],region
+          // 是 landmark 命名容器;group 是非 landmark 命名容器(用于 form
+          // controls 分组),语义不同,必须分别召回。
+          "[role=group]",
+          "fieldset",
           "[role=menuitem]",
           "[role=treeitem]",
           "[role=option]",
