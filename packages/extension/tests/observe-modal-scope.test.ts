@@ -215,6 +215,23 @@ describe("modal-scope: source-lock(inject func 内联副本同步)", () => {
     // 时),getRole 返 \"toolbar\" 自然不与 button 混淆。
     expect(src).toMatch(/\[role=toolbar\]/);
   });
+
+  it("R14 B024: INTERACTIVE_SELECTORS 含 [role=tree] 让 tree 容器自身召回", () => {
+    // R14 评测发现:R13 修复 toolbar 后,ARIA 1.2 tree pattern 的容器
+    // tree(非 treegrid)仍丢失(2026-06-28 a11y 评测 R14 B024)。treeitem
+    // 元素已在,Agent 看到 Projects/Reports/Letters 3 treeitem 不知属
+    // 哪个 tree(W3C APG 官方 File Directory Treeview 例 1 tree + 45
+    // treeitem,只有 3 露在 viewport,均无 tree 容器)。tree 携带
+    // aria-labelledby / aria-multiselectable / aria-required,屏幕阅读器
+    // 按方向键 roving tabindex 且层级通过 tree 容器判边界 — 容器不在
+    // → agent 拿不到 tree 间关系,跨 tree 同名 treeitem 选错,TreeView
+    // pattern 的 arrow key 导航完全无法推理。修复:[role=tree] 加
+    // INTERACTIVE_SELECTORS,与 toolbar 同模式。tree 不交互(无
+    // cursor:pointer 时),getRole 返 \"tree\" 自然不与 treeitem 混淆。
+    // 注意:table/treegrid 容器已在 TABLE_EXTRA_SELECTORS(R5 B013),
+    // 此处只补纯 [role=tree](非 treegrid 形式)。
+    expect(src).toMatch(/\[role=tree\]/);
+  });
   it("inject func 模态块用 inject 形参 filter(非外层 filterMode)防 ReferenceError", () => {
     // inject func 第 5 形参名是 `filter`(func 签名 L731);只有外层 scanOneFrame 才叫 filterMode。
     // 模态块若误用 filterMode → inject MAIN-world 作用域无此变量 → minify 成自由变量 `a`

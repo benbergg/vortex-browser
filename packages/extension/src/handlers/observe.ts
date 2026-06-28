@@ -969,6 +969,22 @@ async function scanOneFrame(
           // toolbar 不交互(无 cursor:pointer 时),getRole 返 "toolbar"
           // 自然不与 button 混淆。
           "[role=toolbar]",
+          // R14 B024 修复: [role=tree] 容器加入 INTERACTIVE_SELECTORS。
+          // R13 修复 toolbar 后,ARIA 1.2 tree pattern 的容器 tree(非
+          // treegrid)仍丢失(2026-06-28 a11y 评测 R14 B024)。treeitem
+          // 元素已在,Agent 看到 Projects/Reports/Letters 3 treeitem 不知
+          // 属哪个 tree(W3C APG 官方 File Directory Treeview 例 1 tree
+          // + 45 treeitem,只有 3 露在 viewport,均无 tree 容器)。tree
+          // 携带 aria-labelledby / aria-multiselectable / aria-required,
+          // 屏幕阅读器按方向键 roving tabindex 且层级通过 tree 容器判
+          // 边界 — 容器不在 → agent 拿不到 tree 间关系,跨 tree 同名
+          // treeitem 选错,TreeView pattern 的 arrow key 导航完全无法
+          // 推理。修复:[role=tree] 加 INTERACTIVE_SELECTORS,与 toolbar
+          // 同模式。tree 不交互(无 cursor:pointer 时),getRole 返 "tree"
+          // 自然不与 treeitem 混淆。注意:table/treegrid 容器已在
+          // TABLE_EXTRA_SELECTORS(R5 B013),此处只补纯 [role=tree](非
+          // treegrid 形式)。
+          "[role=tree]",
           "[role=menuitem]",
           "[role=treeitem]",
           "[role=option]",
