@@ -79,6 +79,8 @@ export function createSupervisor(deps: SupervisorDeps): SupervisorHandle {
   let killTimer: ReturnType<typeof setTimeout> | null = null;
   /** I3:新 child 完成 initialize 的看门狗计时器。 */
   let reinitTimer: ReturnType<typeof setTimeout> | null = null;
+  /** I3:退避重试的定时器,stop() 时清理避免进程退出后仍触发(open handle 泄漏)。 */
+  let backoffTimer: ReturnType<typeof setTimeout> | null = null;
 
   const log = (s: string): void => void process.stderr.write(`[supervisor] ${s}\n`);
 
@@ -160,7 +162,15 @@ export function createSupervisor(deps: SupervisorDeps): SupervisorHandle {
     initRetryCount++;
     if (initRetryCount >= MAX_INIT_RETRIES) {
       log(`新 child 已连续初始化失败 ${initRetryCount} 次;放弃重启并对缓冲请求合成错误响应`);
+      // 捕获 pendingAgain:放弃期间若有新的重启信号(如好构建上线)需在重置后兑现
+      const hadPending = pendingAgain;
       abortBufferedRequests();
+      // 清空 inflight/abortedIds:缓冲的请求已被 abortBufferedRequests 中止,
+      // 若不清空,下次 triggerRestart 时 doTriggerRestart 会把残留 inflight 视为待排空,
+      // 臂 drainTimer 延迟重启;drainTimeoutMs 后 forceDrain 还会对同一 id 再次合成 -32000
+      // (double-response),并在 onChildData 因 abortedIds 清空后误转发迟到响应。
+      inflight.clear();
+      abortedIds.clear();
       // 重置状态机:supervisor 保持存活,等待下一次成功构建触发的重启
       restarting = false;
       awaitingChildInit = false;
@@ -168,11 +178,16 @@ export function createSupervisor(deps: SupervisorDeps): SupervisorHandle {
       wantRestart = false;
       pendingAgain = false;
       initRetryCount = 0;
+      // 若放弃期间收到了被合并的重启信号,立即触发以自动恢复(如好构建恰好在 crash-loop 期间落盘)
+      if (hadPending) doTriggerRestart("coalesced-after-giveup");
       return;
     }
     const delay = Math.min(200 * Math.pow(2, initRetryCount - 1), 5_000);
     log(`新 child 崩溃(code=${code});将在 ${delay}ms 后第 ${initRetryCount}/${MAX_INIT_RETRIES} 次重试`);
-    setTimeout(() => {
+    // 存储定时器:stop() 时需清理,否则进程退出后仍会触发 continueRestartAfterChildExit
+    if (backoffTimer) { clearTimeout(backoffTimer); backoffTimer = null; }
+    backoffTimer = setTimeout(() => {
+      backoffTimer = null;
       if (stopped) return;
       continueRestartAfterChildExit();
     }, delay);
@@ -276,7 +291,13 @@ export function createSupervisor(deps: SupervisorDeps): SupervisorHandle {
     }
   }
 
-  /** I3:新 child 超时未回复 initialize,SIGKILL 后由 onChildExit 触发重试逻辑。 */
+  /**
+   * I3:新 child 超时未回复 initialize,SIGKILL 后由 onChildExit 触发重试逻辑。
+   * 已知良性竞态:若 init 响应恰好与本计时器在同一 tick 触发,onReinitTimeout 先运行,
+   * 会 SIGKILL 一个已完成初始化的 child;随后 onChildReinitialized 入队但 child 已被杀,
+   * onChildExit(restarting=true, awaitingChildInit=false)走非 crash 分支再 spawn 一次,
+   * 多发一次 list_changed,状态机可自愈。概率极低,无需额外处理。
+   */
   function onReinitTimeout(): void {
     reinitTimer = null;
     log(`新 child 超时未完成 initialize (${reinitTimeoutMs}ms); SIGKILL`);
@@ -309,7 +330,20 @@ export function createSupervisor(deps: SupervisorDeps): SupervisorHandle {
       if (msg.method === "notifications/initialized") initializedRaw = raw;
       if (isRequest(msg)) inflight.add(msg.id as string | number);
       if (bufferingUpstream) requestBuffer.push(raw);
-      else writeRawToChild(raw);
+      else if (child) writeRawToChild(raw);
+      else if (isRequest(msg) && msg.id != null) {
+        // give-up 后 child=null 且非缓冲状态:静默丢弃会导致 Claude 请求永久挂起,
+        // 合成明确的错误响应,让模型收到失败信号而非无响应超时
+        inflight.delete(msg.id as string | number);
+        writeToClaude({
+          jsonrpc: "2.0",
+          id: msg.id,
+          error: {
+            code: -32000,
+            message: "vortex MCP child unavailable; rebuild to recover",
+          },
+        });
+      }
     }
   }
 
@@ -329,8 +363,9 @@ export function createSupervisor(deps: SupervisorDeps): SupervisorHandle {
       stopped = true;
       if (drainTimer) clearTimeout(drainTimer);
       if (killTimer) clearTimeout(killTimer);
-      // I3:stop 时清理看门狗,避免 supervisor 停止后仍触发重试逻辑
+      // I3:stop 时清理看门狗及退避重试定时器,避免 supervisor 停止后仍触发重试逻辑
       if (reinitTimer) { clearTimeout(reinitTimer); reinitTimer = null; }
+      if (backoffTimer) { clearTimeout(backoffTimer); backoffTimer = null; }
       if (child) { try { child.kill("SIGTERM"); } catch { /* ignore */ } }
     },
     getChildPid(): number | undefined { return child?.pid; },

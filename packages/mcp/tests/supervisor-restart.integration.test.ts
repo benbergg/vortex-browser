@@ -211,6 +211,88 @@ describe("supervisor 重启全链路(集成 spike)", () => {
    * 场景:triggerRestart 后新 child 每次都立即退出(模拟损坏的构建产物),
    * supervisor 带退避重试 MAX_INIT_RETRIES(3)次后放弃,对缓冲请求回复 -32000 错误。
    */
+  /**
+   * 回归测试 I3(inflight 泄漏恢复路径):give-up 后 inflight/abortedIds 已清,
+   * 再次 triggerRestart 不触发 drainTimer 卡顿,且不对已中止的 id 再发 -32000。
+   *
+   * 未修复前:give-up 后 inflight 仍含缓冲请求的 id → 下次 triggerRestart 时
+   * doTriggerRestart 臂 drainTimer(drainTimeoutMs)→ forceDrain 对同一 id 再合成 -32000
+   * (double-response),且恢复被推迟整个 drainTimeoutMs。
+   */
+  it("give-up 后 inflight 已清:再次重启无 drainTimer 卡顿且无重复 error(I3 inflight-leak 回归)", async () => {
+    const stdin = new PassThrough();
+    const stdout = new PassThrough();
+    const frames = new LineFramer();
+
+    // 追踪 id:99 收到的所有 -32000 错误次数(双响应检测)
+    let error99Count = 0;
+    const monitorFramer = new LineFramer();
+    stdout.on("data", (c: Buffer) => {
+      for (const { msg } of monitorFramer.push(c)) {
+        if ((msg as any).id === 99 && (msg as any).error?.code === -32000) error99Count++;
+      }
+    });
+
+    // spawn1=健康(完成握手); spawn2-4=崩溃(耗尽 MAX_INIT_RETRIES=3 次重试); spawn5+=健康(恢复)
+    let spawnCount = 0;
+    const testSpawnFn = ((cmd: string, args: string[], opts: object) => {
+      spawnCount++;
+      const useHealthy = spawnCount === 1 || spawnCount > 4;
+      const effectiveArgs = useHealthy ? args : [CRASH_STUB];
+      return nodeSpawn(cmd, effectiveArgs, opts as Parameters<typeof nodeSpawn>[2]);
+    }) as typeof nodeSpawn;
+
+    const drainTimeoutMs = 300; // 若 inflight 泄漏,forceDrain 会在此时触发二次 error
+    const sup = createSupervisor({
+      childEntry: STUB,
+      childArgs: [],
+      stdin,
+      stdout,
+      spawnFn: testSpawnFn,
+      killTimeoutMs: 100,
+      reinitTimeoutMs: 300,
+      drainTimeoutMs,
+    });
+    sup.start();
+
+    // 握手(spawn1,健康 stub)
+    stdin.write(frame({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2024-11-05" } }));
+    await waitFor(frames, stdout, (m) => m.id === 1 && (m as any).result?.serverInfo?.name === "stub");
+    stdin.write(frame({ jsonrpc: "2.0", method: "notifications/initialized" }));
+    stdin.write(frame({ jsonrpc: "2.0", id: 2, method: "tools/list" }));
+    await waitFor(frames, stdout, (m) => m.id === 2);
+
+    // 触发 crash-loop,缓冲一条请求(id:99 将随 give-up 收到第一次 -32000)
+    sup.triggerRestart("broken-build");
+    stdin.write(frame({ jsonrpc: "2.0", id: 99, method: "tools/list" }));
+
+    // 等 give-up 的 -32000(3次重试带退避 ~200+400ms,总约 700ms)
+    await waitFor(frames, stdout, (m) => (m as any).id === 99 && (m as any).error != null, 8000);
+    expect(error99Count).toBe(1);       // 恰一次错误
+    expect(spawnCount).toBe(4);         // 初始 1 + 重试 3
+
+    // === 恢复阶段:模拟好构建上线 ===
+    sup.triggerRestart("good-build");   // spawn5=健康;inflight 已清则立即 doRestart,无 drainTimer 卡顿
+
+    // 等 list_changed(恢复完成信号)
+    // 若 inflight 泄漏:drainTimer 先臂 300ms → forceDrain → 二次 -32000 → doRestart → list_changed
+    // 若已修复:立即 doRestart → list_changed 在 reinitTimeoutMs 内抵达
+    await waitFor(
+      frames, stdout,
+      (m) => m.method === "notifications/tools/list_changed",
+      4000,
+    );
+
+    // 核心断言:id:99 全程只有一次 -32000,无 double-response
+    expect(error99Count).toBe(1);
+
+    // 验证新 child 可正常应答(恢复完整可用)
+    stdin.write(frame({ jsonrpc: "2.0", id: 100, method: "tools/list" }));
+    await waitFor(frames, stdout, (m) => (m as any).id === 100 && (m as any).result != null, 3000);
+
+    sup.stop();
+  }, 15000);
+
   it("新 child 持续崩溃耗尽重试后对缓冲请求合成错误(I3 回归)", async () => {
     const stdin = new PassThrough();
     const stdout = new PassThrough();
