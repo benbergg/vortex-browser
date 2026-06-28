@@ -200,6 +200,21 @@ describe("modal-scope: source-lock(inject func 内联副本同步)", () => {
     // cursor:pointer 时),getRole 返 "tablist" 自然不与 tab 混淆。
     expect(src).toMatch(/\[role=tablist\]/);
   });
+
+  it("R13 B023: INTERACTIVE_SELECTORS 含 [role=toolbar] 让 toolbar 容器自身召回", () => {
+    // R13 评测发现:R12 修复 tablist 后,ARIA 1.2 toolbar pattern 的
+    // 容器 toolbar 仍丢失(2026-06-28 a11y 评测 R13 B023)。button/
+    // radiogroup 子元素已在,Agent 看到 Bold/Italic/Underline + Copy/
+    // Cut/Paste + Helvetica Font 共 9 控件不知属哪个 toolbar(react-aria
+    // Toolbar 站 \"Text formatting\" toolbar 6 子全散落:style group +
+    // clipboard group + helvetica group)。toolbar 携带 aria-label /
+    // aria-orientation,屏幕阅读器把整组作为 landmark 播报且按方向键
+    // roving tabindex — 容器不在 → agent 拿不到 group 边界,跨 toolbar
+    // 同名 button 选错。修复:[role=toolbar] 加 INTERACTIVE_SELECTORS,
+    // 与 radiogroup/tablist 同模式。toolbar 不交互(无 cursor:pointer
+    // 时),getRole 返 \"toolbar\" 自然不与 button 混淆。
+    expect(src).toMatch(/\[role=toolbar\]/);
+  });
   it("inject func 模态块用 inject 形参 filter(非外层 filterMode)防 ReferenceError", () => {
     // inject func 第 5 形参名是 `filter`(func 签名 L731);只有外层 scanOneFrame 才叫 filterMode。
     // 模态块若误用 filterMode → inject MAIN-world 作用域无此变量 → minify 成自由变量 `a`

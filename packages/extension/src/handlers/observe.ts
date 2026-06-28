@@ -955,6 +955,20 @@ async function scanOneFrame(
           // tablist 不交互(无 cursor:pointer 时),getRole 返 "tablist"
           // 自然不与 tab 混淆。
           "[role=tablist]",
+          // R13 B023 修复: [role=toolbar] 容器加入 INTERACTIVE_SELECTORS。
+          // R12 修复 tablist 后,ARIA 1.2 toolbar pattern 的容器 toolbar
+          // 仍丢失(2026-06-28 a11y 评测 R13 B023)。button/radiogroup 子
+          // 元素已在,Agent 看到 Bold/Italic/Underline + Copy/Cut/Paste
+          // + Helvetica Font 共 9 控件不知属哪个 toolbar(react-aria
+          // Toolbar 站 "Text formatting" toolbar 6 子全散落:style group +
+          // clipboard group + helvetica group)。toolbar 携带 aria-label
+          // / aria-orientation,屏幕阅读器把整组作为 landmark 播报且按
+          // 方向键 roving tabindex — 容器不在 → agent 拿不到 group
+          // 边界,跨 toolbar 同名 button 选错。修复:[role=toolbar] 加
+          // INTERACTIVE_SELECTORS,与 radiogroup/tablist 同模式。
+          // toolbar 不交互(无 cursor:pointer 时),getRole 返 "toolbar"
+          // 自然不与 button 混淆。
+          "[role=toolbar]",
           "[role=menuitem]",
           "[role=treeitem]",
           "[role=option]",
