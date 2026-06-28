@@ -32,13 +32,20 @@ describe("supervisor 重启全链路(集成 spike)", () => {
     const stdout = new PassThrough();
     const frames = new LineFramer();
 
-    let stdoutEnded = false;
-    stdout.on("end", () => { stdoutEnded = true; });
+    // 断言(a):stdout 在重启前后始终存活(未被 error/close/destroy)。
+    // 'end' 事件永远不会触发(supervisor 从不调用 stdout.end()),用 error/close 才能抓到真实回归。
+    // 传输连续性还由 (b)/(c)/(d) 互补证明:list_changed 与 id:3 响应都在同一 stdout 上收到,
+    // 即流在重启前后都载有流量,并非巧合存活。
+    let streamBroke = false;
+    stdout.on("error", () => { streamBroke = true; });
+    stdout.on("close", () => { streamBroke = true; });
 
+    // 断言(b):恰好一次 list_changed。
+    // 使用持久 LineFramer 实例而非逐块 new,避免跨 chunk 消息被截断而漏计。
     let listChangedCount = 0;
+    const listChangedFramer = new LineFramer();
     stdout.on("data", (c: Buffer) => {
-      // 独立计数器(不消费 waitFor 用的同一 framer,各自维护)
-      for (const { msg } of new LineFramer().push(c)) {
+      for (const { msg } of listChangedFramer.push(c)) {
         if (msg.method === "notifications/tools/list_changed") listChangedCount++;
       }
     });
@@ -81,8 +88,10 @@ describe("supervisor 重启全链路(集成 spike)", () => {
     expect(pidAfter).not.toBe(pidBefore);
     // 断言:(b) 恰一次 list_changed
     expect(listChangedCount).toBe(1);
-    // 断言:(a) Claude 连接(stdout)全程未 end
-    expect(stdoutEnded).toBe(false);
+    // 断言:(a) Claude 连接(stdout)全程未被 error/close/destroy
+    expect(streamBroke).toBe(false);
+    expect(stdout.writable).toBe(true);
+    expect(stdout.destroyed).toBe(false);
 
     sup.stop();
   });
