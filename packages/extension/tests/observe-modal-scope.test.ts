@@ -140,12 +140,23 @@ describe("modal-scope: source-lock(inject func 内联副本同步)", () => {
     // R8 评测发现:真站或注入的 <ul role="listbox" aria-multiselectable="true">
     // 容器在 observe 输出中完全丢失(只显示 4 个 option,2026-06-28 a11y
     // 评测 R8 B018)。Agent 看到 option "Red" [selected] 但不知是哪个
-    // listbox 上下文(Colors? Sizes?)。修复:[role=listbox] 加
+    // listbox 上下文(Colors? Sizes? Filters?)。修复:[role=listbox] 加
     // INTERACTIVE_SELECTORS,与 [role=option] 一起召回;走 extractCompound
     // 输出 count + options(R2 B006 已加 truncated)。与 R4 B011 tabpanel
     // / R5 B013 table / R7 B016 progressbar 同模式:listbox 不交互
     // (无 cursor:pointer 时),getRole 返 "listbox" 自然不与 button 混淆。
     expect(src).toMatch(/\[role=listbox\]/);
+  });
+
+  it("R9 B019: INTERACTIVE_SELECTORS 含 [role=menu] 让 menu 容器自身召回", () => {
+    // R9 评测发现:R8 B018 修复 listbox 容器时漏了 [role=menu] 容器 —
+    // 同一类下拉容器(WAI-ARIA menu pattern,button [haspopup=menu]
+    // controls=menu 关联)。Agent 看到 button "Open menu" controls=#r9-menu
+    // 但不知 menu 内部结构(Cut/Copy/Paste 等 menuitem),menu 元素
+    // 整体在 observe 输出中完全丢失(2026-06-28 a11y 评测 R9 B019)。
+    // 修复:[role=menu] 加 INTERACTIVE_SELECTORS,与 [role=menuitem]
+    // 一起召回,走 extractCompound 输出 count + options。
+    expect(src).toMatch(/\[role=menu\]/);
   });
   it("inject func 模态块用 inject 形参 filter(非外层 filterMode)防 ReferenceError", () => {
     // inject func 第 5 形参名是 `filter`(func 签名 L731);只有外层 scanOneFrame 才叫 filterMode。
