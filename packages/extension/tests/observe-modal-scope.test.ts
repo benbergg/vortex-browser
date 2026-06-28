@@ -100,6 +100,17 @@ describe("modal-scope: source-lock(inject func 内联副本同步)", () => {
       /__activeModal.*baseCandidates\.unshift|baseCandidates\.unshift\(__activeModal\)|baseCandidates = \[__activeModal.*baseCandidates\]/s,
     );
   });
+
+  it("R4 B011: INTERACTIVE_SELECTORS 含 [role=tabpanel] 让 tab 内容容器召回", () => {
+    // R4 评测发现:react-aria Tabs 页面 4 个 tabpanel 元素 (role=tabpanel)
+    // 在 observe 输出中完全丢失(2026-06-28 a11y 评测 R4 B011)。Agent 看到
+    // tab "General" [selected] + controls=#tabpanel-general,但不知 tab
+    // 内容长啥样。修复:[role=tabpanel] 加 INTERACTIVE_SELECTORS 总是收集
+    // (不限 filter=all),tab 内容容器 (含内部 textbox/button) 也被一起召回。
+    // tabpanel 自身不被标可点(无 cursor:pointer,无 [listener],getRole 返
+    // "tabpanel")，仅显示结构 — 与 dialog 容器不同,无需 modal-scope 特殊处理。
+    expect(src).toMatch(/\[role=tabpanel\]/);
+  });
   it("inject func 模态块用 inject 形参 filter(非外层 filterMode)防 ReferenceError", () => {
     // inject func 第 5 形参名是 `filter`(func 签名 L731);只有外层 scanOneFrame 才叫 filterMode。
     // 模态块若误用 filterMode → inject MAIN-world 作用域无此变量 → minify 成自由变量 `a`

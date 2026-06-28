@@ -881,6 +881,13 @@ async function scanOneFrame(
           "[role=checkbox]",
           "[role=radio]",
           "[role=tab]",
+          // R4 B011 修复: [role=tabpanel] 容器加入 INTERACTIVE_SELECTORS。
+          // 历史上仅 [role=tab] 在,Agent 看到 tab "General" [selected] 配
+          // controls=#tabpanel-general 但看不到 tabpanel 内部。tabpanel
+          // 是结构性容器(WAI-ARIA tab pattern),不交互,加进 selector 仅
+          // 让 baseCandidates 收集 — getRole 返 "tabpanel" 自然不会与
+          // tab 混淆,无 cursor:pointer 时不会被 react-clickable 误标。
+          "[role=tabpanel]",
           "[role=menuitem]",
           "[role=treeitem]",
           "[role=option]",

@@ -74,7 +74,10 @@ describe("applyOverlay 命中覆盖", () => {
     expect(els[0].role).toBe("tab");
     expect(els[0].name).toBe("详情");
     expect((els[0] as any).state?.selected).toBe(true);
-    expect((els[0] as any).controls).toEqual([1]); // backendId 200 → index 1
+    // R4 B012 修复:AX 路径设的 controls 改用 B008 形状 [{index:N}] 而非纯
+    // 数字数组 [N](后者被渲染层当 {index:N, id:undefined} 用,拼出
+    // controls=#undefined)。B008 形状与 page-side aria-controls 路径对齐。
+    expect((els[0] as any).controls).toEqual([{ index: 1 }]);
     expect((els[0] as any).nameSource).toBeDefined();
   });
 });

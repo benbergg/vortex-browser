@@ -224,12 +224,28 @@ export function applyOverlay(
     if (ov.state) el.state = { ...(el.state ?? {}), ...ov.state };
     if (ov.valueNow !== undefined) el.valueNow = ov.valueNow;
     if (ov.controls) {
-      const idxs = ov.controls.map((b) => backendToIndex.get(b)).filter((x): x is number => x != null);
-      if (idxs.length) el.controls = idxs;
+      // R4 B012 修复:AX 路径设的 controls 必须用 B008 形状 [{index:N}],而非纯
+      // 数字数组 — 后者被渲染层当 {index:数字,id:undefined} 用,拼出
+      // `controls=#undefined`(2026-06-28 a11y 评测 R4)。B008 路径(aria-controls
+      // 字符串,3188-3220)设的是 [{id|index}],B009 fallback 是 [{id:"ghost"}]。
+      // 形状必须对齐,否则 AX 路径覆盖 page-side 路径后渲染成 `#undefined`。
+      // 优先级:AX 路径(更准,CDP 拿的 relatedNodes)优先;若所有 backendId 都
+      // 找不到对应 index,保留 page-side 路径设的 controls(它仍可能正确)。
+      const ctrlList: Array<{ index: number; id?: undefined }> = [];
+      for (const b of ov.controls) {
+        const idx = backendToIndex.get(b);
+        if (idx != null) ctrlList.push({ index: idx });
+      }
+      if (ctrlList.length) el.controls = ctrlList as unknown as number[];
     }
     if (ov.owns) {
-      const idxs = ov.owns.map((b) => backendToIndex.get(b)).filter((x): x is number => x != null);
-      if (idxs.length) el.owns = idxs;
+      // 同 controls 形状对齐修复
+      const ownList: Array<{ index: number; id?: undefined }> = [];
+      for (const b of ov.owns) {
+        const idx = backendToIndex.get(b);
+        if (idx != null) ownList.push({ index: idx });
+      }
+      if (ownList.length) el.owns = ownList as unknown as number[];
     }
     if (ov.errorMessage) el.errorMessage = ov.errorMessage;
     if (ov.description) el.description = ov.description;
