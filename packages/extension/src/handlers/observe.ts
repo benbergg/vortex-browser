@@ -12,6 +12,65 @@ import {
 import { captureAXNodeMap } from "../reasoning/ax-snapshot.js";
 import { buildIndexToBackend, applyOverlay, type OverlayableElement } from "./observe-ax-overlay.js";
 import { markListenerElements } from "./observe-js-listener.js";
+import {
+  ARIA_ROLE_TAXONOMY,
+  RECALL_ROLES,
+  categoryOf,
+  isContainerRole,
+} from "../reasoning/aria-taxonomy.js";
+
+/**
+ * 仅供单测:复刻 inject 内联 getRole 真源(改一处须同步 inject 内联副本,
+ * observe-role-gate.test.ts 锁守护)。@author qingwa
+ */
+export function getRoleForTest(el: Element): string {
+  const explicit = el.getAttribute("role");
+  if (explicit) {
+    const first = explicit.trim().split(/\s+/)[0];
+    if (first) return first;
+  }
+  const tag = el.tagName.toLowerCase();
+  if (tag === "a" && el.hasAttribute("href")) return "link";
+  if (tag === "button") return "button";
+  if (tag === "input") {
+    const t = (el as HTMLInputElement).type;
+    if (t === "checkbox") return "checkbox";
+    if (t === "radio") return "radio";
+    if (t === "submit" || t === "button" || t === "reset" || t === "image") return "button";
+    if (t === "range") return "slider";
+    if (t === "number") return "spinbutton";
+    return "textbox";
+  }
+  if (tag === "select") return "combobox";
+  if (tag === "textarea") return "textbox";
+  if (tag === "iframe") {
+    return el.hasAttribute("title") ? "region" : "iframe";
+  }
+  if (tag === "summary") return "button";
+  // HTML-AAM 隐式映射(Task 3 新增)
+  if (tag === "nav") return "navigation";
+  if (tag === "main") return "main";
+  if (tag === "aside") return "complementary";
+  if (tag === "fieldset") return "group";
+  if (tag === "ul" || tag === "ol") return "list";
+  if (tag === "li") return "listitem";
+  // header/footer 仅当非 article/section/aside/main/nav 后代时为 banner/contentinfo
+  if (tag === "header" && !el.closest("article,section,aside,main,nav")) return "banner";
+  if (tag === "footer" && !el.closest("article,section,aside,main,nav")) return "contentinfo";
+  // section 仅在有可及名称(aria-label/aria-labelledby)时为 region
+  if (tag === "section" && (el.hasAttribute("aria-label") || el.hasAttribute("aria-labelledby"))) return "region";
+  return tag;
+}
+
+/**
+ * 仅供单测:复刻 inject 内联 passesRoleGate 真源(改一处须同步 inject 内联副本与
+ * aria-taxonomy.ts RECALL_ROLES 真源,observe-role-gate.test.ts 锁守护)。
+ * 真源 = reasoning/aria-taxonomy.ts RECALL_ROLES(getRoleForTest 出 role,过门判断)。
+ * @author qingwa
+ */
+export function passesRoleGateForTest(el: Element): boolean {
+  return RECALL_ROLES.has(getRoleForTest(el));
+}
 
 type FramesParam =
   | "main"
@@ -335,23 +394,8 @@ export function applyReactClickableMarker(
  * 内联同语义副本(closure 注入无法 import),改一处须同步另一处,源码锁守护。
  */
 export const FOCUS_CONTAINER_ROLES = new Set<string>([
-  "tooltip",
-  "dialog",
-  "alertdialog",
-  "group",
-  "region",
-  "menu",
-  "listbox",
-  "tree",
-  "grid",
-  "table",
-  "tabpanel",
-  "navigation",
-  "toolbar",
-  "document",
-  "application",
-  "none",
-  "presentation",
+  ...Object.keys(ARIA_ROLE_TAXONOMY).filter(isContainerRole),
+  "none", "presentation", // 装饰占位:同样不该触发短路
 ]);
 export const ATOMIC_INTERACTIVE_SELECTORS =
   "button,a[href],summary,input:not([type=hidden]),select,textarea,label,[role=button],[role=link],[role=textbox],[role=checkbox],[role=radio],[role=tab],[role=menuitem],[role=treeitem],[role=option],[contenteditable],[onclick]";
@@ -398,6 +442,26 @@ export function isCompoundControlSelf(el: Element): boolean {
   if (tag === "A" || tag === "BUTTON" || tag === "SUMMARY") return true;
   const role = el.getAttribute("role")?.trim().split(/\s+/)[0];
   return !!role && SINGLE_CONTROL_ROLES.has(role);
+}
+
+/**
+ * 截断优先级 rank:rank 越小越优先保留。widget 最高,landmark 最先丢。
+ * 接入 allCandidates 排序的次级 key,不破坏既有两层正交排序(overlay + main-content)。
+ * 真源见 reasoning/aria-taxonomy.ts(categoryOf);inject 内联副本 closure 注入无法 import,
+ * 改此处须同步 inject 内联副本,observe-truncation-priority.test.ts 源码锁守护同义。
+ * @author qingwa
+ */
+export function truncationRank(role: string): number {
+  switch (categoryOf(role)) {
+    case "widget": return 0;
+    case "composite": return 1;
+    case "range":
+    case "live":
+    case "window": return 2;
+    case "structure": return 3;
+    case "landmark": return 4;
+    default: return 5;
+  }
 }
 
 /**
@@ -847,7 +911,7 @@ async function scanOneFrame(
           stale.removeAttribute("data-vortex-rid");
         }
 
-        const INTERACTIVE_SELECTORS = [
+const INTERACTIVE_SELECTORS = [
           "button",
           "a[href]",
           // N0002 B017:iframe 元素收集。MDN 文档页 / PDF embed / video / 跨源 widget
@@ -867,7 +931,7 @@ async function scanOneFrame(
           "input:not([type=hidden])",
           "select",
           "textarea",
-          // 原生 disclosure 触发器：<details> 的首个 <summary> 是可点开合的控件
+          // 原生 disclosure 触发器:<details> 的首个 <summary> 是可点开合的控件
           // (GitHub 菜单 / MDN / 文档站 FAQ 折叠大量使用)。它本身是交互入口,
           // 而关闭态 <details> 的内部内容由下方 checkVisibility 门挡掉
           // (content-visibility:hidden,2026-06-02 dogfood)。:first-of-type 限定
@@ -875,170 +939,18 @@ async function scanOneFrame(
           // 普通流内容点了无效,收进来会误导 agent(评审 #1 LOW)。
           "details > summary:first-of-type",
           "label:has(input[type=radio]), label:has(input[type=checkbox])",
-          "[role=button]",
-          "[role=link]",
-          "[role=textbox]",
-          "[role=checkbox]",
-          "[role=radio]",
-          "[role=tab]",
-          // R4 B011 修复: [role=tabpanel] 容器加入 INTERACTIVE_SELECTORS。
-          // 历史上仅 [role=tab] 在,Agent 看到 tab "General" [selected] 配
-          // controls=#tabpanel-general 但看不到 tabpanel 内部。tabpanel
-          // 是结构性容器(WAI-ARIA tab pattern),不交互,加进 selector 仅
-          // 让 baseCandidates 收集 — getRole 返 "tabpanel" 自然不会与
-          // tab 混淆,无 cursor:pointer 时不会被 react-clickable 误标。
-          "[role=tabpanel]",
-          // R7 B016 修复: [role=progressbar] / [role=meter] 加入
-          // INTERACTIVE_SELECTORS。WAI-ARIA 标准进度/量度元素,任何 upload
-          // progress / 评分 / loading bar 都用。历史上无 [role=progressbar]
-          // → 进度条完全丢失,Agent 看不到 65% / 100% 这种关键状态。
-          // 进度/量度元素不交互(无 cursor:pointer 时),getRole 返
-          // "progressbar"/"meter" 自然不与 button 混淆。valuenow/min/max
-          // 走 valueNow/valuemin/max 已有的值域字段。
-          "[role=progressbar]",
-          "[role=meter]",
-          // R8 B018 修复: [role=listbox] 容器加入 INTERACTIVE_SELECTORS。
-          // 历史上仅 [role=option] 在,Agent 看到 option "Red" [selected] 但
-          // 不知是哪个 listbox 上下文(2026-06-28 a11y 评测 R8 B018)。原生
-          // <select> 走 getRole 返 "combobox" 不命中(原生 select 是
-          // 独立分支,978 行),ARIA [role=listbox] 容器丢失。
-          // 修复:[role=listbox] 加入,与 [role=option] 一起召回,
-          // 走 extractCompound 输出 count + options(R2 B006 已加 truncated)。
-          // listbox 不交互(无 cursor:pointer 时),与 progressbar/table
-          // 同模式。
-          "[role=listbox]",
-          // R9 B019 修复: [role=menu] 容器加入 INTERACTIVE_SELECTORS。
-          // R8 B018 修复 listbox 时漏了 menu — 同一类"下拉容器"(WAI-ARIA
-          // menu pattern,button [haspopup=menu] controls=menu 关联),但
-          // [role=menu] 容器在 observe 输出中完全丢失(2026-06-28 a11y
-          // 评测 R9 B019)。Agent 看到 button "Open menu" controls=#r9-menu
-          // 但不知 menu 内部结构(Cut/Copy/Paste)。修复:[role=menu] 加
-          // INTERACTIVE_SELECTORS,与 [role=menuitem] 一起召回,走
-          // extractCompound 输出 count + options。menu 不交互(无
-          // cursor:pointer 时),getRole 返 "menu" 自然不与 button 混淆。
-          "[role=menu]",
-          // R10 B020 修复: [role=region] 容器加入 INTERACTIVE_SELECTORS。
-          // R9 修复后 listbox/menu/dialog/tabpanel/table/progressbar
-          // 都召回,但 [role=region] (WAI-ARIA landmark 容器,用于
-          // disclosure/fieldset/分组)仍丢失(2026-06-28 a11y 评测 R10
-          // B020)。Agent 看到 button "Show details" [expanded] controls=
-          // #r10-panel 但 region 容器整体不见,不知 panel 内容范围。
-          // 修复:[role=region] 加 INTERACTIVE_SELECTORS,与 listbox/menu
-          // 等同模式。region 不交互(无 cursor:pointer 时),getRole 返
-          // "region" 自然不与 button 混淆。
-          "[role=region]",
-          // R11 B021 修复: [role=radiogroup] 容器加入 INTERACTIVE_SELECTORS。
-          // R10 修复 region 后,ARAI 1.2 radio pattern 的容器 radiogroup
-          // 仍丢失(2026-06-28 a11y 评测 R11 B021)。Agent 看到
-          // radio "Apple" [checked] 不知属哪个 group(react-aria Tree 站
-          // 6 个 radiogroup 全部 0 召回:style / selectionMode /
-          // selectionBehavior 各 aria-label 关键状态被丢;W3C APG 官方
-          // radio 范例 2 个 radiogroup 也丢)。radiogroup 携带 aria-label
-          // / aria-required / aria-disabled,屏幕阅读器把整组作为 landmark
-          // 播报 — 容器不在 → agent 拿不到 group context,跨组同名 radio
-          // (Apple/Pear/Orange 多个 demo)极易选错。修复:[role=radiogroup]
-          // 加 INTERACTIVE_SELECTORS,与 listbox/menu/region 同模式。
-          // radiogroup 不交互(无 cursor:pointer 时),getRole 返
-          // "radiogroup" 自然不与 radio/button 混淆。
-          "[role=radiogroup]",
-          // R12 B022 修复: [role=tablist] 容器加入 INTERACTIVE_SELECTORS。
-          // R11 修复 radiogroup 后,ARIA 1.2 tabs pattern 的容器 tablist
-          // 仍丢失(2026-06-28 a11y 评测 R12 B022)。tab 元素本身已在
-          // INTERACTIVE_SELECTORS,Agent 看到 4 个 sibling tab 不知属哪个
-          // tablist(react-aria Tabs 站 2 个可见 tablist 全部 0 召回:
-          // Settings/4-tab + Files/3-tab 各 aria-label + aria-orientation
-          // 关键状态被丢)。tablist 携带 aria-label / aria-orientation
-          // / aria-multiselectable,屏幕阅读器用此判 group 边界 — 容器
-          // 不在 → agent 拿不到 tab 间关系,跨 tablist 同名 tab 选错,
-          // WAI-ARIA tabs pattern 的 roving tabindex 完全无法推理。修复:
-          // [role=tablist] 加 INTERACTIVE_SELECTORS,与 radiogroup 同模式。
-          // tablist 不交互(无 cursor:pointer 时),getRole 返 "tablist"
-          // 自然不与 tab 混淆。
-          "[role=tablist]",
-          // R13 B023 修复: [role=toolbar] 容器加入 INTERACTIVE_SELECTORS。
-          // R12 修复 tablist 后,ARIA 1.2 toolbar pattern 的容器 toolbar
-          // 仍丢失(2026-06-28 a11y 评测 R13 B023)。button/radiogroup 子
-          // 元素已在,Agent 看到 Bold/Italic/Underline + Copy/Cut/Paste
-          // + Helvetica Font 共 9 控件不知属哪个 toolbar(react-aria
-          // Toolbar 站 "Text formatting" toolbar 6 子全散落:style group +
-          // clipboard group + helvetica group)。toolbar 携带 aria-label
-          // / aria-orientation,屏幕阅读器把整组作为 landmark 播报且按
-          // 方向键 roving tabindex — 容器不在 → agent 拿不到 group
-          // 边界,跨 toolbar 同名 button 选错。修复:[role=toolbar] 加
-          // INTERACTIVE_SELECTORS,与 radiogroup/tablist 同模式。
-          // toolbar 不交互(无 cursor:pointer 时),getRole 返 "toolbar"
-          // 自然不与 button 混淆。
-          "[role=toolbar]",
-          // R14 B024 修复: [role=tree] 容器加入 INTERACTIVE_SELECTORS。
-          // R13 修复 toolbar 后,ARIA 1.2 tree pattern 的容器 tree(非
-          // treegrid)仍丢失(2026-06-28 a11y 评测 R14 B024)。treeitem
-          // 元素已在,Agent 看到 Projects/Reports/Letters 3 treeitem 不知
-          // 属哪个 tree(W3C APG 官方 File Directory Treeview 例 1 tree
-          // + 45 treeitem,只有 3 露在 viewport,均无 tree 容器)。tree
-          // 携带 aria-labelledby / aria-multiselectable / aria-required,
-          // 屏幕阅读器按方向键 roving tabindex 且层级通过 tree 容器判
-          // 边界 — 容器不在 → agent 拿不到 tree 间关系,跨 tree 同名
-          // treeitem 选错,TreeView pattern 的 arrow key 导航完全无法
-          // 推理。修复:[role=tree] 加 INTERACTIVE_SELECTORS,与 toolbar
-          // 同模式。tree 不交互(无 cursor:pointer 时),getRole 返 "tree"
-          // 自然不与 treeitem 混淆。注意:table/treegrid 容器已在
-          // TABLE_EXTRA_SELECTORS(R5 B013),此处只补纯 [role=tree](非
-          // treegrid 形式)。
-          "[role=tree]",
-          // R15 B025 修复: [role=grid] 容器加入 INTERACTIVE_SELECTORS。
-          // R14 修复 tree 后,ARIA 1.2 grid pattern 的容器 grid(非
-          // table 元素)仍丢失(2026-06-28 a11y 评测 R15 B025)。<table>
-          // 元素已被 TABLE_EXTRA_SELECTORS(R5 B013)捕获,但 <div role=
-          // "grid"> 形式漏(W3C APG Layout Grid 例 3 grid 全部 <div> + 0
-          // 召回:grid1_label/grid2_label/grid3_label 各 aria-labelledby
-          // 关键状态被丢)。row/gridcell 子元素已在,Agent 看到 6 gridcell
-          // 不知属哪个 grid。grid 携带 aria-labelledby / aria-multiselectable,
-          // 屏幕阅读器按方向键 roving tabindex — 容器不在 → agent 拿不到
-          // grid 间关系,跨 grid 同名 row 选错,Layout Grid pattern 的 arrow
-          // key 导航完全无法推理。修复:[role=grid] 加 INTERACTIVE_SELECTORS
-          // (而非 TABLE_EXTRA_SELECTORS,因为 grid 不是 <table>,且现有
-          // TABLE_EXTRA_SELECTORS 已含 <table> 元素会兜底 table+role=grid
-          // 形式)。grid 不交互(无 cursor:pointer 时),getRole 返 "grid"
-          // 自然不与 row/gridcell 混淆。
-          "[role=grid]",
-          // R16 B026 修复: [role=group] + fieldset 容器加入 INTERACTIVE_SELECTORS。
-          // R15 修复 grid 后,HTML <fieldset>/ARIA [role=group] 容器仍丢失
-          // (2026-06-28 a11y 评测 R16 B026)。W3C WAI Grouping Controls 教程
-          // 5 fieldset(Output format / I want to receive / Shipping
-          // Address / Billing Address / Which course ...)+ <legend> 命名
-          // 全部 0 召回,Agent 看到 3 radio(Text/CSV/HTML)不知属 Output
-          // format fieldset 容器。fieldset 携带 <legend>(HTML-AAM 隐式
-          // role=group),是 form controls 分组标准模式;ARIA 1.2 group role
-          // 也用于 disclosure/TreeSection 等分组。控件组分组信息丢失 → agent
-          // 拿不到 form section 边界,跨组同名 input 极易选错(典型:3 个
-          // text input 跨多组,不知哪个属 Shipping)。修复:[role=group] 加
-          // INTERACTIVE_SELECTORS 捕获显式 role="group";同时加 fieldset
-          // 元素选择器捕获 <fieldset>(HTML-AAM 隐式 role=group,attribute
-          // 无 role 字符串)。两者分别命中,联合覆盖两类 group 容器。group
-          // 不交互(无 cursor:pointer 时),getRole 返 "group" 自然不与
-          // radio/button 混淆。注意:R10 B020 已修 [role=region],region
-          // 是 landmark 命名容器;group 是非 landmark 命名容器(用于 form
-          // controls 分组),语义不同,必须分别召回。
-          "[role=group]",
-          "fieldset",
-          // R17 B027 修复: [role=search] 容器加入 INTERACTIVE_SELECTORS。
-          // R16 修复 group 后,ARIA search landmark 容器仍丢失
-          // (2026-06-28 a11y 评测 R17 B027)。search 是 W3C ARIA 8 大
-          // landmark(banner/main/navigation/search/form/contentinfo/
-          // complementary/application)之一,屏幕阅读器用户按快捷键跳
-          // landmark 搜索功能位。DuckDuckGo 首页 1 <div role="search">
-          // (aria-label="利用 DuckDuckGo 搜索网络内容")包裹搜索 combobox +
-          // 搜索模式 radiogroup + AI 设置按钮 — 容器 0 召回,Agent 看到
-          // 搜索 combobox 不知属 search landmark。修复:[role=search] 加
-          // INTERACTIVE_SELECTORS,与 radiogroup/tablist/toolbar 同模式
-          // (虽然 search 是 landmark,但 R10 region landmark 已修,search
-          // 形态更接近 group/radiogroup — 包裹交互控件集合)。search 不
-          // 交互(无 cursor:pointer 时),getRole 返 "search" 自然不与
-          // combobox/button 混淆。
-          "[role=search]",
-          "[role=menuitem]",
-          "[role=treeitem]",
-          "[role=option]",
+          // Task 4 召回决策改造:不再逐个枚举 [role=X] 选择器,而是用 `[role]` 一网打尽
+          // 所有显式 ARIA role,再走下方 RECALL_ROLES 召回门过滤(presentation/none/generic
+          // 不召回)。新增 role 类型(ARIA 1.3 升版)无需再补 selector — 改一处 taxonomy
+          // 即可生效(2026-06-28 a11y 评测 R1–R17 收敛)。
+          "[role]",
+          // 原生 HTML 语义容器:经 getRole HTML-AAM 隐式映射到 ARIA landmark/structure,
+          // 同样走 RECALL_ROLES 召回门。这些 tag 历史上是「被忽视的容器」,Agent 看不到
+          // 它们的 landmark/分组结构;现统一召回,与显式 [role=X] 形式等价。
+          // 注意:section 仅在有 aria-label/aria-labelledby 时才为 region(无名称时
+          // getRole 返 tag name "section" 不在 RECALL_ROLES),召回门会自然过滤掉
+          // 装饰用 section;但下方收集循环加过门成本几乎为零,统一收也无副作用。
+          "table,nav,main,header,footer,aside,fieldset,ul,ol,li,section",
           "[tabindex]:not([tabindex='-1'])",
           "[contenteditable]",
           // Inline onclick handler — covers jQuery-era PHP backoffice / WebForms
@@ -1056,6 +968,10 @@ async function scanOneFrame(
           // 故 [draggable=true] 精确匹配——draggable=""/"false" 不收(2026-06-14 真实站
           // 评测 the-internet/drag_and_drop)。原生 img/a 默认可拖但已被 a[href] 覆盖。
           "[draggable=true]",
+          // [data-vtx-listener] 是 pre-scan CDP getEventListeners 标的纯 addEventListener
+          // 元素(vanilla/jQuery 直绑 —— 见 observe-js-listener.ts)。data-vtx-listener
+          // 必须独立选择器,无法被 [role] 或原生 tag 覆盖。
+          "[data-vtx-listener]",
         ].join(",");
 
         const COLLECTED_ATTRS = [
@@ -1141,10 +1057,62 @@ async function scanOneFrame(
           // <summary> 是 disclosure 开合控件,交互模型等同按钮,role 报 button 让
           // LLM 直接理解为可点(原生 <details>/<summary>,2026-06-02 dogfood)。
           if (tag === "summary") return "button";
+          // HTML-AAM 隐式映射(Task 3 新增,与上方导出 getRoleForTest 须同步)
+          if (tag === "nav") return "navigation";
+          if (tag === "main") return "main";
+          if (tag === "aside") return "complementary";
+          if (tag === "fieldset") return "group";
+          if (tag === "ul" || tag === "ol") return "list";
+          if (tag === "li") return "listitem";
+          // header/footer 仅当非 article/section/aside/main/nav 后代时为 banner/contentinfo
+          if (tag === "header" && !el.closest("article,section,aside,main,nav")) return "banner";
+          if (tag === "footer" && !el.closest("article,section,aside,main,nav")) return "contentinfo";
+          // section 仅在有可及名称(aria-label/aria-labelledby)时为 region
+          if (tag === "section" && (el.hasAttribute("aria-label") || el.hasAttribute("aria-labelledby"))) return "region";
           // 班牛 bnCheck 自定义勾选控件(无 role/无原生 input)→ checkbox(N0064 P2-1)。
           if (bnCheckInfo(el)) return "checkbox";
           return tag;
         }
+
+        // Task 4 召回门 passesRoleGate(真源:reasoning/aria-taxonomy.ts RECALL_ROLES)
+        //
+        // inject func 内联副本(真源见 aria-taxonomy.ts,改一处须同步 inject 内联副本与
+        // handler 顶层 passesRoleGateForTest,源码锁守护,observe-taxonomy-inlined.test.ts +
+        // observe-role-gate.test.ts 锁)。66 项,从 ARIA_ROLE_TAXONOMY 67 项扣 EXPLICIT_DENY
+        // 唯一交集 caption;presentation/none/generic 不在(EXPLICIT_DENY 召回门过滤)。
+        //
+        // 召回决策:命中 [role] 或原生语义容器选择器时,只有 role ∈ RECALL_ROLES 才入池。
+        // 原生交互元素(a/button/input/select/textarea/summary/label:has/input)+ 启发式
+        // 入口(contenteditable/onclick/draggable/tabindex/listener marker)直接收,
+        // 不走此门(curosr:pointer fallback 路径同理,不入池不需门)。
+        // DERIVED_FROM_ARIA_TAXONOMY
+        const __RECALL_ROLES = new Set([
+          // widget(19):原子交互控件
+          "button","checkbox","link","menuitem","menuitemcheckbox","menuitemradio",
+          "option","radio","scrollbar","searchbox","slider","spinbutton","switch",
+          "tab","textbox","treeitem","gridcell","columnheader","rowheader",
+          // composite(9):管理一组 widget 的容器
+          "combobox","grid","listbox","menu","menubar","radiogroup","tablist","tree","treegrid",
+          // structure(21):文档结构容器(caption 在 EXPLICIT_DENY,排除)
+          "group","toolbar","table","tabpanel","row","rowgroup","cell","article",
+          "list","listitem","feed","figure","separator","tooltip","note","term",
+          "definition","directory","document","application","blockquote",
+          // landmark(8):地标
+          "banner","complementary","contentinfo","form","main","navigation","region","search",
+          // range(2):值域/进度
+          "progressbar","meter",
+          // live(5):实时区
+          "alert","log","marquee","status","timer",
+          // window(2):窗口
+          "dialog","alertdialog",
+        ]);
+        function passesRoleGate(el: Element): boolean {
+          return __RECALL_ROLES.has(getRole(el));
+        }
+        // 召回门触发条件:命中 [role] 或原生语义容器选择器(命中后才过门)。
+        // 原生交互元素 / 启发式入口不命中此选择器 → 不过门,直接入池。
+        const ROLE_GATE_TRIGGER_SELECTORS =
+          "[role],table,nav,main,header,footer,aside,fieldset,ul,ol,li,section";
 
         // 元素是否带交互可供性(用于 occlusion carve-out 判定 widget 容器)。
         function isInteractiveEl(x: Element): boolean {
@@ -2238,12 +2206,12 @@ async function scanOneFrame(
         // structural roles that table-heavy pages expose (rows / cells /
         // column headers) so LLMs can reference data grid coordinates.
         const TABLE_EXTRA_SELECTORS =
-          // R5 B013 修复: 原生 <table> 元素加入,让 table 容器自身召回
-          // (此前只收 tr/td/th/row 角色,Agent 看到 row "Product Sales"
-          // 但不知是哪个 table 上下文)。filter=all 时 table 容器与内部
-          // row/cell/columnheader 一起召回,getRole 返 "table" 自然
-          // 与行/单元格区分,无 cursor:pointer 不被 react-clickable 误标。
-          "table,tr,td,th,[role=row],[role=cell],[role=columnheader],[role=rowheader],[role=gridcell]";
+          // 原生 <table> 容器已并入 INTERACTIVE_SELECTORS(Task 4):HTML-AAM 隐式映射
+          // getRole <table> → "table" ∈ RECALL_ROLES,过召回门入池。此处只补行/列等
+          // 内部 cell 结构与显式 row/cell/gridcell role(原生 tr/td/th 的 getRole 返
+          // tag name 不在 RECALL_ROLES,无法过门,需 selector 直收;filter=all 时
+          // 才用,普通观察不影响)。
+          "tr,td,th,[role=row],[role=cell],[role=columnheader],[role=rowheader],[role=gridcell]";
         const ROOT_SELECTORS =
           filter === "all"
             ? `${INTERACTIVE_SELECTORS},${TABLE_EXTRA_SELECTORS}`
@@ -2322,7 +2290,16 @@ async function scanOneFrame(
         // <li/div cursor:pointer @click=...> 而非原生 button / [role=button]，
         // 静态白名单完全捕获不到。事件挂在 Vue/React vnode 层，元素本身
         // 没 onclick 也没 framework key，所以走 computed style 兜底。
-        const interactiveSet = new Set<Element>(nodeList);
+        // Task 4 召回门:nodeList 中 [role] / 原生语义容器命中元素需过 passesRoleGate
+        // (RECALL_ROLES 判据)才入池——presentation/none/generic 等装饰角色直接过滤。
+        // 原生交互元素(a/button/input/select/textarea/summary/label:has(input))与
+        // 启发式入口(tabindex≥0/contenteditable/onclick/draggable/listener marker)不
+        // 命中 ROLE_GATE_TRIGGER_SELECTORS,直接入池(curosr:pointer fallback 路径同理)。
+        const interactiveSet = new Set<Element>();
+        for (const el of nodeList) {
+          if (el.matches(ROLE_GATE_TRIGGER_SELECTORS) && !passesRoleGate(el)) continue;
+          interactiveSet.add(el);
+        }
         // Sweep all elements (Vue/React UI libs frequently use custom
         // tags like <el-button> / <a-link> / <van-cell> for interactive
         // widgets — bytenew testc 行操作 link is <el-button> not <div>),
@@ -2414,16 +2391,69 @@ async function scanOneFrame(
         // 自身可点的内容卡(京东 _card)保留入池。
         const isSelfClickable = (el: Element): boolean =>
           getComputedStyle(el).cursor === "pointer" || hasFrameworkClick(el);
-        // isFocusContainerOnly 内联副本——真源见导出函数(可单测),inject func 注入丢
-        // 模块作用域不能 import,改一处须同步另一处(源码锁守护)。判据:祖先 role ∈
-        // 容器角色集 或 仅靠 tabindex 入池(非原子控件)→ 聚焦/浮层容器(Element UI
+        // isFocusContainerOnly 内联副本——真源见 reasoning/aria-taxonomy.ts
+        // (ARIA_ROLE_TAXONOMY + isContainerRole) + 导出函数 isFocusContainerOnly
+        // (jsdom 单测锁)。inject func 注入丢模块作用域不能 import,改此处须同步
+        // aria-taxonomy.ts + 源码锁测试守护(observe-focus-container-suppress.test.ts
+        // 检 DERIVED_FROM_ARIA_TAXONOMY marker + 派生角色。判据:祖先 role ∈ 容器
+        // 角色集 或 仅靠 tabindex 入池(非原子控件)→ 聚焦/浮层容器(Element UI
         // el-popover/el-dialog/el-drawer 自带 tabindex=0+role=tooltip|dialog),它不
         // 描述子树,下方跨池祖先短路不应因它跳过其 cursor:pointer 子项(N0064 D6
         // columnDisplay 9 列 bnCheck 全丢)。
+        // DERIVED_FROM_ARIA_TAXONOMY
+        const __ARIA_ROLE_TAXONOMY = {
+          button:["widget"], checkbox:["widget"], link:["widget"], menuitem:["widget"],
+          menuitemcheckbox:["widget"], menuitemradio:["widget"], option:["widget"],
+          radio:["widget"], scrollbar:["widget"], searchbox:["widget"], slider:["widget","range"],
+          spinbutton:["widget","range"], switch:["widget"], tab:["widget"], textbox:["widget"],
+          treeitem:["widget"], gridcell:["widget"], columnheader:["widget"], rowheader:["widget"],
+          combobox:["composite","widget"], grid:["composite"], listbox:["composite"],
+          menu:["composite"], menubar:["composite"], radiogroup:["composite"],
+          tablist:["composite"], tree:["composite"], treegrid:["composite"],
+          group:["structure"], toolbar:["structure"], table:["structure"], tabpanel:["structure"],
+          row:["structure"], rowgroup:["structure"], cell:["structure"], article:["structure"],
+          list:["structure"], listitem:["structure"], feed:["structure"], figure:["structure"],
+          separator:["structure"], tooltip:["structure"], note:["structure"], term:["structure"],
+          definition:["structure"], directory:["structure"], document:["structure"],
+          application:["structure"], caption:["structure"], blockquote:["structure"],
+          banner:["landmark"], complementary:["landmark"], contentinfo:["landmark"],
+          form:["landmark"], main:["landmark"], navigation:["landmark"], region:["landmark"],
+          search:["landmark"],
+          progressbar:["range"], meter:["range"],
+          alert:["live"], log:["live"], marquee:["live"], status:["live"], timer:["live"],
+          dialog:["window"], alertdialog:["window","live"],
+        };
+        const __CATEGORY_PRIORITY = ["composite","window","landmark","structure","live","range","widget"];
+        const __CONTAINER_CATS = new Set(["composite","structure","landmark","window"]);
+        const __isContainerRole = (role) => {
+          const cats = __ARIA_ROLE_TAXONOMY[role];
+          if (!cats) return false;
+          let main;
+          for (const c of __CATEGORY_PRIORITY) if (cats.includes(c)) { main = c; break; }
+          return main != null && __CONTAINER_CATS.has(main);
+        };
+        // truncationRank 内联副本(真源:导出函数 truncationRank in observe.ts)。inject
+        // closure 注入无法 import,改一处须同步。语义同源:rank 越小越优先保留,token 压力
+        // 下 widget 必留,landmark/structure 先丢。未知 role 返默认 5,落到桶尾。
+        const __truncationRank = (role) => {
+          const cats = __ARIA_ROLE_TAXONOMY[role];
+          if (!cats) return 5;
+          let main;
+          for (const c of __CATEGORY_PRIORITY) if (cats.includes(c)) { main = c; break; }
+          switch (main) {
+            case "widget": return 0;
+            case "composite": return 1;
+            case "range":
+            case "live":
+            case "window": return 2;
+            case "structure": return 3;
+            case "landmark": return 4;
+            default: return 5;
+          }
+        };
         const FOCUS_CONTAINER_ROLES = new Set([
-          "tooltip", "dialog", "alertdialog", "group", "region", "menu",
-          "listbox", "tree", "grid", "table", "tabpanel", "navigation",
-          "toolbar", "document", "application", "none", "presentation",
+          ...Object.keys(__ARIA_ROLE_TAXONOMY).filter(__isContainerRole),
+          "none", "presentation",
         ]);
         const ATOMIC_INTERACTIVE_SELECTORS =
           "button,a[href],summary,input:not([type=hidden]),select,textarea,label,[role=button],[role=link],[role=textbox],[role=checkbox],[role=radio],[role=tab],[role=menuitem],[role=treeitem],[role=option],[contenteditable],[onclick]";
@@ -2915,7 +2945,16 @@ async function scanOneFrame(
           // 零漂移:无浮层且主/导航未跨 ≥2 桶 → 原数组同序。
           const a1Buckets = (a1Main.length > 0 ? 1 : 0) + (a1Mid.length > 0 ? 1 : 0) + (a1Nav.length > 0 ? 1 : 0);
           if (overlayEls.length === 0 && a1Buckets <= 1) return baseCandidates;
-          return [...overlayEls, ...a1Main, ...a1Mid, ...a1Nav];
+          // Task 6 截断优先级:同桶内按 ARIA category rank 升序,token 压力下 widget 优先保留,
+          // landmark/structure 先丢。同 rank 用原序稳定排序,不破坏桶间主序(overlay > main >
+          // mid > nav)。role 推导走 inject 内联 getRole 真源(与导出 getRoleForTest 同义)。
+          const sortByTruncationRank = (els: Element[]): Element[] => {
+            return els
+              .map((el, i) => ({ el, i, rank: __truncationRank(getRole(el)) }))
+              .sort((a, b) => a.rank - b.rank || a.i - b.i)
+              .map(({ el }) => el);
+          };
+          return [...sortByTruncationRank(overlayEls), ...sortByTruncationRank(a1Main), ...sortByTruncationRank(a1Mid), ...sortByTruncationRank(a1Nav)];
         })();
 
         const elements: Array<{

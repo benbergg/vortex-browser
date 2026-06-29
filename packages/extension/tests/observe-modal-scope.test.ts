@@ -109,7 +109,12 @@ describe("modal-scope: source-lock(inject func 内联副本同步)", () => {
     // (不限 filter=all),tab 内容容器 (含内部 textbox/button) 也被一起召回。
     // tabpanel 自身不被标可点(无 cursor:pointer,无 [listener],getRole 返
     // "tabpanel")，仅显示结构 — 与 dialog 容器不同,无需 modal-scope 特殊处理。
-    expect(src).toMatch(/\[role=tabpanel\]/);
+    //
+    // Task 4 收敛后:[role] 一网打尽 + RECALL_ROLES 召回门覆盖 tabpanel。
+    // 此项断言改为锁「[role] 选择器存在」(统一入口)与「tabpanel ∈ RECALL_ROLES」(派生真源)。
+    expect(src).toMatch(/"\[role\]"/);
+    // tabpanel 不再需要独立 [role=tabpanel] 选择器 — 由 [role] + RECALL_ROLES 统一召回
+    expect(src).not.toMatch(/\[role=tabpanel\]/);
   });
 
   it("R5 B013: TABLE_EXTRA_SELECTORS 含 table 元素让 table 容器自身召回", () => {
@@ -132,8 +137,12 @@ describe("modal-scope: source-lock(inject func 内联副本同步)", () => {
     // 不交互(无 cursor:pointer 时),getRole 返 "progressbar"/"meter"
     // 自然不与 button 混淆。valuenow/min/max 走已有 valueNow/valuemin/max
     // 字段(observe-render.ts 已渲染 [valuemin=0] [valuemax=100] value=X)。
-    expect(src).toMatch(/\[role=progressbar\]/);
-    expect(src).toMatch(/\[role=meter\]/);
+    //
+    // Task 4 收敛后:[role] + RECALL_ROLES 一网打尽。progressbar / meter 不再需
+    // 独立选择器 — 由 RECALL_ROLES(aria-taxonomy.ts range 类)统一召回。
+    expect(src).toMatch(/"\[role\]"/);
+    expect(src).not.toMatch(/\[role=progressbar\]/);
+    expect(src).not.toMatch(/\[role=meter\]/);
   });
 
   it("R8 B018: INTERACTIVE_SELECTORS 含 [role=listbox] 让 listbox 容器自身召回", () => {
@@ -168,7 +177,11 @@ describe("modal-scope: source-lock(inject func 内联副本同步)", () => {
     // 加 INTERACTIVE_SELECTORS,与 listbox/menu/dialog/tabpanel/table
     // /progressbar 同模式。region 不交互(无 cursor:pointer 时),
     // getRole 返 "region" 自然不与 button 混淆。
-    expect(src).toMatch(/\[role=region\]/);
+    //
+    // Task 4 收敛后:[role] + RECALL_ROLES 一网打尽。region 不再需独立选择器 —
+    // 由 RECALL_ROLES(aria-taxonomy.ts landmark 类)统一召回。
+    expect(src).toMatch(/"\[role\]"/);
+    expect(src).not.toMatch(/\[role=region\]/);
   });
 
   it("R11 B021: INTERACTIVE_SELECTORS 含 [role=radiogroup] 让 radiogroup 容器自身召回", () => {
@@ -183,7 +196,11 @@ describe("modal-scope: source-lock(inject func 内联副本同步)", () => {
     // 修复:[role=radiogroup] 加 INTERACTIVE_SELECTORS,与 listbox/menu/
     // region 同模式。radiogroup 不交互(无 cursor:pointer 时),getRole
     // 返 "radiogroup" 自然不与 radio/button 混淆。
-    expect(src).toMatch(/\[role=radiogroup\]/);
+    //
+    // Task 4 收敛后:[role] + RECALL_ROLES 一网打尽。radiogroup 不再需
+    // 独立选择器 — 由 RECALL_ROLES(aria-taxonomy.ts composite 类)统一召回。
+    expect(src).toMatch(/"\[role\]"/);
+    expect(src).not.toMatch(/\[role=radiogroup\]/);
   });
 
   it("R12 B022: INTERACTIVE_SELECTORS 含 [role=tablist] 让 tablist 容器自身召回", () => {
@@ -198,22 +215,30 @@ describe("modal-scope: source-lock(inject func 内联副本同步)", () => {
     // pattern 的 roving tabindex 完全无法推理。修复:[role=tablist] 加
     // INTERACTIVE_SELECTORS,与 radiogroup 同模式。tablist 不交互(无
     // cursor:pointer 时),getRole 返 "tablist" 自然不与 tab 混淆。
-    expect(src).toMatch(/\[role=tablist\]/);
+    //
+    // Task 4 收敛后:[role] + RECALL_ROLES 一网打尽。tablist 不再需
+    // 独立选择器 — 由 RECALL_ROLES(aria-taxonomy.ts composite 类)统一召回。
+    expect(src).toMatch(/"\[role\]"/);
+    expect(src).not.toMatch(/\[role=tablist\]/);
   });
 
-  it("R13 B023: INTERACTIVE_SELECTORS 含 [role=toolbar] 让 toolbar 容器自身召回", () => {
+it("R13 B023: INTERACTIVE_SELECTORS 含 [role=toolbar] 让 toolbar 容器自身召回", () => {
     // R13 评测发现:R12 修复 tablist 后,ARIA 1.2 toolbar pattern 的
     // 容器 toolbar 仍丢失(2026-06-28 a11y 评测 R13 B023)。button/
     // radiogroup 子元素已在,Agent 看到 Bold/Italic/Underline + Copy/
     // Cut/Paste + Helvetica Font 共 9 控件不知属哪个 toolbar(react-aria
-    // Toolbar 站 \"Text formatting\" toolbar 6 子全散落:style group +
+    // Toolbar 站 "Text formatting" toolbar 6 子全散落:style group +
     // clipboard group + helvetica group)。toolbar 携带 aria-label /
     // aria-orientation,屏幕阅读器把整组作为 landmark 播报且按方向键
     // roving tabindex — 容器不在 → agent 拿不到 group 边界,跨 toolbar
     // 同名 button 选错。修复:[role=toolbar] 加 INTERACTIVE_SELECTORS,
     // 与 radiogroup/tablist 同模式。toolbar 不交互(无 cursor:pointer
-    // 时),getRole 返 \"toolbar\" 自然不与 button 混淆。
-    expect(src).toMatch(/\[role=toolbar\]/);
+    // 时),getRole 返 "toolbar" 自然不与 button 混淆。
+    //
+    // Task 4 收敛后:[role] + RECALL_ROLES 一网打尽。toolbar 不再需
+    // 独立选择器 — 由 RECALL_ROLES(aria-taxonomy.ts structure 类)统一召回。
+    expect(src).toMatch(/"\[role\]"/);
+    expect(src).not.toMatch(/\[role=toolbar\]/);
   });
 
   it("R14 B024: INTERACTIVE_SELECTORS 含 [role=tree] 让 tree 容器自身召回", () => {
@@ -272,21 +297,25 @@ it("R16 B026: INTERACTIVE_SELECTORS 含 [role=group] + fieldset 让 group/fields
     expect(src).toMatch(/\bfieldset\b/);
   });
 
-  it("R17 B027: INTERACTIVE_SELECTORS 含 [role=search] 让 search landmark 容器自身召回", () => {
+it("R17 B027: INTERACTIVE_SELECTORS 含 [role=search] 让 search landmark 容器自身召回", () => {
     // R17 评测发现:R16 修复 group 后,ARIA search landmark 容器仍
     // 丢失(2026-06-28 a11y 评测 R17 B027)。search 是 W3C ARIA 8 大
     // landmark(banner/main/navigation/search/form/contentinfo/
     // complementary/application)之一,屏幕阅读器用户按快捷键跳
-    // landmark 搜索功能位。DuckDuckGo 首页 1 <div role=\"search\">
-    // (aria-label=\"利用 DuckDuckGo 搜索网络内容\")包裹搜索 combobox +
+    // landmark 搜索功能位。DuckDuckGo 首页 1 <div role="search">
+    // (aria-label="利用 DuckDuckGo 搜索网络内容")包裹搜索 combobox +
     // 搜索模式 radiogroup + AI 设置按钮 — 容器 0 召回,Agent 看到
     // 搜索 combobox 不知属 search landmark。修复:[role=search] 加
     // INTERACTIVE_SELECTORS,与 radiogroup/tablist/toolbar 同模式
     // (虽然 search 是 landmark,但 R10 region landmark 已修,search
     // 形态更接近 group/radiogroup — 包裹交互控件集合)。search 不
-    // 交互(无 cursor:pointer 时),getRole 返 \"search\" 自然不与
+    // 交互(无 cursor:pointer 时),getRole 返 "search" 自然不与
     // combobox/button 混淆。
-    expect(src).toMatch(/\[role=search\]/);
+    //
+    // Task 4 收敛后:[role] + RECALL_ROLES 一网打尽。search 不再需
+    // 独立选择器 — 由 RECALL_ROLES(aria-taxonomy.ts landmark 类)统一召回。
+    expect(src).toMatch(/"\[role\]"/);
+    expect(src).not.toMatch(/\[role=search\]/);
   });
   it("inject func 模态块用 inject 形参 filter(非外层 filterMode)防 ReferenceError", () => {
     // inject func 第 5 形参名是 `filter`(func 签名 L731);只有外层 scanOneFrame 才叫 filterMode。
