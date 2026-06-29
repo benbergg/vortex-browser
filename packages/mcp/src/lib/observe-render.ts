@@ -1,5 +1,7 @@
 // packages/mcp/src/lib/observe-render.ts
 
+import { categoryOf } from "./aria-taxonomy.js";
+
 export interface CompactElement {
   index: number;
   tag: string;
@@ -241,6 +243,69 @@ function escapeName(s: string): string {
   return s.replace(/\r?\n/g, " ").replace(/"/g, '\\"').slice(0, 80);
 }
 
+/**
+ * Landmark 锚点:在元素行打 `[landmark:role]` 前缀,让 agent 一眼认出这是地标
+ * 容器(region/main/navigation/banner 等),与普通结构容器区分。T5 派发。
+ * 极简锚点:不放 compound 段(地标元数据少,语义靠 role+name 表达)。
+ */
+function landmarkFlag(role: string): string {
+  return categoryOf(role) === "landmark" ? ` [landmark:${role}]` : "";
+}
+
+/**
+ * Live 实时区锚点:`[live]` 前缀让 agent 立刻识别 status/alert/log/timer 是
+ * 动态文字区(不需要 click,会自然更新),不会被当成静态 text 误读。T5 派发。
+ */
+function liveFlag(role: string): string {
+  return categoryOf(role) === "live" ? " [live]" : "";
+}
+
+/**
+ * Compound 段渲染派发(T5 — 按 categoryOf 派发,不再按 compound.role 字面分支):
+ * - 输入子类型(date-input/file-input/range-input/number-input,不在 taxonomy):
+ *   现有 format/file/min/max/step 路径,widget 特化;
+ * - composite(combobox/listbox/menu 等):count + options 样本 + truncated;
+ * - structure(toolbar/tabpanel/group/table/row/figure 等):标签 + 可选 count,
+ *   不出 options(地标类数据走 element-line anchor,不在此处堆)。
+ * - 其他类别(landmark/live/window/range):不在 compound 段渲染(由 element-line
+ *   的 [landmark:role] / [live] / 现有 valueNow / modal-scope 各自承担)。
+ */
+function renderCompoundSeg(c: NonNullable<CompactElement["compound"]>): string {
+  const role = c.role;
+  // 输入子类型优先于 categoryOf(它们不在 taxonomy,categoryOf 返回 undefined)。
+  if (role === "date-input") {
+    const extra = c.formatHint ? ` format=${c.formatHint}` : "";
+    return ` compound=(${role}${extra})`;
+  }
+  if (role === "file-input") {
+    const extra = c.formatHint ? ` file=${c.formatHint}` : "";
+    return ` compound=(${role}${extra})`;
+  }
+  if (role === "range-input" || role === "number-input") {
+    const minSeg = c.min != null ? ` min=${c.min}` : "";
+    const maxSeg = c.max != null ? ` max=${c.max}` : "";
+    const stepSeg = c.step != null ? ` step=${c.step}` : "";
+    return ` compound=(${role}${minSeg}${maxSeg}${stepSeg})`;
+  }
+  const cat = categoryOf(role);
+  if (cat === "composite") {
+    const countSeg = c.count != null ? ` count=${c.count}` : "";
+    const optSeg = c.options?.length ? ` options=${c.options.join("|")}` : "";
+    // R2 B006: options 被截断时追加 "+N more" 提示,Agent 据此知后段未列。
+    // 真实 options 数 = 列出的 + truncated。
+    const truncSeg = c.truncated ? ` +${c.truncated} more` : "";
+    return ` compound=(${role}${countSeg}${optSeg}${truncSeg})`;
+  }
+  if (cat === "structure") {
+    // toolbar 用 "controls"(语义贴近),其他结构容器用 "items"。
+    const label = role === "toolbar" ? "controls" : "items";
+    const countSeg = c.count != null ? ` ${c.count} ${label}` : "";
+    return ` compound=(${role}${countSeg})`;
+  }
+  // landmark / live / window / range / unknown:不在 compound 段输出。
+  return "";
+}
+
 /** 盲区行内 tag:挂在 agent 要操作的元素上(承重)。 */
 function blindspotTag(b?: CompactElement["blindspot"]): string {
   if (!b) return "";
@@ -358,12 +423,19 @@ export function renderObserveCompact(
     const offscreenSeg = el.inViewport === false ? " [offscreen]" : "";
     if (el.offScreenActionable) offScreenCount++;
 
+    // T5: 按 category 派发的元数据锚点 + compound 段。
+    // landmark/live 锚点放在 name 之后(避免破坏既有 `[role] "name"` 子串的测试断言,如
+    // `[alert] "操作成功"`),compound 段跟随其后,与 renderObserveTree 对齐。
+    const lm = landmarkFlag(el.role);
+    const lv = liveFlag(el.role);
+    const comp = el.compound ? renderCompoundSeg(el.compound) : "";
+
     // T4-diff: 新增元素（在上次快照不存在）打 * 前缀。
     const isNew = prevKeys !== null && !prevKeys.has(buildElementKey(el));
     const newPrefix = isNew ? "* " : "";
 
     lines.push(
-      `${newPrefix}${refOf(el, snapshotHash)} [${el.role}]${name}${stateFlags(el.state)}${valueSeg}${valueMinSeg}${valueMaxSeg}${keyshortcutsSeg}${offscreenSeg}${blindspotTag(el.blindspot)}${el.behindModal ? " [behind-modal]" : ""}${bboxSeg}`,
+      `${newPrefix}${refOf(el, snapshotHash)} [${el.role}]${name}${lm}${lv}${stateFlags(el.state)}${comp}${valueSeg}${valueMinSeg}${valueMaxSeg}${keyshortcutsSeg}${offscreenSeg}${blindspotTag(el.blindspot)}${el.behindModal ? " [behind-modal]" : ""}${bboxSeg}`,
     );
   }
 
@@ -496,39 +568,15 @@ export function renderObserveTree(
     const hasUrl = e.role === "link" && !!e.href;
     const hasChildren = kids.length > 0 || hasUrl;
     const weak = e.nameSource === "placeholder" || e.nameSource === "title" ? " [weakname]" : "";
-    // compound 渲染:按 compound.role 类型决定渲染哪些元数据字段
-    // - combobox/listbox 等:count + options
-    // - date-input:format=<formatHint>
-    // - file-input:file=<formatHint>
-    // - range-input/number-input:min=/max=/step=(有值则渲染)
-    let comp = "";
-    if (e.compound) {
-      const c = e.compound;
-      const role = c.role;
-      let extra = "";
-      if (role === "date-input") {
-        // date/time/datetime-local/month/week input 格式串
-        if (c.formatHint) extra = ` format=${c.formatHint}`;
-      } else if (role === "file-input") {
-        // file input 当前文件名或 None
-        if (c.formatHint) extra = ` file=${c.formatHint}`;
-      } else if (role === "range-input" || role === "number-input") {
-        // range/number 约束
-        const minSeg = c.min != null ? ` min=${c.min}` : "";
-        const maxSeg = c.max != null ? ` max=${c.max}` : "";
-        const stepSeg = c.step != null ? ` step=${c.step}` : "";
-        extra = `${minSeg}${maxSeg}${stepSeg}`;
-      } else {
-        // combobox/listbox 等:count + options(原有逻辑)
-        const countSeg = c.count != null ? ` count=${c.count}` : "";
-        const optSeg = c.options?.length ? ` options=${c.options.join("|")}` : "";
-        // R2 B006: options 被截断时追加 "+N more" 提示,Agent 据此知后段未列。
-        // 真实 options 数 = 列出的 + truncated。
-        const truncSeg = c.truncated ? ` +${c.truncated} more` : "";
-        extra = `${countSeg}${optSeg}${truncSeg}`;
-      }
-      comp = ` compound=(${role}${extra})`;
-    }
+    // compound 渲染(T5 — renderCompoundSeg 按 category 派发):
+    // - input 子类型(date/file/range/number)→ format/file/min/max/step
+    // - composite(combobox/listbox/menu)→ count + options + truncated
+    // - structure(toolbar/group/tabpanel 等)→ count + label
+    // - landmark/live/window/range → 由 element-line 的 [landmark:role]/[live]/
+    //   现有 valueNow/modal-scope 各自承担,此处不输出。
+    const comp = e.compound ? renderCompoundSeg(e.compound) : "";
+    const lm = landmarkFlag(e.role);
+    const lv = liveFlag(e.role);
     const err = e.errorMessage ? ` error=${JSON.stringify(e.errorMessage)}` : "";
     // N0002 B008 + B009: aria-controls / aria-owns 渲染。
     //  - {index:N} → @ref:eN (已收集元素, agent 可直接 click)
@@ -544,7 +592,7 @@ export function renderObserveTree(
     const isNew = prevKeys !== null && !prevKeys.has(buildElementKey(e));
     const newPrefix = isNew ? "* " : "";
     lines.push(
-      `${indent}${newPrefix}- ${e.role}${name}${ref}${stateFlags(e.state)}${weak}${cursor}${listener}${dropzone}${draggable}${valueSeg}${valueMinSeg}${valueMaxSeg}${keyshortcutsSeg}${comp}${err}${ctrl}${desc}${offscreenSeg}${blindspotTag(e.blindspot)}${e.behindModal ? " [behind-modal]" : ""}${bboxSeg}${hasChildren ? ":" : ""}`,
+      `${indent}${newPrefix}- ${e.role}${name}${ref}${lm}${lv}${stateFlags(e.state)}${weak}${cursor}${listener}${dropzone}${draggable}${valueSeg}${valueMinSeg}${valueMaxSeg}${keyshortcutsSeg}${comp}${err}${ctrl}${desc}${offscreenSeg}${blindspotTag(e.blindspot)}${e.behindModal ? " [behind-modal]" : ""}${bboxSeg}${hasChildren ? ":" : ""}`,
     );
     if (hasUrl) lines.push(`${indent}  - /url: ${e.href}`);
     for (const k of kids) emit(k, depth + 1);

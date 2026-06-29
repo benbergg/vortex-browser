@@ -323,3 +323,71 @@ describe("renderObserveCompact — propagates hash to every ref (v0.8)", () => {
     expect(out).not.toContain("@a3f7");
   });
 });
+
+// =========================================================
+// 按 category 渲染派发(T5)
+// - composite: count + options + truncated
+// - structure: count + label,无 options
+// - landmark: 元素行 [landmark:role] 锚点
+// - live: 元素行 [live] 锚点
+// - widget: 不变(input 子类型走现有 format/file/min/max/step 路径)
+// =========================================================
+describe("按 category 渲染派发(T5)", () => {
+  function mkData(el: Record<string, unknown>) {
+    return {
+      snapshotId: "t",
+      url: "https://x",
+      viewport: { width: 100, height: 100, scrollY: 0, scrollHeight: 0 },
+      elements: [el],
+    };
+  }
+
+  it("composite(listbox)出 count+options 样本 + truncated", () => {
+    const out = renderObserveCompact(mkData({
+      index: 0, tag: "div", role: "listbox", name: "Colors", frameId: 0,
+      compound: { role: "listbox", count: 8, options: ["Red", "Green"], truncated: 6 },
+    }) as any, null);
+    expect(out).toContain("count=8");
+    expect(out).toContain("options=Red|Green");
+    expect(out).toContain("+6 more");
+  });
+
+  it("structure(toolbar)只出标签+count,不出 options=", () => {
+    const out = renderObserveCompact(mkData({
+      index: 0, tag: "div", role: "toolbar", name: "Text formatting", frameId: 0,
+      compound: { role: "toolbar", count: 6 },
+    }) as any, null);
+    expect(out).toContain("Text formatting");
+    expect(out).toContain("toolbar");
+    expect(out).toContain("compound=(toolbar");
+    expect(out).toContain("6 controls");
+    expect(out).not.toContain("options=");
+  });
+
+  it("landmark(region)渲染带 [landmark:role] 前缀", () => {
+    const out = renderObserveCompact(mkData({
+      index: 0, tag: "section", role: "region", name: "Details", frameId: 0,
+    }) as any, null);
+    expect(out).toContain("region");
+    expect(out).toContain("[landmark:region]");
+    expect(out).toContain("Details");
+    expect(out).not.toContain("options=");
+  });
+
+  it("live(status)渲染带 [live] 前缀", () => {
+    const out = renderObserveCompact(mkData({
+      index: 0, tag: "div", role: "status", name: "Saved successfully", frameId: 0,
+    }) as any, null);
+    expect(out).toContain("status");
+    expect(out).toContain("[live]");
+    expect(out).toContain("Saved successfully");
+  });
+
+  it("widget(button)不变", () => {
+    const out = renderObserveCompact(mkData({
+      index: 0, tag: "button", role: "button", name: "Save", frameId: 0,
+    }) as any, null);
+    expect(out).toContain("[button]");
+    expect(out).toContain("Save");
+  });
+});
