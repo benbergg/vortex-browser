@@ -1,0 +1,9 @@
+{
+  "fixture": "r16-group",
+  "path": "/synth/r16-group.html",
+  "tier": "easy",
+  "frames": "main",
+  "entries": [
+    { "id": "r16-group", "interactive": true, "expectedName": "Notification preferences", "expectedRole": "group", "pattern": "r16-group", "note": "R16 [role=group] 容器(structure)自身召回" }
+  ]
+}

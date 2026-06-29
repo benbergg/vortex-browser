@@ -1,0 +1,9 @@
+{
+  "fixture": "r5-table",
+  "path": "/synth/r5-table.html",
+  "tier": "easy",
+  "frames": "main",
+  "entries": [
+    { "id": "r5-table", "interactive": true, "expectedName": "Quarterly revenue", "expectedRole": "table", "pattern": "r5-table", "note": "R5 native <table> HTML-AAM 隐式 → role=table(structure);内部 row/cell 仅 filter=all 时召回,默认 scope 不入池" }
+  ]
+}

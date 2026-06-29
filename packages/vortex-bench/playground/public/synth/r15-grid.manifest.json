@@ -1,0 +1,9 @@
+{
+  "fixture": "r15-grid",
+  "path": "/synth/r15-grid.html",
+  "tier": "easy",
+  "frames": "main",
+  "entries": [
+    { "id": "r15-grid", "interactive": true, "expectedName": "Schedule grid", "expectedRole": "grid", "pattern": "r15-grid", "note": "R15 grid 容器(composite)自身召回(<div role=grid>,非 table 元素)" }
+  ]
+}

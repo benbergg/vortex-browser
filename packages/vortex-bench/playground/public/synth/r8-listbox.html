@@ -1,0 +1,13 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>r8 listbox regression</title>
+<style>.opt{padding:4px 12px;display:block}</style>
+</head><body>
+<h1>R8 listbox regression</h1>
+<!-- listbox(composite)容器自身召回:子元素用 role=presentation 让其不出独立召回行,
+     只验证容器召回。composite 整段走 extractCompound 渲染 count + options 样本。 -->
+<div role="listbox" aria-label="Color picker" data-vtx-oracle="r8-listbox">
+  <span class="opt" role="presentation">Red</span>
+  <span class="opt" role="presentation">Green</span>
+  <span class="opt" role="presentation">Blue</span>
+</div>
+</body></html>

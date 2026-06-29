@@ -1,0 +1,9 @@
+{
+  "fixture": "r8-listbox",
+  "path": "/synth/r8-listbox.html",
+  "tier": "easy",
+  "frames": "main",
+  "entries": [
+    { "id": "r8-listbox", "interactive": true, "expectedName": "Color picker", "expectedRole": "listbox", "pattern": "r8-listbox", "note": "R8 listbox 容器(composite)自身召回" }
+  ]
+}

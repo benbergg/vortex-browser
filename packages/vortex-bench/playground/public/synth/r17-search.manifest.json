@@ -1,0 +1,9 @@
+{
+  "fixture": "r17-search",
+  "path": "/synth/r17-search.html",
+  "tier": "easy",
+  "frames": "main",
+  "entries": [
+    { "id": "r17-search", "interactive": true, "expectedName": "Search the web", "expectedRole": "search", "pattern": "r17-search", "note": "R17 search landmark 容器自身召回" }
+  ]
+}

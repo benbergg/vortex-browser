@@ -1,0 +1,9 @@
+{
+  "fixture": "r14-tree",
+  "path": "/synth/r14-tree.html",
+  "tier": "easy",
+  "frames": "main",
+  "entries": [
+    { "id": "r14-tree", "interactive": true, "expectedName": "File directory", "expectedRole": "tree", "pattern": "r14-tree", "note": "R14 tree 容器(composite)自身召回" }
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "fixture": "r11-radiogroup",
+  "path": "/synth/r11-radiogroup.html",
+  "tier": "easy",
+  "frames": "main",
+  "entries": [
+    { "id": "r11-radiogroup", "interactive": true, "expectedName": "Output format", "expectedRole": "radiogroup", "pattern": "r11-radiogroup", "note": "R11 radiogroup 容器(composite)自身召回" }
+  ]
+}

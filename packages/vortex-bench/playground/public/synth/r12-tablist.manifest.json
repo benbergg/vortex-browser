@@ -1,0 +1,9 @@
+{
+  "fixture": "r12-tablist",
+  "path": "/synth/r12-tablist.html",
+  "tier": "easy",
+  "frames": "main",
+  "entries": [
+    { "id": "r12-tablist", "interactive": true, "expectedName": "Settings tabs", "expectedRole": "tablist", "pattern": "r12-tablist", "note": "R12 tablist 容器(composite)自身召回" }
+  ]
+}

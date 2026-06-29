@@ -1,0 +1,9 @@
+{
+  "fixture": "r10-region",
+  "path": "/synth/r10-region.html",
+  "tier": "easy",
+  "frames": "main",
+  "entries": [
+    { "id": "r10-region", "interactive": true, "expectedName": "Filter options", "expectedRole": "region", "pattern": "r10-region", "note": "R10 region landmark 自身召回" }
+  ]
+}

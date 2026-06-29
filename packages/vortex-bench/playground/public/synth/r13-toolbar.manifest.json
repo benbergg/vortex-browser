@@ -1,0 +1,9 @@
+{
+  "fixture": "r13-toolbar",
+  "path": "/synth/r13-toolbar.html",
+  "tier": "easy",
+  "frames": "main",
+  "entries": [
+    { "id": "r13-toolbar", "interactive": true, "expectedName": "Text formatting", "expectedRole": "toolbar", "pattern": "r13-toolbar", "note": "R13 toolbar 容器(structure)自身召回" }
+  ]
+}

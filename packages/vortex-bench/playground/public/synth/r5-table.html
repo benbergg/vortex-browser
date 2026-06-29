@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>r5 table regression</title>
+<style>table{border-collapse:collapse;margin:8px}th,td{border:1px solid #888;padding:6px 12px;text-align:left}</style>
+</head><body>
+<h1>R5 table regression</h1>
+<!-- 原生 <table> 元素:HTML-AAM 隐式映射到 role=table(structure 容器)。
+     observe 应召回 table 容器本体 + 内部 row/tr/tbody/th/td 内容(R5 B013)。
+     table 容器自身从 TABLE_EXTRA_SELECTORS 入选已合并入 INTERACTIVE_SELECTORS 统一召回。 -->
+<table data-vtx-oracle="r5-table" aria-label="Quarterly revenue">
+  <thead>
+    <tr data-vtx-oracle="r5-row-1">
+      <th>Quarter</th>
+      <th>Revenue</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr data-vtx-oracle="r5-row-2">
+      <td>Q1</td>
+      <td>$1.2M</td>
+    </tr>
+    <tr data-vtx-oracle="r5-row-3">
+      <td>Q2</td>
+      <td>$1.5M</td>
+    </tr>
+  </tbody>
+</table>
+</body></html>

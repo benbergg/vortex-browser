@@ -1,0 +1,10 @@
+{
+  "fixture": "r7-progressbar",
+  "path": "/synth/r7-progressbar.html",
+  "tier": "easy",
+  "frames": "main",
+  "entries": [
+    { "id": "r7-progressbar", "interactive": true, "expectedName": "Upload progress", "expectedRole": "progressbar", "pattern": "r7-progressbar", "note": "R7 progressbar 容器(range 类)" },
+    { "id": "r7-meter", "interactive": true, "expectedName": "Disk usage", "expectedRole": "meter", "pattern": "r7-progressbar", "note": "R7 meter 容器(range 类)" }
+  ]
+}

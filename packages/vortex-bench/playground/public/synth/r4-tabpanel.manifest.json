@@ -1,0 +1,13 @@
+{
+  "fixture": "r4-tabpanel",
+  "path": "/synth/r4-tabpanel.html",
+  "tier": "easy",
+  "frames": "main",
+  "entries": [
+    { "id": "r4-tablist", "interactive": true, "expectedName": "Account settings", "expectedRole": "tablist", "pattern": "r4-tabpanel", "note": "R4 tablist 容器(composite)" },
+    { "id": "r4-tab-1-marker", "interactive": false, "expectedName": null, "expectedRole": null, "pattern": "r4-tabpanel", "note": "装饰占位,role=presentation 应被召回门过滤" },
+    { "id": "r4-tab-2-marker", "interactive": false, "expectedName": null, "expectedRole": null, "pattern": "r4-tabpanel", "note": "装饰占位" },
+    { "id": "r4-tabpanel-1", "interactive": true, "expectedName": "Profile settings", "expectedRole": "tabpanel", "pattern": "r4-tabpanel", "note": "R4 tabpanel 容器自身召回(structure)" },
+    { "id": "r4-tabpanel-2", "interactive": true, "expectedName": "Security settings", "expectedRole": "tabpanel", "pattern": "r4-tabpanel", "note": "R4 第二个 tabpanel 同模式" }
+  ]
+}

@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>r4 tabpanel regression</title>
+<style>.panel{border:1px solid #888;padding:16px;width:480px;margin-top:8px}</style>
+</head><body>
+<h1>R4 tabpanel regression</h1>
+<!-- WAI-ARIA tabs pattern: tablist 含 tab,每个 tab controls 一个 tabpanel。
+     observe 应同时召回 tablist 容器 + tabpanels(R4 B011/B012)。
+     tabpanel 是 structure 容器 category,容器自身的 aria-labelledby 决定 accessibleName。
+     子元素用 role=presentation 让其不发出独立召回行,只验证容器召回。 -->
+<div id="r4-tabs" role="tablist" aria-label="Account settings" data-vtx-oracle="r4-tablist">
+  <span role="presentation" data-vtx-oracle="r4-tab-1-marker">Profile</span>
+  <span role="presentation" data-vtx-oracle="r4-tab-2-marker">Security</span>
+</div>
+<div id="r4-panel-1" role="tabpanel" aria-label="Profile settings" class="panel" data-vtx-oracle="r4-tabpanel-1">
+  Update your display name and avatar.
+</div>
+<div id="r4-panel-2" role="tabpanel" aria-label="Security settings" class="panel" data-vtx-oracle="r4-tabpanel-2">
+  Enable two-factor authentication.
+</div>
+</body></html>

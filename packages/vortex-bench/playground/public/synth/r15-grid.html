@@ -1,0 +1,13 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>r15 grid regression</title>
+<style>.cell{padding:4px 12px;display:block}</style>
+</head><body>
+<h1>R15 grid regression</h1>
+<!-- grid(composite)容器自身召回:ARIA 1.2 grid pattern 容器(<div role=grid> 形式,非 table 元素)。
+     row/gridcell 子元素用 role=presentation 防双 emit。 -->
+<div role="grid" aria-label="Schedule grid" data-vtx-oracle="r15-grid">
+  <span class="cell" role="presentation">Row 1 / Cell 1</span>
+  <span class="cell" role="presentation">Row 1 / Cell 2</span>
+  <span class="cell" role="presentation">Row 2 / Cell 1</span>
+</div>
+</body></html>

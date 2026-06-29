@@ -1,0 +1,13 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>r12 tablist regression</title>
+<style>.tab{padding:8px 16px;cursor:default;display:inline-block;border:1px solid #888}</style>
+</head><body>
+<h1>R12 tablist regression</h1>
+<!-- tablist(composite)容器自身召回:WAI-ARIA tabs pattern 容器。
+     tab 子元素用 role=presentation 防双 emit。 -->
+<div role="tablist" aria-label="Settings tabs" data-vtx-oracle="r12-tablist">
+  <span class="tab" role="presentation">General</span>
+  <span class="tab" role="presentation">Privacy</span>
+  <span class="tab" role="presentation">Advanced</span>
+</div>
+</body></html>

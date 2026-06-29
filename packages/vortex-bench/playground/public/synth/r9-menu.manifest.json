@@ -1,0 +1,9 @@
+{
+  "fixture": "r9-menu",
+  "path": "/synth/r9-menu.html",
+  "tier": "easy",
+  "frames": "main",
+  "entries": [
+    { "id": "r9-menu", "interactive": true, "expectedName": "Edit menu", "expectedRole": "menu", "pattern": "r9-menu", "note": "R9 menu 容器(composite)自身召回" }
+  ]
+}

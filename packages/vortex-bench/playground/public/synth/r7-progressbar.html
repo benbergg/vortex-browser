@@ -1,0 +1,14 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>r7 progressbar regression</title>
+<style>.meter{display:block;width:280px;height:18px;border:1px solid #888}</style>
+</head><body>
+<h1>R7 progressbar / meter regression</h1>
+<!-- WAI-ARIA progressbar / meter 容器自身召回(R7 B016)。range 类。
+     子元素用 role=presentation 装饰进度条视觉。 -->
+<div role="progressbar" aria-label="Upload progress" aria-valuenow="65" aria-valuemin="0" aria-valuemax="100" data-vtx-oracle="r7-progressbar">
+  <span class="meter" role="presentation" aria-hidden="true"></span>
+</div>
+<div role="meter" aria-label="Disk usage" aria-valuenow="42" aria-valuemin="0" aria-valuemax="100" data-vtx-oracle="r7-meter">
+  <span class="meter" role="presentation" aria-hidden="true"></span>
+</div>
+</body></html>
