@@ -13,6 +13,7 @@ import { dirname, join } from "node:path";
 import {
   isModalOverlayRoot,
   selectActiveModal,
+  selectActiveModalLike,
   scopeCandidatesToModal,
   isModalLikeOverlay,
 } from "../src/handlers/observe.js";
@@ -22,6 +23,8 @@ function el(html: string): HTMLElement {
   d.innerHTML = html.trim();
   return d.firstElementChild as HTMLElement;
 }
+
+const vp = () => ({ w: 1000, h: 1000 });
 
 describe("modal-scope: isModalOverlayRoot", () => {
   it("aria-modal=true → true", () => {
@@ -52,6 +55,30 @@ describe("modal-scope: selectActiveModal", () => {
     const outer = el('<div role="dialog" aria-modal="true" aria-label="Outer"></div>');
     const inner = el('<div role="dialog" aria-modal="true" aria-label="Inner"></div>');
     expect(selectActiveModal([outer, inner])).toBe(inner);
+  });
+});
+
+describe("modal-scope: selectActiveModalLike(多信号分层优先,aria-modal 权威)", () => {
+  it("真模态(aria-modal=true)优先于 DOM 序靠后的伪模态(仅 role=dialog)", () => {
+    // 回归守护:真模态 Tips 在前、伪模态 Hint(无 aria-modal)在后,旧 last-wins 误选 Hint
+    // → 真模态被裁剪抑制(2026-06-29 modal-scope synth fixture live 实测)。
+    const tips = el('<div role="dialog" aria-modal="true" aria-label="Tips"></div>');
+    const hint = el('<div role="dialog" aria-label="Hint"></div>');
+    expect(selectActiveModalLike([tips, hint], undefined, vp)).toBe(tips);
+  });
+  it("无 aria-modal 时回退多信号:仅 role=dialog 的伪模态(兜底 antd/shadcn)", () => {
+    const dlg = el('<div role="dialog" aria-label="antd"></div>');
+    const lb = el('<div role="listbox"></div>');
+    expect(selectActiveModalLike([lb, dlg], undefined, vp)).toBe(dlg);
+  });
+  it("多个 aria-modal=true 嵌套 → 取最后一个(顶层),不被后续伪模态夺位", () => {
+    const outer = el('<div role="dialog" aria-modal="true"></div>');
+    const inner = el('<div role="dialog" aria-modal="true"></div>');
+    const pseudo = el('<div role="dialog"></div>');
+    expect(selectActiveModalLike([outer, inner, pseudo], undefined, vp)).toBe(inner);
+  });
+  it("无任何模态信号 → null(零漂移)", () => {
+    expect(selectActiveModalLike([el('<div role="listbox"></div>')], undefined, vp)).toBe(null);
   });
 });
 
@@ -86,6 +113,12 @@ describe("modal-scope: source-lock(inject func 内联副本同步)", () => {
   });
   it("inject func 内联 selectActiveModal 同名逻辑存在", () => {
     expect(src).toContain("__activeModal");
+  });
+  it("inject func 内联模态选择是分层优先(aria-modal 权威),与 selectActiveModalLike 同步", () => {
+    // 回归守护:防 inline 退回 last-wins 让伪模态夺位真模态(2026-06-29 modal-scope live)。
+    expect(src).toContain("__activeStrictModal");
+    expect(src).toContain("__activeLikeModal");
+    expect(src).toMatch(/__activeModal\s*=\s*__activeStrictModal\s*\?\?\s*__activeLikeModal/);
   });
   it("R3 B010 修复: activeModal 显式注入 baseCandidates,dialog 容器自身召回", () => {
     // R3 评测发现:role=dialog aria-modal=true 的 modal 容器在 observe 输出

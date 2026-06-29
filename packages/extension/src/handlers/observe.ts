@@ -681,6 +681,39 @@ export function selectActiveModal(
 }
 
 /**
+ * 运行时(inject func)实际用的多信号 active modal 选择——分层优先级:
+ *   ① 优先 aria-modal=true 的最后一个(ARIA 权威信号,嵌套对话框取顶层);
+ *   ② 无任何 aria-modal=true 时,才回退到 isModalLikeOverlay 多信号(role=dialog/
+ *      alertdialog / 视口≥80% 覆盖)的最后一个,兜底 antd 老 Dialog / shadcn AlertDialog /
+ *      Element Plus .el-overlay 罩层。
+ *
+ * 修复(2026-06-29 modal-scope bench live 实测):旧 inline 对 isModalLikeOverlay 命中者
+ * 一律 last-wins、不区分信号强度 → 真模态(aria-modal=true "Tips")被 DOM 序靠后、仅
+ * role=dialog 的伪模态("Hint")夺位,真模态反被裁剪抑制。分层后 aria-modal=true 权威优先。
+ *
+ * inject func(scanOneFrame)内联同名逻辑(__activeModal/__activeStrictModal),改一处须同步;
+ * 本导出由 observe-modal-scope.test.ts 锁守护。
+ * @author qingwa
+ */
+export function selectActiveModalLike(
+  overlayRoots: Element[],
+  getAttr: (e: Element, n: string) => string | null = (e, n) => e.getAttribute(n),
+  viewport: () => { w: number; h: number } = () => ({ w: innerWidth, h: innerHeight }),
+): Element | null {
+  let strict: Element | null = null;
+  let like: Element | null = null;
+  for (const el of overlayRoots) {
+    if (getAttr(el, "aria-modal") === "true") {
+      strict = el;
+      like = el;
+    } else if (isModalLikeOverlay(el, getAttr, viewport)) {
+      like = el;
+    }
+  }
+  return strict ?? like;
+}
+
+/**
  * 把候选裁剪到模态子树:保留 modalRoot 内(含自身)的候选,统计被抑制的背景数。保持候选相对序。
  */
 export function scopeCandidatesToModal(
@@ -2863,29 +2896,33 @@ const INTERACTIVE_SELECTORS = [
         // 模态子树 + 发 # modal: meta;filter==='all' 时不裁剪、背景打 behindModal 标(Task 4)。
         // ⚠ inject func 第 5 形参名是 `filter`(非外层的 filterMode);误用 filterMode 会 ReferenceError。
         // ⚠ 内联副本:与模块级 selectActiveModal / scopeCandidatesToModal 同步(observe-modal-scope.test.ts 锁)。
+        // 多信号 active modal 选择内联副本(与模块级 selectActiveModalLike 同步,源码锁守护)。
+        // 分层优先级:aria-modal=true 是 ARIA 权威信号,优先于仅 role=dialog / 覆盖门的弱信号。
+        // ① __activeStrictModal:aria-modal=true 的最后一个(嵌套对话框取顶层);
+        // ② __activeLikeModal:isModalLikeOverlay 多信号的最后一个(兜底 antd 老 Dialog /
+        //    Element Plus .el-overlay 罩层 / shadcn AlertDialog,默认无 aria-modal)。
+        // 最终 __activeModal = strict ?? like —— 防真模态(aria-modal=true)被 DOM 序靠后、
+        // 仅 role=dialog 的伪模态夺位、反遭裁剪抑制(2026-06-29 modal-scope bench live 实测)。
         let __activeModal: Element | null = null;
+        let __activeStrictModal: Element | null = null;
+        let __activeLikeModal: Element | null = null;
         for (const el of overlayRoots) {
-          // N0002 B002:多信号 modal 判定内联副本(与模块级 isModalLikeOverlay 同步)。
-          // 仅 aria-modal=true 硬门漏掉 antd 老 Dialog / Element Plus .el-overlay 罩层
-          // / shadcn AlertDialog(默认无 aria-modal 仅 role 或仅尺寸)。三门并集:
-          // aria-modal 严格门 → role=dialog/alertdialog 语义门 → 视口≥80% 覆盖门。
-          // 覆盖门需"含交互后代"由 overlayRoots 收集阶段保证。
-          let __isModal = false;
           if (el.getAttribute("aria-modal") === "true") {
-            __isModal = true;
-          } else {
-            const __role = (el.getAttribute("role") || "").trim().split(/\s+/)[0];
-            if (__role === "dialog" || __role === "alertdialog") {
-              __isModal = true;
-            } else {
-              const __r = el.getBoundingClientRect();
-              if (__r.width >= innerWidth * 0.8 && __r.height >= innerHeight * 0.8) {
-                __isModal = true;
-              }
-            }
+            __activeStrictModal = el;
+            __activeLikeModal = el;
+            continue;
           }
-          if (__isModal) __activeModal = el; // 多个取最后(顶层)
+          const __role = (el.getAttribute("role") || "").trim().split(/\s+/)[0];
+          if (__role === "dialog" || __role === "alertdialog") {
+            __activeLikeModal = el;
+            continue;
+          }
+          const __r = el.getBoundingClientRect();
+          if (__r.width >= innerWidth * 0.8 && __r.height >= innerHeight * 0.8) {
+            __activeLikeModal = el;
+          }
         }
+        __activeModal = __activeStrictModal ?? __activeLikeModal;
         let __modalMeta: { name: string; role: string; suppressed: number } | null = null;
         // filter=all 逃生口:不裁剪,但记录模态根供元素装配时给背景打 behindModal 标。
         const __behindModalRoot: Element | null =
