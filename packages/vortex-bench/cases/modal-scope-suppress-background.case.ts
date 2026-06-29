@@ -57,15 +57,25 @@ const def: CaseDefinition = {
       `模态内 Confirm 不应打 [behind-modal]。行: ${confirmLine.trim()}`,
     );
 
-    // ③ 负样本:role=dialog 无 aria-modal(伪模态)走 overlay-priority 前置,不裁剪,行为不变
+    // ③ 真模态优先:Tips(aria-modal=true)才是 active modal,伪模态 Hint(仅 role=dialog,
+    //    无 aria-modal)受真模态的 ARIA inert 语义约束,作背景处理。
+    //    2026-06-29 修复:旧 inline last-wins 让 DOM 序靠后的伪模态 Hint 夺位真模态 Tips,
+    //    真模态反被裁剪抑制;分层优先(aria-modal=true 权威)后 Tips 正确胜出。
+    //    filter=all:伪模态 OK/Apply 可见但带 [behind-modal](背景标记)。
     ctx.assert(
       /"OK"/.test(snapAll) && /"Apply"/.test(snapAll),
-      `伪模态 OK/Apply 应被召回(走前置)。snapshot head:\n${snapAll.slice(0, 800)}`,
+      `filter=all 应召回伪模态 OK/Apply。snapshot head:\n${snapAll.slice(0, 800)}`,
     );
-    // 伪模态不应被裁剪,默认 observe 应仍能看到(走 overlay-priority 前置)
+    const okLineAll = snapAll.split("\n").find((l) => l.includes('"OK"')) ?? "";
     ctx.assert(
-      /"OK"/.test(snapDefault) || /"Apply"/.test(snapDefault),
-      `默认 observe 也应见伪模态按钮(零漂移:不裁剪伪模态)。snapshot head:\n${snapDefault.slice(0, 800)}`,
+      okLineAll.includes("[behind-modal]"),
+      `真模态激活时伪模态 OK 应带 [behind-modal](背景)。行: ${okLineAll.trim()}`,
+    );
+    //    默认 observe(filter=interactive):裁剪到真模态 Tips 子树,伪模态作背景被抑制
+    //    (ARIA inert——真模态打开时模态外内容视为惰性,与 nav link 一并不出)。
+    ctx.assert(
+      !/"OK"/.test(snapDefault) && !/"Apply"/.test(snapDefault),
+      `真模态激活时默认 observe 应抑制伪模态 OK/Apply(背景裁剪)。snapshot head:\n${snapDefault.slice(0, 800)}`,
     );
   },
 };

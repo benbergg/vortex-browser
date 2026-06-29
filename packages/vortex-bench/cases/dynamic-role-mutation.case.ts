@@ -1,12 +1,15 @@
 // Validates that observe's getUiState (observe.ts:437-475) picks up
 // `aria-pressed` mutations across re-observes — i.e. the compact line
-// for a toggle button gains a `[active]` flag after click and the
+// for a toggle button gains a `[pressed]` flag after click and the
 // flag corresponds to the live DOM, not a stale snapshot cache.
 //
+// 注：aria-pressed=true 渲染为 `[pressed]`(observe-render.ts:227-229 R1 B004,
+// 刻意与 [active] 区分/不同源),早期断言用 [active] 已随 R1 B004 漂移,此处对齐。
+//
 // Tested guarantee:
-//   - First observe: button line has no `[active]` (aria-pressed=false).
+//   - First observe: button line has no `[pressed]` (aria-pressed=false).
 //   - After vortex_act(click): the next observe shows the SAME button
-//     line with `[active]` appended.
+//     line with `[pressed]` appended.
 //   - The button's accessible name stays stable across the click so
 //     a regression cannot bypass the assertion by giving the same
 //     element a different ref / line entirely.
@@ -55,8 +58,8 @@ const def: CaseDefinition = {
       `observe should surface "Toggle button". snapshot head:\n${snap0.slice(0, 500)}`,
     );
     ctx.assert(
-      !line0!.includes("[active]"),
-      `initial state should NOT have [active] (aria-pressed=false). line: "${line0}"`,
+      !line0!.includes("[pressed]"),
+      `initial state should NOT have [pressed] (aria-pressed=false). line: "${line0}"`,
     );
 
     // 2. Click the toggle. The page handler flips aria-pressed and
@@ -70,7 +73,7 @@ const def: CaseDefinition = {
     // 3. Re-observe. Same accessible name (aria-label is constant), but
     //    aria-pressed is now "true" so getUiState walks the element's
     //    ancestor chain (self + 2 above) and records state.active=true.
-    //    The renderer must emit [active] after the quoted name.
+    //    The renderer must emit [pressed] after the quoted name.
     const snap1 = extractText(await ctx.call("vortex_observe", {}));
     const line1 = findLineWithName(snap1, "Toggle button");
     ctx.assert(
@@ -78,8 +81,8 @@ const def: CaseDefinition = {
       `re-observe should still surface "Toggle button" after click. snapshot head:\n${snap1.slice(0, 500)}`,
     );
     ctx.assert(
-      line1!.includes("[active]"),
-      `after click, [active] flag should be present (aria-pressed=true). line: "${line1}"`,
+      line1!.includes("[pressed]"),
+      `after click, [pressed] flag should be present (aria-pressed=true). line: "${line1}"`,
     );
   },
 };
