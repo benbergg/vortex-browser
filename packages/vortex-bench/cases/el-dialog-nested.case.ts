@@ -36,7 +36,7 @@ const def: CaseDefinition = {
     //    直接使用 vortex_fill with kind=select
     await ctx.call("vortex_fill", {
       target: "[data-testid=\"inside-select\"]",
-      kind: "select",
+      widget: "select",
       value: "Y"
     });
 

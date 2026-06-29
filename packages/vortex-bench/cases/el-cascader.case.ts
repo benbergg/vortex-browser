@@ -15,7 +15,7 @@ const def: CaseDefinition = {
     try {
       const res = await ctx.call("vortex_fill", {
         target: "[data-testid=\"target-cascader\"]",
-        kind: "cascader",
+        widget: "cascader",
         value: PATH
       });
       fillText = extractText(res);

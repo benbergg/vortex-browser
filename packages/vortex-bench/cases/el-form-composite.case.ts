@@ -21,7 +21,7 @@ const def: CaseDefinition = {
     // 2. level 选 "高"（走 el-select，driver 按 label 匹配故传中文 label）
     await ctx.call("vortex_fill", {
       target: "[data-testid=\"form-level\"]",
-      kind: "select",
+      widget: "select",
       value: "高"
     });
 
@@ -34,7 +34,7 @@ const def: CaseDefinition = {
     // 4. checkbox-group 选 alpha + beta
     await ctx.call("vortex_fill", {
       target: "[data-testid=\"form-tags\"]",
-      kind: "checkbox-group",
+      widget: "checkbox-group",
       value: ["alpha", "beta"]
     });
 

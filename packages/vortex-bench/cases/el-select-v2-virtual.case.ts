@@ -24,7 +24,7 @@ const def: CaseDefinition = {
   async run(ctx) {
     await ctx.call("vortex_fill", {
       target: "[data-testid=\"target-select-v2\"]",
-      kind: "select",
+      widget: "select",
       value: "Option 500",
     });
 

@@ -19,7 +19,7 @@ const def: CaseDefinition = {
       // 不会自动 closest() 到外层 wrapper。这是 vortex 的可优化点（见 README）。
       const res = await ctx.call("vortex_fill", {
         target: "[data-testid=\"target-datetimerange\"] .el-date-editor.el-range-editor",
-        kind: "datetimerange",
+        widget: "datetimerange",
         value: { start: START, end: END }
       });
       fillText = extractText(res);

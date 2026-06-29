@@ -17,7 +17,7 @@ const def: CaseDefinition = {
     try {
       const res = await ctx.call("vortex_fill", {
         target: "[data-testid=\"target-daterange\"] .el-date-editor.el-range-editor",
-        kind: "daterange",
+        widget: "daterange",
         value: { start: START, end: END }
       });
       fillText = extractText(res);

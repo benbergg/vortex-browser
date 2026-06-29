@@ -12,7 +12,7 @@ const def: CaseDefinition = {
     await ctx.call("vortex_act", {
       action: "fill",
       target: "[data-testid=\"target-time-picker\"] input",
-      kind: "time",
+      widget: "time",
       value: TIME
     });
     await assertResultContains(ctx, `time=${TIME}`);
