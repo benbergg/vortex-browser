@@ -4,10 +4,13 @@
 
 import { makePrng } from "./fuzz-prng.js";
 import type { AstNode, FuzzPage, NoiseNode, PrimitiveKind, PrimitiveNode } from "../fuzz-types.js";
+import { FUZZ_RECALL_CONTAINERS, FUZZ_DECORATIVE_ROLES } from "./fuzz-aria-roles.js";
 
 export const ALL_PRIMITIVE_KINDS: PrimitiveKind[] = [
   "native-button", "anchor", "role-button-div", "cursor-pointer-div",
   "icon-svg-title", "icon-img-alt", "icon-aria-label", "shadow-button", "srcdoc-button",
+  // Task 7:ARIA 容器 / 装饰角色节点,oracle 双断言(Recall=true / false)
+  "aria-container", "decorative-role",
 ];
 
 const NAME_POOL = ["保存", "打开菜单", "关闭", "搜索", "提交", "取消", "下一步", "返回", "编辑", "删除"];
@@ -19,11 +22,62 @@ export function generate(seed: number): FuzzPage {
   let idCounter = 0;
   const nextId = (): string => `p${idCounter++}`;
 
+  // Task 7:种入 ARIA 容器 / 装饰角色节点(盲点守卫)。
+  // 容器(aria-container)挑 RECALL_ROLES 容器类 — oracle 期望 observe 召回(Recall=true)。
+  // 装饰(decorative-role)挑 EXPLICIT_DENY 装饰占位(presentation/none/generic)—
+  // oracle 期望 observe 不召回(Recall=false)。两类节点用同等 PRNG 步进,保持决定论。
+  //
+  // 数量控制:容器 0..2、装饰 0..1,追加在 1..8 既有路径之后;
+  // 这样既有 fuzz-generate / fuzz-ast / fuzz-shrink 测试不受 PRNG 序列变化影响。
+  // 容器不放在 hidden 祖先里(否则 deriveManifest interactive:false 误判),
+  // 但 generate 不传 allowHidden 信息,所以容器节点在 placePrimitive 阶段自然走默认;
+  // 这里我们对 decorative-role 用同样默认路径(placePrimitive 接受原 kind 决定 allowHidden)。
+  const recallContainersArr = Array.from(FUZZ_RECALL_CONTAINERS);
+  const decorativeRolesArr = Array.from(FUZZ_DECORATIVE_ROLES);
+
   const nPrimitives = 1 + r.int(8); // 1..8
   const primitives: PrimitiveNode[] = [];
   for (let i = 0; i < nPrimitives; i++) {
     const kind = r.pick(ALL_PRIMITIVE_KINDS);
-    primitives.push({ type: "primitive", kind, id: nextId(), name: r.pick(NAME_POOL) });
+    // 1..8 路径也可能命中 aria-container / decorative-role(Task 7 之后 ALL_PRIMITIVE_KINDS
+    // 含二者),需要按 kind 填充 role,否则后续 fuzz-ast.test / render 断言会失败。
+    const node: PrimitiveNode = {
+      type: "primitive", kind, id: nextId(), name: r.pick(NAME_POOL),
+    };
+    if (kind === "aria-container") {
+      node.role = r.pick(recallContainersArr);
+    } else if (kind === "decorative-role") {
+      node.role = r.pick(decorativeRolesArr);
+    }
+    primitives.push(node);
+  }
+
+  // Task 7:种入 ARIA 容器 / 装饰角色节点(盲点守卫)。
+  // 容器(aria-container)挑 RECALL_ROLES 容器类 — oracle 期望 observe 召回(Recall=true)。
+  // 装饰(decorative-role)挑 EXPLICIT_DENY 装饰占位(presentation/none/generic)—
+  // oracle 期望 observe 不召回(Recall=false)。两类节点用同等 PRNG 步进,保持决定论。
+  //
+  // 数量控制:容器 0..2、装饰 0..1,追加在 1..8 既有路径之后;
+  // recallContainersArr / decorativeRolesArr 已在函数顶部声明(被 1..8 路径共享)。
+  const nContainers = r.int(3); // 0..2
+  for (let i = 0; i < nContainers; i++) {
+    primitives.push({
+      type: "primitive",
+      kind: "aria-container",
+      id: nextId(),
+      name: r.pick(NAME_POOL),
+      role: r.pick(recallContainersArr),
+    });
+  }
+  const nDecorative = r.int(2); // 0..1
+  for (let i = 0; i < nDecorative; i++) {
+    primitives.push({
+      type: "primitive",
+      kind: "decorative-role",
+      id: nextId(),
+      name: r.pick(NAME_POOL),
+      role: r.pick(decorativeRolesArr),
+    });
   }
 
   // srcdoc-button 用 joinBy:"name" 匹配,同一页任何原语与 srcdoc-button 重名都会导致

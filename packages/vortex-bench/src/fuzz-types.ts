@@ -11,7 +11,14 @@ export type PrimitiveKind =
   | "icon-img-alt"
   | "icon-aria-label"
   | "shadow-button"   // 声明式 open shadow(<template shadowrootmode=open>)
-  | "srcdoc-button";  // <iframe srcdoc> 内 button(跨 frame,joinBy:name)
+  | "srcdoc-button"   // <iframe srcdoc> 内 button(跨 frame,joinBy:name)
+  // Task 7:ARIA 容器 / 装饰角色节点。
+  // aria-container = 显式 role ∈ RECALL_ROLES 容器集,期望观察召回(Recall=true)。
+  // decorative-role = 显式 role ∈ EXPLICIT_DENY 装饰占位(presentation/none/generic),
+  //                   严禁带 cursor:pointer/onclick/tabindex(plan line 659 教训),
+  //                   期望观察不召回(Recall=false)。
+  | "aria-container"
+  | "decorative-role";
 
 /** 种下的可交互元素:带已知 ground-truth */
 export interface PrimitiveNode {
@@ -21,6 +28,9 @@ export interface PrimitiveNode {
   id: string;
   /** 期望 accessibleName */
   name: string;
+  /** aria-container 的具体 ARIA role(随机从 FUZZ_RECALL_CONTAINERS 选);
+   * 其他原语无此字段。 */
+  role?: string;
 }
 
 /** 可证非交互的噪声包装 */

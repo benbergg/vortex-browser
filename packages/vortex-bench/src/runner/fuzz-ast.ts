@@ -38,6 +38,18 @@ function renderPrimitive(p: PrimitiveNode): string {
       const inner = `<button data-vtx-oracle="${p.id}">${n}</button>`;
       return `<iframe ${o} srcdoc="${esc(inner)}" style="width:200px;height:60px;border:0"></iframe>`;
     }
+    case "aria-container":
+      // 显式 role ∈ RECALL_ROLES 的容器(随机 tablist/toolbar/listbox/...)。
+      // 严禁带 cursor:pointer/onclick/tabindex:这些会触发启发式入口「正当」召回,
+      // 绕开召回门,导致 oracle 无法判定召回门是否独立有效(plan line 659 教训)。
+      // role 字段缺失时回退 tablist(源码锁 fuzz-aria-roles.test.ts 兜底断言该 role 在集)。
+      return `<div role="${esc(p.role ?? "tablist")}" aria-label="${n}" ${o}></div>`;
+    case "decorative-role":
+      // 显式装饰角色(presentation/none/generic)。name 不可达(aria-hidden 隐式),
+      // 但放进 div 内文本内容仅为让 oracle 能几何 join(joinBy:"geometry")。
+      // 严禁带 cursor:pointer/onclick/tabindex:plan line 659 — 启发式会正当召回
+      // 该装饰节点,导致 oracle 期望 Recall=false 但实际 Recall=true → 假阳。
+      return `<div role="${esc(p.role ?? "presentation")}" ${o}>${n}</div>`;
   }
 }
 
@@ -92,14 +104,27 @@ export function deriveManifest(page: FuzzPage, fixture: string, path: string): S
   const entries: ManifestEntry[] = prims.map((p) => {
     const hidden = isUnderHidden(page.root, p.id) === true;
     const joinBy: "geometry" | "name" = p.kind === "srcdoc-button" ? "name" : "geometry";
-    // 所有原语统一:隐藏祖先下 → interactive:false;否则 true。
-    // 生成器保证 srcdoc-button 永远不出现在隐藏包装里,故不存在"name-join 无法测精度"的矛盾。
-    const interactive = !hidden;
+    // Task 7:容器/装饰角色走双断言 oracle。
+    // - aria-container:期望 observe 召回(Recall=true),无视 hidden(真召)。
+    //   但若容器在 hidden 祖先下,实际不可达,应改判 interactive:false 避免假阳。
+    // - decorative-role:永远不召回(Recall=false),无论是否 hidden。
+    //   EXPLICIT_DENY 角色是「不该出现的元素」,即使可达也不召回。
+    let interactive: boolean;
+    if (p.kind === "decorative-role") {
+      interactive = false; // 装饰:永远不召
+    } else if (p.kind === "aria-container") {
+      interactive = !hidden; // 容器:hidden 祖先下 → 不可达 → 不该召
+    } else {
+      // 其他原语:隐藏祖先下 → interactive:false;否则 true。
+      // 生成器保证 srcdoc-button 永远不出现在隐藏包装里,故不存在
+      // "name-join 无法测精度"的矛盾。
+      interactive = !hidden;
+    }
     return {
       id: p.id,
       interactive,
-      expectedName: p.name,
-      expectedRole: null,
+      expectedName: p.kind === "decorative-role" ? null : p.name,
+      expectedRole: p.kind === "aria-container" || p.kind === "decorative-role" ? (p.role ?? null) : null,
       pattern: `fuzz-${p.kind}`,
       joinBy,
     };
