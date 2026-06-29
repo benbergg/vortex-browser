@@ -4,7 +4,10 @@ import type { CDPAXNode, AXOverlayInfo, AXValueSource } from "../reasoning/types
 // 除无语义的 generic/none/presentation 外,也含 Chrome AX 内部文本角色 LabelText
 // ——可点 <label> 的 AX role 是 LabelText,但对 LLM 远不如启发式的 `label` 清晰
 // (bench aria-cursor-nested-no-dup 暴露)。name/state 仍取 AX。
-const GENERIC_ROLES = new Set([
+// 注意:GENERIC_ROLES 是「AX 角色不夺启发式」的策略集合,与 taxonomy 的
+// 「召回分类」语义不同(AX 增强策略 ≠ 召回决策),不强行派生以避免语义错配。
+// 改此处须同步 aria-taxonomy.test.ts 的等价用例。
+export const GENERIC_ROLES = new Set([
   "generic", "none", "presentation", "", "text", "InlineTextBox", "LabelText",
 ]);
 

@@ -4,22 +4,31 @@
 import { vtxError, VtxErrorCode } from "@vortex-browser/shared";
 import type { AXNode, AXSnapshot, CDPAXNode } from "./types.js";
 import { sha16 } from "./descriptor.js";
+import { ARIA_ROLE_TAXONOMY, isAtomicWidget } from "./aria-taxonomy.js";
 
 export interface DebuggerLike {
   enableDomain(tabId: number, domain: string): Promise<void>;
   sendCommand(tabId: number, method: string, params?: unknown): Promise<unknown>;
 }
 
-export const INTERACTIVE_ROLES = new Set([
-  "button", "link", "textbox", "checkbox", "radio", "combobox",
-  "listbox", "menuitem", "tab", "switch", "slider", "spinbutton",
-  "option", "searchbox",
-]);
+// 派生自 aria-taxonomy.ts:INTERACTIVE_ROLES = 原子 widget 控件(widget 且非 composite)。
+// 旧手维护版含 combobox/listbox(派生为容器),缺 menuitemcheckbox/menuitemradio/
+// scrollbar/treeitem/gridcell/columnheader/rowheader(都是真原子 widget)。
+export const INTERACTIVE_ROLES = new Set(
+  Object.keys(ARIA_ROLE_TAXONOMY).filter(isAtomicWidget),
+);
 
-export const STRUCTURAL_ROLES = new Set([
-  "heading", "banner", "navigation", "main", "contentinfo",
-  "complementary", "region", "dialog", "alert", "status",
-]);
+// 派生自 aria-taxonomy.ts:STRUCTURAL_ROLES = structure + landmark + window 三类标签。
+// 旧手维护版含 heading(EXPLICIT_DENY)/alert/status(live 类),缺大量结构角色
+// (article/list/listitem/group/toolbar/tabpanel/table/row/rowgroup/cell/feed/
+// figure/separator/tooltip/note/term/definition/directory/caption/blockquote/
+// document/application/form/main/search)。
+export const STRUCTURAL_ROLES = new Set(
+  Object.keys(ARIA_ROLE_TAXONOMY).filter((r) => {
+    const c = ARIA_ROLE_TAXONOMY[r];
+    return c.includes("structure") || c.includes("landmark") || c.includes("window");
+  }),
+);
 
 function getProp(n: CDPAXNode, name: string): unknown {
   const p = n.properties?.find(x => x.name === name);

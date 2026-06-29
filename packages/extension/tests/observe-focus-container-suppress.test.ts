@@ -100,3 +100,70 @@ describe("inject func 内联 isFocusContainerOnly + 跨池短路接入(源码锁
     );
   });
 });
+
+/**
+ * 注入体 FOCUS_CONTAINER_ROLES 必须派生自 aria-taxonomy.ts,不能是旧手维护硬编码。
+ * 旧 17 项硬编码仅含 tooltip/dialog/alertdialog/group/region/menu/listbox/tree/grid/
+ * table/tabpanel/navigation/toolbar/document/application/none/presentation,缺失大量真
+ * 容器角色(article/list/listitem/menubar/radiogroup/tablist/treegrid/row/rowgroup/cell/
+ * feed/figure/separator/note/term/definition/directory/caption/blockquote/form/main/
+ * search/banner/complementary/contentinfo),jsdom 单测通过但生产 inject 仍按旧语义
+ * 执行 → 双轨分裂。Task 2 CRITICAL 修复:同步 inject 内联副本与导出版派生一致。
+ */
+describe("inject func FOCUS_CONTAINER_ROLES 派生自 aria-taxonomy.ts(源码锁,防止硬编码回退)", () => {
+  it("inject 内联副本含 DERIVED_FROM_ARIA_TAXONOMY marker", () => {
+    expect(OBSERVE_SRC).toMatch(/DERIVED_FROM_ARIA_TAXONOMY/);
+  });
+  it("inject 内联副本用 Object.keys(...)filter(...) 派生表达式(非硬编码角色列表)", () => {
+    // 真源派生形态:...Object.keys(ARIA_ROLE_TAXONOMY).filter(isContainerRole)
+    // inject 内联副本形态(避免命名冲突):...Object.keys(__ARIA_ROLE_TAXONOMY).filter(__isContainerRole)
+    expect(OBSERVE_SRC).toMatch(
+      /Object\.keys\(__ARIA_ROLE_TAXONOMY\)\.filter\(__isContainerRole\)/,
+    );
+  });
+  it("inject 内联副本内联 ARIA_ROLE_TAXONOMY 真源完整分类表", () => {
+    // 真源定义的角色分类全部内联进来(composite/structure/landmark/window 四类容器)
+    // 对象 key 用无引号简写:`button:["widget"]`
+    const requiredRoles = [
+      // composite
+      "combobox", "menubar", "radiogroup", "tablist", "treegrid",
+      // structure
+      "article", "listitem", "feed", "figure", "separator", "note",
+      "term", "definition", "directory", "caption", "blockquote",
+      // landmark
+      "banner", "complementary", "contentinfo", "form", "main", "search",
+      // window
+      "dialog", "alertdialog",
+    ];
+    for (const r of requiredRoles) {
+      expect(OBSERVE_SRC).toContain(`${r}:[`);
+    }
+  });
+  it("inject 内联副本派生覆盖旧硬编码全部 17 项 + 新增 26 项", () => {
+    // 旧硬编码存在的项,inject 内联副本中也必须存在(防止改写时遗漏)
+    const oldHardcoded = [
+      "tooltip", "dialog", "alertdialog", "group", "region", "menu",
+      "listbox", "tree", "grid", "table", "tabpanel", "navigation",
+      "toolbar", "document", "application",
+    ];
+    for (const r of oldHardcoded) {
+      expect(OBSERVE_SRC).toContain(`${r}:[`);
+    }
+    // 旧硬编码没有、但派生后必须含的代表性新角色(防止偷工减料回退到旧硬编码)
+    const newDerived = ["menubar", "treegrid", "form", "main", "search", "feed"];
+    for (const r of newDerived) {
+      expect(OBSERVE_SRC).toContain(`${r}:[`);
+    }
+  });
+  it("inject 内联副本 FOCUS_CONTAINER_ROLES = new Set 后跟 \"none\" + \"presentation\" 装饰", () => {
+    // 派生表达式尾部追加的装饰占位(真源与内联副本必须一致)
+    expect(OBSERVE_SRC).toMatch(
+      /\.\.\.Object\.keys\(__ARIA_ROLE_TAXONOMY\)\.filter\(__isContainerRole\),\s*"none",\s*"presentation",\s*\]/,
+    );
+  });
+  it("inject 内联副本的 isContainerRole 判据镜像真源(CATEGORY_PRIORITY + CONTAINER 四类)", () => {
+    // 真源 isContainerRole:取主类(composite/window/landmark/structure 优先)∈ CONTAINER
+    expect(OBSERVE_SRC).toContain('["composite","window","landmark","structure","live","range","widget"]');
+    expect(OBSERVE_SRC).toContain('new Set(["composite","structure","landmark","window"])');
+  });
+});
