@@ -2719,8 +2719,13 @@ const INTERACTIVE_SELECTORS = [
         }
 
         let baseCandidates: Element[] = (() => {
+          // 召回门接线:渲染候选池用过门的 interactiveSet(= nodeList ∩ passesRoleGate,
+          // 保 DOM 序),不用未过门的原始 nodeList。Task 4 把选择器拓宽为裸 [role] 后,
+          // presentation/none/generic/text/paragraph/heading 等非召回角色 + 无名
+          // section/header 全进 nodeList;若此处展开 nodeList 则召回门被旁路、装饰角色
+          // 泄漏进输出(youtube role=text "2.1万次观看" 回归,2026-06-29 APG live spike)。
           const raw: Element[] = [
-            ...Array.from(nodeList),
+            ...Array.from(interactiveSet),
             ...cursorPointerLeaves,
             ...iconCtaExtras,
           ];
