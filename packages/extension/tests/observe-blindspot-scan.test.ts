@@ -49,6 +49,7 @@ describe("scan func 内联 detectBlindspot 与纯函数一致", () => {
     expect(src).toContain('"__reactInternalInstance$"');
     // Vue 实例属性(直接属性访问,非字符串字面量)
     expect(src).toContain('.__vue__');
+    expect(src).toContain('.__vue_app__');
     // 祖先遍历上界与真源一致
     expect(src).toContain('__i < 6');
     // 类型声明同步(ScannedElement.blindspot + __vtxBlind)
