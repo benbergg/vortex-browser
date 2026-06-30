@@ -211,7 +211,7 @@ interface ScannedElement {
     step?: string;
   };
   /** 盲区降级信号:虚拟列表/canvas/closed-shadow。@since blindspot */
-  blindspot?: { kind: "virtual" | "canvas" | "shadow"; total?: number; rendered?: number; confidence?: "low" };
+  blindspot?: { kind: "virtual" | "canvas" | "shadow"; total?: number; rendered?: number; confidence?: "low"; readback?: "component" | "screenshot" | "chart"; chartLib?: string };
   /** 模态弹层外的背景元素(filter=all 逃生口信号)。@since modal-scope */
   behindModal?: boolean;
   _sel: string;
@@ -3291,11 +3291,26 @@ const INTERACTIVE_SELECTORS = [
           const __inputCompound = buildInputCompound(htmlEl);
           // [inline detectBlindspot] — 真源 packages/extension/src/page-side/blindspot-detect.ts,
           // 改一处须改两处;tests/observe-blindspot-scan.test.ts 校验标记存在 + 纯函数行为对齐。
-          let __vtxBlind: { kind: "virtual" | "canvas" | "shadow"; total?: number; rendered?: number; confidence?: "low" } | null = null;
+          let __vtxBlind: { kind: "virtual" | "canvas" | "shadow"; total?: number; rendered?: number; confidence?: "low"; readback?: "component" | "screenshot" | "chart"; chartLib?: string } | null = null;
           {
             const __t = htmlEl.tagName.toLowerCase();
             if (__t === "canvas") {
-              if (rect.width * rect.height >= 200 * 150) __vtxBlind = { kind: "canvas" };
+              if (rect.width * rect.height >= 200 * 150) {
+                if (htmlEl.getAttribute("data-zr-dom-id") !== null) {
+                  __vtxBlind = { kind: "canvas", readback: "chart", chartLib: "echarts" };
+                } else {
+                  let __n: HTMLElement | null = htmlEl;
+                  for (let __i = 0; __n && __i < 6; __i++, __n = __n.parentElement) {
+                    if ((__n as any).__vue__ || (__n as any).__vue_app__) { __vtxBlind = { kind: "canvas", readback: "component" }; break; }
+                    let __hit = false;
+                    for (const __k of Object.keys(__n)) {
+                      if (__k.indexOf("__reactFiber$") === 0 || __k.indexOf("__reactInternalInstance$") === 0) { __hit = true; break; }
+                    }
+                    if (__hit) { __vtxBlind = { kind: "canvas", readback: "component" }; break; }
+                  }
+                  if (!__vtxBlind) __vtxBlind = { kind: "canvas", readback: "screenshot" };
+                }
+              }
             } else if (["grid", "treegrid", "table", "listbox", "tree"].indexOf(role) >= 0) {
               const __rendered =
                 role === "grid" || role === "treegrid" || role === "table"

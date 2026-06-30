@@ -33,4 +33,52 @@ describe("scan func 内联 detectBlindspot 与纯函数一致", () => {
     expect(detectBlindspot(document.querySelector("[role=grid]") as HTMLElement, 10))
       .toEqual({ kind: "virtual", total: 1000, rendered: 10 });
   });
+
+  // canvas readback 三态 parity:内联副本须与真源 detectBlindspot 行为逐字等价
+  it("observe.ts 内联副本 canvas 分支包含 readback 分类字符串(结构同步)", () => {
+    const src = readFileSync(join(__dirname, "../src/handlers/observe.ts"), "utf8");
+    // canvas readback 三态
+    expect(src).toContain('readback: "chart"');
+    expect(src).toContain('readback: "component"');
+    expect(src).toContain('readback: "screenshot"');
+    expect(src).toContain('chartLib: "echarts"');
+    // zrender 属性名
+    expect(src).toContain('"data-zr-dom-id"');
+    // React fiber 键前缀(两种)
+    expect(src).toContain('"__reactFiber$"');
+    expect(src).toContain('"__reactInternalInstance$"');
+    // Vue 实例属性(直接属性访问,非字符串字面量)
+    expect(src).toContain('.__vue__');
+    // 祖先遍历上界与真源一致
+    expect(src).toContain('__i < 6');
+    // 类型声明同步(ScannedElement.blindspot + __vtxBlind)
+    expect(src).toContain('readback?: "component" | "screenshot" | "chart"');
+    expect(src).toContain('chartLib?: string');
+  });
+
+  it("纯函数 canvas: zrender(data-zr-dom-id) → chart/echarts", () => {
+    document.body.innerHTML = '<canvas data-zr-dom-id="0"></canvas>';
+    const el = document.querySelector("canvas") as HTMLElement;
+    el.getBoundingClientRect = () =>
+      ({ width: 400, height: 300, left: 0, top: 0, right: 400, bottom: 300, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect;
+    expect(detectBlindspot(el, 0)).toEqual({ kind: "canvas", readback: "chart", chartLib: "echarts" });
+  });
+
+  it("纯函数 canvas: React fiber 祖先 → component", () => {
+    document.body.innerHTML = '<div id="host"><canvas></canvas></div>';
+    const host = document.getElementById("host")!;
+    const el = document.querySelector("canvas") as HTMLElement;
+    (host as any)["__reactFiber$abc"] = {};
+    el.getBoundingClientRect = () =>
+      ({ width: 400, height: 300, left: 0, top: 0, right: 400, bottom: 300, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect;
+    expect(detectBlindspot(el, 0)).toEqual({ kind: "canvas", readback: "component" });
+  });
+
+  it("纯函数 canvas: 普通大 canvas → screenshot", () => {
+    document.body.innerHTML = '<canvas></canvas>';
+    const el = document.querySelector("canvas") as HTMLElement;
+    el.getBoundingClientRect = () =>
+      ({ width: 400, height: 300, left: 0, top: 0, right: 400, bottom: 300, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect;
+    expect(detectBlindspot(el, 0)).toEqual({ kind: "canvas", readback: "screenshot" });
+  });
 });
