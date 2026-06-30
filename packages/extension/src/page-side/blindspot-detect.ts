@@ -10,6 +10,8 @@ export type Blindspot = {
   total?: number;
   rendered?: number;
   confidence?: "low";
+  readback?: "component" | "screenshot" | "chart";
+  chartLib?: string;
 };
 
 const VIRTUAL_ROLES = new Set(["grid", "treegrid", "table", "listbox", "tree"]);
@@ -27,7 +29,23 @@ export function detectBlindspot(el: HTMLElement, renderedDescendants: number): B
   // A1 canvas:可交互内容画布,内部对象不在 DOM。
   if (tag === "canvas") {
     const r = el.getBoundingClientRect();
-    return r.width * r.height >= CANVAS_MIN_AREA ? { kind: "canvas" } : null;
+    if (r.width * r.height < CANVAS_MIN_AREA) return null;
+    // 图表库识别(廉价高精度):zrender(echarts)给 canvas 打 data-zr-dom-id 属性。
+    if (el.getAttribute("data-zr-dom-id") !== null) {
+      return { kind: "canvas", readback: "chart", chartLib: "echarts" };
+    }
+    // 框架驱动画布:canvas 或 ≤6 层祖先挂 React fiber / Vue 实例 → 状态可经
+    // vortex_query mode=component 读回(Excalidraw 实证)。
+    let node: HTMLElement | null = el;
+    for (let i = 0; node && i < 6; i++, node = node.parentElement) {
+      if ((node as any).__vue__ || (node as any).__vue_app__) return { kind: "canvas", readback: "component" };
+      for (const k of Object.keys(node)) {
+        if (k.indexOf("__reactFiber$") === 0 || k.indexOf("__reactInternalInstance$") === 0) {
+          return { kind: "canvas", readback: "component" };
+        }
+      }
+    }
+    return { kind: "canvas", readback: "screenshot" };
   }
   const role = (el.getAttribute("role") || "").toLowerCase();
   // A2 虚拟列表:ARIA 声明总量远大于渲染数。

@@ -52,12 +52,49 @@ describe("detectBlindspot", () => {
   it("大尺寸 canvas → canvas", () => {
     document.body.innerHTML = `<canvas></canvas>`;
     const c = withRect(document.querySelector("canvas")!, 800, 600);
-    expect(detectBlindspot(c, 0)).toEqual({ kind: "canvas" });
+    expect(detectBlindspot(c, 0)).toEqual({ kind: "canvas", readback: "screenshot" });
   });
   it("装饰性小 canvas(sparkline) → 不报（负例）", () => {
     document.body.innerHTML = `<canvas></canvas>`;
     const c = withRect(document.querySelector("canvas")!, 40, 16);
     expect(detectBlindspot(c, 0)).toBeNull();
+  });
+  it("zrender/echarts canvas → readback=chart", () => {
+    const c = document.createElement("canvas");
+    c.setAttribute("data-zr-dom-id", "zr_0");
+    Object.defineProperty(c, "getBoundingClientRect", {
+      value: () => ({ width: 400, height: 300, left: 0, top: 0, right: 400, bottom: 300, x: 0, y: 0, toJSON() {} }),
+      configurable: true,
+    });
+    expect(detectBlindspot(c, 0)).toEqual({ kind: "canvas", readback: "chart", chartLib: "echarts" });
+  });
+  it("React fiber 祖先 canvas → readback=component", () => {
+    const wrap = document.createElement("div");
+    (wrap as any)["__reactFiber$abc123"] = {};
+    const c = document.createElement("canvas");
+    Object.defineProperty(c, "getBoundingClientRect", {
+      value: () => ({ width: 400, height: 300, left: 0, top: 0, right: 400, bottom: 300, x: 0, y: 0, toJSON() {} }),
+      configurable: true,
+    });
+    wrap.appendChild(c);
+    expect(detectBlindspot(c, 0)).toEqual({ kind: "canvas", readback: "component" });
+  });
+  it("Vue 实例 canvas 自身 → readback=component", () => {
+    const c = document.createElement("canvas");
+    (c as any).__vue__ = {};
+    Object.defineProperty(c, "getBoundingClientRect", {
+      value: () => ({ width: 400, height: 300, left: 0, top: 0, right: 400, bottom: 300, x: 0, y: 0, toJSON() {} }),
+      configurable: true,
+    });
+    expect(detectBlindspot(c, 0)).toEqual({ kind: "canvas", readback: "component" });
+  });
+  it("纯光栅 canvas(无框架/无图表) → readback=screenshot", () => {
+    const c = document.createElement("canvas");
+    Object.defineProperty(c, "getBoundingClientRect", {
+      value: () => ({ width: 400, height: 300, left: 0, top: 0, right: 400, bottom: 300, x: 0, y: 0, toJSON() {} }),
+      configurable: true,
+    });
+    expect(detectBlindspot(c, 0)).toEqual({ kind: "canvas", readback: "screenshot" });
   });
   it("自定义元素 closed shadow(无 shadowRoot,无 light 子) → shadow 低置信", () => {
     document.body.innerHTML = `<x-widget></x-widget>`;
