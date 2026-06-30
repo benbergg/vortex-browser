@@ -3497,7 +3497,8 @@ const INTERACTIVE_SELECTORS = [
         // [inline detectBlindspot:virtual] 虚拟列表专扫:role=grid/listbox 等容器
         // 常不被 elements 收集(rows 成顶层根),故独立 querySelectorAllDeep 一遍,
         // 产出 frame 级 blindspots → 渲染 # blindspots: meta(不依赖元素收集)。
-        // canvas/shadow 走 per-element 内联标注(它们会被收集)。
+        // canvas/shadow 走 per-element 内联标注(若被收集);未被收集的 chart canvas 由下方
+        // [inline detectChartCanvas] 页级扫描兜底(dedup 防双报)。
         const pageBlindspots: Array<
           | { kind: "virtual"; total: number; rendered: number; name: string; confidence?: "low" }
           | { kind: "canvas"; name: string; chartLib: string; readback: "chart" }
