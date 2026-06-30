@@ -84,4 +84,16 @@ describe("scan func 内联 detectBlindspot 与纯函数一致", () => {
       ({ width: 400, height: 300, left: 0, top: 0, right: 400, bottom: 300, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect;
     expect(detectBlindspot(el, 0)).toEqual({ kind: "canvas", readback: "screenshot" });
   });
+
+  // Task 3: 页级 chart canvas 扫描 parity 断言
+  it("[inline detectChartCanvas] 标记存在 + zrender 属性判定内联", () => {
+    const src = readFileSync(join(__dirname, "../src/handlers/observe.ts"), "utf8");
+    expect(src).toContain("[inline detectChartCanvas]");
+    expect(src).toContain("data-zr-dom-id");
+  });
+  it("页级 canvas 扫描有尺寸门 + dedup(collectedEls)", () => {
+    const src = readFileSync(join(__dirname, "../src/handlers/observe.ts"), "utf8");
+    expect(src).toContain("200 * 150");
+    expect(src).toContain("collectedEls.indexOf");
+  });
 });

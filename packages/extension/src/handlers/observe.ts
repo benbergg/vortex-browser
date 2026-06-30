@@ -229,8 +229,11 @@ interface FramePageResult {
   elements: ScannedElement[];
   candidateCount: number;
   truncated: boolean;
-  /** 虚拟列表盲区(容器常不被 elements 收集,独立扫描)。@since blindspot */
-  blindspots?: Array<{ kind: "virtual"; total: number; rendered: number; name: string; confidence?: "low" }>;
+  /** 虚拟列表 + 图表 canvas 盲区(容器常不被 elements 收集,独立扫描)。@since blindspot */
+  blindspots?: Array<
+    | { kind: "virtual"; total: number; rendered: number; name: string; confidence?: "low" }
+    | { kind: "canvas"; name: string; chartLib: string; readback: "chart" }
+  >;
   /** 模态作用域信号(aria-modal 弹层打开,裁剪了背景)。@since modal-scope */
   modal?: { name: string; role: string; suppressed: number };
 }
@@ -3495,7 +3498,10 @@ const INTERACTIVE_SELECTORS = [
         // 常不被 elements 收集(rows 成顶层根),故独立 querySelectorAllDeep 一遍,
         // 产出 frame 级 blindspots → 渲染 # blindspots: meta(不依赖元素收集)。
         // canvas/shadow 走 per-element 内联标注(它们会被收集)。
-        const pageBlindspots: Array<{ kind: "virtual"; total: number; rendered: number; name: string; confidence?: "low" }> = [];
+        const pageBlindspots: Array<
+          | { kind: "virtual"; total: number; rendered: number; name: string; confidence?: "low" }
+          | { kind: "canvas"; name: string; chartLib: string; readback: "chart" }
+        > = [];
         {
           const __vc = querySelectorAllDeep("[role=grid],[role=treegrid],[role=table],[role=listbox],[role=tree]", document);
           for (const c of __vc) {
@@ -3600,6 +3606,21 @@ const INTERACTIVE_SELECTORS = [
               const __dnm = (__sc as HTMLElement).getAttribute("aria-label") || "list";
               pageBlindspots.push({ kind: "virtual", total: __dEst, rendered: __dRendered, name: String(__dnm).slice(0, 40), confidence: "low" });
             }
+          }
+          // [inline detectChartCanvas] 图表 canvas 页级扫描:图表 canvas 常不被收集为交互
+          // 元素(ECharts 在 srcdoc 子 frame / 主 frame 非交互 canvas),独立扫一遍产 frame
+          // 级条目。真源 blindspot-detect.ts detectChartCanvas,改一处须改两处。charts-only:
+          // 仅 echarts/zrender(canvas 带 data-zr-dom-id)。
+          for (const __cv of querySelectorAllDeep("canvas", document)) {
+            const __cr = (__cv as HTMLElement).getBoundingClientRect();
+            if (__cr.width * __cr.height < 200 * 150) continue;          // 尺寸门(排装饰 sparkline)
+            if (collectedEls.indexOf(__cv as Element) >= 0) continue;     // dedup:已 per-element 收集不双报
+            if ((__cv as HTMLElement).getAttribute("data-zr-dom-id") === null) continue; // 仅 echarts/zrender
+            const __cnm =
+              (__cv as HTMLElement).getAttribute("aria-label") ||
+              (__cv as HTMLElement).getAttribute("title") ||
+              "chart";
+            pageBlindspots.push({ kind: "canvas", name: String(__cnm).slice(0, 40), chartLib: "echarts", readback: "chart" });
           }
         }
 
