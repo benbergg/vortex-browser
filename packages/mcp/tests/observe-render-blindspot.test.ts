@@ -108,6 +108,16 @@ describe("canvas readback 指路 (compact)", () => {
       ] } as any, null);
     expect(out).toContain("[blindspot=canvas chart=echarts readback=evaluate:getOption]");
     expect(out).toContain("chart(echarts)"); // 顶部 summary 指路
+    expect(out).toContain("vortex_evaluate"); // 顶部 summary 必须指向正确通道(getOption),挡"指错工具"回归
+  });
+
+  it("canvas chart 缺 chartLib → fallback chart=?", () => {
+    const out = renderObserveCompact(
+      { snapshotId: "s", url: "u", elements: [
+        { index: 0, tag: "canvas", role: "img", name: "C", frameId: 0,
+          blindspot: { kind: "canvas", readback: "chart" } },
+      ] } as any, null);
+    expect(out).toContain("chart=? readback=evaluate:getOption");
   });
 
   it("canvas component 渲染 readback=query:component", () => {
