@@ -79,6 +79,14 @@ describe("detectBlindspot", () => {
     wrap.appendChild(c);
     expect(detectBlindspot(c, 0)).toEqual({ kind: "canvas", readback: "component" });
   });
+  it("legacy React 祖先 canvas → readback=component", () => {
+    const wrap = document.createElement("div");
+    (wrap as any)["__reactInternalInstance$def456"] = {};
+    const c = document.createElement("canvas");
+    withRect(c, 400, 300);
+    wrap.appendChild(c);
+    expect(detectBlindspot(c, 0)).toEqual({ kind: "canvas", readback: "component" });
+  });
   it("Vue 实例 canvas 自身 → readback=component", () => {
     const c = document.createElement("canvas");
     (c as any).__vue__ = {};
