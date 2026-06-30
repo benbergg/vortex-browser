@@ -99,6 +99,27 @@ describe("A4 截断量化", () => {
   });
 });
 
+describe("frame 级 canvas 盲区 (compact)", () => {
+  it("frame 级 chart canvas 盲区 → summary 指向 vortex_evaluate", () => {
+    const out = renderObserveCompact(
+      { snapshotId: "s", url: "u", elements: [],
+        frames: [{ frameId: 12, url: "about:srcdoc", scanned: true, elementCount: 0, offset: { x: 0, y: 0 },
+          blindspots: [{ kind: "canvas", name: "图表", chartLib: "echarts", readback: "chart" }] }] } as any,
+      null);
+    expect(out).toContain("图表 chart(echarts) → read via vortex_evaluate getOption()");
+    expect(out).toContain("(frame 12)");
+  });
+
+  it("frame 级 virtual 盲区渲染不受 canvas 分支影响(回归)", () => {
+    const out = renderObserveCompact(
+      { snapshotId: "s", url: "u", elements: [],
+        frames: [{ frameId: 0, url: "u", scanned: true, elementCount: 0, offset: { x: 0, y: 0 },
+          blindspots: [{ kind: "virtual", total: 200, rendered: 9, name: "list" }] }] } as any,
+      null);
+    expect(out).toContain("list virtual(200/9)");
+  });
+});
+
 describe("canvas readback 指路 (compact)", () => {
   it("canvas chart 渲染 chart + readback=evaluate", () => {
     const out = renderObserveCompact(
