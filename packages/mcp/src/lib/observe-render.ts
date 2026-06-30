@@ -94,6 +94,7 @@ interface CompactFrame {
   blindspots?: Array<
     | { kind: "virtual"; total: number; rendered: number; name: string; confidence?: "low" }
     | { kind: "canvas"; name: string; chartLib: string; readback: "chart" }
+    | { kind: "image"; name: string; src: string }
   >;
   /** 模态作用域信号(aria-modal 弹层裁剪了背景)。@since modal-scope */
   modal?: { name: string; role: string; suppressed: number };
@@ -380,6 +381,9 @@ function blindspotSummary(
       const fr = f.frameId !== 0 ? ` (frame ${f.frameId})` : "";
       if (b.kind === "canvas") {
         parts.push(`${b.name} chart(${b.chartLib}) → read via vortex_evaluate ${chartReadback(b.chartLib).hint}${fr}`);
+      } else if (b.kind === "image") {
+        // 无 alt 内容图:先试 query src/上下文,真需视觉内容才 screenshot(⑨ affordance)。
+        parts.push(`${b.name}(no alt) → src=${b.src} | visual content, use vortex_screenshot${fr}`);
       } else {
         // confidence:low(A2-fb scrollHeight 估算)用 ~ 前缀标记 total 为近似值。
         const tot = b.confidence === "low" ? `~${b.total}` : `${b.total}`;

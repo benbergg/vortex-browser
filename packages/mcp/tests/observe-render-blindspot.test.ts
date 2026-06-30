@@ -110,6 +110,16 @@ describe("frame 级 canvas 盲区 (compact)", () => {
     expect(out).toContain("(frame 12)");
   });
 
+  it("frame 级无 alt 图盲区 → summary 指 src + screenshot(⑨ affordance)", () => {
+    const out = renderObserveCompact(
+      { snapshotId: "s", url: "u", elements: [],
+        frames: [{ frameId: 0, url: "u", scanned: true, elementCount: 0, offset: { x: 0, y: 0 },
+          blindspots: [{ kind: "image", name: "image", src: "https://x/cat.jpg" }] }] } as any,
+      null);
+    expect(out).toContain("image(no alt) → src=https://x/cat.jpg");
+    expect(out).toContain("vortex_screenshot");
+  });
+
   it("frame 级 virtual 盲区渲染不受 canvas 分支影响(回归)", () => {
     const out = renderObserveCompact(
       { snapshotId: "s", url: "u", elements: [],

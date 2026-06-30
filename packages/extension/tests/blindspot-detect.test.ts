@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { detectBlindspot, detectVirtualByScroll, detectDivVirtualScroller, detectChartCanvas } from "../src/page-side/blindspot-detect.js";
+import { detectBlindspot, detectVirtualByScroll, detectDivVirtualScroller, detectChartCanvas, detectImageBlindspot } from "../src/page-side/blindspot-detect.js";
 
 /** 清理 page-side 图表库全局,避免跨用例污染(Chart.js/G2 检测读 window 全局)。 */
 function cleanupChartGlobals() {
@@ -273,5 +273,38 @@ describe("detectChartCanvas", () => {
     const d = document.createElement("div");
     d.setAttribute("data-zr-dom-id", "zr_0");
     expect(detectChartCanvas(d)).toBeNull();
+  });
+});
+
+describe("detectImageBlindspot", () => {
+  function img(opts: { alt?: string | null; ariaLabel?: string; w?: number; h?: number; src?: string; ariaHidden?: boolean }) {
+    const el = document.createElement("img");
+    if (opts.alt != null) el.setAttribute("alt", opts.alt);
+    if (opts.ariaLabel) el.setAttribute("aria-label", opts.ariaLabel);
+    if (opts.ariaHidden) el.setAttribute("aria-hidden", "true");
+    Object.defineProperty(el, "src", { value: opts.src ?? "https://x/p.jpg", configurable: true });
+    withRect(el, opts.w ?? 320, opts.h ?? 240);
+    return el;
+  }
+  it("无 alt 属性的内容图(够大)→ {src}", () => {
+    expect(detectImageBlindspot(img({ src: "https://x/cat.jpg" }))).toEqual({ src: "https://x/cat.jpg" });
+  });
+  it("有意义 alt → null(可读)", () => {
+    expect(detectImageBlindspot(img({ alt: "一只猫" }))).toBeNull();
+  });
+  it("alt=\"\" 显式装饰 → null(不报)", () => {
+    expect(detectImageBlindspot(img({ alt: "" }))).toBeNull();
+  });
+  it("aria-label 提供文本 → null", () => {
+    expect(detectImageBlindspot(img({ ariaLabel: "图标" }))).toBeNull();
+  });
+  it("aria-hidden 装饰 → null", () => {
+    expect(detectImageBlindspot(img({ ariaHidden: true }))).toBeNull();
+  });
+  it("小图标(<80)→ null(排装饰/图标)", () => {
+    expect(detectImageBlindspot(img({ w: 24, h: 24 }))).toBeNull();
+  });
+  it("非 img 元素 → null", () => {
+    expect(detectImageBlindspot(withRect(document.createElement("div"), 320, 240))).toBeNull();
   });
 });

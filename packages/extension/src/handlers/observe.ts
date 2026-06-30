@@ -229,10 +229,11 @@ interface FramePageResult {
   elements: ScannedElement[];
   candidateCount: number;
   truncated: boolean;
-  /** 虚拟列表 + 图表 canvas 盲区(容器常不被 elements 收集,独立扫描)。@since blindspot */
+  /** 虚拟列表 + 图表 canvas + 无 alt 图盲区(容器常不被 elements 收集,独立扫描)。@since blindspot */
   blindspots?: Array<
     | { kind: "virtual"; total: number; rendered: number; name: string; confidence?: "low" }
     | { kind: "canvas"; name: string; chartLib: string; readback: "chart" }
+    | { kind: "image"; name: string; src: string }
   >;
   /** 模态作用域信号(aria-modal 弹层打开,裁剪了背景)。@since modal-scope */
   modal?: { name: string; role: string; suppressed: number };
@@ -3517,6 +3518,7 @@ const INTERACTIVE_SELECTORS = [
         const pageBlindspots: Array<
           | { kind: "virtual"; total: number; rendered: number; name: string; confidence?: "low" }
           | { kind: "canvas"; name: string; chartLib: string; readback: "chart" }
+          | { kind: "image"; name: string; src: string }
         > = [];
         {
           const __vc = querySelectorAllDeep("[role=grid],[role=treegrid],[role=table],[role=listbox],[role=tree]", document);
@@ -3651,6 +3653,29 @@ const INTERACTIVE_SELECTORS = [
               __cvEl.getAttribute("title") ||
               "chart";
             pageBlindspots.push({ kind: "canvas", name: String(__cnm).slice(0, 40), chartLib: __clib, readback: "chart" });
+          }
+          // [inline detectImageBlindspot] 无 alt 内容图页级扫描:无 alt 图不被 observe 收集为
+          // 元素(⑨ 实证空树),独立扫一遍产 frame 级条目。真源 blindspot-detect.ts
+          // detectImageBlindspot,改一处须改两处。排除:有意义 alt / alt=""(装饰)/ aria-label/
+          // title / aria-hidden / role=presentation / 图标级小图(<80)。
+          for (const __im of querySelectorAllDeep("img", document)) {
+            const __imEl = __im as HTMLElement;
+            const __altV = (__imEl.getAttribute("alt") || "").trim();
+            if (__altV) continue;                                          // 有意义 alt → 可读
+            if (__imEl.hasAttribute("alt")) continue;                      // alt="" 显式装饰
+            if ((__imEl.getAttribute("aria-label") || "").trim()) continue;
+            if ((__imEl.getAttribute("title") || "").trim()) continue;
+            if (__imEl.getAttribute("aria-hidden") === "true" || __imEl.getAttribute("role") === "presentation") continue;
+            const __ir = __imEl.getBoundingClientRect();
+            if (__ir.width < 80 || __ir.height < 80) continue;             // 内容尺寸门(排图标)
+            if (collectedEls.indexOf(__im as Element) >= 0) continue;      // dedup
+            const __isrc =
+              (__imEl as HTMLImageElement).currentSrc ||
+              (__imEl as HTMLImageElement).src ||
+              __imEl.getAttribute("src") ||
+              "";
+            const __inm = __imEl.getAttribute("aria-labelledby") || "image";
+            pageBlindspots.push({ kind: "image", name: String(__inm).slice(0, 40), src: String(__isrc).slice(0, 300) });
           }
         }
 
@@ -3973,6 +3998,7 @@ export function registerObserveHandlers(router: ActionRouter, debuggerMgr: Debug
         blindspots?: Array<
           | { kind: "virtual"; total: number; rendered: number; name: string; confidence?: "low" }
           | { kind: "canvas"; name: string; chartLib: string; readback: "chart" }
+          | { kind: "image"; name: string; src: string }
         >;
         /** 模态作用域信号。@since modal-scope */
         modal?: { name: string; role: string; suppressed: number };

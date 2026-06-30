@@ -3,7 +3,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { detectBlindspot } from "../src/page-side/blindspot-detect.js";
+import { detectBlindspot, detectImageBlindspot } from "../src/page-side/blindspot-detect.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -102,5 +102,24 @@ describe("scan func 内联 detectBlindspot 与纯函数一致", () => {
     const src = readFileSync(join(__dirname, "../src/handlers/observe.ts"), "utf8");
     expect(src).toContain("200 * 150");
     expect(src).toContain("collectedEls.indexOf");
+  });
+  it("[inline detectImageBlindspot] 无 alt 图页级扫描标记 + 门判定内联(parity)", () => {
+    const src = readFileSync(join(__dirname, "../src/handlers/observe.ts"), "utf8");
+    expect(src).toContain("[inline detectImageBlindspot]");
+    expect(src).toContain('hasAttribute("alt")'); // alt="" 装饰排除
+    expect(src).toContain('kind: "image"');
+    expect(src).toContain("__ir.width < 80"); // 内容尺寸门与真源一致
+  });
+});
+
+describe("detectImageBlindspot 纯函数 parity", () => {
+  it("无 alt 大图 → {src};alt='' 装饰 → null", () => {
+    const big = document.createElement("img");
+    Object.defineProperty(big, "src", { value: "https://x/p.jpg", configurable: true });
+    big.getBoundingClientRect = () =>
+      ({ width: 320, height: 240, left: 0, top: 0, right: 320, bottom: 240, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect;
+    expect(detectImageBlindspot(big)).toEqual({ src: "https://x/p.jpg" });
+    big.setAttribute("alt", "");
+    expect(detectImageBlindspot(big)).toBeNull();
   });
 });

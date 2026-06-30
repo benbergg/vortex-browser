@@ -195,3 +195,24 @@ export function detectChartCanvas(el: HTMLElement): { chartLib: string } | null 
   if (Cj && typeof Cj.getChart === "function" && Cj.getChart(el)) return { chartLib: "chartjs" };
   return null;
 }
+
+/**
+ * 无 alt 内容图盲区识别(⑨ 实证:observe 对无 alt 图给空树,agent 须自己 query 发现)。
+ * 内容图(够大)且无任何文本替代(alt/aria-label/title)→ 内容只在像素 → 指路 screenshot/src。
+ * 排除:有意义 alt(可读)/ alt=""(显式装饰)/ aria-hidden / role=presentation / 图标级小图。
+ * observe.ts pageBlindspots pass 内联同一判定(标记 [inline detectImageBlindspot]),改一处须改两处。
+ */
+export function detectImageBlindspot(el: HTMLElement): { src: string } | null {
+  if (el.tagName.toLowerCase() !== "img") return null;
+  const altVal = (el.getAttribute("alt") || "").trim();
+  if (altVal) return null; // 有意义 alt → 可读,非盲区
+  if (el.hasAttribute("alt")) return null; // alt="" 显式装饰 → 不报
+  const aria = (el.getAttribute("aria-label") || "").trim();
+  if (aria) return null;
+  if ((el.getAttribute("title") || "").trim()) return null;
+  if (el.getAttribute("aria-hidden") === "true" || el.getAttribute("role") === "presentation") return null;
+  const r = el.getBoundingClientRect();
+  if (r.width < 80 || r.height < 80) return null; // 内容尺寸门(排图标/装饰)
+  const src = (el as HTMLImageElement).currentSrc || (el as HTMLImageElement).src || el.getAttribute("src") || "";
+  return { src: src.slice(0, 300) };
+}
