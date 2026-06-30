@@ -3613,10 +3613,10 @@ const INTERACTIVE_SELECTORS = [
           // 级条目。真源 blindspot-detect.ts detectChartCanvas,改一处须改两处。charts-only:
           // 仅 echarts/zrender(canvas 带 data-zr-dom-id)。
           for (const __cv of querySelectorAllDeep("canvas", document)) {
+            if ((__cv as HTMLElement).getAttribute("data-zr-dom-id") === null) continue; // 仅 echarts/zrender
             const __cr = (__cv as HTMLElement).getBoundingClientRect();
             if (__cr.width * __cr.height < 200 * 150) continue;          // 尺寸门(排装饰 sparkline)
             if (collectedEls.indexOf(__cv as Element) >= 0) continue;     // dedup:已 per-element 收集不双报
-            if ((__cv as HTMLElement).getAttribute("data-zr-dom-id") === null) continue; // 仅 echarts/zrender
             const __cnm =
               (__cv as HTMLElement).getAttribute("aria-label") ||
               (__cv as HTMLElement).getAttribute("title") ||
@@ -3941,7 +3941,10 @@ export function registerObserveHandlers(router: ActionRouter, debuggerMgr: Debug
         /** 该 frame 扫描时考虑的候选总数(截断量化)。@since blindspot */
         candidateCount?: number;
         /** 虚拟列表盲区(容器未收集时的 frame 级信号)。@since blindspot */
-        blindspots?: Array<{ kind: "virtual"; total: number; rendered: number; name: string; confidence?: "low" }>;
+        blindspots?: Array<
+          | { kind: "virtual"; total: number; rendered: number; name: string; confidence?: "low" }
+          | { kind: "canvas"; name: string; chartLib: string; readback: "chart" }
+        >;
         /** 模态作用域信号。@since modal-scope */
         modal?: { name: string; role: string; suppressed: number };
       }> = [];
