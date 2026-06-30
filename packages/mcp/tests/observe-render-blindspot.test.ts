@@ -141,6 +141,27 @@ describe("canvas readback 指路 (compact)", () => {
     expect(out).toContain("chart=? readback=evaluate:getOption");
   });
 
+  it("Chart.js chartLib → lib-aware hint(Chart.getChart,非硬编码 getOption)", () => {
+    const out = renderObserveCompact(
+      { snapshotId: "s", url: "u", elements: [
+        { index: 0, tag: "canvas", role: "img", name: "C", frameId: 0,
+          blindspot: { kind: "canvas", readback: "chart", chartLib: "chartjs" } },
+      ] } as any, null);
+    expect(out).toContain("[blindspot=canvas chart=chartjs readback=evaluate:Chart.getChart]");
+    expect(out).toContain("chart(chartjs) → read via vortex_evaluate Chart.getChart(canvas).data");
+    expect(out).not.toContain("getOption"); // ⑥ 回归:Chart.js 不再误指 getOption / screenshot
+  });
+
+  it("G2/G2Plot chartLib → lib-aware hint(getData/getOptions)", () => {
+    const out = renderObserveCompact(
+      { snapshotId: "s", url: "u", elements: [
+        { index: 0, tag: "canvas", role: "img", name: "C", frameId: 0,
+          blindspot: { kind: "canvas", readback: "chart", chartLib: "g2plot" } },
+      ] } as any, null);
+    expect(out).toContain("[blindspot=canvas chart=g2plot readback=evaluate:getData]");
+    expect(out).toContain("chart(g2plot) → read via vortex_evaluate getData()/getOptions()");
+  });
+
   it("canvas component 渲染 readback=query:component", () => {
     const out = renderObserveCompact(
       { snapshotId: "s", url: "u", elements: [

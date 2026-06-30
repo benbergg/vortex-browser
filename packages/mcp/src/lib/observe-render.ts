@@ -309,6 +309,28 @@ function renderCompoundSeg(c: NonNullable<CompactElement["compound"]>): string {
   return "";
 }
 
+/**
+ * 图表库 → readback 方法映射(单一真源)。检测层(blindspot-detect)只设 chartLib 信号,
+ * 方法名在此按库映射,加新库只改一处。`method` 用于行内 tag(短名),`hint` 用于 summary(完整)。
+ * - echarts:`getOption()`
+ * - chartjs:`Chart.getChart(canvas).data`
+ * - g2/g2plot(AntV):`getData()/getOptions()`
+ * - 未知:`getOption()/getData()` 兜底
+ */
+function chartReadback(chartLib?: string): { method: string; hint: string } {
+  switch ((chartLib ?? "").toLowerCase()) {
+    case "echarts":
+      return { method: "getOption", hint: "getOption()" };
+    case "chartjs":
+      return { method: "Chart.getChart", hint: "Chart.getChart(canvas).data" };
+    case "g2":
+    case "g2plot":
+      return { method: "getData", hint: "getData()/getOptions()" };
+    default:
+      return { method: "getOption", hint: "getOption()/getData()" };
+  }
+}
+
 /** 盲区行内 tag:挂在 agent 要操作的元素上(承重)。 */
 function blindspotTag(b?: CompactElement["blindspot"]): string {
   if (!b) return "";
@@ -322,7 +344,7 @@ function blindspotTag(b?: CompactElement["blindspot"]): string {
     return ` [virtual: ${t}]`;
   }
   if (b.kind === "canvas") {
-    if (b.readback === "chart") return ` [blindspot=canvas chart=${b.chartLib ?? "?"} readback=evaluate:getOption]`;
+    if (b.readback === "chart") return ` [blindspot=canvas chart=${b.chartLib ?? "?"} readback=evaluate:${chartReadback(b.chartLib).method}]`;
     if (b.readback === "component") return " [blindspot=canvas readback=query:component]";
     return " [blindspot=canvas readback=screenshot]"; // screenshot / 旧无 readback 缺省
   }
@@ -347,7 +369,7 @@ function blindspotSummary(
     const ref = refOf(e, snapshotHash);
     if (b.kind === "virtual") parts.push(`${e.role} ${ref} virtual(${b.total ?? "?"}/${b.rendered ?? "?"})`);
     else if (b.kind === "canvas") {
-      if (b.readback === "chart") parts.push(`${e.role} ${ref} chart(${b.chartLib ?? "?"}) → read via vortex_evaluate getOption()`);
+      if (b.readback === "chart") parts.push(`${e.role} ${ref} chart(${b.chartLib ?? "?"}) → read via vortex_evaluate ${chartReadback(b.chartLib).hint}`);
       else if (b.readback === "component") parts.push(`${e.role} ${ref} canvas → readable via vortex_query mode=component`);
       else parts.push(`${e.role} ${ref} canvas → visual only, use vortex_screenshot`);
     }
@@ -357,7 +379,7 @@ function blindspotSummary(
     for (const b of f.blindspots ?? []) {
       const fr = f.frameId !== 0 ? ` (frame ${f.frameId})` : "";
       if (b.kind === "canvas") {
-        parts.push(`${b.name} chart(${b.chartLib}) → read via vortex_evaluate getOption()${fr}`);
+        parts.push(`${b.name} chart(${b.chartLib}) → read via vortex_evaluate ${chartReadback(b.chartLib).hint}${fr}`);
       } else {
         // confidence:low(A2-fb scrollHeight 估算)用 ~ 前缀标记 total 为近似值。
         const tot = b.confidence === "low" ? `~${b.total}` : `${b.total}`;

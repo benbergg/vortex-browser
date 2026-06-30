@@ -3302,14 +3302,29 @@ const INTERACTIVE_SELECTORS = [
                 if (htmlEl.getAttribute("data-zr-dom-id") !== null) {
                   __vtxBlind = { kind: "canvas", readback: "chart", chartLib: "echarts" };
                 } else {
-                  let __n: HTMLElement | null = htmlEl;
-                  for (let __i = 0; __n && __i < 6; __i++, __n = __n.parentElement) {
-                    if ((__n as any).__vue__ || (__n as any).__vue_app__) { __vtxBlind = { kind: "canvas", readback: "component" }; break; }
-                    let __hit = false;
-                    for (const __k of Object.keys(__n)) {
-                      if (__k.indexOf("__reactFiber$") === 0 || __k.indexOf("__reactInternalInstance$") === 0) { __hit = true; break; }
+                  // ② G2/G2Plot:祖先 div(≤6 层)data-chart-source-type(图表库优先于框架)。
+                  for (let __a: HTMLElement | null = htmlEl, __j = 0; __a && __j < 6 && !__vtxBlind; __j++, __a = __a.parentElement) {
+                    const __cst = __a.getAttribute("data-chart-source-type");
+                    if (__cst) __vtxBlind = { kind: "canvas", readback: "chart", chartLib: __cst.toLowerCase() };
+                  }
+                  // ③ Chart.js:全局 Chart.getChart(canvas) 命中本 canvas。
+                  if (!__vtxBlind) {
+                    const __Cj = (window as any).Chart;
+                    if (__Cj && typeof __Cj.getChart === "function" && __Cj.getChart(htmlEl)) {
+                      __vtxBlind = { kind: "canvas", readback: "chart", chartLib: "chartjs" };
                     }
-                    if (__hit) { __vtxBlind = { kind: "canvas", readback: "component" }; break; }
+                  }
+                  // 框架驱动画布 → component。
+                  if (!__vtxBlind) {
+                    let __n: HTMLElement | null = htmlEl;
+                    for (let __i = 0; __n && __i < 6; __i++, __n = __n.parentElement) {
+                      if ((__n as any).__vue__ || (__n as any).__vue_app__) { __vtxBlind = { kind: "canvas", readback: "component" }; break; }
+                      let __hit = false;
+                      for (const __k of Object.keys(__n)) {
+                        if (__k.indexOf("__reactFiber$") === 0 || __k.indexOf("__reactInternalInstance$") === 0) { __hit = true; break; }
+                      }
+                      if (__hit) { __vtxBlind = { kind: "canvas", readback: "component" }; break; }
+                    }
                   }
                   if (!__vtxBlind) __vtxBlind = { kind: "canvas", readback: "screenshot" };
                 }
@@ -3610,18 +3625,32 @@ const INTERACTIVE_SELECTORS = [
           }
           // [inline detectChartCanvas] 图表 canvas 页级扫描:图表 canvas 常不被收集为交互
           // 元素(ECharts 在 srcdoc 子 frame / 主 frame 非交互 canvas),独立扫一遍产 frame
-          // 级条目。真源 blindspot-detect.ts detectChartCanvas,改一处须改两处。charts-only:
-          // 仅 echarts/zrender(canvas 带 data-zr-dom-id)。
+          // 级条目。真源 blindspot-detect.ts detectChartCanvas,改一处须改两处。识别库:
+          // echarts(data-zr-dom-id)/ G2(祖先 data-chart-source-type)/ Chart.js(Chart.getChart)。
           for (const __cv of querySelectorAllDeep("canvas", document)) {
-            if ((__cv as HTMLElement).getAttribute("data-zr-dom-id") === null) continue; // 仅 echarts/zrender
-            const __cr = (__cv as HTMLElement).getBoundingClientRect();
+            const __cvEl = __cv as HTMLElement;
+            let __clib: string | null = null;
+            if (__cvEl.getAttribute("data-zr-dom-id") !== null) {
+              __clib = "echarts";
+            } else {
+              for (let __a: HTMLElement | null = __cvEl, __j = 0; __a && __j < 6 && !__clib; __j++, __a = __a.parentElement) {
+                const __cst = __a.getAttribute("data-chart-source-type");
+                if (__cst) __clib = __cst.toLowerCase();
+              }
+              if (!__clib) {
+                const __Cj = (window as any).Chart;
+                if (__Cj && typeof __Cj.getChart === "function" && __Cj.getChart(__cvEl)) __clib = "chartjs";
+              }
+            }
+            if (!__clib) continue;                                        // 非已知图表库 canvas
+            const __cr = __cvEl.getBoundingClientRect();
             if (__cr.width * __cr.height < 200 * 150) continue;          // 尺寸门(排装饰 sparkline)
             if (collectedEls.indexOf(__cv as Element) >= 0) continue;     // dedup:已 per-element 收集不双报
             const __cnm =
-              (__cv as HTMLElement).getAttribute("aria-label") ||
-              (__cv as HTMLElement).getAttribute("title") ||
+              __cvEl.getAttribute("aria-label") ||
+              __cvEl.getAttribute("title") ||
               "chart";
-            pageBlindspots.push({ kind: "canvas", name: String(__cnm).slice(0, 40), chartLib: "echarts", readback: "chart" });
+            pageBlindspots.push({ kind: "canvas", name: String(__cnm).slice(0, 40), chartLib: __clib, readback: "chart" });
           }
         }
 

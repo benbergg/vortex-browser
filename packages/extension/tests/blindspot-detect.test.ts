@@ -1,6 +1,11 @@
 // @vitest-environment jsdom
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { detectBlindspot, detectVirtualByScroll, detectDivVirtualScroller, detectChartCanvas } from "../src/page-side/blindspot-detect.js";
+
+/** 清理 page-side 图表库全局,避免跨用例污染(Chart.js/G2 检测读 window 全局)。 */
+function cleanupChartGlobals() {
+  delete (window as any).Chart;
+}
 
 function withRect(el: Element, width: number, height: number) {
   Object.defineProperty(el, "getBoundingClientRect", {
@@ -36,6 +41,7 @@ function makeDivScroller(opts: {
 }
 
 describe("detectBlindspot", () => {
+  afterEach(cleanupChartGlobals);
   it("aria-rowcount 远大于渲染行 → virtual", () => {
     document.body.innerHTML = `<div role="grid" aria-rowcount="1000">${"<div role='row'></div>".repeat(32)}</div>`;
     const grid = document.querySelector("[role=grid]")!;
@@ -102,6 +108,31 @@ describe("detectBlindspot", () => {
       value: () => ({ width: 400, height: 300, left: 0, top: 0, right: 400, bottom: 300, x: 0, y: 0, toJSON() {} }),
       configurable: true,
     });
+    expect(detectBlindspot(c, 0)).toEqual({ kind: "canvas", readback: "screenshot" });
+  });
+  it("Chart.js canvas(window.Chart.getChart 命中)→ readback=chart chartLib=chartjs", () => {
+    const c = withRect(document.createElement("canvas"), 400, 300);
+    (window as any).Chart = { getChart: (arg: any) => (arg === c ? { id: 0 } : undefined) };
+    expect(detectBlindspot(c, 0)).toEqual({ kind: "canvas", readback: "chart", chartLib: "chartjs" });
+  });
+  it("G2 祖先(data-chart-source-type)canvas → readback=chart chartLib=g2plot", () => {
+    const wrap = document.createElement("div");
+    wrap.setAttribute("data-chart-source-type", "G2Plot");
+    const c = withRect(document.createElement("canvas"), 400, 300);
+    wrap.appendChild(c);
+    expect(detectBlindspot(c, 0)).toEqual({ kind: "canvas", readback: "chart", chartLib: "g2plot" });
+  });
+  it("Chart.js canvas 在 React fiber 祖先内 → chart 优先于 component(锁顺序)", () => {
+    const wrap = document.createElement("div");
+    (wrap as any)["__reactFiber$xyz"] = {};
+    const c = withRect(document.createElement("canvas"), 400, 300);
+    wrap.appendChild(c);
+    (window as any).Chart = { getChart: (arg: any) => (arg === c ? { id: 0 } : undefined) };
+    expect(detectBlindspot(c, 0)).toEqual({ kind: "canvas", readback: "chart", chartLib: "chartjs" });
+  });
+  it("有 window.Chart 但 getChart 未命中本 canvas → 不算 chartjs(回落 screenshot)", () => {
+    const c = withRect(document.createElement("canvas"), 400, 300);
+    (window as any).Chart = { getChart: () => undefined };
     expect(detectBlindspot(c, 0)).toEqual({ kind: "canvas", readback: "screenshot" });
   });
   it("自定义元素 closed shadow(无 shadowRoot,无 light 子) → shadow 低置信", () => {
@@ -217,10 +248,23 @@ describe("detectDivVirtualScroller (A2-fb-div 纯 div 虚拟列表)", () => {
 });
 
 describe("detectChartCanvas", () => {
+  afterEach(cleanupChartGlobals);
   it("zrender canvas(有 data-zr-dom-id)→ {chartLib:echarts}", () => {
     const c = document.createElement("canvas");
     c.setAttribute("data-zr-dom-id", "zr_0");
     expect(detectChartCanvas(c)).toEqual({ chartLib: "echarts" });
+  });
+  it("Chart.js canvas(window.Chart.getChart 命中)→ {chartLib:chartjs}", () => {
+    const c = document.createElement("canvas");
+    (window as any).Chart = { getChart: (arg: any) => (arg === c ? { id: 0 } : undefined) };
+    expect(detectChartCanvas(c)).toEqual({ chartLib: "chartjs" });
+  });
+  it("G2 祖先(data-chart-source-type)canvas → {chartLib:g2plot}", () => {
+    const wrap = document.createElement("div");
+    wrap.setAttribute("data-chart-source-type", "G2Plot");
+    const c = document.createElement("canvas");
+    wrap.appendChild(c);
+    expect(detectChartCanvas(c)).toEqual({ chartLib: "g2plot" });
   });
   it("无 data-zr-dom-id 的 canvas → null", () => {
     expect(detectChartCanvas(document.createElement("canvas"))).toBeNull();

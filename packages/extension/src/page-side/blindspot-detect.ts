@@ -30,9 +30,22 @@ export function detectBlindspot(el: HTMLElement, renderedDescendants: number): B
   if (tag === "canvas") {
     const r = el.getBoundingClientRect();
     if (r.width * r.height < CANVAS_MIN_AREA) return null;
-    // 图表库识别(廉价高精度):zrender(echarts)给 canvas 打 data-zr-dom-id 属性。
+    // 图表库识别(廉价高精度,**优先于框架检测**:库 introspection 取精确数据系列,
+    // 比 component-mode 读 state 更直达;避免把已知图表库 canvas 误标 screenshot/component。
+    // Highcharts/D3 默认渲染 SVG(<text> 已被 observe 读),非 canvas 盲区,不在此列)。
+    // ① echarts:zrender 给 canvas 打 data-zr-dom-id 属性。
     if (el.getAttribute("data-zr-dom-id") !== null) {
       return { kind: "canvas", readback: "chart", chartLib: "echarts" };
+    }
+    // ② G2/G2Plot(AntV):信号在祖先 div 的 data-chart-source-type(≤6 层)。
+    for (let a: HTMLElement | null = el, i = 0; a && i < 6; i++, a = a.parentElement) {
+      const cst = a.getAttribute("data-chart-source-type");
+      if (cst) return { kind: "canvas", readback: "chart", chartLib: cst.toLowerCase() };
+    }
+    // ③ Chart.js:全局 Chart.getChart(canvas) 命中本 canvas 实例 → 数据在 chart.data。
+    const __Cj = (window as any).Chart;
+    if (__Cj && typeof __Cj.getChart === "function" && __Cj.getChart(el)) {
+      return { kind: "canvas", readback: "chart", chartLib: "chartjs" };
     }
     // 框架驱动画布:canvas 或 ≤6 层祖先挂 React fiber / Vue 实例 → 状态可经
     // vortex_query mode=component 读回(Excalidraw 实证)。
@@ -170,6 +183,15 @@ export function detectDivVirtualScroller(scroller: HTMLElement): Blindspot | nul
  */
 export function detectChartCanvas(el: HTMLElement): { chartLib: string } | null {
   if (el.tagName.toLowerCase() !== "canvas") return null;
-  if (el.getAttribute("data-zr-dom-id") === null) return null;
-  return { chartLib: "echarts" };
+  // ① echarts:zrender canvas 带 data-zr-dom-id。
+  if (el.getAttribute("data-zr-dom-id") !== null) return { chartLib: "echarts" };
+  // ② G2/G2Plot:祖先 div(≤6 层)data-chart-source-type。
+  for (let a: HTMLElement | null = el, i = 0; a && i < 6; i++, a = a.parentElement) {
+    const cst = a.getAttribute("data-chart-source-type");
+    if (cst) return { chartLib: cst.toLowerCase() };
+  }
+  // ③ Chart.js:全局 Chart.getChart(canvas) 命中本 canvas。
+  const Cj = (window as any).Chart;
+  if (Cj && typeof Cj.getChart === "function" && Cj.getChart(el)) return { chartLib: "chartjs" };
+  return null;
 }

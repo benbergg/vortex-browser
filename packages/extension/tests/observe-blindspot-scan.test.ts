@@ -52,6 +52,10 @@ describe("scan func 内联 detectBlindspot 与纯函数一致", () => {
     expect(src).toContain('.__vue_app__');
     // 祖先遍历上界与真源一致
     expect(src).toContain('__i < 6');
+    // G2/G2Plot 祖先信号 + Chart.js 全局判定(图表库扩展,内联与真源同步)
+    expect(src).toContain('"data-chart-source-type"');
+    expect(src).toContain('.getChart');
+    expect(src).toContain('chartLib: "chartjs"');
     // canvas 面积门与真源一致
     expect(src).toContain('200 * 150');
     // 类型声明同步(ScannedElement.blindspot + __vtxBlind)
@@ -90,6 +94,9 @@ describe("scan func 内联 detectBlindspot 与纯函数一致", () => {
     const src = readFileSync(join(__dirname, "../src/handlers/observe.ts"), "utf8");
     expect(src).toContain("[inline detectChartCanvas]");
     expect(src).toContain("data-zr-dom-id");
+    // 页级扫描同样支持 G2/Chart.js(chartLib 按 canvas 计算,非硬编码 echarts)
+    expect(src).toContain('"data-chart-source-type"');
+    expect(src).toContain("chartLib: __clib");
   });
   it("页级 canvas 扫描有尺寸门 + dedup(collectedEls)", () => {
     const src = readFileSync(join(__dirname, "../src/handlers/observe.ts"), "utf8");
