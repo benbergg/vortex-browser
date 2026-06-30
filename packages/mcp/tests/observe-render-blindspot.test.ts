@@ -16,7 +16,7 @@ describe("blindspot inline tag (tree)", () => {
     const out = renderObserveTree(obs([
       { index: 0, tag: "canvas", role: "img", name: "C", frameId: 0, blindspot: { kind: "canvas" } },
     ]), null);
-    expect(out).toContain("[blindspot=canvas]");
+    expect(out).toContain("[blindspot=canvas readback=screenshot]");
   });
   it("closed shadow 低置信渲染 [blindspot=shadow?]", () => {
     const out = renderObserveTree(obs([
@@ -96,5 +96,37 @@ describe("A4 截断量化", () => {
       frames: [{ frameId: 0, parentFrameId: -1, url: "http://x", offset: { x: 0, y: 0 }, elementCount: 12, truncated: false, scanned: true, candidateCount: 12 }],
     });
     expect(renderObserveTree(data as any, null)).not.toContain("# truncated");
+  });
+});
+
+describe("canvas readback 指路 (compact)", () => {
+  it("canvas chart 渲染 chart + readback=evaluate", () => {
+    const out = renderObserveCompact(
+      { snapshotId: "s", url: "u", elements: [
+        { index: 0, tag: "canvas", role: "img", name: "C", frameId: 0,
+          blindspot: { kind: "canvas", readback: "chart", chartLib: "echarts" } },
+      ] } as any, null);
+    expect(out).toContain("[blindspot=canvas chart=echarts readback=evaluate:getOption]");
+    expect(out).toContain("chart(echarts)"); // 顶部 summary 指路
+  });
+
+  it("canvas component 渲染 readback=query:component", () => {
+    const out = renderObserveCompact(
+      { snapshotId: "s", url: "u", elements: [
+        { index: 0, tag: "canvas", role: "img", name: "C", frameId: 0,
+          blindspot: { kind: "canvas", readback: "component" } },
+      ] } as any, null);
+    expect(out).toContain("[blindspot=canvas readback=query:component]");
+    expect(out).toContain("vortex_query mode=component");
+  });
+
+  it("canvas screenshot(纯光栅 + 旧无 readback)渲染 readback=screenshot", () => {
+    for (const bs of [{ kind: "canvas", readback: "screenshot" }, { kind: "canvas" }]) {
+      const out = renderObserveCompact(
+        { snapshotId: "s", url: "u", elements: [
+          { index: 0, tag: "canvas", role: "img", name: "C", frameId: 0, blindspot: bs },
+        ] } as any, null);
+      expect(out).toContain("[blindspot=canvas readback=screenshot]");
+    }
   });
 });

@@ -75,7 +75,7 @@ export interface CompactElement {
    */
   offScreenActionable?: boolean;
   /** 盲区降级信号:虚拟列表/canvas/closed-shadow。@since blindspot */
-  blindspot?: { kind: "virtual" | "canvas" | "shadow"; total?: number; rendered?: number; confidence?: "low" };
+  blindspot?: { kind: "virtual" | "canvas" | "shadow"; total?: number; rendered?: number; confidence?: "low"; readback?: "component" | "screenshot" | "chart"; chartLib?: string };
   /** 模态弹层外的背景元素(filter=all 逃生口)。@since modal-scope */
   behindModal?: boolean;
 }
@@ -318,7 +318,11 @@ function blindspotTag(b?: CompactElement["blindspot"]): string {
           : "?";
     return ` [virtual: ${t}]`;
   }
-  if (b.kind === "canvas") return " [blindspot=canvas]";
+  if (b.kind === "canvas") {
+    if (b.readback === "chart") return ` [blindspot=canvas chart=${b.chartLib ?? "?"} readback=evaluate:getOption]`;
+    if (b.readback === "component") return " [blindspot=canvas readback=query:component]";
+    return " [blindspot=canvas readback=screenshot]"; // screenshot / 旧无 readback 缺省
+  }
   return b.confidence === "low" ? " [blindspot=shadow?]" : " [blindspot=shadow]";
 }
 
@@ -339,7 +343,11 @@ function blindspotSummary(
     if (!b) continue;
     const ref = refOf(e, snapshotHash);
     if (b.kind === "virtual") parts.push(`${e.role} ${ref} virtual(${b.total ?? "?"}/${b.rendered ?? "?"})`);
-    else if (b.kind === "canvas") parts.push(`${e.role} ${ref} canvas-editor`);
+    else if (b.kind === "canvas") {
+      if (b.readback === "chart") parts.push(`${e.role} ${ref} chart(${b.chartLib ?? "?"}) → read via vortex_evaluate getOption()`);
+      else if (b.readback === "component") parts.push(`${e.role} ${ref} canvas → readable via vortex_query mode=component`);
+      else parts.push(`${e.role} ${ref} canvas → visual only, use vortex_screenshot`);
+    }
     else parts.push(`${e.role} ${ref} shadow${b.confidence === "low" ? "?" : ""}`);
   }
   for (const f of frames ?? []) {
