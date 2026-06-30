@@ -385,11 +385,11 @@ export const PUBLIC_TOOLS: ToolDef[] = [
     // 零 LLM 探测:text grep 可见文本 / css 计数+取属性。一次 executeScript 即时返回。
     name: "vortex_query",
     action: "query.queryPage",
-    description: "Zero-LLM page probe: mode=text greps visible text; mode=css finds elements (attr for attributes); mode=component reads Vue/React instance data + table row objects.",
+    description: "Zero-LLM probe: text=grep visible text; css=find elems(+attr); component=Vue/React state+row; geometry=bbox/viewport/occlusion/textClip-vs-clip+pair align/overlap (no screenshot).",
     schema: {
       type: "object",
       properties: {
-        mode: { enum: ["text", "css", "component"] },
+        mode: { enum: ["text", "css", "component", "geometry"] },
         pattern: { type: "string" },
         isRegex: { type: "boolean" },
         caseSensitive: { type: "boolean" },

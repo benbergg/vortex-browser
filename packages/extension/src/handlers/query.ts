@@ -518,6 +518,183 @@ export const componentInspectFunc = (
   }
 };
 
+/**
+ * page-side 几何探测函数体。mode=geometry 注入 MAIN world。
+ * 回答「看似视觉、实可几何化」的布局问题(① 实证:observe 给 ref 不给 bbox/视口/遮挡):
+ *  - bbox / inViewport(完整在视口内)
+ *  - occluded(中心点 elementFromPoint 命中非自身/后代 → 被浮层遮挡)+ occludedBy
+ *  - textClipped(scrollWidth>clientWidth → 文字 ellipsis)vs clippedByAncestor(超出 overflow 祖先可视框 → 布局裁剪)
+ *    —— 区分「列被容器裁剪」与「仅文字省略」(截图会把二者混为一谈,① 实证)
+ *  - pair(命中前两个元素时):overlap / 上下左右关系 / 六类对齐(左右上下+水平/垂直居中)
+ * 参数 args: [selector, maxResults]。⚠ 自包含:注入丢模块作用域,queryAllDeep 必须内联。
+ */
+export const geometryProbeFunc = (
+  selector: string,
+  maxResults: number,
+):
+  | {
+      viewport: { w: number; h: number };
+      elements: Array<{
+        index: number;
+        tag: string;
+        bbox: [number, number, number, number];
+        inViewport: boolean;
+        occluded: boolean;
+        occludedBy?: string;
+        textClipped: boolean;
+        clippedByAncestor: boolean;
+      }>;
+      pair?: {
+        overlap: boolean;
+        aAboveB: boolean;
+        aBelowB: boolean;
+        aLeftOfB: boolean;
+        aRightOfB: boolean;
+        sameLeft: boolean;
+        sameTop: boolean;
+        sameRight: boolean;
+        sameBottom: boolean;
+        sameHCenter: boolean;
+        sameVCenter: boolean;
+      };
+      total: number;
+      showing: number;
+    }
+  | { error: string } => {
+  try {
+    const SHADOW_WALK_MAX_DEPTH = 8;
+    const queryAllDeep = (sel: string, root: Document | ShadowRoot, depth: number): Element[] => {
+      const acc: Element[] = Array.from(root.querySelectorAll(sel));
+      if (depth >= SHADOW_WALK_MAX_DEPTH) return acc;
+      for (const host of root.querySelectorAll("*")) {
+        const sr = (host as HTMLElement).shadowRoot;
+        if (sr) acc.push(...queryAllDeep(sel, sr, depth + 1));
+      }
+      return acc;
+    };
+
+    let matched: Element[];
+    try {
+      matched = queryAllDeep(selector, document, 0);
+    } catch (e) {
+      return { error: "Invalid CSS selector: " + (e instanceof Error ? e.message : String(e)) };
+    }
+
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const R = (n: number): number => Math.round(n);
+    const TOL = 2; // 对齐/越界容差(px)
+
+    const desc = (el: Element | null): string => {
+      if (!el) return "?";
+      let s = el.tagName ? el.tagName.toLowerCase() : "?";
+      if ((el as HTMLElement).id) s += "#" + (el as HTMLElement).id;
+      else if (typeof (el as HTMLElement).className === "string" && (el as HTMLElement).className.trim()) {
+        s += "." + (el as HTMLElement).className.trim().split(/\s+/)[0];
+      }
+      return s;
+    };
+
+    const total = matched.length;
+    const limit = Math.min(total, maxResults);
+    const rects: DOMRect[] = [];
+    const elements = [];
+    for (let i = 0; i < limit; i++) {
+      const el = matched[i] as HTMLElement;
+      const r = el.getBoundingClientRect();
+      rects.push(r);
+      const inViewport = r.left >= -TOL && r.top >= -TOL && r.right <= vw + TOL && r.bottom <= vh + TOL;
+
+      // 遮挡:中心点 elementFromPoint 命中非自身/非后代 → 被压在上面。
+      let occluded = false;
+      let occludedBy: string | undefined;
+      const cx = r.left + r.width / 2;
+      const cy = r.top + r.height / 2;
+      const top = typeof document.elementFromPoint === "function" ? document.elementFromPoint(cx, cy) : null;
+      if (top && top !== el && !el.contains(top)) {
+        occluded = true;
+        occludedBy = desc(top);
+      }
+
+      // 文字 ellipsis:内容宽超过可视宽(非布局裁剪,只是文字省略号)。
+      const textClipped = el.scrollWidth > el.clientWidth + TOL;
+
+      // 布局裁剪:元素被最近 overflow(hidden/auto/scroll)祖先的可视框切掉。
+      let clippedByAncestor = false;
+      for (let a: HTMLElement | null = el.parentElement, j = 0; a && j < 12; j++, a = a.parentElement) {
+        const ov = (() => {
+          try {
+            const cs = getComputedStyle(a);
+            return cs.overflow + " " + cs.overflowX + " " + cs.overflowY;
+          } catch {
+            return "";
+          }
+        })();
+        if (/hidden|auto|scroll|clip/.test(ov)) {
+          const ar = a.getBoundingClientRect();
+          if (r.right > ar.right + TOL || r.bottom > ar.bottom + TOL || r.left < ar.left - TOL || r.top < ar.top - TOL) {
+            clippedByAncestor = true;
+          }
+          break; // 只看最近的裁剪祖先
+        }
+      }
+
+      elements.push({
+        index: i,
+        tag: el.tagName.toLowerCase(),
+        bbox: [R(r.left), R(r.top), R(r.width), R(r.height)] as [number, number, number, number],
+        inViewport,
+        occluded,
+        ...(occludedBy ? { occludedBy } : {}),
+        textClipped,
+        clippedByAncestor,
+      });
+    }
+
+    const out: {
+      viewport: { w: number; h: number };
+      elements: typeof elements;
+      pair?: {
+        overlap: boolean;
+        aAboveB: boolean;
+        aBelowB: boolean;
+        aLeftOfB: boolean;
+        aRightOfB: boolean;
+        sameLeft: boolean;
+        sameTop: boolean;
+        sameRight: boolean;
+        sameBottom: boolean;
+        sameHCenter: boolean;
+        sameVCenter: boolean;
+      };
+      total: number;
+      showing: number;
+    } = { viewport: { w: vw, h: vh }, elements, total, showing: limit };
+
+    if (rects.length >= 2) {
+      const a = rects[0];
+      const b = rects[1];
+      const near = (x: number, y: number): boolean => Math.abs(x - y) <= TOL;
+      out.pair = {
+        overlap: !(a.right <= b.left || a.left >= b.right || a.bottom <= b.top || a.top >= b.bottom),
+        aAboveB: a.bottom <= b.top + TOL,
+        aBelowB: a.top >= b.bottom - TOL,
+        aLeftOfB: a.right <= b.left + TOL,
+        aRightOfB: a.left >= b.right - TOL,
+        sameLeft: near(a.left, b.left),
+        sameTop: near(a.top, b.top),
+        sameRight: near(a.right, b.right),
+        sameBottom: near(a.bottom, b.bottom),
+        sameHCenter: near(a.left + a.width / 2, b.left + b.width / 2),
+        sameVCenter: near(a.top + a.height / 2, b.top + b.height / 2),
+      };
+    }
+    return out;
+  } catch (e) {
+    return { error: "geometry probe error: " + (e instanceof Error ? e.message : String(e)) };
+  }
+};
+
 export function registerQueryHandlers(router: ActionRouter): void {
   router.registerAll({
     [QueryActions.QUERY_PAGE]: async (args, tabId) => {
@@ -525,10 +702,10 @@ export function registerQueryHandlers(router: ActionRouter): void {
       const pattern = args.pattern as string | undefined;
 
       // 参数校验
-      if (!mode || (mode !== "text" && mode !== "css" && mode !== "component")) {
+      if (!mode || (mode !== "text" && mode !== "css" && mode !== "component" && mode !== "geometry")) {
         throw vtxError(
           VtxErrorCode.INVALID_PARAMS,
-          `vortex_query: mode must be 'text', 'css' or 'component', got ${String(mode)}`,
+          `vortex_query: mode must be 'text', 'css', 'component' or 'geometry', got ${String(mode)}`,
         );
       }
       if (!pattern || typeof pattern !== "string" || !pattern.trim()) {
@@ -598,6 +775,30 @@ export function registerQueryHandlers(router: ActionRouter): void {
         }
         if ("error" in res && res.error) {
           throw vtxError(VtxErrorCode.JS_EXECUTION_ERROR, `query.queryPage css error: ${res.error}`);
+        }
+        return res;
+      } else if (mode === "geometry") {
+        // geometry 模式:注入 geometryProbeFunc 取 bbox/视口/遮挡/裁剪 + 两元素关系。
+        // pattern = CSS 选择器(命中多元素;命中前两个产 pair 关系)。
+        const maxResults = Math.min((args.maxResults as number | undefined) ?? 10, 50);
+
+        const results = await chrome.scripting.executeScript({
+          target: buildExecuteTarget(tid, frameId),
+          func: geometryProbeFunc,
+          args: [pattern, maxResults],
+          world: "MAIN",
+        });
+
+        const res = results[0]?.result as
+          | { viewport: unknown; elements: unknown[]; total: number; showing: number }
+          | { error: string }
+          | undefined;
+
+        if (!res) {
+          throw vtxError(VtxErrorCode.JS_EXECUTION_ERROR, "query.queryPage geometry: executeScript returned no result");
+        }
+        if ("error" in res && res.error) {
+          throw vtxError(VtxErrorCode.JS_EXECUTION_ERROR, `query.queryPage geometry error: ${res.error}`);
         }
         return res;
       } else {
