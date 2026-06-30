@@ -695,6 +695,123 @@ export const geometryProbeFunc = (
   }
 };
 
+/**
+ * page-side 配色/视觉态探测函数体。mode=style 注入 MAIN world。
+ * 回答「配色/对比度对不对」(⑦ 实证:observe 完全不给颜色;getComputedStyle 可读但 agent 难自算——
+ * 徽章背景常在祖先/伪元素、WCAG 公式易错)。每元素:color / background(透明则上溯祖先 painted bg,
+ * bgFromAncestor 标记)/ fontWeight / fontSize / contrastRatio(WCAG 相对亮度比)/ wcagAA(≥4.5)/ wcagAAA(≥7)。
+ * 参数 args: [selector, maxResults]。⚠ 自包含:注入丢模块作用域,queryAllDeep 必须内联。
+ */
+export const styleProbeFunc = (
+  selector: string,
+  maxResults: number,
+):
+  | {
+      elements: Array<{
+        index: number;
+        tag: string;
+        color: string;
+        background: string;
+        bgFromAncestor: boolean;
+        fontWeight: string;
+        fontSize: string;
+        contrastRatio: number | null;
+        wcagAA: boolean;
+        wcagAAA: boolean;
+      }>;
+      total: number;
+      showing: number;
+    }
+  | { error: string } => {
+  try {
+    const SHADOW_WALK_MAX_DEPTH = 8;
+    const queryAllDeep = (sel: string, root: Document | ShadowRoot, depth: number): Element[] => {
+      const acc: Element[] = Array.from(root.querySelectorAll(sel));
+      if (depth >= SHADOW_WALK_MAX_DEPTH) return acc;
+      for (const host of root.querySelectorAll("*")) {
+        const sr = (host as HTMLElement).shadowRoot;
+        if (sr) acc.push(...queryAllDeep(sel, sr, depth + 1));
+      }
+      return acc;
+    };
+
+    // 解析 rgb/rgba → [r,g,b,a];无法解析返 null。
+    const parse = (c: string): [number, number, number, number] | null => {
+      if (!c) return null;
+      const m = c.match(/-?[\d.]+/g);
+      if (!m || m.length < 3) return null;
+      const n = m.map(Number);
+      return [n[0], n[1], n[2], n.length >= 4 ? n[3] : 1];
+    };
+    // 透明判定:无背景 / transparent / alpha=0。
+    const isTransparent = (c: string): boolean => {
+      if (!c || c === "transparent") return true;
+      const p = parse(c);
+      return p ? p[3] === 0 : true;
+    };
+    // WCAG 相对亮度。
+    const lum = (rgb: [number, number, number, number]): number => {
+      const f = (v: number): number => {
+        const s = v / 255;
+        return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
+      };
+      return 0.2126 * f(rgb[0]) + 0.7152 * f(rgb[1]) + 0.0722 * f(rgb[2]);
+    };
+
+    let matched: Element[];
+    try {
+      matched = queryAllDeep(selector, document, 0);
+    } catch (e) {
+      return { error: "Invalid CSS selector: " + (e instanceof Error ? e.message : String(e)) };
+    }
+
+    const total = matched.length;
+    const limit = Math.min(total, maxResults);
+    const elements = [];
+    for (let i = 0; i < limit; i++) {
+      const el = matched[i] as HTMLElement;
+      const cs = getComputedStyle(el);
+      const color = cs.color;
+      // 上溯找 painted 背景(⑦:徽章背景常在祖先;自身透明时找最近非透明祖先)。
+      let background = cs.backgroundColor;
+      let bgFromAncestor = false;
+      if (isTransparent(background)) {
+        for (let a: HTMLElement | null = el.parentElement, j = 0; a && j < 8; j++, a = a.parentElement) {
+          const abg = getComputedStyle(a).backgroundColor;
+          if (!isTransparent(abg)) {
+            background = abg;
+            bgFromAncestor = true;
+            break;
+          }
+        }
+      }
+      let contrastRatio: number | null = null;
+      const fg = parse(color);
+      const bg = parse(background);
+      if (fg && bg && !isTransparent(background)) {
+        const L1 = lum(fg) + 0.05;
+        const L2 = lum(bg) + 0.05;
+        contrastRatio = Math.round((Math.max(L1, L2) / Math.min(L1, L2)) * 100) / 100;
+      }
+      elements.push({
+        index: i,
+        tag: el.tagName.toLowerCase(),
+        color,
+        background,
+        bgFromAncestor,
+        fontWeight: cs.fontWeight,
+        fontSize: cs.fontSize,
+        contrastRatio,
+        wcagAA: contrastRatio != null && contrastRatio >= 4.5,
+        wcagAAA: contrastRatio != null && contrastRatio >= 7,
+      });
+    }
+    return { elements, total, showing: limit };
+  } catch (e) {
+    return { error: "style probe error: " + (e instanceof Error ? e.message : String(e)) };
+  }
+};
+
 export function registerQueryHandlers(router: ActionRouter): void {
   router.registerAll({
     [QueryActions.QUERY_PAGE]: async (args, tabId) => {
@@ -702,10 +819,13 @@ export function registerQueryHandlers(router: ActionRouter): void {
       const pattern = args.pattern as string | undefined;
 
       // 参数校验
-      if (!mode || (mode !== "text" && mode !== "css" && mode !== "component" && mode !== "geometry")) {
+      if (
+        !mode ||
+        (mode !== "text" && mode !== "css" && mode !== "component" && mode !== "geometry" && mode !== "style")
+      ) {
         throw vtxError(
           VtxErrorCode.INVALID_PARAMS,
-          `vortex_query: mode must be 'text', 'css', 'component' or 'geometry', got ${String(mode)}`,
+          `vortex_query: mode must be 'text', 'css', 'component', 'geometry' or 'style', got ${String(mode)}`,
         );
       }
       if (!pattern || typeof pattern !== "string" || !pattern.trim()) {
@@ -799,6 +919,29 @@ export function registerQueryHandlers(router: ActionRouter): void {
         }
         if ("error" in res && res.error) {
           throw vtxError(VtxErrorCode.JS_EXECUTION_ERROR, `query.queryPage geometry error: ${res.error}`);
+        }
+        return res;
+      } else if (mode === "style") {
+        // style 模式:注入 styleProbeFunc 取 computed color/background(上溯 painted bg)+ WCAG 对比度。
+        const maxResults = Math.min((args.maxResults as number | undefined) ?? 10, 50);
+
+        const results = await chrome.scripting.executeScript({
+          target: buildExecuteTarget(tid, frameId),
+          func: styleProbeFunc,
+          args: [pattern, maxResults],
+          world: "MAIN",
+        });
+
+        const res = results[0]?.result as
+          | { elements: unknown[]; total: number; showing: number }
+          | { error: string }
+          | undefined;
+
+        if (!res) {
+          throw vtxError(VtxErrorCode.JS_EXECUTION_ERROR, "query.queryPage style: executeScript returned no result");
+        }
+        if ("error" in res && res.error) {
+          throw vtxError(VtxErrorCode.JS_EXECUTION_ERROR, `query.queryPage style error: ${res.error}`);
         }
         return res;
       } else {
