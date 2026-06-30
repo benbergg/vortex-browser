@@ -52,6 +52,8 @@ describe("scan func 内联 detectBlindspot 与纯函数一致", () => {
     expect(src).toContain('.__vue_app__');
     // 祖先遍历上界与真源一致
     expect(src).toContain('__i < 6');
+    // canvas 面积门与真源一致
+    expect(src).toContain('200 * 150');
     // 类型声明同步(ScannedElement.blindspot + __vtxBlind)
     expect(src).toContain('readback?: "component" | "screenshot" | "chart"');
     expect(src).toContain('chartLib?: string');

@@ -3893,7 +3893,7 @@ export function registerObserveHandlers(router: ActionRouter, debuggerMgr: Debug
           step?: string;
         };
         /** 盲区降级信号(compact 也透传)。@since blindspot */
-        blindspot?: { kind: "virtual" | "canvas" | "shadow"; total?: number; rendered?: number; confidence?: "low" };
+        blindspot?: { kind: "virtual" | "canvas" | "shadow"; total?: number; rendered?: number; confidence?: "low"; readback?: "component" | "screenshot" | "chart"; chartLib?: string };
         /** 模态弹层外的背景元素(filter=all 逃生口信号)。@since modal-scope */
         behindModal?: boolean;
       };
