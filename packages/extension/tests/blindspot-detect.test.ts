@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeEach } from "vitest";
-import { detectBlindspot, detectVirtualByScroll, detectDivVirtualScroller } from "../src/page-side/blindspot-detect.js";
+import { detectBlindspot, detectVirtualByScroll, detectDivVirtualScroller, detectChartCanvas } from "../src/page-side/blindspot-detect.js";
 
 function withRect(el: Element, width: number, height: number) {
   Object.defineProperty(el, "getBoundingClientRect", {
@@ -213,5 +213,21 @@ describe("detectDivVirtualScroller (A2-fb-div 纯 div 虚拟列表)", () => {
   it("子项过少(<3) → 不报（负例）", () => {
     const sc = makeDivScroller({ scrollHeight: 5000000, clientHeight: 198, overflowY: "scroll", childCount: 2, childHeight: 50 });
     expect(detectDivVirtualScroller(sc)).toBeNull();
+  });
+});
+
+describe("detectChartCanvas", () => {
+  it("zrender canvas(有 data-zr-dom-id)→ {chartLib:echarts}", () => {
+    const c = document.createElement("canvas");
+    c.setAttribute("data-zr-dom-id", "zr_0");
+    expect(detectChartCanvas(c)).toEqual({ chartLib: "echarts" });
+  });
+  it("无 data-zr-dom-id 的 canvas → null", () => {
+    expect(detectChartCanvas(document.createElement("canvas"))).toBeNull();
+  });
+  it("非 canvas 元素(即便有 data-zr-dom-id)→ null", () => {
+    const d = document.createElement("div");
+    d.setAttribute("data-zr-dom-id", "zr_0");
+    expect(detectChartCanvas(d)).toBeNull();
   });
 });

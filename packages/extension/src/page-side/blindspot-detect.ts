@@ -161,3 +161,15 @@ export function detectDivVirtualScroller(scroller: HTMLElement): Blindspot | nul
   }
   return null;
 }
+
+/**
+ * 图表 canvas 页级识别(charts-only 页级盲区扫描)。echarts/zrender 给其 canvas 打
+ * data-zr-dom-id 属性(2026-06-30 真站 spike 验证)。非 canvas / 无该属性 → null。
+ * observe.ts pageBlindspots pass 内联同一判定(标记 [inline detectChartCanvas]),
+ * 改一处须改两处;observe-blindspot-scan.test.ts 校验。
+ */
+export function detectChartCanvas(el: HTMLElement): { chartLib: string } | null {
+  if (el.tagName.toLowerCase() !== "canvas") return null;
+  if (el.getAttribute("data-zr-dom-id") === null) return null;
+  return { chartLib: "echarts" };
+}
