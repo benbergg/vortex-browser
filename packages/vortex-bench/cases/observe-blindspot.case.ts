@@ -3,7 +3,7 @@
 // 修复前 observe 遇虚拟列表/canvas 静默返回局部不给信号,agent 把局部当全局。
 // 修复后:
 //   - 虚拟列表(aria-rowcount/setsize 远大于渲染)→ 顶部 `# blindspots: ... virtual(N/M)`
-//   - 可交互大 canvas → 行内 `[blindspot=canvas]` + meta `canvas-editor`
+//   - 可交互大 canvas → 行内 `[blindspot=canvas readback=<type>]` + meta 指路尾巴
 // 负例(同 fixture 内):普通 button / setsize 与渲染相符的小 listbox 不得误报。
 //
 // 证据:reports/_dogfood/spike-perception-blindspot-2026-06-17.md(ag-grid/Excalidraw live)
@@ -24,10 +24,10 @@ const def: CaseDefinition = {
       `虚拟列表应出 # blindspots virtual(1000/M)。snapshot head:\n${snap.slice(0, 700)}`,
     );
 
-    // A1 canvas:大尺寸画布行内标注
+    // A1 canvas:大尺寸画布行内标注(新格式 [blindspot=canvas readback=<type>],前缀匹配)
     ctx.assert(
-      snap.includes("[blindspot=canvas]"),
-      `可交互大 canvas 应出 [blindspot=canvas]。snapshot head:\n${snap.slice(0, 700)}`,
+      snap.includes("[blindspot=canvas "),
+      `可交互大 canvas 应出 [blindspot=canvas readback=...]。snapshot head:\n${snap.slice(0, 700)}`,
     );
 
     // 负例:小 listbox(setsize=3,渲染 3)不得被误标虚拟

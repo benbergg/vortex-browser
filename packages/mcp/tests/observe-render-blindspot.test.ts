@@ -12,7 +12,7 @@ describe("blindspot inline tag (tree)", () => {
     ]), null);
     expect(out).toContain("[virtual: 1000/32]");
   });
-  it("canvas 渲染 [blindspot=canvas]", () => {
+  it("canvas 渲染 [blindspot=canvas readback=screenshot]", () => {
     const out = renderObserveTree(obs([
       { index: 0, tag: "canvas", role: "img", name: "C", frameId: 0, blindspot: { kind: "canvas" } },
     ]), null);

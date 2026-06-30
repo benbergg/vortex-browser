@@ -179,7 +179,7 @@ URL: u
 - button "搜索" [ref=@h:e0] desc="Press / to search" bbox=[1,2,3,4]
 - list "结果" [ref=@h:e1] [virtual: 114/7] bbox=[5,6,7,8]
 - button "屏外" [ref=@h:e2] [offscreen] bbox=[9,10,11,12]
-- canvas "图" [ref=@h:e3] [blindspot=canvas] bbox=[13,14,15,16]`;
+- canvas "图" [ref=@h:e3] [blindspot=canvas readback=screenshot] bbox=[13,14,15,16]`;
     const p = parseObserveSnapshot(text);
     expect(p.rows).toHaveLength(4);
     expect(p.rows[0].bbox).toEqual([1, 2, 3, 4]);
