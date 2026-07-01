@@ -222,16 +222,18 @@ export type BlankShell = { root: string; rootLen: number; framework: string };
 
 /**
  * 空壳 SPA / 渲染失败感知(P2 衍生:站点自身 JS/网络失败致 #root 空时 observe 静默空树,
- * 模型误读"无控件")。五门全满足才触发:framework 在场 + 根容器存在且近空 + 0 交互 +
- * document complete。软语义:加载中/真失败两态提示都正确。observe.ts page-side scan 内联
+ * 模型误读"无控件")。触发:framework 在场(F4 收紧:仅框架名) + document complete + 存在
+ * 挂载点(#root/#app/#__next/[data-reactroot]) + **所有存在挂载点都是空壳**(近空 root 且
+ * root 内无交互后代)。软语义:加载中/真失败两态提示都正确。observe.ts page-side scan 内联
  * 同一判定(标记 [inline detectBlankShell]),改一处须改两处。win 传 window(单测传 mock)。
- * interactiveCount:调用方传"已排除结构性 html/body 的收集交互元素数"(某些站给 body 挂
- * cursor:pointer/listener 致其被收集,会击穿裸计数 —— g2.antv 空态实证)。
+ * collected:该 frame 已收集交互元素 DOM 节点集。判"root 内有无交互后代"用**后代包含**
+ * (el.contains(c) && el!==c),天然排除 html/body 祖先噪声 + root 容器自身(F2:某些站给
+ * body/root 挂 cursor:pointer 致被收集,裸计数会击穿 —— g2.antv 空态实证);F3:任一挂载点
+ * 已渲染即不报,防"#root 空 portal + #app 已渲染"误判。
  */
-export function detectBlankShell(doc: Document, win: any, interactiveCount: number): BlankShell | null {
-  if (interactiveCount !== 0) return null;                       // ④ 有非结构性交互元素 → 非空壳
-  if (doc.readyState !== "complete") return null;                // ⑤ 仍在加载 DOM 阶段
-  let framework = "";                                            // ① framework 在场
+export function detectBlankShell(doc: Document, win: any, collected: Element[]): BlankShell | null {
+  if (doc.readyState !== "complete") return null;                // 仍在加载 DOM 阶段
+  let framework = "";                                            // ① framework 在场(仅框架名,F4)
   if (win.React !== undefined) framework = "react";
   else if (win.Vue !== undefined) framework = "vue";
   else if (win.__NEXT_DATA__ !== undefined) framework = "next";
@@ -245,11 +247,16 @@ export function detectBlankShell(doc: Document, win: any, interactiveCount: numb
     }
   }
   if (!framework) return null;
-  for (const sel of ["#root", "#app", "#__next", "[data-reactroot]"]) {  // ② 挂载点 ③ 近空
+  // 遍历所有挂载点:任一"已渲染"(root 内容 ≥64 或 root 内有交互后代)→ 页面渲染成功,不报(F3);
+  // 仅当所有存在挂载点都空壳时,报首个空壳(F2:后代包含排除 root 自身 + html/body 祖先噪声)。
+  let blank: { sel: string; len: number } | null = null;
+  for (const sel of ["#root", "#app", "#__next", "[data-reactroot]"]) {
     const el = doc.querySelector(sel);
     if (!el) continue;
     const len = el.innerHTML.trim().length;
-    return len < 64 ? { root: sel, rootLen: len, framework } : null;      // 首个存在挂载点定状态
+    const hasInner = collected.some((c) => el !== c && el.contains(c));
+    if (len >= 64 || hasInner) return null;                      // 某挂载点已渲染 → 不报
+    if (!blank) blank = { sel, len };
   }
-  return null;
+  return blank ? { root: blank.sel, rootLen: blank.len, framework } : null;
 }

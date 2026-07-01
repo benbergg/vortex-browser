@@ -129,12 +129,12 @@ describe("blankShell inline↔真源 parity", () => {
   it("observe.ts 含 [inline detectBlankShell] 标记", () => {
     expect(observeSrc).toContain("[inline detectBlankShell]");
   });
-  it("inline 副本含五门关键判据(与真源一致)", () => {
-    expect(observeSrc).toContain('__nonStructural === 0 && document.readyState === "complete"'); // ④⑤
-    expect(observeSrc).toMatch(/__e\.tag !== "html" && __e\.tag !== "body"/); // ④ 排除结构性 html/body(g2 空态实证)
+  it("inline 副本含关键判据(与真源一致)", () => {
+    expect(observeSrc).toContain('document.readyState === "complete"'); // complete 门
     expect(observeSrc).toMatch(/umi\|react\|vue\|angular\|svelte\|next\|nuxt/); // ① framework 正则(F4 收紧:去泛匹配 chunk/hash)
     expect(observeSrc).toContain('"#root", "#app", "#__next", "[data-reactroot]"'); // ② 挂载点
-    expect(observeSrc).toContain("__len < 64"); // ③ 近空阈值
+    expect(observeSrc).toContain("__rt !== __c && __rt.contains(__c)"); // F2 后代包含(排除 html/body 祖先 + root 自身)
+    expect(observeSrc).toContain("__len >= 64 || __hasInner"); // ③ 近空阈值 + F3 任一挂载点已渲染即抑制
   });
   it("framesOut 管道镜像 blankShell(与 modal 同形)", () => {
     expect(observeSrc).toContain("s.page.blankShell ? { blankShell: s.page.blankShell }");

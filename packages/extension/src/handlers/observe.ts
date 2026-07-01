@@ -3682,14 +3682,13 @@ const INTERACTIVE_SELECTORS = [
         }
 
         // [inline detectBlankShell] 真源 packages/extension/src/page-side/blindspot-detect.ts
-        // detectBlankShell,改一处须改两处。空壳 SPA/渲染失败感知:framework 在场 + 根容器近空
-        // + 0 交互(elements.length===0) + document complete → frame 级 blankShell 信号。
+        // detectBlankShell,改一处须改两处。空壳 SPA/渲染失败感知:framework 在场(F4 仅框架名)
+        // + document complete + 存在挂载点 + 所有存在挂载点都空壳(近空 root 且 root 内无交互后代)。
+        // 用后代包含(__rt.contains(__c)&&__rt!==__c)判 root 内有无交互内容,天然排除 html/body
+        // 祖先噪声 + root 容器自身(F2:g2.antv 给 body 挂 cursor:pointer 致被收集,裸计数击穿);
+        // F3:任一挂载点已渲染即不报(防 #root 空 portal + #app 已渲染误判)。
         let __blankShell: { root: string; rootLen: number; framework: string } | undefined;
-        // "0 交互"门排除结构性 html/body:部分站给 body 挂 cursor:pointer/listener 致其被
-        // 收集,会击穿裸 elements.length===0(g2.antv 空态实证:收集到 html+body 噪声)。
-        // 只数 root 内真实交互内容 → 空壳(root 空、仅 body 噪声)仍触发,小内容已渲染页不误触发。
-        const __nonStructural = elements.filter((__e) => __e.tag !== "html" && __e.tag !== "body").length;
-        if (__nonStructural === 0 && document.readyState === "complete") {
+        if (document.readyState === "complete") {
           let __fw = "";
           if ((window as any).React !== undefined) __fw = "react";
           else if ((window as any).Vue !== undefined) __fw = "vue";
@@ -3701,13 +3700,17 @@ const INTERACTIVE_SELECTORS = [
             }
           }
           if (__fw) {
+            let __blank: { sel: string; len: number } | null = null;
+            let __rendered = false;
             for (const __sel of ["#root", "#app", "#__next", "[data-reactroot]"]) {
               const __rt = document.querySelector(__sel);
               if (!__rt) continue;
               const __len = __rt.innerHTML.trim().length;
-              if (__len < 64) __blankShell = { root: __sel, rootLen: __len, framework: __fw };
-              break;
+              const __hasInner = collectedEls.some((__c) => __rt !== __c && __rt.contains(__c));
+              if (__len >= 64 || __hasInner) { __rendered = true; break; } // 某挂载点已渲染 → 不报(F3)
+              if (!__blank) __blank = { sel: __sel, len: __len };
             }
+            if (!__rendered && __blank) __blankShell = { root: __blank.sel, rootLen: __blank.len, framework: __fw };
           }
         }
 

@@ -316,48 +316,66 @@ describe("detectBlankShell", () => {
     return opts.win ?? {};
   }
 
-  it("失败空壳(framework+空root+0交互+complete) → 命中", () => {
+  it("失败空壳(framework+空root+root内无交互+complete) → 命中", () => {
     const win = mk(`<div id="root"></div>`, { win: { React: {} } });
-    expect(detectBlankShell(document, win, 0)).toEqual({ root: "#root", rootLen: 0, framework: "react" });
+    expect(detectBlankShell(document, win, [])).toEqual({ root: "#root", rootLen: 0, framework: "react" });
   });
 
-  it("root 有内容 → 不命中(已渲染)", () => {
+  it("root 有内容(≥64) → 不命中(已渲染)", () => {
     const win = mk(`<div id="root"><h1>Dashboard</h1><nav>....................................</nav></div>`, { win: { React: {} } });
-    expect(detectBlankShell(document, win, 0)).toBeNull();
+    expect(detectBlankShell(document, win, [])).toBeNull();
   });
 
   it("无 framework → 不命中(静态稀疏页护栏)", () => {
     const win = mk(`<div id="root"></div>`, { win: {} });
-    expect(detectBlankShell(document, win, 0)).toBeNull();
+    expect(detectBlankShell(document, win, [])).toBeNull();
   });
 
-  it("交互元素≠0 → 不命中(小内容已渲染页护栏)", () => {
+  it("root 内有交互后代 → 不命中(小内容已渲染页护栏)", () => {
+    const win = mk(`<div id="root"><button>go</button></div>`, { win: { React: {} } });
+    const btn = document.querySelector("button")!;
+    expect(detectBlankShell(document, win, [btn])).toBeNull();
+  });
+
+  it("F2:root 容器自身被收集(cursor:pointer) → 仍命中(后代包含排除 root 自身)", () => {
     const win = mk(`<div id="root"></div>`, { win: { React: {} } });
-    expect(detectBlankShell(document, win, 2)).toBeNull();
+    const root = document.querySelector("#root")!;
+    expect(detectBlankShell(document, win, [root])).toEqual({ root: "#root", rootLen: 0, framework: "react" });
+  });
+
+  it("F2:html/body 噪声被收集(祖先) → 仍命中(祖先非后代)", () => {
+    const win = mk(`<div id="root"></div>`, { win: { React: {} } });
+    expect(detectBlankShell(document, win, [document.body, document.documentElement])).toEqual({ root: "#root", rootLen: 0, framework: "react" });
   });
 
   it("readyState≠complete → 不命中(仍在加载)", () => {
     const win = mk(`<div id="root"></div>`, { ready: "loading", win: { React: {} } });
-    expect(detectBlankShell(document, win, 0)).toBeNull();
+    expect(detectBlankShell(document, win, [])).toBeNull();
   });
 
   it("无 SPA 挂载点 → 不命中(不敢称 SPA 外壳)", () => {
     const win = mk(`<main></main>`, { win: { React: {} } });
-    expect(detectBlankShell(document, win, 0)).toBeNull();
+    expect(detectBlankShell(document, win, [])).toBeNull();
+  });
+
+  it("F3:#root 空 portal + #app 已渲染(有交互后代) → 不命中(任一挂载点渲染即抑制)", () => {
+    const win = mk(`<div id="root"></div><div id="app"><button>go</button></div>`, { win: { React: {} } });
+    const btn = document.querySelector("#app button")!;
+    expect(detectBlankShell(document, win, [btn])).toBeNull();
   });
 
   it("framework 经 script chunk 检出(无 globals) → 命中 script-chunk", () => {
     const win = mk(`<div id="app"></div><script src="https://cdn/umi.89ab768f.js"></script>`, { win: {} });
-    expect(detectBlankShell(document, win, 0)).toEqual({ root: "#app", rootLen: 0, framework: "script-chunk" });
+    expect(detectBlankShell(document, win, [])).toEqual({ root: "#app", rootLen: 0, framework: "script-chunk" });
   });
 
   it("umi globals 检出 g_history", () => {
     const win = mk(`<div id="root"></div>`, { win: { g_history: {} } });
-    expect(detectBlankShell(document, win, 0)?.framework).toBe("umi");
+    expect(detectBlankShell(document, win, [])?.framework).toBe("umi");
   });
 
   it("F4:仅哈希包名(无框架名)不算 framework 在场 → 不命中", () => {
     const win = mk(`<div id="root"></div><script src="https://cdn/index.a1b2c3d4.js"></script>`, { win: {} });
-    expect(detectBlankShell(document, win, 0)).toBeNull();
+    expect(detectBlankShell(document, win, [])).toBeNull();
   });
 });
