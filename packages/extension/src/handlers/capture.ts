@@ -7,6 +7,8 @@ import { getActiveTabId, buildExecuteTarget, ensureFrameAttached } from "../lib/
 import { getIframeOffset } from "../lib/iframe-offset.js";
 import { resolveTarget } from "../lib/resolve-target.js";
 import { loadPageSideModule } from "../adapter/page-side-loader.js";
+import { getSnapshotEntry, getLatestSnapshotForTab } from "../lib/snapshot-store.js";
+import { drawMarksOnImage, type MarkRect } from "../lib/mark-overlay.js";
 
 // GIF 录制状态
 interface GifSession {
@@ -147,6 +149,71 @@ async function computeFrameClip(
   };
 }
 
+/**
+ * P1-3 薄视觉兑底(Set-of-Mark):把 observe 快照的 ref 编号叠到视口截图上。
+ * 图上数字 == 快照 index == vortex_act 的 @ref,让模型对 canvas/地图/无 alt 图等
+ * 硬视觉区域也能精确定位并操作。
+ *
+ * 复用 observe 快照的 index→selector(显式 snapshotId 优先,否则该 tab 最近一次
+ * observe),在主 frame 内按 selector 实时量 getBoundingClientRect →视口内元素叠标。
+ * 仅主 frame(跨 frame 叠标需偏移复合,v1 略),仅视口截图(叠标坐标系=视口物理像素)。
+ * 任何失败退化返回原图,绝不因叠标丢截图。
+ */
+async function overlayMarks(
+  tid: number,
+  dataUrl: string,
+  snapshotId: string | undefined,
+): Promise<{ dataUrl?: string; count: number; refs?: number[]; note?: string }> {
+  const snap = snapshotId ? getSnapshotEntry(snapshotId) : getLatestSnapshotForTab(tid)?.entry;
+  if (!snap) {
+    return { count: 0, note: "marks:true 需先 vortex_observe(无可用快照)" };
+  }
+  // 仅主 frame 元素(frameId 0/undefined);跨 frame 叠标需偏移复合,v1 跳过
+  const mainEls = snap.elements.filter((e) => (e.frameId ?? 0) === 0);
+  const skippedCross = snap.elements.length - mainEls.length;
+  if (mainEls.length === 0) {
+    return { count: 0, note: "快照无主 frame 元素" };
+  }
+  // 加载 dom-resolve,queryDeep 穿 open shadow(与 ELEMENT handler 一致)
+  await loadPageSideModule(tid, 0, "dom-resolve");
+  const items = mainEls.map((e) => ({ index: e.index, selector: e.selector }));
+  const measured = await chrome.scripting.executeScript({
+    target: { tabId: tid }, // 不带 frameId → 主 frame
+    world: "MAIN",
+    func: (list: Array<{ index: number; selector: string }>) => {
+      const R = (window as unknown as { __vortexDomResolve?: { queryDeep(s: string): Element | null } }).__vortexDomResolve;
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
+      const dpr = window.devicePixelRatio || 1;
+      const rects: Array<{ index: number; x: number; y: number; w: number; h: number; inViewport: boolean }> = [];
+      for (const it of list) {
+        let el: Element | null = null;
+        try {
+          el = R?.queryDeep ? R.queryDeep(it.selector) : document.querySelector(it.selector);
+        } catch {
+          el = null;
+        }
+        if (!el) continue;
+        const r = el.getBoundingClientRect();
+        if (r.width <= 0 || r.height <= 0) continue;
+        const inV = r.bottom > 0 && r.right > 0 && r.top < vh && r.left < vw;
+        if (!inV) continue;
+        rects.push({ index: it.index, x: r.left, y: r.top, w: r.width, h: r.height, inViewport: true });
+      }
+      return { result: { rects, dpr } };
+    },
+    args: [items],
+  });
+  const mres = (measured[0]?.result as { result?: { rects: MarkRect[]; dpr: number } } | undefined)?.result;
+  if (!mres || mres.rects.length === 0) {
+    const note = skippedCross > 0 ? `视口内无可标元素(${skippedCross} 跨 frame 略)` : "视口内无可标元素";
+    return { count: 0, note };
+  }
+  const { dataUrl: marked, count, refs } = await drawMarksOnImage(dataUrl, mres.rects, mres.dpr);
+  if (count === 0) return { count: 0, note: "视口内无可标元素" };
+  return { dataUrl: marked, count, refs };
+}
+
 export function registerCaptureHandlers(
   router: ActionRouter,
   debuggerMgr: DebuggerManager,
@@ -160,6 +227,10 @@ export function registerCaptureHandlers(
       const clip = args.clip as { x: number; y: number; width: number; height: number } | undefined;
       const deviceScaleFactor = args.deviceScaleFactor as 1 | 2 | undefined;
       const frameId = args.frameId as number | undefined;
+      const marks = args.marks === true;
+      const marksSnapshotId = args.snapshotId as string | undefined;
+      // marks 仅支持默认视口截图(非 fullPage/clip/单 frame):叠标坐标系=视口物理像素
+      const marksApplicable = marks && !fullPage && !clip && (frameId == null || frameId === 0);
 
       // Native 快路径:viewport 截图(非 fullPage/clip/单 frame/DPR override)走
       // chrome.tabs.captureVisibleTab(~10-50ms),绕开 CDP debugger.attach 的 ~3s
@@ -183,12 +254,18 @@ export function registerCaptureHandlers(
           if (tab.active && tab.windowId != null && tab.windowId >= 0) {
             const opts: chrome.tabs.CaptureVisibleTabOptions = { format };
             if (format === "jpeg" && quality != null) opts.quality = quality;
-            const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, opts);
+            let dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, opts);
+            let marksMeta: Awaited<ReturnType<typeof overlayMarks>> | undefined;
+            if (marksApplicable) {
+              marksMeta = await overlayMarks(tid, dataUrl, marksSnapshotId);
+              if (marksMeta.dataUrl) dataUrl = marksMeta.dataUrl;
+            }
             return {
               dataUrl,
-              format,
-              ...(format === "jpeg" && quality != null ? { quality } : {}),
+              format: marksMeta?.dataUrl ? "png" : format,
+              ...(!marksMeta?.dataUrl && format === "jpeg" && quality != null ? { quality } : {}),
               fullPage: false,
+              ...(marksMeta ? { marks: marksMeta.count, ...(marksMeta.refs ? { markedRefs: marksMeta.refs } : {}), ...(marksMeta.note ? { marksNote: marksMeta.note } : {}) } : {}),
               timestamp: Date.now(),
             };
           }
@@ -202,15 +279,23 @@ export function registerCaptureHandlers(
         effectiveClip = await computeFrameClip(tid, frameId);
       }
 
-      const { dataUrl, truncation } = await captureTab(debuggerMgr, tid, { format, quality, fullPage, clip: effectiveClip, deviceScaleFactor });
+      const captured = await captureTab(debuggerMgr, tid, { format, quality, fullPage, clip: effectiveClip, deviceScaleFactor });
+      let dataUrl = captured.dataUrl;
+      const truncation = captured.truncation;
+      let marksMeta: Awaited<ReturnType<typeof overlayMarks>> | undefined;
+      if (marksApplicable) {
+        marksMeta = await overlayMarks(tid, dataUrl, marksSnapshotId);
+        if (marksMeta.dataUrl) dataUrl = marksMeta.dataUrl;
+      }
 
       return {
         dataUrl,
-        format,
-        ...(format === "jpeg" && quality != null ? { quality } : {}),
+        format: marksMeta?.dataUrl ? "png" : format,
+        ...(!marksMeta?.dataUrl && format === "jpeg" && quality != null ? { quality } : {}),
         ...(deviceScaleFactor != null ? { deviceScaleFactor } : {}),
         ...(frameId != null ? { frameId } : {}),
         fullPage: !!fullPage,
+        ...(marksMeta ? { marks: marksMeta.count, ...(marksMeta.refs ? { markedRefs: marksMeta.refs } : {}), ...(marksMeta.note ? { marksNote: marksMeta.note } : {}) } : {}),
         ...(truncation
           ? { truncated: true, contentHeight: truncation.contentHeight, capturedHeight: truncation.capturedHeight }
           : {}),

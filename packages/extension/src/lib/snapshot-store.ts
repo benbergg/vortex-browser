@@ -54,3 +54,20 @@ export function setSnapshot(id: string, entry: SnapshotEntry): void {
 export function getSnapshotEntry(snapshotId: string): SnapshotEntry | undefined {
   return snapshots.get(snapshotId);
 }
+
+/**
+ * 取指定 tab 最近一次(未过期)的 observe 快照。
+ * P1-3 marks 截图在未显式传 snapshotId 时,默认叠最近一次 observe 的 ref 编号。
+ * Map 保序 → 反向遍历即「最新优先」;顺带跳过已过 TTL 的条目。
+ */
+export function getLatestSnapshotForTab(tabId: number): { snapshotId: string; entry: SnapshotEntry } | undefined {
+  const now = Date.now();
+  const ids = [...snapshots.keys()];
+  for (let i = ids.length - 1; i >= 0; i--) {
+    const id = ids[i];
+    const entry = snapshots.get(id)!;
+    if (now - entry.capturedAt > SNAPSHOT_TTL_MS) continue;
+    if (entry.tabId === tabId) return { snapshotId: id, entry };
+  }
+  return undefined;
+}

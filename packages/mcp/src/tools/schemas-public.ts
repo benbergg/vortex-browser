@@ -167,7 +167,7 @@ export const PUBLIC_TOOLS: ToolDef[] = [
   {
     name: "vortex_screenshot",
     action: "capture.screenshot",
-    description: "Screenshot page/element. jpeg+quality saves tokens.",
+    description: "Screenshot page/element. jpeg+quality saves tokens. marks=overlay observe ref# on viewport (pixel→@ref).",
     schema: {
       type: "object",
       properties: {
@@ -175,6 +175,11 @@ export const PUBLIC_TOOLS: ToolDef[] = [
         fullPage: { type: "boolean" },
         format: { enum: ["png", "jpeg"] },
         quality: { type: "number" },
+        // P1-3 薄视觉兑底(Set-of-Mark):把最近 observe 的 ref 编号叠到视口截图上,
+        // 图上数字=快照 index=@ref。仅视口(非 fullPage/元素)。snapshotId 指定用哪次
+        // observe 的编号,省略则该 tab 最近一次。
+        marks: { type: "boolean" },
+        snapshotId: { type: "string" },
         ...tabFields,
       },
     },
