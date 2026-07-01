@@ -71,6 +71,15 @@
 // component(读 Vue/React 实例数据 + 表行对象),description 同步说明。componentDepth
 // 不入 schema(handler 读取,省预算)。payload 实测 7773B,cap +100 留 ~80B 余量。
 // 沿用"加能力调 cap 不压字符"惯例。
+//
+// vortex_query mode=flow: 7900 → 8100 B。vortex_query mode 枚举新增
+// flow(ipaas 流程图 readback → mermaid/tree/json),description 同步追加
+// "; flow=流程图→mermaid."。flowProbeFunc 自包含内联 detect+read+serialize
+// (改一处须改两处,query-flow-parity.test.ts 校验);纯读 ipaas Vue
+// processSetting._data, 不调用 Vue 方法。考虑过进一步压 description
+// (drop "+WCAG"/"Lake "等), 但 +WCAG 是 style 模式真能力, Lake Sheet 是
+// 真产品名, 压缩损 LLM 可读性, 沿用"加能力微调 cap 不压字符"惯例
+// (与历次 +100 同步长)。cap +200 至 8100, 留 ~94B 余量。
 
 import { describe, it, expect, afterEach } from "vitest";
 import { COMMIT_KINDS } from "@vortex-browser/shared";
@@ -82,7 +91,7 @@ describe("I15: tools/list budget + count + internalized grep", () => {
     defs.map(d => ({ name: d.name, description: d.description, inputSchema: d.schema })),
   );
 
-  it("tools/list 字节 ≤ 8000 B (debug_read 描述强化, 实测 7845 留 155B buffer)", () => {
+  it("tools/list 字节 ≤ 8100 B (flow mode 描述追加, 实测 8006 留 ~94B buffer)", () => {
     // V2 P0 修复 D16: filter 子字段 description 是必要的文档化豁免
     // (handler 已实现 console.ts:160 level / network.ts:305-321 pattern+statusMin/Max),
     // 移除豁免会触发 V2 D16 真发现复发 (LLM 不知可用子字段)。
@@ -92,7 +101,10 @@ describe("I15: tools/list budget + count + internalized grep", () => {
     // source=network/request 自动捕获 POST 请求/响应体(无需手搓 fetch hook),消除评测员
     // 误搓 fetch hook 的根因(保留 "pattern REQUIRED" 满足 B3-8)。payload 实测 7845B,
     // cap +100 留 155B 余量。沿用"加能力调 cap"惯例。
-    expect(toolsListPayload.length).toBeLessThanOrEqual(8000);
+    // mode=flow: 8000 → 8100。vortex_query mode 枚举新增 flow(ipaas 流程图 readback),
+    // description 同步追加 "; flow=流程图→mermaid."。payload 实测 8006B,
+    // cap +100 留 ~94B 余量。沿用"加能力调 cap 不压字符"惯例。
+    expect(toolsListPayload.length).toBeLessThanOrEqual(8100);
   });
 
   it("公开工具数量 = 20（vortex_query 零 LLM 探测: 19 + vortex_query）", () => {

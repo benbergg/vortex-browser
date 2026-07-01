@@ -946,6 +946,121 @@ export const sheetProbeFunc = (
   }
 };
 
+/**
+ * page-side 流程图 readback 函数体。mode=flow 注入 MAIN world。
+ * 参数 args: [pattern(adapter/容器提示), format(mermaid|tree|json)]。
+ * 返回 { text } 或 { error }。⚠ [inline flow-readback]:注入丢模块作用域,detect/read/
+ * serialize 必须内联;逻辑须与 src/page-side/flow-readback.ts 真源一致(改一处须改两处),
+ * query-flow-parity.test.ts 校验。纯读,不调用 Vue 方法(只读安全)。
+ */
+export const flowProbeFunc = (
+  pattern: string,
+  format: string,
+): { text: string } | { error: string } => {
+  try {
+    const doc = document;
+    // —— ipaas adapter: detect + read(内联真源 findIpaasVm/ipaasAdapter.read)——
+    const body = doc.querySelector(".processSetting-body");
+    let vm: any = null;
+    if (body) {
+      let cur: any = body, hops = 0;
+      while (cur && hops < 15) {
+        if (cur.__vue__ && cur.__vue__._data && Array.isArray(cur.__vue__._data.nodesDataList)) { vm = cur.__vue__; break; }
+        cur = cur.parentElement; hops++;
+      }
+    }
+    if (!vm) return { error: "no flow diagram on page (未检测到流程图；若确在流程页请等待加载，或用 vortex_screenshot)" };
+
+    const d = vm._data;
+    const nodes: Array<{ id: string; label: string; type: string }> = [];
+    const edges: Array<{ from: string; to: string; label?: string }> = [];
+    let counter = 0;
+    const genId = (n: any): string => (n && n.id != null && n.id !== "null" ? `ip_${n.id}_${counter++}` : `n${counter++}`);
+    const subSeq = (x: any): any[] =>
+      Array.isArray(x) ? x
+      : x && Array.isArray(x.septs) ? x.septs
+      : x && Array.isArray(x.nodes) ? x.nodes
+      : x && Array.isArray(x.children) ? x.children
+      : [];
+    const expand = (seq: any[], prevId: string | null): { first: string | null; last: string | null } => {
+      let last = prevId, first: string | null = null;
+      for (const node of seq || []) {
+        if (!node || typeof node !== "object") continue;
+        const id = genId(node);
+        const type = String(node.septType || node.type || "NODE");
+        nodes.push({ id, label: String(node.name || node.nodeName || type), type });
+        if (last) edges.push({ from: last, to: id });
+        if (first === null) first = id;
+        last = id;
+        const data = node.data || {};
+        if (Array.isArray(data.branchData) && data.branchData.length) {
+          for (const branch of data.branchData) {
+            const bseq = subSeq(branch);
+            if (!bseq.length) continue;
+            const r = expand(bseq, null);
+            if (r.first) edges.push({ from: id, to: r.first, label: (branch && (branch.name || branch.branchName)) || "分支" });
+          }
+        }
+        const loop = subSeq(data.iterateSeptData);
+        if (loop.length) { const r = expand(loop, null); if (r.first) edges.push({ from: id, to: r.first, label: "循环" }); }
+      }
+      return { first, last };
+    };
+    let mainPrev: string | null = null;
+    if (d.startNode && typeof d.startNode === "object") {
+      const sid = genId(d.startNode);
+      nodes.push({ id: sid, label: String(d.startNode.name || "开始"), type: String(d.startNode.septType || "START") });
+      mainPrev = sid;
+    }
+    const bodyRes = expand(Array.isArray(d.nodesDataList) ? d.nodesDataList : [], mainPrev);
+    mainPrev = bodyRes.last ?? mainPrev;
+    if (d.endNode && typeof d.endNode === "object") {
+      const eid = genId(d.endNode);
+      nodes.push({ id: eid, label: String(d.endNode.name || "结束"), type: String(d.endNode.septType || "END") });
+      if (mainPrev) edges.push({ from: mainPrev, to: eid });
+    }
+    const title = d.formParams && typeof d.formParams.name === "string" ? d.formParams.name : undefined;
+    const graph = { title, nodes, edges };
+
+    // —— serialize(内联真源 serializeFlow)——
+    const escFlow = (s: string): string => String(s ?? "").replace(/\r?\n/g, " ").replace(/"/g, "#quot;").trim();
+    const fmt = format === "tree" || format === "json" ? format : "mermaid";
+    if (fmt === "json") return { text: JSON.stringify(graph) };
+    if (fmt === "tree") {
+      const byId = new Map(graph.nodes.map((n) => [n.id, n]));
+      const lines: string[] = [];
+      if (graph.title) lines.push(`流程: ${graph.title}`);
+      graph.nodes.forEach((n, i) => {
+        lines.push(`${i + 1}. ${n.label} (${n.type})`);
+        for (const e of graph.edges.filter((ed) => ed.from === n.id)) {
+          const tgt = byId.get(e.to);
+          lines.push(`   → ${tgt ? tgt.label : e.to}${e.label ? ` [${e.label}]` : ""}`);
+        }
+      });
+      return { text: lines.join("\n") };
+    }
+    // mermaid
+    const idx = new Map<string, string>();
+    graph.nodes.forEach((n, i) => idx.set(n.id, `N${i}`));
+    const lines: string[] = ["flowchart TD"];
+    if (graph.title) lines.push(`  %% ${escFlow(graph.title)}`);
+    for (const n of graph.nodes) {
+      const mid = idx.get(n.id)!;
+      const text = `${escFlow(n.label)} (${escFlow(n.type)})`;
+      const t = (n.type || "").toUpperCase();
+      lines.push("  " + (t === "START" || t === "END" ? `${mid}(["${text}"])` : t === "PARALLEL" ? `${mid}{"${text}"}` : `${mid}["${text}"]`));
+    }
+    for (const e of graph.edges) {
+      const f = idx.get(e.from), t = idx.get(e.to);
+      if (!f || !t) continue;
+      lines.push(e.label ? `  ${f} -->|${escFlow(e.label)}| ${t}` : `  ${f} --> ${t}`);
+    }
+    return { text: lines.join("\n") };
+  } catch (e) {
+    return { error: "flow readback error: " + (e instanceof Error ? e.message : String(e)) };
+  }
+};
+
 export function registerQueryHandlers(router: ActionRouter): void {
   router.registerAll({
     [QueryActions.QUERY_PAGE]: async (args, tabId) => {
@@ -956,11 +1071,11 @@ export function registerQueryHandlers(router: ActionRouter): void {
       if (
         !mode ||
         (mode !== "text" && mode !== "css" && mode !== "component" &&
-         mode !== "geometry" && mode !== "style" && mode !== "sheet")
+         mode !== "geometry" && mode !== "style" && mode !== "sheet" && mode !== "flow")
       ) {
         throw vtxError(
           VtxErrorCode.INVALID_PARAMS,
-          `vortex_query: mode must be 'text', 'css', 'component', 'geometry', 'style' or 'sheet', got ${String(mode)}`,
+          `vortex_query: mode must be 'text', 'css', 'component', 'geometry', 'style', 'sheet' or 'flow', got ${String(mode)}`,
         );
       }
       if (!pattern || typeof pattern !== "string" || !pattern.trim()) {
@@ -1054,6 +1169,25 @@ export function registerQueryHandlers(router: ActionRouter): void {
         }
         if ("error" in res && res.error) {
           throw vtxError(VtxErrorCode.JS_EXECUTION_ERROR, `query.queryPage geometry error: ${res.error}`);
+        }
+        return res;
+      } else if (mode === "flow") {
+        // flow 模式:注入 flowProbeFunc,adapter 检测流程图→读模型→mermaid/tree/json。
+        const format = typeof args.attr === "string" ? args.attr : "mermaid";
+
+        const results = await chrome.scripting.executeScript({
+          target: buildExecuteTarget(tid, frameId),
+          func: flowProbeFunc,
+          args: [pattern, format],
+          world: "MAIN",
+        });
+
+        const res = results[0]?.result as { text: string } | { error: string } | undefined;
+        if (!res) {
+          throw vtxError(VtxErrorCode.JS_EXECUTION_ERROR, "query.queryPage flow: executeScript returned no result");
+        }
+        if ("error" in res && res.error) {
+          throw vtxError(VtxErrorCode.JS_EXECUTION_ERROR, `query.queryPage flow error: ${res.error}`);
         }
         return res;
       } else if (mode === "sheet") {
