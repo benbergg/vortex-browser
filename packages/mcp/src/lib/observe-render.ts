@@ -98,6 +98,8 @@ interface CompactFrame {
   >;
   /** 模态作用域信号(aria-modal 弹层裁剪了背景)。@since modal-scope */
   modal?: { name: string; role: string; suppressed: number };
+  /** 空壳 SPA/渲染失败 frame 级信号。@since blank-shell */
+  blankShell?: { root: string; rootLen: number; framework: string };
 }
 
 export interface CompactObserve {
@@ -405,6 +407,17 @@ function modalSummary(frames?: CompactFrame[]): string | null {
   return null;
 }
 
+/** 空壳 SPA/渲染失败 meta 行:首个带 blankShell 的 frame → # blank-shell:。软语义(加载/失败两态都对)。 */
+function blankShellSummary(frames?: CompactFrame[]): string | null {
+  for (const f of frames ?? []) {
+    if (f.blankShell) {
+      const b = f.blankShell;
+      return `# blank-shell: ${b.framework} 应用的 ${b.root} 近空(${b.rootLen} chars)且 0 交互元素、文档已 complete — 页面可能仍在渲染或渲染失败。建议 vortex_wait_for(idle=net) 后重试,或 vortex_debug_read(console/network) 查错(如 ERR_NETWORK / React hydration)。`;
+    }
+  }
+  return null;
+}
+
 /** 截断量化 meta 行:per truncated frame。追加到 scanNotes。 */
 function pushTruncationNotes(frames: CompactFrame[] | undefined, scanNotes: string[]): void {
   for (const f of frames ?? []) {
@@ -433,6 +446,8 @@ export function renderObserveCompact(
   if (bsLine) lines.push(bsLine);
   const modalLine = modalSummary(data.frames);
   if (modalLine) lines.push(modalLine);
+  const blankLine = blankShellSummary(data.frames);
+  if (blankLine) lines.push(blankLine);
   lines.push("");
 
   // T4-diff: 查找上一快照身份键集合（不存在/过期则 null → 不 diff）。
@@ -546,6 +561,8 @@ export function renderObserveTree(
   if (bsLine) lines.push(bsLine);
   const modalLine = modalSummary(data.frames);
   if (modalLine) lines.push(modalLine);
+  const blankLine = blankShellSummary(data.frames);
+  if (blankLine) lines.push(blankLine);
   lines.push("");
 
   // T4-diff: 查找上一快照身份键集合。

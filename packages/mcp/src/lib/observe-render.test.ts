@@ -143,3 +143,42 @@ describe("observe-render: listbox options 截断提示 (N0002 R2 B006)", () => {
     expect(out).toMatch(/\+2 more/);
   });
 });
+
+describe("observe-render: blankShell 空壳 SPA 渲染", () => {
+  function mkBlankData(blankShell?: { root: string; rootLen: number; framework: string }) {
+    return {
+      snapshotId: "s1",
+      url: "https://x/app",
+      elements: [],
+      frames: [
+        {
+          frameId: 0,
+          parentFrameId: -1,
+          url: "https://x/app",
+          offset: { x: 0, y: 0 },
+          elementCount: 0,
+          truncated: false,
+          scanned: true,
+          ...(blankShell ? { blankShell } : {}),
+        },
+      ],
+    } as unknown as CompactObserve;
+  }
+
+  it("blankShell frame → 输出 # blank-shell: 提示行含 framework/root", () => {
+    const out = renderObserveTree(mkBlankData({ root: "#root", rootLen: 0, framework: "umi" }), null);
+    expect(out).toContain("# blank-shell:");
+    expect(out).toContain("umi");
+    expect(out).toContain("#root");
+  });
+
+  it("renderObserveCompact 同样渲染 # blank-shell:", () => {
+    const out = renderObserveCompact(mkBlankData({ root: "#app", rootLen: 12, framework: "react" }), null);
+    expect(out).toContain("# blank-shell:");
+    expect(out).toContain("react");
+  });
+
+  it("无 blankShell → 不输出该行(向后兼容)", () => {
+    expect(renderObserveTree(mkBlankData(), null)).not.toContain("# blank-shell:");
+  });
+});
