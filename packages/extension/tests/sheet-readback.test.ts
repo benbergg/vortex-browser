@@ -104,4 +104,34 @@ describe("readLakeSheetModel 归一化", () => {
   it("内核无 model → null", () => {
     expect(readLakeSheetModel({}, "*")).toBeNull();
   });
+
+  it("富单元格:图片 value → markdown 图片(非 [object Object])", () => {
+    const k = {
+      model: {
+        data: { name: "I", rowCount: 1, colCount: 2, mergeCells: {} },
+        table: [[{ value: "订单" }, { value: { class: "image", src: "https://cdn/x.png", name: "x.png" } }]],
+      },
+    };
+    const s = readLakeSheetModel(k, "*")!;
+    expect(s.cells[0][1]).toBe("![x.png](https://cdn/x.png)");
+  });
+
+  it("去尾部全空行/列:分配大网格仅裁到内容边界", () => {
+    const k = {
+      model: {
+        data: { name: "T", rowCount: 5, colCount: 4, mergeCells: {} },
+        table: [
+          [{ value: "h" }, { value: "v" }, {}, {}],
+          [{ value: "a" }, { value: "b" }, {}, {}],
+          [{}, {}, {}, {}],
+          [{}, {}, {}, {}],
+          [{}, {}, {}, {}],
+        ],
+      },
+    };
+    const s = readLakeSheetModel(k, "*")!;
+    expect(s.rowCount).toBe(2);        // 5 行 → 裁到 2 行有内容
+    expect(s.colCount).toBe(2);        // 4 列 → 裁到 2 列有内容
+    expect(s.cells).toEqual([["h", "v"], ["a", "b"]]);
+  });
 });

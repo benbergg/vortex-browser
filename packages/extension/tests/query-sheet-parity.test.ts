@@ -21,4 +21,8 @@ describe("sheetProbeFunc 内联 ↔ sheet-readback 真源 parity", () => {
   it("内联含 cell 取值契约 value ?? ''", () => {
     expect(src).toContain("c.value");
   });
+  it("内联含富单元格图片渲染 + 尾部空行列裁剪(与真源一致)", () => {
+    expect(src).toContain('v.class === "image"');   // 图片 → markdown 图片
+    expect(src).toContain("lastRow = -1, lastCol = -1"); // 尾部裁剪
+  });
 });

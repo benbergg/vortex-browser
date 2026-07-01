@@ -849,7 +849,14 @@ export const sheetProbeFunc = (
     const cellText = (c: any): string => {
       if (c == null) return "";
       const v = typeof c === "object" ? c.value : c;
-      return v == null ? "" : String(v);
+      if (v == null) return "";
+      if (typeof v === "object") {
+        // 富单元格:语雀内联图片 {class:"image",src,name} → markdown 图片;其他对象取 .text 或 JSON 片段(不吐 [object Object])。
+        if (v.class === "image" && typeof v.src === "string") return `![${v.name || "image"}](${v.src})`;
+        if (typeof v.text === "string") return v.text;
+        try { return JSON.stringify(v).slice(0, 100); } catch { return ""; }
+      }
+      return String(v);
     };
     const cells: string[][] = table.map((row: any[]) => {
       const out: string[] = [];
@@ -866,10 +873,20 @@ export const sheetProbeFunc = (
         }
       }
     }
+    // 去尾部全空行/列(语雀分配 rowCount/colCount 常远大于真实内容,避免吐大量空行空列)。
+    let lastRow = -1, lastCol = -1;
+    for (let r = 0; r < cells.length; r++) {
+      for (let c = 0; c < colCount; c++) {
+        if (cells[r][c] !== "") { if (r > lastRow) lastRow = r; if (c > lastCol) lastCol = c; }
+      }
+    }
+    const nRows = lastRow + 1, nCols = lastCol + 1;
     const sheet = {
       name: typeof d.name === "string" ? d.name : "",
-      rowCount: typeof d.rowCount === "number" ? d.rowCount : table.length,
-      colCount, cells, merges,
+      rowCount: nRows,
+      colCount: nCols,
+      cells: cells.slice(0, nRows).map((row) => row.slice(0, nCols)),
+      merges: merges.filter((mg) => mg.row < nRows && mg.col < nCols),
     };
 
     // —— serialize(内联真源 serializeSheet)——
