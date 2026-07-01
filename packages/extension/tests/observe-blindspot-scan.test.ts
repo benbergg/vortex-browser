@@ -110,6 +110,12 @@ describe("scan func 内联 detectBlindspot 与纯函数一致", () => {
     expect(src).toContain('kind: "image"');
     expect(src).toContain("__ir.width < 80"); // 内容尺寸门与真源一致
   });
+  it("[inline detectLakeSheet] 页级扫描标记 + 定位判据内联(parity)", () => {
+    const src = readFileSync(join(__dirname, "../src/handlers/observe.ts"), "utf8");
+    expect(src).toContain("[inline detectLakeSheet]");
+    expect(src).toContain(".lake-sheet-canvas-container");
+    expect(src).toContain('kind: "sheet"');
+  });
 });
 
 describe("detectImageBlindspot 纯函数 parity", () => {

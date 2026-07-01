@@ -3521,6 +3521,7 @@ const INTERACTIVE_SELECTORS = [
           | { kind: "virtual"; total: number; rendered: number; name: string; confidence?: "low" }
           | { kind: "canvas"; name: string; chartLib: string; readback: "chart" }
           | { kind: "image"; name: string; src: string }
+          | { kind: "sheet"; name: string; lib: "lakesheet"; rows: number; cols: number }
         > = [];
         {
           const __vc = querySelectorAllDeep("[role=grid],[role=treegrid],[role=table],[role=listbox],[role=tree]", document);
@@ -3678,6 +3679,34 @@ const INTERACTIVE_SELECTORS = [
               "";
             const __inm = __imEl.getAttribute("aria-labelledby") || "image";
             pageBlindspots.push({ kind: "image", name: String(__inm).slice(0, 40), src: String(__isrc).slice(0, 300) });
+          }
+          // [inline detectLakeSheet] 语雀 Lake Sheet 帧级盲区:cell 在 canvas,observe 空树。
+          // 真源 blindspot-detect.ts detectLakeSheet,改一处须改两处。逐字对齐定位 + 维度读:
+          // .lake-sheet-canvas-container/.lake-sheet-editor → __reactFiber → memoizedState.sheet.model.data。
+          // 每 frame 至多 push 一处(若内核存在)。
+          if (pageBlindspots.every((__bs) => __bs.kind !== "sheet")) {
+            const __lsContainer = document.querySelector(".lake-sheet-canvas-container") || document.querySelector(".lake-sheet-editor");
+            if (__lsContainer) {
+              const __lsFk = Object.keys(__lsContainer as any).find(
+                (__k) => __k.startsWith("__reactInternalInstance") || __k.startsWith("__reactFiber"),
+              );
+              if (__lsFk) {
+                let __lsFiber: any = (__lsContainer as any)[__lsFk];
+                let __lsDepth = 0;
+                while (__lsFiber && __lsDepth < 40) {
+                  const __lsSt = __lsFiber.memoizedState;
+                  if (__lsSt && __lsSt.sheet && __lsSt.sheet.model && __lsSt.sheet.model.data) {
+                    const __lsD = __lsSt.sheet.model.data;
+                    const __lsRows = typeof __lsD.rowCount === "number" ? __lsD.rowCount : 0;
+                    const __lsCols = typeof __lsD.colCount === "number" ? __lsD.colCount : 0;
+                    pageBlindspots.push({ kind: "sheet", name: "lakesheet", lib: "lakesheet", rows: __lsRows, cols: __lsCols });
+                    break;
+                  }
+                  __lsFiber = __lsFiber.return;
+                  __lsDepth++;
+                }
+              }
+            }
           }
         }
 

@@ -197,6 +197,35 @@ export function detectChartCanvas(el: HTMLElement): { chartLib: string } | null 
 }
 
 /**
+ * 语雀 Lake Sheet 帧级盲区识别:canvas 电子表格,cell 全在 canvas → observe 空树。
+ * 定位内核读 model.data 维度,产帧级盲区指向 vortex_query mode=sheet。
+ * observe.ts 页级扫描内联同一判定(标记 [inline detectLakeSheet]),改一处须改两处。
+ */
+export function detectLakeSheet(doc: Document): { rows: number; cols: number } | null {
+  const container =
+    doc.querySelector(".lake-sheet-canvas-container") || doc.querySelector(".lake-sheet-editor");
+  if (!container) return null;
+  const fk = Object.keys(container).find(
+    (k) => k.startsWith("__reactInternalInstance") || k.startsWith("__reactFiber"),
+  );
+  if (!fk) return null;
+  let fiber: any = (container as any)[fk];
+  let depth = 0;
+  while (fiber && depth < 40) {
+    const st = fiber.memoizedState;
+    if (st && st.sheet && st.sheet.model && st.sheet.model.data) {
+      const d = st.sheet.model.data;
+      const rows = typeof d.rowCount === "number" ? d.rowCount : 0;
+      const cols = typeof d.colCount === "number" ? d.colCount : 0;
+      return { rows, cols };
+    }
+    fiber = fiber.return;
+    depth++;
+  }
+  return null;
+}
+
+/**
  * 无 alt 内容图盲区识别(⑨ 实证:observe 对无 alt 图给空树,agent 须自己 query 发现)。
  * 内容图(够大)且无任何文本替代(alt/aria-label/title)→ 内容只在像素 → 指路 screenshot/src。
  * 排除:有意义 alt(可读)/ alt=""(显式装饰)/ aria-hidden / role=presentation / 图标级小图。

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { detectBlindspot, detectVirtualByScroll, detectDivVirtualScroller, detectChartCanvas, detectImageBlindspot, detectBlankShell } from "../src/page-side/blindspot-detect.js";
+import { detectBlindspot, detectVirtualByScroll, detectDivVirtualScroller, detectChartCanvas, detectImageBlindspot, detectBlankShell, detectLakeSheet } from "../src/page-side/blindspot-detect.js";
 
 /** 清理 page-side 图表库全局,避免跨用例污染(Chart.js/G2 检测读 window 全局)。 */
 function cleanupChartGlobals() {
@@ -414,5 +414,21 @@ describe("detectBlankShell", () => {
     cv.getBoundingClientRect = () =>
       ({ width: 20, height: 20, left: 0, top: 0, right: 20, bottom: 20, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect;
     expect(detectBlankShell(document, win, [])).toEqual({ root: "#root", rootLen: 17, framework: "react" });
+  });
+});
+
+describe("detectLakeSheet", () => {
+  it("有 lake-sheet 容器 + 内核 → {rows,cols}", () => {
+    document.body.innerHTML = '<div class="lake-sheet-canvas-container"></div>';
+    const el = document.querySelector(".lake-sheet-canvas-container")! as any;
+    el["__reactFiber$x"] = {
+      memoizedState: { sheet: { model: { data: { rowCount: 199, colCount: 27 }, table: [] } } },
+      return: null,
+    };
+    expect(detectLakeSheet(document)).toEqual({ rows: 199, cols: 27 });
+  });
+  it("无 lake-sheet 容器 → null", () => {
+    document.body.innerHTML = "<div>x</div>";
+    expect(detectLakeSheet(document)).toBeNull();
   });
 });

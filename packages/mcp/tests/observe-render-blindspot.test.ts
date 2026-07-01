@@ -81,6 +81,14 @@ describe("frame 级虚拟列表盲区（容器未收集时）", () => {
     expect(out).toMatch(/# blindspots:.*canvas/);
     expect(out).toMatch(/# blindspots:.*virtual.*1003\/37/);
   });
+  it("frame 级 lake-sheet 盲区指向 vortex_query mode=sheet", () => {
+    const data = obs([], {
+      frames: [{ frameId: 0, parentFrameId: -1, url: "http://x", offset: { x: 0, y: 0 }, elementCount: 0, truncated: false, scanned: true,
+        blindspots: [{ kind: "sheet", name: "lakesheet", lib: "lakesheet", rows: 199, cols: 27 }] }],
+    });
+    const out = renderObserveTree(data as any, null);
+    expect(out).toContain("lakesheet sheet lakesheet(199×27) → readable via vortex_query mode=sheet");
+  });
 });
 
 describe("A4 截断量化", () => {
