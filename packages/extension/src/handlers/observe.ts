@@ -3700,17 +3700,35 @@ const INTERACTIVE_SELECTORS = [
             }
           }
           if (__fw) {
-            let __blank: { sel: string; len: number } | null = null;
-            let __rendered = false;
-            for (const __sel of ["#root", "#app", "#__next", "[data-reactroot]"]) {
-              const __rt = document.querySelector(__sel);
-              if (!__rt) continue;
-              const __len = __rt.innerHTML.trim().length;
-              const __hasInner = collectedEls.some((__c) => __rt !== __c && __rt.contains(__c));
-              if (__len >= 64 || __hasInner) { __rendered = true; break; } // 某挂载点已渲染 → 不报(F3)
-              if (!__blank) __blank = { sel: __sel, len: __len };
+            const __mounts = ["#root", "#app", "#__next", "[data-reactroot]"];
+            const __mountEls = __mounts.map((__s) => document.querySelector(__s)).filter(Boolean) as Element[];
+            const __html = document.documentElement, __body = document.body;
+            // 页级门(F1/F2):排除 html/body + 挂载容器自身后仍有交互元素 → 已渲染(内容在非标准容器
+            // 或 open shadow 内,collectedEls 穿 shadow 故此处计入),不报。排 html/body 保 g2 FN 修复。
+            const __hasContent = collectedEls.some((__c) => __c !== __html && __c !== __body && __mountEls.indexOf(__c) < 0);
+            // 视觉门(F3):canvas/video 类应用无交互 DOM 但已渲染,面积门与 canvas 盲区一致。
+            let __hasVisual = false;
+            for (const __v of Array.from(document.querySelectorAll("canvas, video"))) {
+              const __vr = (__v as Element).getBoundingClientRect();
+              if (__vr.width * __vr.height > 200 * 150) { __hasVisual = true; break; }
             }
-            if (!__rendered && __blank) __blankShell = { root: __blank.sel, rootLen: __blank.len, framework: __fw };
+            if (!__hasContent && !__hasVisual) {
+              let __blank: { sel: string; len: number } | null = null;
+              for (const __sel of __mounts) {
+                const __rt = document.querySelector(__sel);
+                if (!__rt) continue;
+                const __len = __rt.innerHTML.trim().length;
+                // deepContains 穿 open shadow(contains 不穿,collectedEls 含 shadow 内元素)
+                const __hasInner = collectedEls.some((__c) => {
+                  let __cur: any = __c;
+                  while (__cur) { if (__cur === __rt) return __rt !== __c; __cur = __cur.parentNode || __cur.host || null; }
+                  return false;
+                });
+                if (__len >= 64 || __hasInner) { __blank = null; break; } // 某挂载点已渲染 → 不报(F4 取舍)
+                if (!__blank) __blank = { sel: __sel, len: __len };
+              }
+              if (__blank) __blankShell = { root: __blank.sel, rootLen: __blank.len, framework: __fw };
+            }
           }
         }
 

@@ -231,6 +231,18 @@ export type BlankShell = { root: string; rootLen: number; framework: string };
  * body/root 挂 cursor:pointer 致被收集,裸计数会击穿 —— g2.antv 空态实证);F3:任一挂载点
  * 已渲染即不报,防"#root 空 portal + #app 已渲染"误判。
  */
+// 穿 open shadow 边界的后代包含。Element.contains **不穿** shadow root,而 collected 经
+// querySelectorAllDeep 收集含 shadow 内元素;沿 parentNode→host 上升可跨 shadow 判定祖先关系
+// (shadowRoot.parentNode=null,靠 .host 上升到宿主元素)。F1 修复:应用渲染进 shadow 时不误判空壳。
+function deepContains(root: Node, node: Node): boolean {
+  let cur: any = node;
+  while (cur) {
+    if (cur === root) return true;
+    cur = cur.parentNode || cur.host || null;
+  }
+  return false;
+}
+
 export function detectBlankShell(doc: Document, win: any, collected: Element[]): BlankShell | null {
   if (doc.readyState !== "complete") return null;                // 仍在加载 DOM 阶段
   let framework = "";                                            // ① framework 在场(仅框架名,F4)
@@ -247,14 +259,28 @@ export function detectBlankShell(doc: Document, win: any, collected: Element[]):
     }
   }
   if (!framework) return null;
-  // 遍历所有挂载点:任一"已渲染"(root 内容 ≥64 或 root 内有交互后代)→ 页面渲染成功,不报(F3);
-  // 仅当所有存在挂载点都空壳时,报首个空壳(F2:后代包含排除 root 自身 + html/body 祖先噪声)。
+  const mounts = ["#root", "#app", "#__next", "[data-reactroot]"];
+  const mountEls = mounts.map((s) => doc.querySelector(s)).filter(Boolean) as Element[];
+  const html = doc.documentElement,
+    body = doc.body;
+  // 页级门(F1/F2 修复):排除 html/body + 挂载容器自身三类结构性噪声后仍有交互元素 → 页面已渲染
+  // (内容在非标准容器或 open shadow 内)→ 不报。排除 html/body 保住 g2 空态噪声击穿的 FN 修复;
+  // 排除 mountEls 自身兼容 #root 挂 cursor:pointer 被收集;collected 穿 shadow 故 shadow 应用在此计入。
+  const hasContent = collected.some((c) => c !== html && c !== body && mountEls.indexOf(c) < 0);
+  if (hasContent) return null;
+  // 视觉门(F3 修复):canvas/video 类应用(webgl/pixi/konva)无交互 DOM 但已渲染,面积门与 canvas 盲区一致。
+  for (const v of Array.from(doc.querySelectorAll("canvas, video"))) {
+    const r = v.getBoundingClientRect();
+    if (r.width * r.height > 200 * 150) return null;
+  }
+  // 找首个空壳挂载点:近空(<64)且 root 内无交互后代(deepContains 穿 shadow)。
+  // 任一挂载点已渲染即整体不报(F4 取舍:优先规避 FP,主 #root 崩溃但残留渲染态挂载点时抑制信号)。
   let blank: { sel: string; len: number } | null = null;
-  for (const sel of ["#root", "#app", "#__next", "[data-reactroot]"]) {
+  for (const sel of mounts) {
     const el = doc.querySelector(sel);
     if (!el) continue;
     const len = el.innerHTML.trim().length;
-    const hasInner = collected.some((c) => el !== c && el.contains(c));
+    const hasInner = collected.some((c) => el !== c && deepContains(el, c));
     if (len >= 64 || hasInner) return null;                      // 某挂载点已渲染 → 不报
     if (!blank) blank = { sel, len };
   }

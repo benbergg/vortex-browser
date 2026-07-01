@@ -133,8 +133,14 @@ describe("blankShell inline↔真源 parity", () => {
     expect(observeSrc).toContain('document.readyState === "complete"'); // complete 门
     expect(observeSrc).toMatch(/umi\|react\|vue\|angular\|svelte\|next\|nuxt/); // ① framework 正则(F4 收紧:去泛匹配 chunk/hash)
     expect(observeSrc).toContain('"#root", "#app", "#__next", "[data-reactroot]"'); // ② 挂载点
-    expect(observeSrc).toContain("__rt !== __c && __rt.contains(__c)"); // F2 后代包含(排除 html/body 祖先 + root 自身)
-    expect(observeSrc).toContain("__len >= 64 || __hasInner"); // ③ 近空阈值 + F3 任一挂载点已渲染即抑制
+    // F1/F2 页级门:排除 html/body + 挂载容器自身后仍有交互元素 → 已渲染,不报
+    expect(observeSrc).toContain("__mountEls.indexOf(__c) < 0");
+    // F1 deepContains:穿 open shadow 的后代包含(parentNode→host 上升)
+    expect(observeSrc).toContain("__cur.parentNode || __cur.host");
+    // F3 视觉门:canvas/video 面积门(webgl/pixi 无交互 DOM 但已渲染)
+    expect(observeSrc).toContain('querySelectorAll("canvas, video")');
+    expect(observeSrc).toContain("__hasVisual");
+    expect(observeSrc).toContain("__len >= 64 || __hasInner"); // ③ 近空阈值 + F4 任一挂载点已渲染即抑制
   });
   it("framesOut 管道镜像 blankShell(与 modal 同形)", () => {
     expect(observeSrc).toContain("s.page.blankShell ? { blankShell: s.page.blankShell }");

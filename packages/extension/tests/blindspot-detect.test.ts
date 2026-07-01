@@ -378,4 +378,41 @@ describe("detectBlankShell", () => {
     const win = mk(`<div id="root"></div><script src="https://cdn/index.a1b2c3d4.js"></script>`, { win: {} });
     expect(detectBlankShell(document, win, [])).toBeNull();
   });
+
+  // F5-#1:应用渲染进 #root>host 的 open shadow → collectedEls 穿 shadow 收集到内部控件,
+  // 页级门计入(host/shadowBtn 非 html/body/mount)→ 不误报(修 el.contains 不穿 shadow 的 FP)
+  it("F5-#1:应用渲染进 open shadow(collected 含 shadow 内元素) → 不命中(页级门 + deepContains)", () => {
+    const win = mk(`<div id="root"><div id="host"></div></div>`, { win: { React: {} } });
+    const host = document.querySelector("#host")!;
+    const sr = host.attachShadow({ mode: "open" });
+    const btn = document.createElement("button");
+    btn.textContent = "go";
+    sr.appendChild(btn);
+    expect(detectBlankShell(document, win, [btn])).toBeNull();
+  });
+
+  // F5-#2:内容挂到非标准容器 .app-root、残留空 #root decoy → 页级门数到 .app-root 内控件 → 不误报
+  it("F5-#2:非标准挂载容器已渲染 + 残留空 #root decoy → 不命中(页级门)", () => {
+    const win = mk(`<div id="root"></div><div class="app-root"><button>go</button></div>`, { win: { React: {} } });
+    const btn = document.querySelector(".app-root button")!;
+    expect(detectBlankShell(document, win, [btn])).toBeNull();
+  });
+
+  // F5-#3:canvas/webgl 应用 #root 内只有大 canvas、无交互 DOM → 视觉门拦截 → 不误报
+  it("F5-#3:#root 内大 canvas 无交互 DOM → 不命中(视觉门)", () => {
+    const win = mk(`<div id="root"><canvas></canvas></div>`, { win: { React: {} } });
+    const cv = document.querySelector("canvas")!;
+    cv.getBoundingClientRect = () =>
+      ({ width: 400, height: 300, left: 0, top: 0, right: 400, bottom: 300, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect;
+    expect(detectBlankShell(document, win, [])).toBeNull();
+  });
+
+  // F5-#3 反向:小 canvas(loading spinner 尺寸,未过面积门)+ 空 #root → 仍命中(软语义"可能仍在渲染")
+  it("F5-#3 反向:小 canvas(<面积门)+ 空 root → 仍命中(不误抑制加载态)", () => {
+    const win = mk(`<div id="root"><canvas></canvas></div>`, { win: { React: {} } });
+    const cv = document.querySelector("canvas")!;
+    cv.getBoundingClientRect = () =>
+      ({ width: 20, height: 20, left: 0, top: 0, right: 20, bottom: 20, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect;
+    expect(detectBlankShell(document, win, [])).toEqual({ root: "#root", rootLen: 17, framework: "react" });
+  });
 });
