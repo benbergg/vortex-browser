@@ -19,4 +19,8 @@ describe("flowProbeFunc 内联 ↔ flow-readback 真源 parity", () => {
     expect(src).toContain("branchData"); // 并行递归
     expect(src).toContain('#quot;');      // mermaid `"` 转义
   });
+  it("内联含 CONCURRENT 菱形 + 分支序号(app 源码坐实的真实形状,与真源一致)", () => {
+    expect(src).toContain('=== "CONCURRENT"'); // 真实并行 septType → 菱形
+    expect(src).toContain("`分支${bi + 1}`");  // 分支按序号
+  });
 });

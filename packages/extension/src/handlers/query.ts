@@ -994,12 +994,13 @@ export const flowProbeFunc = (
         last = id;
         const data = node.data || {};
         if (Array.isArray(data.branchData) && data.branchData.length) {
-          for (const branch of data.branchData) {
+          // 真实形状(app 源码坐实):branchData[i]={septType:"CONCURRENT_ITEM",septs:[...]}(无 name),分支按序号。
+          data.branchData.forEach((branch: any, bi: number) => {
             const bseq = subSeq(branch);
-            if (!bseq.length) continue;
+            if (!bseq.length) return;
             const r = expand(bseq, null);
-            if (r.first) edges.push({ from: id, to: r.first, label: (branch && (branch.name || branch.branchName)) || "分支" });
-          }
+            if (r.first) edges.push({ from: id, to: r.first, label: (branch && (branch.name || branch.branchName)) || `分支${bi + 1}` });
+          });
         }
         const loop = subSeq(data.iterateSeptData);
         if (loop.length) { const r = expand(loop, null); if (r.first) edges.push({ from: id, to: r.first, label: "循环" }); }
@@ -1048,7 +1049,7 @@ export const flowProbeFunc = (
       const mid = idx.get(n.id)!;
       const text = `${escFlow(n.label)} (${escFlow(n.type)})`;
       const t = (n.type || "").toUpperCase();
-      lines.push("  " + (t === "START" || t === "END" ? `${mid}(["${text}"])` : t === "PARALLEL" ? `${mid}{"${text}"}` : `${mid}["${text}"]`));
+      lines.push("  " + (t === "START" || t === "END" ? `${mid}(["${text}"])` : t === "PARALLEL" || t === "CONCURRENT" ? `${mid}{"${text}"}` : `${mid}["${text}"]`));
     }
     for (const e of graph.edges) {
       const f = idx.get(e.from), t = idx.get(e.to);

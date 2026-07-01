@@ -93,25 +93,48 @@ describe("ipaasAdapter.read", () => {
     expect(g.edges[1].to).toBe(g.nodes[2].id);
   });
 
-  it("并行节点递归 branchData(假定形状 [{name,septs:[]}])→ fan-out 边", () => {
+  // 真实形状(app 源码 getNodeListByIndices 坐实):CONCURRENT 节点 data.branchData 是分支数组,
+  // 每分支是 {septType:"CONCURRENT_ITEM", septs:[节点]}(无 name → 分支按序号命名)。
+  it("CONCURRENT 节点递归 branchData[{CONCURRENT_ITEM,septs}] → fan-out 边(分支按序号)", () => {
     mountIpaas({
       startNode: { id: "s", name: "触发", septType: "START", data: {} },
       nodesDataList: [{
-        id: "p", name: "并行", septType: "PARALLEL",
+        id: "c", name: "并行", septType: "CONCURRENT",
         data: { branchData: [
-          { name: "分支A", septs: [{ id: "a", name: "脚本A", septType: "SCRIPT", data: {} }] },
-          { name: "分支B", septs: [{ id: "b", name: "脚本B", septType: "SCRIPT", data: {} }] },
+          { septType: "CONCURRENT_ITEM", septs: [{ id: "a", name: "脚本A", septType: "GROOVY_SCRIPT", data: {} }] },
+          { septType: "CONCURRENT_ITEM", septs: [{ id: "b", name: "HTTP-B", septType: "HTTP", data: {} }] },
         ] },
       }],
       endNode: { id: "e", name: "结束", septType: "END", data: {} },
     });
     const g = ipaasAdapter.read(document)!;
-    // 含并行节点 + 两分支子节点
-    expect(g.nodes.some((n) => n.type === "PARALLEL")).toBe(true);
-    expect(g.nodes.filter((n) => n.type === "SCRIPT")).toHaveLength(2);
-    // 并行节点 fan-out 到分支首节点,边带分支名
-    const par = g.nodes.find((n) => n.type === "PARALLEL")!;
-    expect(g.edges.some((e) => e.from === par.id && e.label === "分支A")).toBe(true);
+    const con = g.nodes.find((n) => n.type === "CONCURRENT")!;
+    expect(con).toBeTruthy();
+    expect(g.nodes.filter((n) => n.id === "ip_a_2" || n.label === "脚本A")).toHaveLength(1); // 分支子节点入图
+    // 两分支 fan-out,边按序号命名
+    expect(g.edges.some((e) => e.from === con.id && e.label === "分支1")).toBe(true);
+    expect(g.edges.some((e) => e.from === con.id && e.label === "分支2")).toBe(true);
+  });
+
+  // 真实形状:ITERATE 节点 data.iterateSeptData.septs 是循环体节点数组。
+  it("ITERATE 节点递归 iterateSeptData.septs → 循环回边", () => {
+    mountIpaas({
+      startNode: { id: "s", name: "触发", septType: "START", data: {} },
+      nodesDataList: [{
+        id: "it", name: "循环", septType: "ITERATE",
+        data: { iterateSeptData: { septs: [{ id: "l", name: "循环体HTTP", septType: "HTTP", data: {} }] } },
+      }],
+      endNode: { id: "e", name: "结束", septType: "END", data: {} },
+    });
+    const g = ipaasAdapter.read(document)!;
+    const it = g.nodes.find((n) => n.type === "ITERATE")!;
+    expect(g.nodes.some((n) => n.label === "循环体HTTP")).toBe(true);
+    expect(g.edges.some((e) => e.from === it.id && e.label === "循环")).toBe(true);
+  });
+
+  it("serializeFlow:CONCURRENT 渲成菱形(与 PARALLEL 同)", () => {
+    const g = { nodes: [{ id: "c", label: "并行", type: "CONCURRENT" }], edges: [] };
+    expect(serializeFlow(g, "mermaid")).toContain('N0{"并行 (CONCURRENT)"}');
   });
 
   it("非 ipaas 页 detect=false / read=null", () => {

@@ -24,9 +24,10 @@ function renderMermaid(graph: FlowGraph): string {
     const mid = idx.get(n.id)!;
     const text = `${escFlow(n.label)} (${escFlow(n.type)})`;
     const t = (n.type || "").toUpperCase();
+    // 并行/分支节点用菱形:PARALLEL(通用)+ CONCURRENT(ipaas 真实 septType)。
     const shaped =
       t === "START" || t === "END" ? `${mid}(["${text}"])`
-      : t === "PARALLEL" ? `${mid}{"${text}"}`
+      : t === "PARALLEL" || t === "CONCURRENT" ? `${mid}{"${text}"}`
       : `${mid}["${text}"]`;
     lines.push(`  ${shaped}`);
   }
@@ -112,12 +113,14 @@ export const ipaasAdapter: FlowAdapter = {
         const data = node.data || {};
         // 并行/分支:每分支 fan-out(边带分支名),v1 不显式 merge 回后继(留 backlog)。
         if (Array.isArray(data.branchData) && data.branchData.length) {
-          for (const branch of data.branchData) {
+          // 真实形状(app 源码坐实):branchData[i] = {septType:"CONCURRENT_ITEM", septs:[...]}(无 name)。
+          // 分支无名 → 按序号"分支N"。
+          data.branchData.forEach((branch: any, bi: number) => {
             const bseq = subSeq(branch);
-            if (!bseq.length) continue;
+            if (!bseq.length) return;
             const r = expand(bseq, null);
-            if (r.first) edges.push({ from: id, to: r.first, label: (branch && (branch.name || branch.branchName)) || "分支" });
-          }
+            if (r.first) edges.push({ from: id, to: r.first, label: (branch && (branch.name || branch.branchName)) || `分支${bi + 1}` });
+          });
         }
         // 循环体:回边 label "循环"。
         const loop = subSeq(data.iterateSeptData);
