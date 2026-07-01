@@ -225,9 +225,11 @@ export type BlankShell = { root: string; rootLen: number; framework: string };
  * 模型误读"无控件")。五门全满足才触发:framework 在场 + 根容器存在且近空 + 0 交互 +
  * document complete。软语义:加载中/真失败两态提示都正确。observe.ts page-side scan 内联
  * 同一判定(标记 [inline detectBlankShell]),改一处须改两处。win 传 window(单测传 mock)。
+ * interactiveCount:调用方传"已排除结构性 html/body 的收集交互元素数"(某些站给 body 挂
+ * cursor:pointer/listener 致其被收集,会击穿裸计数 —— g2.antv 空态实证)。
  */
 export function detectBlankShell(doc: Document, win: any, interactiveCount: number): BlankShell | null {
-  if (interactiveCount !== 0) return null;                       // ④ 有收集到元素 → 非空壳
+  if (interactiveCount !== 0) return null;                       // ④ 有非结构性交互元素 → 非空壳
   if (doc.readyState !== "complete") return null;                // ⑤ 仍在加载 DOM 阶段
   let framework = "";                                            // ① framework 在场
   if (win.React !== undefined) framework = "react";

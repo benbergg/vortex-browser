@@ -3685,7 +3685,11 @@ const INTERACTIVE_SELECTORS = [
         // detectBlankShell,改一处须改两处。空壳 SPA/渲染失败感知:framework 在场 + 根容器近空
         // + 0 交互(elements.length===0) + document complete → frame 级 blankShell 信号。
         let __blankShell: { root: string; rootLen: number; framework: string } | undefined;
-        if (elements.length === 0 && document.readyState === "complete") {
+        // "0 交互"门排除结构性 html/body:部分站给 body 挂 cursor:pointer/listener 致其被
+        // 收集,会击穿裸 elements.length===0(g2.antv 空态实证:收集到 html+body 噪声)。
+        // 只数 root 内真实交互内容 → 空壳(root 空、仅 body 噪声)仍触发,小内容已渲染页不误触发。
+        const __nonStructural = elements.filter((__e) => __e.tag !== "html" && __e.tag !== "body").length;
+        if (__nonStructural === 0 && document.readyState === "complete") {
           let __fw = "";
           if ((window as any).React !== undefined) __fw = "react";
           else if ((window as any).Vue !== undefined) __fw = "vue";
