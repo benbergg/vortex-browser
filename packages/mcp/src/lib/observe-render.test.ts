@@ -181,4 +181,15 @@ describe("observe-render: blankShell 空壳 SPA 渲染", () => {
   it("无 blankShell → 不输出该行(向后兼容)", () => {
     expect(renderObserveTree(mkBlankData(), null)).not.toContain("# blank-shell:");
   });
+
+  it("F1:仅子 frame(frameId≠0)带 blankShell → 主页不输出 # blank-shell:", () => {
+    const data = {
+      snapshotId: "s3", url: "https://x/app", elements: [],
+      frames: [
+        { frameId: 0, parentFrameId: -1, url: "https://x/app", offset: { x: 0, y: 0 }, elementCount: 3, truncated: false, scanned: true },
+        { frameId: 1, parentFrameId: 0, url: "https://embed/child", offset: { x: 0, y: 0 }, elementCount: 0, truncated: false, scanned: true, blankShell: { root: "#root", rootLen: 0, framework: "react" } },
+      ],
+    } as unknown as CompactObserve;
+    expect(renderObserveTree(data, null)).not.toContain("# blank-shell:");
+  });
 });

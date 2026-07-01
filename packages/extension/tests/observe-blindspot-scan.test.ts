@@ -132,7 +132,7 @@ describe("blankShell inline↔真源 parity", () => {
   it("inline 副本含五门关键判据(与真源一致)", () => {
     expect(observeSrc).toContain('__nonStructural === 0 && document.readyState === "complete"'); // ④⑤
     expect(observeSrc).toMatch(/__e\.tag !== "html" && __e\.tag !== "body"/); // ④ 排除结构性 html/body(g2 空态实证)
-    expect(observeSrc).toMatch(/umi\|react\|vue\|next\|runtime\|chunk/); // ① framework 正则
+    expect(observeSrc).toMatch(/umi\|react\|vue\|angular\|svelte\|next\|nuxt/); // ① framework 正则(F4 收紧:去泛匹配 chunk/hash)
     expect(observeSrc).toContain('"#root", "#app", "#__next", "[data-reactroot]"'); // ② 挂载点
     expect(observeSrc).toContain("__len < 64"); // ③ 近空阈值
   });

@@ -3697,7 +3697,7 @@ const INTERACTIVE_SELECTORS = [
           else if (typeof (window as any).g_history !== "undefined" || (window as any).g !== undefined) __fw = "umi";
           else {
             for (const __s of Array.from(document.scripts)) {
-              if (/(?:umi|react|vue|next|runtime|chunk|\.[a-f0-9]{8}\.js)/i.test((__s as HTMLScriptElement).src || "")) { __fw = "script-chunk"; break; }
+              if (/(?:umi|react|vue|angular|svelte|next|nuxt)/i.test((__s as HTMLScriptElement).src || "")) { __fw = "script-chunk"; break; }
             }
           }
           if (__fw) {

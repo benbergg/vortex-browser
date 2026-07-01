@@ -355,4 +355,9 @@ describe("detectBlankShell", () => {
     const win = mk(`<div id="root"></div>`, { win: { g_history: {} } });
     expect(detectBlankShell(document, win, 0)?.framework).toBe("umi");
   });
+
+  it("F4:仅哈希包名(无框架名)不算 framework 在场 → 不命中", () => {
+    const win = mk(`<div id="root"></div><script src="https://cdn/index.a1b2c3d4.js"></script>`, { win: {} });
+    expect(detectBlankShell(document, win, 0)).toBeNull();
+  });
 });

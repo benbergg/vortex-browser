@@ -410,7 +410,7 @@ function modalSummary(frames?: CompactFrame[]): string | null {
 /** 空壳 SPA/渲染失败 meta 行:首个带 blankShell 的 frame → # blank-shell:。软语义(加载/失败两态都对)。 */
 function blankShellSummary(frames?: CompactFrame[]): string | null {
   for (const f of frames ?? []) {
-    if (f.blankShell) {
+    if (f.blankShell && f.frameId === 0) {  // F1:仅主 frame,避免空白子 iframe 误报页级
       const b = f.blankShell;
       return `# blank-shell: ${b.framework} 应用的 ${b.root} 近空(${b.rootLen} chars)且 0 交互元素、文档已 complete — 页面可能仍在渲染或渲染失败。建议 vortex_wait_for(idle=net) 后重试,或 vortex_debug_read(console/network) 查错(如 ERR_NETWORK / React hydration)。`;
     }

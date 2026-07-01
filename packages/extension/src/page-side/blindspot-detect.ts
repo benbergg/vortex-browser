@@ -238,7 +238,7 @@ export function detectBlankShell(doc: Document, win: any, interactiveCount: numb
   else if (typeof win.g_history !== "undefined" || win.g !== undefined) framework = "umi";
   else {
     for (const s of Array.from(doc.scripts)) {
-      if (/(?:umi|react|vue|next|runtime|chunk|\.[a-f0-9]{8}\.js)/i.test((s as HTMLScriptElement).src || "")) {
+      if (/(?:umi|react|vue|angular|svelte|next|nuxt)/i.test((s as HTMLScriptElement).src || "")) {
         framework = "script-chunk";
         break;
       }
