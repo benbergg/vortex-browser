@@ -881,12 +881,20 @@ export const sheetProbeFunc = (
       }
     }
     const nRows = lastRow + 1, nCols = lastCol + 1;
+    // 工作簿页签(内联 readWorksheetTabs,parity):让模型知道有哪些 sheet 及怎么切换。
+    const worksheets: Array<{ name: string; active: boolean }> = [];
+    for (const t of Array.from(document.querySelectorAll(".lake-sheet-tab-item"))) {
+      const nameEl = t.querySelector(".sheet-name-container");
+      const wname = ((nameEl && nameEl.textContent) || t.textContent || "").trim();
+      if (wname) worksheets.push({ name: wname, active: t.classList.contains("lake-sheet-tab-item-active") });
+    }
     const sheet = {
       name: typeof d.name === "string" ? d.name : "",
       rowCount: nRows,
       colCount: nCols,
       cells: cells.slice(0, nRows).map((row) => row.slice(0, nCols)),
       merges: merges.filter((mg) => mg.row < nRows && mg.col < nCols),
+      worksheets,
     };
 
     // —— serialize(内联真源 serializeSheet)——
@@ -912,7 +920,7 @@ export const sheetProbeFunc = (
     const shown = Math.min(total, Math.max(1, maxRows));
     const truncated = total > shown;
     if (fmt === "json") {
-      return { text: JSON.stringify({ sheet: sheet.name, rowCount: sheet.rowCount, colCount: sheet.colCount, rows: sheet.cells.slice(0, shown), merges: sheet.merges, truncated }) };
+      return { text: JSON.stringify({ sheet: sheet.name, rowCount: sheet.rowCount, colCount: sheet.colCount, rows: sheet.cells.slice(0, shown), merges: sheet.merges, worksheets: sheet.worksheets, truncated }) };
     }
     const filled = applyMergeFill(sheet.cells, sheet.merges).slice(0, shown);
     if (filled.length === 0) return { text: `> ${sheet.rowCount} 行 × ${sheet.colCount} 列，空表（sheet: ${sheet.name}）` };
@@ -928,6 +936,10 @@ export const sheetProbeFunc = (
     lines.push(truncated
       ? `> ${sheet.rowCount} 行 × ${sheet.colCount} 列，显示 1–${shown} / 共 ${total} 行，提高 maxResults 取更多（sheet: ${sheet.name}）`
       : `> ${sheet.rowCount} 行 × ${sheet.colCount} 列，显示 1–${shown}（sheet: ${sheet.name}）`);
+    if (sheet.worksheets && sheet.worksheets.length > 1) {
+      const wnames = sheet.worksheets.map((w) => (w.active ? `*${w.name}` : w.name)).join(" | ");
+      lines.push(`> 工作簿(${sheet.worksheets.length}): ${wnames} — 切换其他 sheet: vortex_act 点对应页签(见 observe)后再 vortex_query mode=sheet`);
+    }
     return { text: lines.join("\n") };
   } catch (e) {
     return { error: "sheet readback error: " + (e instanceof Error ? e.message : String(e)) };

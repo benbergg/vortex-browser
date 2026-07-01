@@ -25,4 +25,9 @@ describe("sheetProbeFunc 内联 ↔ sheet-readback 真源 parity", () => {
     expect(src).toContain('v.class === "image"');   // 图片 → markdown 图片
     expect(src).toContain("lastRow = -1, lastCol = -1"); // 尾部裁剪
   });
+  it("内联含工作簿页签枚举 + 清单行(与真源一致)", () => {
+    expect(src).toContain(".lake-sheet-tab-item");        // 页签枚举
+    expect(src).toContain("lake-sheet-tab-item-active");  // 活动标记
+    expect(src).toContain("工作簿(");                      // 清单行
+  });
 });

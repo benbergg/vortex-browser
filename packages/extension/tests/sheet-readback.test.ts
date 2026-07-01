@@ -1,5 +1,6 @@
+// @vitest-environment jsdom
 import { describe, it, expect } from "vitest";
-import { serializeSheet, readLakeSheetModel, type NormalizedSheet } from "../src/page-side/sheet-readback.js";
+import { serializeSheet, readLakeSheetModel, readWorksheetTabs, type NormalizedSheet } from "../src/page-side/sheet-readback.js";
 
 // 纵向合并(colCount=1,rowCount=3):锚值只在 row1,covered row2/row3 为空 → markdown 应 fill-down
 const verticalMerge: NormalizedSheet = {
@@ -133,5 +134,41 @@ describe("readLakeSheetModel 归一化", () => {
     expect(s.rowCount).toBe(2);        // 5 行 → 裁到 2 行有内容
     expect(s.colCount).toBe(2);        // 4 列 → 裁到 2 列有内容
     expect(s.cells).toEqual([["h", "v"], ["a", "b"]]);
+  });
+});
+
+describe("readWorksheetTabs 工作簿页签枚举", () => {
+  it("读页签名 + 活动标记", () => {
+    document.body.innerHTML = `
+      <div class="lake-sheet-tab-item"><span class="sheet-name-container">好评</span></div>
+      <div class="lake-sheet-tab-item lake-sheet-tab-item-active"><span class="sheet-name-container">历史宝洁</span></div>
+      <div class="lake-sheet-tab-item"><span class="sheet-name-container">备用样本</span></div>`;
+    expect(readWorksheetTabs(document)).toEqual([
+      { name: "好评", active: false },
+      { name: "历史宝洁", active: true },
+      { name: "备用样本", active: false },
+    ]);
+  });
+  it("无页签 → 空数组", () => {
+    document.body.innerHTML = `<div>x</div>`;
+    expect(readWorksheetTabs(document)).toEqual([]);
+  });
+});
+
+describe("serializeSheet 工作簿清单行", () => {
+  it("markdown 追加工作簿清单(>1 sheet,标当前)", () => {
+    const s: NormalizedSheet = {
+      name: "历史宝洁", rowCount: 1, colCount: 1, cells: [["h"]], merges: [],
+      worksheets: [{ name: "好评", active: false }, { name: "历史宝洁", active: true }],
+    };
+    const last = serializeSheet(s, { format: "markdown", maxRows: 200 }).split("\n").pop()!;
+    expect(last).toContain("工作簿(2)");
+    expect(last).toContain("*历史宝洁"); // 当前 sheet 标星
+    expect(last).toContain("好评");
+    expect(last).toContain("mode=sheet"); // 切换指引
+  });
+  it("单 sheet 或无 worksheets → 不追加清单行", () => {
+    const s: NormalizedSheet = { name: "S", rowCount: 1, colCount: 1, cells: [["h"]], merges: [] };
+    expect(serializeSheet(s, { format: "markdown", maxRows: 200 })).not.toContain("工作簿(");
   });
 });

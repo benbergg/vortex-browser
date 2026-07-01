@@ -7,14 +7,33 @@
  * 改一处须改两处;query-sheet-parity.test.ts 校验。
  */
 export interface Merge { row: number; col: number; rowCount: number; colCount: number; }
+export interface Worksheet { name: string; active: boolean; }
 export interface NormalizedSheet {
   name: string;
   rowCount: number;
   colCount: number;
   cells: string[][];
   merges: Merge[];
+  /** 同工作簿内其他 sheet 页签(供模型发现+切换),仅 probe 从 DOM 填。 */
+  worksheets?: Worksheet[];
 }
 export type SheetFormat = "markdown" | "csv" | "json";
+
+/**
+ * 从底部页签栏枚举工作簿(2026-07-01 语雀实测:`.lake-sheet-tab-item` 各页签,名在
+ * `.sheet-name-container`,活动页 `.lake-sheet-tab-item-active`)。让模型知道有哪些 sheet。
+ * ⚠ probe 内联同一逻辑,改一处须改两处;query-sheet-parity.test.ts 校验。
+ */
+export function readWorksheetTabs(doc: Document): Worksheet[] {
+  const tabs = Array.from(doc.querySelectorAll(".lake-sheet-tab-item"));
+  const out: Worksheet[] = [];
+  for (const t of tabs) {
+    const nameEl = t.querySelector(".sheet-name-container");
+    const name = ((nameEl && nameEl.textContent) || t.textContent || "").trim();
+    if (name) out.push({ name, active: t.classList.contains("lake-sheet-tab-item-active") });
+  }
+  return out;
+}
 
 /** markdown 单元格转义:`|`→`\|`、换行→空格、裁首尾空白。 */
 function escMd(s: string): string {
@@ -59,6 +78,7 @@ export function serializeSheet(
       colCount: sheet.colCount,
       rows: sheet.cells.slice(0, shown),
       merges: sheet.merges,
+      worksheets: sheet.worksheets,
       truncated,
     });
   }
@@ -83,6 +103,11 @@ export function serializeSheet(
     ? `> ${sheet.rowCount} 行 × ${sheet.colCount} 列，显示 1–${shown} / 共 ${total} 行，提高 maxResults 取更多（sheet: ${sheet.name}）`
     : `> ${sheet.rowCount} 行 × ${sheet.colCount} 列，显示 1–${shown}（sheet: ${sheet.name}）`;
   lines.push(foot);
+  // 工作簿清单(>1 sheet):让模型知道有哪些 sheet 及怎么切换。仅活动 sheet 有数据,其余标名。
+  if (sheet.worksheets && sheet.worksheets.length > 1) {
+    const names = sheet.worksheets.map((w) => (w.active ? `*${w.name}` : w.name)).join(" | ");
+    lines.push(`> 工作簿(${sheet.worksheets.length}): ${names} — 切换其他 sheet: vortex_act 点对应页签(见 observe)后再 vortex_query mode=sheet`);
+  }
   return lines.join("\n");
 }
 
