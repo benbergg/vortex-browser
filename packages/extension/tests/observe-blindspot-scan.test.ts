@@ -123,3 +123,19 @@ describe("detectImageBlindspot 纯函数 parity", () => {
     expect(detectImageBlindspot(big)).toBeNull();
   });
 });
+
+describe("blankShell inline↔真源 parity", () => {
+  const observeSrc = readFileSync(join(__dirname, "../src/handlers/observe.ts"), "utf8");
+  it("observe.ts 含 [inline detectBlankShell] 标记", () => {
+    expect(observeSrc).toContain("[inline detectBlankShell]");
+  });
+  it("inline 副本含五门关键判据(与真源一致)", () => {
+    expect(observeSrc).toContain('elements.length === 0 && document.readyState === "complete"'); // ④⑤
+    expect(observeSrc).toMatch(/umi\|react\|vue\|next\|runtime\|chunk/); // ① framework 正则
+    expect(observeSrc).toContain('"#root", "#app", "#__next", "[data-reactroot]"'); // ② 挂载点
+    expect(observeSrc).toContain("__len < 64"); // ③ 近空阈值
+  });
+  it("framesOut 管道镜像 blankShell(与 modal 同形)", () => {
+    expect(observeSrc).toContain("s.page.blankShell ? { blankShell: s.page.blankShell }");
+  });
+});

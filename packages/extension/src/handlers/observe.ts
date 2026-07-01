@@ -237,6 +237,8 @@ interface FramePageResult {
   >;
   /** 模态作用域信号(aria-modal 弹层打开,裁剪了背景)。@since modal-scope */
   modal?: { name: string; role: string; suppressed: number };
+  /** 空壳 SPA/渲染失败 frame 级信号。@since blank-shell */
+  blankShell?: { root: string; rootLen: number; framework: string };
 }
 
 function safeOrigin(url: string | undefined): string | null {
@@ -3679,6 +3681,32 @@ const INTERACTIVE_SELECTORS = [
           }
         }
 
+        // [inline detectBlankShell] 真源 packages/extension/src/page-side/blindspot-detect.ts
+        // detectBlankShell,改一处须改两处。空壳 SPA/渲染失败感知:framework 在场 + 根容器近空
+        // + 0 交互(elements.length===0) + document complete → frame 级 blankShell 信号。
+        let __blankShell: { root: string; rootLen: number; framework: string } | undefined;
+        if (elements.length === 0 && document.readyState === "complete") {
+          let __fw = "";
+          if ((window as any).React !== undefined) __fw = "react";
+          else if ((window as any).Vue !== undefined) __fw = "vue";
+          else if ((window as any).__NEXT_DATA__ !== undefined) __fw = "next";
+          else if (typeof (window as any).g_history !== "undefined" || (window as any).g !== undefined) __fw = "umi";
+          else {
+            for (const __s of Array.from(document.scripts)) {
+              if (/(?:umi|react|vue|next|runtime|chunk|\.[a-f0-9]{8}\.js)/i.test((__s as HTMLScriptElement).src || "")) { __fw = "script-chunk"; break; }
+            }
+          }
+          if (__fw) {
+            for (const __sel of ["#root", "#app", "#__next", "[data-reactroot]"]) {
+              const __rt = document.querySelector(__sel);
+              if (!__rt) continue;
+              const __len = __rt.innerHTML.trim().length;
+              if (__len < 64) __blankShell = { root: __sel, rootLen: __len, framework: __fw };
+              break;
+            }
+          }
+        }
+
         return {
           url: location.href,
           title: document.title,
@@ -3695,6 +3723,7 @@ const INTERACTIVE_SELECTORS = [
           truncated: elements.length >= max || __timeBudgetHit,
           blindspots: pageBlindspots,
           ...(__modalMeta ? { modal: __modalMeta } : {}),
+          ...(__blankShell ? { blankShell: __blankShell } : {}),
         };
       },
       args: [maxElements, viewport, includeText, includeAX, filterMode],
@@ -4002,6 +4031,8 @@ export function registerObserveHandlers(router: ActionRouter, debuggerMgr: Debug
         >;
         /** 模态作用域信号。@since modal-scope */
         modal?: { name: string; role: string; suppressed: number };
+        /** 空壳 SPA/渲染失败 frame 级信号。@since blank-shell */
+        blankShell?: { root: string; rootLen: number; framework: string };
       }> = [];
 
       for (const s of scans) {
@@ -4168,6 +4199,7 @@ offScreenActionable: e.offScreenActionable,
           candidateCount: s.page.candidateCount,
           ...(s.page.blindspots && s.page.blindspots.length ? { blindspots: s.page.blindspots } : {}),
           ...(s.page.modal ? { modal: s.page.modal } : {}),
+          ...(s.page.blankShell ? { blankShell: s.page.blankShell } : {}),
         });
       }
 
