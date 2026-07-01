@@ -812,6 +812,111 @@ export const styleProbeFunc = (
   }
 };
 
+/**
+ * page-side 语雀 Lake Sheet readback 函数体。mode=sheet 注入 MAIN world。
+ * 参数 args: [pattern(sheet 选择器), format(markdown|csv|json), maxRows]。
+ * 返回 { text } 或 { error }。⚠ [inline sheet-readback]:注入丢模块作用域,locate/read/
+ * serialize 必须内联;逻辑须与 src/page-side/sheet-readback.ts 真源一致(改一处须改两处),
+ * query-sheet-parity.test.ts 校验。纯读,不碰 kernel.command/history/ot(只读安全)。
+ */
+export const sheetProbeFunc = (
+  pattern: string,
+  format: string,
+  maxRows: number,
+): { text: string } | { error: string } => {
+  try {
+    const doc = document;
+    const container =
+      doc.querySelector(".lake-sheet-canvas-container") || doc.querySelector(".lake-sheet-editor");
+    if (!container) return { error: "no lake-sheet on page (未找到语雀数据表；若确在表格页请等待加载，或用 vortex_screenshot)" };
+    const fk = Object.keys(container).find(
+      (k) => k.startsWith("__reactInternalInstance") || k.startsWith("__reactFiber"),
+    );
+    if (!fk) return { error: "lake-sheet found but no react fiber (未加载完成，稍后重试或 vortex_screenshot)" };
+    let fiber: any = (container as any)[fk];
+    let depth = 0;
+    let kernel: any = null;
+    while (fiber && depth < 40) {
+      const st = fiber.memoizedState;
+      if (st && st.sheet && (st.sheet.doc || st.sheet.model)) { kernel = st.sheet; break; }
+      fiber = fiber.return; depth++;
+    }
+    if (!kernel) return { error: "lake-sheet kernel not found (fiber 走访失败，稍后重试或 vortex_screenshot)" };
+
+    const m = kernel.model, d = m && m.data, table = m && m.table;
+    if (!d || !Array.isArray(table)) return { error: "lake-sheet model empty" };
+    const colCount = typeof d.colCount === "number" ? d.colCount : (table[0] ? table[0].length : 0);
+    const cellText = (c: any): string => {
+      if (c == null) return "";
+      const v = typeof c === "object" ? c.value : c;
+      return v == null ? "" : String(v);
+    };
+    const cells: string[][] = table.map((row: any[]) => {
+      const out: string[] = [];
+      for (let c = 0; c < colCount; c++) out.push(cellText(row && row[c]));
+      return out;
+    });
+    const merges: Array<{ row: number; col: number; rowCount: number; colCount: number }> = [];
+    const mc = d.mergeCells;
+    if (mc && typeof mc === "object") {
+      for (const k of Object.keys(mc)) {
+        const v = mc[k];
+        if (v && typeof v === "object" && typeof v.row === "number" && typeof v.col === "number") {
+          merges.push({ row: v.row, col: v.col, rowCount: v.rowCount ?? 1, colCount: v.colCount ?? 1 });
+        }
+      }
+    }
+    const sheet = {
+      name: typeof d.name === "string" ? d.name : "",
+      rowCount: typeof d.rowCount === "number" ? d.rowCount : table.length,
+      colCount, cells, merges,
+    };
+
+    // —— serialize(内联真源 serializeSheet)——
+    const escMd = (s: string): string => String(s ?? "").replace(/\r?\n/g, " ").replace(/\|/g, "\\|").trim();
+    const escCsv = (s: string): string => {
+      const v = String(s ?? "");
+      return /[",\n\r]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
+    };
+    const applyMergeFill = (cs: string[][], ms: typeof merges): string[][] => {
+      const grid = cs.map((r) => r.slice());
+      for (const m of ms) {
+        if (m.colCount === 1 && m.rowCount > 1) {
+          const anchor = grid[m.row]?.[m.col] ?? "";
+          for (let r = m.row + 1; r < m.row + m.rowCount; r++) {
+            if (grid[r] && grid[r][m.col] === "") grid[r][m.col] = anchor;
+          }
+        }
+      }
+      return grid;
+    };
+    const fmt = format === "csv" || format === "json" ? format : "markdown";
+    const total = sheet.cells.length;
+    const shown = Math.min(total, Math.max(1, maxRows));
+    const truncated = total > shown;
+    if (fmt === "json") {
+      return { text: JSON.stringify({ sheet: sheet.name, rowCount: sheet.rowCount, colCount: sheet.colCount, rows: sheet.cells.slice(0, shown), merges: sheet.merges, truncated }) };
+    }
+    const filled = applyMergeFill(sheet.cells, sheet.merges).slice(0, shown);
+    if (filled.length === 0) return { text: `> ${sheet.rowCount} 行 × ${sheet.colCount} 列，空表（sheet: ${sheet.name}）` };
+    const lines: string[] = [];
+    if (fmt === "csv") {
+      for (const row of filled) lines.push(row.map(escCsv).join(","));
+    } else {
+      const header = filled[0];
+      lines.push("| " + header.map(escMd).join(" | ") + " |");
+      lines.push("| " + header.map(() => "---").join(" | ") + " |");
+      for (let i = 1; i < filled.length; i++) lines.push("| " + filled[i].map(escMd).join(" | ") + " |");
+    }
+    lines.push(truncated
+      ? `> ${sheet.rowCount} 行 × ${sheet.colCount} 列，显示 1–${shown} / 共 ${total} 行，提高 maxResults 取更多（sheet: ${sheet.name}）`
+      : `> ${sheet.rowCount} 行 × ${sheet.colCount} 列，显示 1–${shown}（sheet: ${sheet.name}）`);
+    return { text: lines.join("\n") };
+  } catch (e) {
+    return { error: "sheet readback error: " + (e instanceof Error ? e.message : String(e)) };
+  }
+};
+
 export function registerQueryHandlers(router: ActionRouter): void {
   router.registerAll({
     [QueryActions.QUERY_PAGE]: async (args, tabId) => {
@@ -821,11 +926,12 @@ export function registerQueryHandlers(router: ActionRouter): void {
       // 参数校验
       if (
         !mode ||
-        (mode !== "text" && mode !== "css" && mode !== "component" && mode !== "geometry" && mode !== "style")
+        (mode !== "text" && mode !== "css" && mode !== "component" &&
+         mode !== "geometry" && mode !== "style" && mode !== "sheet")
       ) {
         throw vtxError(
           VtxErrorCode.INVALID_PARAMS,
-          `vortex_query: mode must be 'text', 'css', 'component', 'geometry' or 'style', got ${String(mode)}`,
+          `vortex_query: mode must be 'text', 'css', 'component', 'geometry', 'style' or 'sheet', got ${String(mode)}`,
         );
       }
       if (!pattern || typeof pattern !== "string" || !pattern.trim()) {
@@ -919,6 +1025,27 @@ export function registerQueryHandlers(router: ActionRouter): void {
         }
         if ("error" in res && res.error) {
           throw vtxError(VtxErrorCode.JS_EXECUTION_ERROR, `query.queryPage geometry error: ${res.error}`);
+        }
+        return res;
+      } else if (mode === "sheet") {
+        // sheet 模式:注入 sheetProbeFunc 读语雀 Lake Sheet 内存模型 → md/csv/json。
+        // pattern = sheet 选择器(v1 仅活动 sheet);attr = 格式;maxResults = 行上限。
+        const format = typeof args.attr === "string" ? args.attr : "markdown";
+        const maxRows = Math.min((args.maxResults as number | undefined) ?? 200, 1000);
+
+        const results = await chrome.scripting.executeScript({
+          target: buildExecuteTarget(tid, frameId),
+          func: sheetProbeFunc,
+          args: [pattern, format, maxRows],
+          world: "MAIN",
+        });
+
+        const res = results[0]?.result as { text: string } | { error: string } | undefined;
+        if (!res) {
+          throw vtxError(VtxErrorCode.JS_EXECUTION_ERROR, "query.queryPage sheet: executeScript returned no result");
+        }
+        if ("error" in res && res.error) {
+          throw vtxError(VtxErrorCode.JS_EXECUTION_ERROR, `query.queryPage sheet error: ${res.error}`);
         }
         return res;
       } else if (mode === "style") {
