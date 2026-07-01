@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { detectBlindspot, detectVirtualByScroll, detectDivVirtualScroller, detectChartCanvas, detectImageBlindspot } from "../src/page-side/blindspot-detect.js";
+import { detectBlindspot, detectVirtualByScroll, detectDivVirtualScroller, detectChartCanvas, detectImageBlindspot, detectBlankShell } from "../src/page-side/blindspot-detect.js";
 
 /** 清理 page-side 图表库全局,避免跨用例污染(Chart.js/G2 检测读 window 全局)。 */
 function cleanupChartGlobals() {
@@ -306,5 +306,53 @@ describe("detectImageBlindspot", () => {
   });
   it("非 img 元素 → null", () => {
     expect(detectImageBlindspot(withRect(document.createElement("div"), 320, 240))).toBeNull();
+  });
+});
+
+describe("detectBlankShell", () => {
+  function mk(html: string, opts: { ready?: DocumentReadyState; win?: any } = {}) {
+    document.documentElement.innerHTML = `<head></head><body>${html}</body>`;
+    Object.defineProperty(document, "readyState", { value: opts.ready ?? "complete", configurable: true });
+    return opts.win ?? {};
+  }
+
+  it("失败空壳(framework+空root+0交互+complete) → 命中", () => {
+    const win = mk(`<div id="root"></div>`, { win: { React: {} } });
+    expect(detectBlankShell(document, win, 0)).toEqual({ root: "#root", rootLen: 0, framework: "react" });
+  });
+
+  it("root 有内容 → 不命中(已渲染)", () => {
+    const win = mk(`<div id="root"><h1>Dashboard</h1><nav>....................................</nav></div>`, { win: { React: {} } });
+    expect(detectBlankShell(document, win, 0)).toBeNull();
+  });
+
+  it("无 framework → 不命中(静态稀疏页护栏)", () => {
+    const win = mk(`<div id="root"></div>`, { win: {} });
+    expect(detectBlankShell(document, win, 0)).toBeNull();
+  });
+
+  it("交互元素≠0 → 不命中(小内容已渲染页护栏)", () => {
+    const win = mk(`<div id="root"></div>`, { win: { React: {} } });
+    expect(detectBlankShell(document, win, 2)).toBeNull();
+  });
+
+  it("readyState≠complete → 不命中(仍在加载)", () => {
+    const win = mk(`<div id="root"></div>`, { ready: "loading", win: { React: {} } });
+    expect(detectBlankShell(document, win, 0)).toBeNull();
+  });
+
+  it("无 SPA 挂载点 → 不命中(不敢称 SPA 外壳)", () => {
+    const win = mk(`<main></main>`, { win: { React: {} } });
+    expect(detectBlankShell(document, win, 0)).toBeNull();
+  });
+
+  it("framework 经 script chunk 检出(无 globals) → 命中 script-chunk", () => {
+    const win = mk(`<div id="app"></div><script src="https://cdn/umi.89ab768f.js"></script>`, { win: {} });
+    expect(detectBlankShell(document, win, 0)).toEqual({ root: "#app", rootLen: 0, framework: "script-chunk" });
+  });
+
+  it("umi globals 检出 g_history", () => {
+    const win = mk(`<div id="root"></div>`, { win: { g_history: {} } });
+    expect(detectBlankShell(document, win, 0)?.framework).toBe("umi");
   });
 });

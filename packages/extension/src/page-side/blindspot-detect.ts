@@ -216,3 +216,38 @@ export function detectImageBlindspot(el: HTMLElement): { src: string } | null {
   const src = (el as HTMLImageElement).currentSrc || (el as HTMLImageElement).src || el.getAttribute("src") || "";
   return { src: src.slice(0, 300) };
 }
+
+/** 空壳 SPA / 渲染失败 frame 级信号。@since blank-shell */
+export type BlankShell = { root: string; rootLen: number; framework: string };
+
+/**
+ * 空壳 SPA / 渲染失败感知(P2 衍生:站点自身 JS/网络失败致 #root 空时 observe 静默空树,
+ * 模型误读"无控件")。五门全满足才触发:framework 在场 + 根容器存在且近空 + 0 交互 +
+ * document complete。软语义:加载中/真失败两态提示都正确。observe.ts page-side scan 内联
+ * 同一判定(标记 [inline detectBlankShell]),改一处须改两处。win 传 window(单测传 mock)。
+ */
+export function detectBlankShell(doc: Document, win: any, interactiveCount: number): BlankShell | null {
+  if (interactiveCount !== 0) return null;                       // ④ 有收集到元素 → 非空壳
+  if (doc.readyState !== "complete") return null;                // ⑤ 仍在加载 DOM 阶段
+  let framework = "";                                            // ① framework 在场
+  if (win.React !== undefined) framework = "react";
+  else if (win.Vue !== undefined) framework = "vue";
+  else if (win.__NEXT_DATA__ !== undefined) framework = "next";
+  else if (typeof win.g_history !== "undefined" || win.g !== undefined) framework = "umi";
+  else {
+    for (const s of Array.from(doc.scripts)) {
+      if (/(?:umi|react|vue|next|runtime|chunk|\.[a-f0-9]{8}\.js)/i.test((s as HTMLScriptElement).src || "")) {
+        framework = "script-chunk";
+        break;
+      }
+    }
+  }
+  if (!framework) return null;
+  for (const sel of ["#root", "#app", "#__next", "[data-reactroot]"]) {  // ② 挂载点 ③ 近空
+    const el = doc.querySelector(sel);
+    if (!el) continue;
+    const len = el.innerHTML.trim().length;
+    return len < 64 ? { root: sel, rootLen: len, framework } : null;      // 首个存在挂载点定状态
+  }
+  return null;
+}
