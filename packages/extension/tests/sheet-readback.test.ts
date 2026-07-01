@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { serializeSheet, type NormalizedSheet } from "../src/page-side/sheet-readback.js";
+import { serializeSheet, readLakeSheetModel, type NormalizedSheet } from "../src/page-side/sheet-readback.js";
 
 // 纵向合并(colCount=1,rowCount=3):锚值只在 row1,covered row2/row3 为空 → markdown 应 fill-down
 const verticalMerge: NormalizedSheet = {
@@ -69,5 +69,39 @@ describe("serializeSheet 其他", () => {
   it("空表", () => {
     const e: NormalizedSheet = { name: "E", rowCount: 0, colCount: 0, cells: [], merges: [] };
     expect(serializeSheet(e, { format: "markdown", maxRows: 200 })).toContain("空表");
+  });
+});
+
+// 合成内核:仿 model.data(维度+合并) + model.table(2D {value} 网格)
+const fakeKernel = {
+  model: {
+    data: {
+      name: "样本表", rowCount: 3, colCount: 2,
+      mergeCells: { "1:0": { row: 1, col: 0, rowCount: 2, colCount: 1 } },
+    },
+    table: [
+      [{ value: "订单号" }, { value: "情感" }],
+      [{ value: "A" }, { value: "好评" }],
+      [{}, { value: "差评" }],
+    ],
+  },
+};
+
+describe("readLakeSheetModel 归一化", () => {
+  it("model.data/table → NormalizedSheet(cellText=value ?? '')", () => {
+    const s = readLakeSheetModel(fakeKernel, "*");
+    expect(s).not.toBeNull();
+    expect(s!.name).toBe("样本表");
+    expect(s!.rowCount).toBe(3);
+    expect(s!.colCount).toBe(2);
+    expect(s!.cells).toEqual([
+      ["订单号", "情感"],
+      ["A", "好评"],
+      ["", "差评"],
+    ]);
+    expect(s!.merges).toEqual([{ row: 1, col: 0, rowCount: 2, colCount: 1 }]);
+  });
+  it("内核无 model → null", () => {
+    expect(readLakeSheetModel({}, "*")).toBeNull();
   });
 });

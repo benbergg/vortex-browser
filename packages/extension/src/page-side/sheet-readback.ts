@@ -85,3 +85,67 @@ export function serializeSheet(
   lines.push(foot);
   return lines.join("\n");
 }
+
+/**
+ * fiber 走访定位 LakeSheet 内核:从 canvas 容器沿 fiber.return 上升,找 memoizedState.sheet
+ * (sig: doc||model)。2026-07-01 真站(banniu.yuque.com)实测路径。
+ */
+export function locateLakeSheetKernel(doc: Document): any | null {
+  const container =
+    doc.querySelector(".lake-sheet-canvas-container") || doc.querySelector(".lake-sheet-editor");
+  if (!container) return null;
+  const fk = Object.keys(container).find(
+    (k) => k.startsWith("__reactInternalInstance") || k.startsWith("__reactFiber"),
+  );
+  if (!fk) return null;
+  let fiber: any = (container as any)[fk];
+  let depth = 0;
+  while (fiber && depth < 40) {
+    const st = fiber.memoizedState;
+    if (st && st.sheet && (st.sheet.doc || st.sheet.model)) return st.sheet;
+    fiber = fiber.return;
+    depth++;
+  }
+  return null;
+}
+
+/**
+ * 归一化 LakeSheet 内核当前 worksheet → NormalizedSheet。
+ * cell 显示文本 = cell?.value ?? ''(非字符串 String 化)。合并从 model.data.mergeCells
+ * ({"r:c":{row,col,rowCount,colCount}})转数组。sheetSelector 非 `*` 时的跨 sheet 定位见
+ * 计划风险项(v1:仅当前活动 sheet 有硬保证)。
+ */
+export function readLakeSheetModel(kernel: any, _sheetSelector: string): NormalizedSheet | null {
+  const m = kernel && kernel.model;
+  const d = m && m.data;
+  const table = m && m.table;
+  if (!d || !Array.isArray(table)) return null;
+  const colCount = typeof d.colCount === "number" ? d.colCount : (table[0] ? table[0].length : 0);
+  const cellText = (c: any): string => {
+    if (c == null) return "";
+    const v = typeof c === "object" ? c.value : c;
+    return v == null ? "" : String(v);
+  };
+  const cells: string[][] = table.map((row: any[]) => {
+    const out: string[] = [];
+    for (let c = 0; c < colCount; c++) out.push(cellText(row && row[c]));
+    return out;
+  });
+  const merges: Merge[] = [];
+  const mc = d.mergeCells;
+  if (mc && typeof mc === "object") {
+    for (const k of Object.keys(mc)) {
+      const v = mc[k];
+      if (v && typeof v === "object" && typeof v.row === "number" && typeof v.col === "number") {
+        merges.push({ row: v.row, col: v.col, rowCount: v.rowCount ?? 1, colCount: v.colCount ?? 1 });
+      }
+    }
+  }
+  return {
+    name: typeof d.name === "string" ? d.name : "",
+    rowCount: typeof d.rowCount === "number" ? d.rowCount : table.length,
+    colCount,
+    cells,
+    merges,
+  };
+}
