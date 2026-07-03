@@ -204,6 +204,20 @@ export const cssQueryFunc = (
             (el as HTMLAnchorElement)[attrName as "href"] !== ""
           ) {
             val = (el as HTMLAnchorElement)[attrName as "href"];
+          } else if (
+            // value/checked/selected 是 form 控件的 live DOM property,用户输入/JS 赋值不反射为
+            // HTML attribute → getAttribute 常返 null(实测 log.bytenew.com 日期/关键词框读空)。
+            // 对 input/textarea/select/option 优先读 property(布尔 → "true"/"false"),回退 attribute。
+            (attrName === "value" || attrName === "checked" || attrName === "selected") &&
+            /^(INPUT|TEXTAREA|SELECT|OPTION)$/.test(el.tagName)
+          ) {
+            const prop = (el as unknown as Record<string, unknown>)[attrName];
+            val =
+              typeof prop === "boolean"
+                ? String(prop)
+                : typeof prop === "string"
+                  ? prop
+                  : el.getAttribute(attrName);
           } else {
             val = el.getAttribute(attrName);
           }
