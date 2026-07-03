@@ -91,7 +91,7 @@ describe("I15: tools/list budget + count + internalized grep", () => {
     defs.map(d => ({ name: d.name, description: d.description, inputSchema: d.schema })),
   );
 
-  it("tools/list 字节 ≤ 8100 B (flow mode 描述追加, 实测 8006 留 ~94B buffer)", () => {
+  it("tools/list 字节 ≤ 8500 B (vortex_mouse_click 坐标点击, 实测 8378 留 ~122B buffer)", () => {
     // V2 P0 修复 D16: filter 子字段 description 是必要的文档化豁免
     // (handler 已实现 console.ts:160 level / network.ts:305-321 pattern+statusMin/Max),
     // 移除豁免会触发 V2 D16 真发现复发 (LLM 不知可用子字段)。
@@ -104,14 +104,18 @@ describe("I15: tools/list budget + count + internalized grep", () => {
     // mode=flow: 8000 → 8100。vortex_query mode 枚举新增 flow(ipaas 流程图 readback),
     // description 同步追加 "; flow=流程图→mermaid."。payload 实测 8006B,
     // cap +100 留 ~94B 余量。沿用"加能力调 cap 不压字符"惯例。
-    expect(toolsListPayload.length).toBeLessThanOrEqual(8100);
+    // feat/coord-click: 8100 → 8500。vortex_mouse_click 坐标点击工具从内部化提升为公开
+    // (handler mouse.click 早已实现,含 frame→viewport 换算,此前只暴露坐标版 mouse.drag;
+    // canvas/地图/无 ref 场景刚需,补齐"坐标 click"能力缺口)。schema 块 +~366B,payload
+    // 实测 8378B,cap +400 至 8500 留 ~122B 余量。沿用"加能力调 cap 不压字符"惯例。
+    expect(toolsListPayload.length).toBeLessThanOrEqual(8500);
   });
 
-  it("公开工具数量 = 20（vortex_query 零 LLM 探测: 19 + vortex_query）", () => {
-    expect(defs.length).toBe(20);
+  it("公开工具数量 = 21（20 + vortex_mouse_click 坐标点击）", () => {
+    expect(defs.length).toBe(21);
   });
 
-  it("20 个公开工具名匹配 spec L4 §1.1+§1.2 + 工具横向优化 T6+T7+vortex_query", () => {
+  it("21 个公开工具名匹配 spec L4 §1.1+§1.2 + 工具横向优化 T6+T7+vortex_query+vortex_mouse_click", () => {
     const names = defs.map(d => d.name).sort();
     expect(names).toEqual([
       "vortex_act",
@@ -123,6 +127,7 @@ describe("I15: tools/list budget + count + internalized grep", () => {
       "vortex_fill",
       "vortex_fill_form",
       "vortex_history",
+      "vortex_mouse_click",
       "vortex_mouse_drag",
       "vortex_navigate",
       "vortex_observe",
@@ -157,8 +162,9 @@ describe("I15: tools/list budget + count + internalized grep", () => {
       "vortex_console", "vortex_network", "vortex_network_response_body", "vortex_events",
       // 存储 → storage
       "vortex_storage_get", "vortex_storage_set", "vortex_storage_session",
-      // 内部化（act/observe 触发）
-      "vortex_mouse_click", "vortex_mouse_move",
+      // 内部化（act/observe 触发）。vortex_mouse_click 已提升为公开坐标点击工具
+      // (canvas/无 ref 场景,配对 vortex_mouse_drag),从本内部化名单移除。
+      "vortex_mouse_move",
       "vortex_file_download", "vortex_file_list_downloads",
       "vortex_batch",
       // 删除（无业务价值 / 内部化）
@@ -294,17 +300,17 @@ describe("Bug F regression: vortex_observe surface must expose frames", () => {
 describe("I15-caps: vortex_verify 仅在 --caps=testing 时进 tools/list", () => {
   afterEach(() => setEnabledCaps([]));
 
-  it("默认面仍 20，不含 vortex_verify", () => {
+  it("默认面仍 21，不含 vortex_verify", () => {
     setEnabledCaps([]);
     const defs = getToolDefs();
-    expect(defs.length).toBe(20);
+    expect(defs.length).toBe(21);
     expect(defs.map((d) => d.name)).not.toContain("vortex_verify");
   });
 
-  it("--caps=testing 时公开面 = 21 且含 vortex_verify", () => {
+  it("--caps=testing 时公开面 = 22 且含 vortex_verify", () => {
     setEnabledCaps(["testing"]);
     const names = getToolDefs().map((d) => d.name);
-    expect(getToolDefs().length).toBe(21);
+    expect(getToolDefs().length).toBe(22);
     expect(names).toContain("vortex_verify");
   });
 });

@@ -352,6 +352,25 @@ export const PUBLIC_TOOLS: ToolDef[] = [
     },
   },
   {
+    // canvas/地图等无 ref 场景的坐标点击。handler(mouse.click)早已实现(含 frame→viewport
+    // 换算),此前只暴露了坐标版 mouse.drag 未暴露 click,导致 canvas 单元格只能"点中心+方向键"绕。
+    // 命名与坐标版 vortex_mouse_drag 配对(均 CDP 坐标派发),区别于 ref 版 vortex_act click。
+    name: "vortex_mouse_click",
+    action: "mouse.click",
+    description: "CDP click at (x,y). canvas/no-ref. coordSpace=frame→viewport by frameId.",
+    schema: {
+      type: "object",
+      properties: {
+        x: { type: "number" },
+        y: { type: "number" },
+        button: { enum: ["left", "right", "middle"] },
+        coordSpace: { enum: ["frame", "viewport"] },
+        ...tabFields,
+      },
+      required: ["x", "y"],
+    },
+  },
+  {
     name: "vortex_file_upload",
     action: "file.upload",
     description: "Upload to input[type=file]. fileContent base64.",

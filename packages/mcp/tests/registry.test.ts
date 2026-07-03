@@ -15,7 +15,7 @@ describe("getToolDefs", () => {
     expect(a).toEqual(b);
   });
 
-  it("returns 20 public tools (vortex_query 零 LLM 探测: 19 + vortex_query)", () => {
+  it("returns 21 public tools (20 + vortex_mouse_click 坐标点击)", () => {
     // v2.1 PR-A: 把 v0.5 内部化的 vortex_tab_list + vortex_history
     // promote 回 public（spec 12-Projects/0000-vortex优化/v2.1-实施方案.md §2 §3）。
     // 后端 handler 早就 ready,只是 schemas-public.ts 没复制 schema 块。
@@ -33,6 +33,7 @@ describe("getToolDefs", () => {
       "vortex_fill",
       "vortex_fill_form",
       "vortex_history",
+      "vortex_mouse_click",
       "vortex_mouse_drag",
       "vortex_navigate",
       "vortex_observe",
@@ -54,7 +55,8 @@ describe("getToolDefs", () => {
     const internalized = [
       "vortex_click", "vortex_type", "vortex_select", "vortex_hover", "vortex_batch",
       "vortex_get_text", "vortex_get_html",
-      "vortex_mouse_click", "vortex_mouse_move",
+      // vortex_mouse_click 已 promote 回公开(坐标点击, 配对 vortex_mouse_drag), 移出本名单
+      "vortex_mouse_move",
       "vortex_console", "vortex_network", "vortex_network_response_body",
       "vortex_storage_get", "vortex_storage_set", "vortex_storage_session",
       "vortex_frames_list", "vortex_wait", "vortex_wait_idle",
@@ -101,12 +103,13 @@ describe("getToolDefs", () => {
     expect(navigate?.returnsImage).toBeUndefined();
   });
 
-  it("has exactly 20 public tools (vortex_query 零 LLM 探测: 19 + vortex_query)", () => {
+  it("has exactly 21 public tools (20 + vortex_mouse_click 坐标点击)", () => {
     // v2.1 PR-A 工作量 ≤ 0.3 人天:schemas-public.ts 复制 2 个 schema 块 +
     // 2 段 description 改写,后端零代码改动。
     // 工具横向优化 T7: 新增 vortex_fill_form(fields[] 批量填表, 部分成功语义)。
     // 工具横向优化: 新增 vortex_query(零 LLM 探测, text grep + css find)。
-    expect(getToolDefs().length).toBe(20);
+    // feat/coord-click: promote vortex_mouse_click(mouse.click handler 早已实现)。
+    expect(getToolDefs().length).toBe(21);
   });
 });
 
