@@ -112,6 +112,49 @@ export function serializeSheet(
 }
 
 /**
+ * 钉钉 spreadsheetv2(flex_table_app)是纯 canvas 电子表格,无 DOM 单元格、无 per-cell ref,
+ * 与语雀 Lake Sheet 的 React fiber 模型完全不同。表格常渲染在同源 iframe #wiki-new-sheet-iframe
+ * 内,或 probe 已注入该 iframe → doc 本身含地址框 .m-formular-bar-inner。
+ *
+ * ⚠ 范围(2026-07 dogfood 实测):仅 **检测 + activeCell**(地址框读回)。单元格网格读回需读
+ * collab-engine/mobx workbook 模型,尚未 live 验证 → 不臆造,故 readDingtalkSheet 只回 detected
+ * +activeCell,让上层给出"用 vortex_screenshot / vortex_mouse_click 按像素定位"的诚实指引。
+ * ⚠ probe 内联同一逻辑,改一处须改两处;query-sheet-parity.test.ts 校验。
+ */
+export interface DingtalkSheetInfo { detected: boolean; activeCell: string | null; }
+
+/** 解析钉钉表格所在 document:本 doc 直含地址框则用之;否则下钻同源 #wiki-new-sheet-iframe。 */
+export function resolveDingtalkSheetDoc(doc: Document): Document | null {
+  if (doc.querySelector(".m-formular-bar-inner")) return doc;
+  const fr = doc.querySelector("#wiki-new-sheet-iframe") as HTMLIFrameElement | null;
+  try {
+    const idoc = fr && fr.contentDocument;
+    if (idoc && idoc.querySelector(".m-formular-bar-inner")) return idoc;
+  } catch { /* cross-origin iframe:无法读,视作未检测到 */ }
+  return null;
+}
+
+/** 从地址框 .m-formular-bar-inner 读活动单元格 A1 地址(叶子节点文本匹配 ^[A-Z]+[0-9]+)。 */
+export function readDingtalkActiveCell(sheetDoc: Document): string | null {
+  const bar = sheetDoc.querySelector(".m-formular-bar-inner");
+  if (!bar) return null;
+  for (const el of Array.from(bar.querySelectorAll("*"))) {
+    if (el.children.length === 0) {
+      const t = ((el.textContent as string) || "").trim();
+      if (/^[A-Z]{1,3}[0-9]{1,7}$/.test(t)) return t;
+    }
+  }
+  return null;
+}
+
+/** 检测钉钉 canvas 电子表格并读 activeCell。非钉钉表格页返回 null(交回语雀分支/报错)。 */
+export function readDingtalkSheet(doc: Document): DingtalkSheetInfo | null {
+  const sheetDoc = resolveDingtalkSheetDoc(doc);
+  if (!sheetDoc) return null;
+  return { detected: true, activeCell: readDingtalkActiveCell(sheetDoc) };
+}
+
+/**
  * fiber 走访定位 LakeSheet 内核:从 canvas 容器沿 fiber.return 上升,找 memoizedState.sheet
  * (sig: doc||model)。2026-07-01 真站(banniu.yuque.com)实测路径。
  */
