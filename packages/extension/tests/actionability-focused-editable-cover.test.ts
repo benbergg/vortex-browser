@@ -37,7 +37,7 @@ describe("actionability focused-editable cover — canvas sheet cell-editor OBSC
     </div>
   `;
 
-  it("does NOT report OBSCURED when the covered target IS the focused editable (cell editor)", async () => {
+  it("does NOT report OBSCURED for edit action (needsEditable) when target IS the focused editable", async () => {
     vi.resetModules();
     let canvasRef: Element | null = null;
     const dom: JSDOM = setupActionabilityEnv({
@@ -54,12 +54,13 @@ describe("actionability focused-editable cover — canvas sheet cell-editor OBSC
     await import("../src/page-side/actionability.js");
     const { checkActionability } = await import("../src/action/actionability.js");
 
-    const res = await checkActionability(1, undefined, "#celledit");
+    // needsEditable:true 对应 type/fill(dom.ts:639/919):豁免 occlusion。
+    const res = await checkActionability(1, undefined, "#celledit", { needsEditable: true });
     expect(res.reason).not.toBe("OBSCURED");
     expect(res.ok).toBe(true);
   });
 
-  it("STILL reports OBSCURED when the covered editable is NOT focused (invariant not regressed)", async () => {
+  it("STILL reports OBSCURED for edit action when the covered editable is NOT focused (invariant)", async () => {
     vi.resetModules();
     let canvasRef: Element | null = null;
     const dom: JSDOM = setupActionabilityEnv({
@@ -70,12 +71,34 @@ describe("actionability focused-editable cover — canvas sheet cell-editor OBSC
 
     const editor = dom.window.document.getElementById("celledit") as HTMLTextAreaElement;
     mockRect(editor, dom);
-    // 不聚焦:activeElement 保持 <body>,豁免不生效。
+    // 不聚焦:activeElement 保持 <body>,豁免不生效(只隔离焦点变量,needsEditable 仍 true)。
     (dom.window.document.body as HTMLElement).focus?.();
 
     await import("../src/page-side/actionability.js");
     const { checkActionability } = await import("../src/action/actionability.js");
 
+    const res = await checkActionability(1, undefined, "#celledit", { needsEditable: true });
+    expect(res.reason).toBe("OBSCURED");
+    expect(res.ok).toBe(false);
+  });
+
+  it("STILL reports OBSCURED for non-edit action (click, needsEditable:false) even if focused (gate)", async () => {
+    vi.resetModules();
+    let canvasRef: Element | null = null;
+    const dom: JSDOM = setupActionabilityEnv({
+      html,
+      elementFromPoint: (_x: number, _y: number) => canvasRef,
+    });
+    canvasRef = dom.window.document.getElementById("grid");
+
+    const editor = dom.window.document.getElementById("celledit") as HTMLTextAreaElement;
+    mockRect(editor, dom);
+    editor.focus(); // 已聚焦,但 click 动作 needsEditable=false → 豁免不生效
+
+    await import("../src/page-side/actionability.js");
+    const { checkActionability } = await import("../src/action/actionability.js");
+
+    // 默认 needsEditable=false(click/hover):occlusion 行为不变,仍 OBSCURED。
     const res = await checkActionability(1, undefined, "#celledit");
     expect(res.reason).toBe("OBSCURED");
     expect(res.ok).toBe(false);
