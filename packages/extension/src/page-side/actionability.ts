@@ -341,7 +341,13 @@ export type ActionabilityResult =
       cx = r.x + r.width / 2;
       cy = r.y + r.height / 2;
     }
-    if (!force) {
+    // 已聚焦的可编辑元素豁免 occlusion:F2/双击打开的单元格编辑器 textarea、IME 捕获框
+    // 常是 1px 绝对定位并被 canvas 视觉遮挡 → deepElementFromPoint 命中上层 canvas →
+    // 误判 OBSCURED 抛 TIMEOUT。但它已是编辑焦点(document.activeElement),CDP insertText/
+    // 键入直达,视觉遮挡不影响事件送达。仅放行 activeElement 且 editable 者,风险面极窄
+    // (钉钉 spreadsheetv2 等 canvas 电子表格 dogfood 2026-07,此前须手传 options.force)。
+    const focusedEditable = el === document.activeElement && isEditable(el).ok;
+    if (!force && !focusedEditable) {
       const re = receivesEvents(el, cx, cy);
       if (!re.ok) {
         // 原生 <dialog>.showModal() 打开时,浏览器把对话框外内容**隐式 inert**(不设
