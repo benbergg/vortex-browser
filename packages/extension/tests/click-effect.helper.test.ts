@@ -25,14 +25,14 @@ describe("click-effect page-side module (__vortexClickEffect)", () => {
       end(t: string): Promise<{
         domMutations: number; urlChanged: boolean; focusChanged: boolean;
         ariaChanged: boolean; observed: boolean; windowMs: number;
-        networkRequests: number; networkSample: string[]; clamped: boolean;
+        networkRequests: number; networkSample: string[]; networkLate: boolean; clamped: boolean;
       }>;
     };
   }
 
-  it("挂载 __vortexClickEffect(version=4, begin/end 函数)", async () => {
+  it("挂载 __vortexClickEffect(version=5, begin/end 函数)", async () => {
     const ns = await load();
-    expect(ns.version).toBe(4);
+    expect(ns.version).toBe(5);
     expect(typeof ns.begin).toBe("function");
     expect(typeof ns.end).toBe("function");
   });
@@ -167,6 +167,59 @@ describe("click-effect page-side module (__vortexClickEffect)", () => {
       const eff = await ns.end(t);
       expect(eff.networkRequests).toBe(8);
       expect(eff.networkSample.length).toBe(5);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  // v5 防抖网络补捕:URL 变化时把网络采样上限从 base ceiling 延到 grace,捕获前端 debounce 的
+  // 延迟 XHR(log.bytenew.com Grafana Loki 前端 ~700ms debounce dogfood 2026-07)。
+  it("URL 变化 + 延迟请求(超 base ceiling) → grace 补捕,networkLate=true", async () => {
+    // 需真实 base URL 才能 pushState 改 location.href(about:blank 不可解析相对 URL)。
+    const dom = new JSDOM('<!DOCTYPE html><body><button id="b">OK</button></body>', {
+      url: "https://log.bytenew.com/?q=1",
+    });
+    globalThis.window = dom.window as any;
+    globalThis.document = dom.window.document as unknown as Document;
+    (globalThis as any).HTMLElement = dom.window.HTMLElement;
+    (globalThis as any).MutationObserver = dom.window.MutationObserver;
+    const ns = await load();
+    // 请求在 wall-clock 180ms 后才出现在 Resource Timing(模拟前端 debounce);base ceiling 仅 40ms。
+    const testStart = Date.now();
+    vi.stubGlobal("performance", {
+      now: () => 1000,
+      getEntriesByType: () =>
+        Date.now() - testStart > 180
+          ? [{ name: "https://log.bytenew.com/proxy_loki/query_range", initiatorType: "fetch", startTime: 1300 }]
+          : [{ name: "https://x/old.js", initiatorType: "script", startTime: 500 }],
+    });
+    try {
+      const t = ns.begin("#b", 40); // base ceiling 40ms
+      dom.window.history.pushState({}, "", "/?q=2"); // 同源 URL 变 → 触发 grace 延长
+      const eff = await ns.end(t);
+      expect(eff.networkRequests).toBe(1); // 补捕到延迟请求(否则 40ms 就返回 0)
+      expect(eff.networkLate).toBe(true); // 首个请求在 base ceiling 之后
+      expect(eff.windowMs).toBeGreaterThan(40); // 实际等待超过 base ceiling
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  }, 5000);
+
+  it("URL 不变 + 延迟请求 → 不延长(门控),base ceiling 即返回 networkRequests=0/networkLate=false", async () => {
+    const ns = await load();
+    const testStart = Date.now();
+    vi.stubGlobal("performance", {
+      now: () => 1000,
+      getEntriesByType: () =>
+        Date.now() - testStart > 180
+          ? [{ name: "https://log.bytenew.com/proxy_loki/query_range", initiatorType: "fetch", startTime: 1300 }]
+          : [{ name: "https://x/old.js", initiatorType: "script", startTime: 500 }],
+    });
+    try {
+      const t = ns.begin("#b", 40); // 无 pushState → URL 不变 → grace 不生效
+      const eff = await ns.end(t);
+      expect(eff.networkRequests).toBe(0); // 40ms 即返回,180ms 的请求未到 → 漏(纯 UI toggle 零延迟)
+      expect(eff.networkLate).toBe(false);
     } finally {
       vi.unstubAllGlobals();
     }

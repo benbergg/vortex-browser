@@ -43,6 +43,10 @@ export interface ClickEffect {
   /** 上述请求前 5 个的 host+path（截断），供 agent 辨识业务端点 vs 风控/埋点接口。
    *  例：京东加购被风控时此处仅见 blackhole.m.jd.com/bypass，无 addCart 端点 → silent fail。 */
   networkSample: string[];
+  /** 首个业务请求在 base ceiling 之后才发起（前端防抖/节流的延迟 XHR）时为 true。提示 agent：
+   *  networkRequests 非 0 是靠 grace 窗口补捕到的，请求相对点击有明显延迟（log.bytenew.com
+   *  Grafana Loki 前端 debounce ~700ms dogfood 2026-07）。false = 无网络或请求在窗口内即时发起。 */
+  networkLate: boolean;
   /** 采集是否成功完成（false=document 被导航替换 / token 已超时清理，信号不可信）。 */
   observed: boolean;
   /** 实际等待耗时（ms）。自适应窗口下 = 网络静默早返或到达 ceiling 的实际时长，非请求值。 */
@@ -84,7 +88,9 @@ interface PendingEntry {
   // timer-throttle）。旧 v3 模块缺 tabHidden 且 end() 仍用 setTimeout 轮询,若不 bump,扩展
   // reload 后未硬刷新页面会读到旧 signature/旧轮询。命名空间 + version 守卫,与 actionability /
   // dom-resolve 约定一致。（v3=Task V-2 新增 userFeedback/toastHit/dialogHit,v2→v3 同理。）
-  if ((window as unknown as { __vortexClickEffect?: { version?: number } }).__vortexClickEffect?.version === 4) {
+  // version 5：新增 networkLate 字段 + end() 防抖网络补捕（URL 变化时把网络采样上限延到
+  // NETWORK_GRACE_MS 捕获延迟 XHR）。bump 使已加载 v4 页在重注入时被覆盖。
+  if ((window as unknown as { __vortexClickEffect?: { version?: number } }).__vortexClickEffect?.version === 5) {
     return;
   }
 
@@ -99,6 +105,11 @@ interface PendingEntry {
   // 自适应轮询间隔与网络静默判定阈值。
   const POLL_MS = 150;
   const IDLE_QUIET_MS = 400;
+  // 防抖网络补捕：URL 已变（导航/路由/查询参数更新，预示数据 fetch 将至）但 base ceiling 内
+  // 仍无网络时，把网络采样上限延到此值以捕获前端 debounce/throttle 的延迟 XHR（受 WINDOW_MAX_MS
+  // 再钳制）。纯 UI toggle（无 URL 变化）不触发，零额外延迟。取 1000：覆盖实测防抖 ~600ms（含
+  // log.bytenew.com Loki）留 ~1.6x 余量，同时把「URL 变但全程无网络」这一罕见情形的空等封在 1s 内。
+  const NETWORK_GRACE_MS = 1000;
 
   const ariaFingerprint = (el: Element | null): string => {
     if (!el) return "";
@@ -303,7 +314,7 @@ interface PendingEntry {
   };
 
   (window as unknown as { __vortexClickEffect: unknown }).__vortexClickEffect = {
-    version: 4,
+    version: 5,
 
     /** 派发前调用：snapshot（url/activeElement/target aria）+ 启动 document 根 observer。返回 token。 */
     begin(sel: string, windowMs: number): string {
@@ -364,6 +375,7 @@ interface PendingEntry {
           ariaChanged: false,
           networkRequests: 0,
           networkSample: [],
+          networkLate: false,
           observed: false,
           windowMs: 0,
           clamped: false,
@@ -388,6 +400,24 @@ interface PendingEntry {
         // （基线已含）与"晚到 POST"（轮询中新增）两种。quietFor 仅在请求**增量**时归零。
         let lastNet = collectNetwork(entry.perfStart).networkRequests;
         let sawNetwork = lastNet > 0;
+        // 首个业务请求出现时的 elapsed（基线已含则 0，否则 -1 直到轮询中首见）。>ceiling ⇒ 防抖延迟。
+        let firstNetAt = sawNetwork ? 0 : -1;
+        // 自适应网络采样上限：尚未见网络且 URL 已变（导航/路由/查询参数更新，预示 fetch 将至）时，
+        // 从 base ceiling 延到 NETWORK_GRACE_MS（受 WINDOW_MAX_MS 钳制）以补捕 debounced XHR；
+        // 纯 UI toggle（无 URL 变化）返 ceiling，零额外延迟。base ceiling 只约束网络维度，dom/url/
+        // aria/feedback 仍在 ceiling 时一并快照，不受 grace 影响（延长只为等网络）。
+        const netDeadline = (): number => {
+          if (!sawNetwork) {
+            let urlChangedNow = false;
+            try {
+              urlChangedNow = window.location.href !== entry.url;
+            } catch {
+              /* ignore */
+            }
+            if (urlChangedNow) return Math.min(WINDOW_MAX_MS, Math.max(ceiling, NETWORK_GRACE_MS));
+          }
+          return ceiling;
+        };
         let pollTimer: ReturnType<typeof setTimeout>;
         // hidden 分支的 MessageChannel 端口；finish 时关闭防泄漏。visible 分支保持 undefined。
         let hiddenPort: MessagePort | undefined;
@@ -427,6 +457,7 @@ interface PendingEntry {
             ariaChanged,
             networkRequests: net.networkRequests,
             networkSample: net.networkSample,
+            networkLate: firstNetAt > ceiling,
             observed,
             windowMs: elapsed,
             clamped,
@@ -442,11 +473,15 @@ interface PendingEntry {
             lastNet = curNet;
             quietFor = 0;
           }
-          if (curNet > 0) sawNetwork = true;
-          if (elapsed >= ceiling) return finish();
-          // 仅在「观察到过网络 + 网络静默达阈值」时早返；静默失败/DOM-only 不早返，等到 ceiling。
+          if (curNet > 0) {
+            sawNetwork = true;
+            if (firstNetAt < 0) firstNetAt = elapsed;
+          }
+          const dl = netDeadline();
+          if (elapsed >= dl) return finish();
+          // 仅在「观察到过网络 + 网络静默达阈值」时早返；静默失败/DOM-only 不早返，等到 deadline。
           if (sawNetwork && quietFor >= IDLE_QUIET_MS) return finish();
-          const dt = Math.min(POLL_MS, ceiling - elapsed);
+          const dt = Math.min(POLL_MS, dl - elapsed);
           elapsed += dt;
           quietFor += dt;
           pollTimer = setTimeout(step, dt);
@@ -472,22 +507,26 @@ interface PendingEntry {
             if (!PENDING[token]) return;
             const t = nowMs();
             const realDt = t - lastTickAt;
-            // 节流:真实经过未达 POLL_MS 且未到 ceiling → 继续 busy-poll,不计 step(避免每 macrotask 采集)。
-            if (realDt < POLL_MS && elapsed + realDt < ceiling) {
+            // 节流:真实经过未达 POLL_MS 且未到 deadline → 继续 busy-poll,不计 step(避免每 macrotask 采集)。
+            if (realDt < POLL_MS && elapsed + realDt < netDeadline()) {
               pump();
               return;
             }
             lastTickAt = t;
-            const dt = Math.min(realDt, ceiling - elapsed);
             const curNet = collectNetwork(entry.perfStart).networkRequests;
             if (curNet > lastNet) {
               lastNet = curNet;
               quietFor = 0;
             }
-            if (curNet > 0) sawNetwork = true;
+            if (curNet > 0) {
+              sawNetwork = true;
+              if (firstNetAt < 0) firstNetAt = elapsed;
+            }
+            const dl = netDeadline();
+            const dt = Math.min(realDt, dl - elapsed);
             elapsed += dt;
             quietFor += dt;
-            if (elapsed >= ceiling) return finish();
+            if (elapsed >= dl) return finish();
             if (sawNetwork && quietFor >= IDLE_QUIET_MS) return finish();
             pump();
           };
