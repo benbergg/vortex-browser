@@ -119,8 +119,8 @@ describe("click-effect hidden-tab 分支 (N0041 background-throttle 修复)", ()
     expect(eff.tabHidden).toBe(true);
   });
 
-  it("version bump 到 4(新增 tabHidden 字段,签名变化)", async () => {
+  it("version bump 到 5(新增 networkLate 字段 + 防抖网络补捕)", async () => {
     const ns = await load();
-    expect(ns.version).toBe(4);
+    expect(ns.version).toBe(5);
   });
 });
