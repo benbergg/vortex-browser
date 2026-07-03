@@ -31,3 +31,23 @@ describe("sheetProbeFunc 内联 ↔ sheet-readback 真源 parity", () => {
     expect(src).toContain("工作簿(");                      // 清单行
   });
 });
+
+describe("sheetProbeFunc 钉钉 fallback 内联 ↔ sheet-readback 真源 parity", () => {
+  const readback = readFileSync(
+    join(__dirname, "../src/page-side/sheet-readback.ts"), "utf8",
+  );
+  it("query.ts 含 [inline dingtalk-sheet] 标记", () => {
+    expect(src).toContain("[inline dingtalk-sheet]");
+  });
+  it("内联 + 真源均含钉钉检测关键判据(地址框 + 同源 iframe 下钻)", () => {
+    for (const s of [src, readback]) {
+      expect(s).toContain(".m-formular-bar-inner");      // 地址框
+      expect(s).toContain("#wiki-new-sheet-iframe");     // 同源 iframe 下钻
+    }
+  });
+  it("内联 + 真源均含 activeCell A1 地址正则", () => {
+    for (const s of [src, readback]) {
+      expect(s).toContain("^[A-Z]{1,3}[0-9]{1,7}");
+    }
+  });
+});

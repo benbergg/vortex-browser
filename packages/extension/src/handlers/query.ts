@@ -813,9 +813,11 @@ export const styleProbeFunc = (
 };
 
 /**
- * page-side 语雀 Lake Sheet readback 函数体。mode=sheet 注入 MAIN world。
+ * page-side 表格 readback 函数体。mode=sheet 注入 MAIN world。
  * 参数 args: [pattern(sheet 选择器), format(markdown|csv|json), maxRows]。
- * 返回 { text } 或 { error }。⚠ [inline sheet-readback]:注入丢模块作用域,locate/read/
+ * 返回 { text } 或 { error }。优先读语雀 Lake Sheet 内存模型;非语雀时 fallback 到
+ * 钉钉 spreadsheetv2 检测 + activeCell(纯 canvas 表格,仅检测+地址框)。
+ * ⚠ [inline sheet-readback] + [inline dingtalk-sheet]:注入丢模块作用域,locate/read/
  * serialize 必须内联;逻辑须与 src/page-side/sheet-readback.ts 真源一致(改一处须改两处),
  * query-sheet-parity.test.ts 校验。纯读,不碰 kernel.command/history/ot(只读安全)。
  */
@@ -828,7 +830,38 @@ export const sheetProbeFunc = (
     const doc = document;
     const container =
       doc.querySelector(".lake-sheet-canvas-container") || doc.querySelector(".lake-sheet-editor");
-    if (!container) return { error: "no lake-sheet on page (未找到语雀数据表；若确在表格页请等待加载，或用 vortex_screenshot)" };
+    if (!container) {
+      // [inline dingtalk-sheet] fallback:钉钉 spreadsheetv2 是纯 canvas 表格(无 DOM 单元格),
+      // 与语雀 fiber 模型不同。仅检测 + 读 activeCell(地址框 .m-formular-bar-inner,同源 iframe
+      // 下钻),单元格网格读回需 collab-engine 模型尚未 live 验证 → 不臆造。逻辑须与真源
+      // src/page-side/sheet-readback.ts 的 resolveDingtalkSheetDoc/readDingtalkActiveCell 一致。
+      let dtDoc: Document | null = doc.querySelector(".m-formular-bar-inner") ? doc : null;
+      if (!dtDoc) {
+        const fr = doc.querySelector("#wiki-new-sheet-iframe") as HTMLIFrameElement | null;
+        try {
+          const idoc = fr && fr.contentDocument;
+          if (idoc && idoc.querySelector(".m-formular-bar-inner")) dtDoc = idoc;
+        } catch { /* cross-origin */ }
+      }
+      if (dtDoc) {
+        let activeCell: string | null = null;
+        const bar = dtDoc.querySelector(".m-formular-bar-inner");
+        if (bar) {
+          for (const el of Array.from(bar.querySelectorAll("*"))) {
+            if (el.children.length === 0) {
+              const t = ((el.textContent as string) || "").trim();
+              if (/^[A-Z]{1,3}[0-9]{1,7}$/.test(t)) { activeCell = t; break; }
+            }
+          }
+        }
+        return { text:
+          `> 检测到钉钉 canvas 电子表格(spreadsheetv2)。活动单元格: ${activeCell ?? "未知"}。\n` +
+          `> 该表格纯 canvas 渲染,无 DOM 单元格模型可读回;请用 vortex_screenshot 看内容、` +
+          `vortex_mouse_click 按像素点选单元格(配合 vortex_query mode=geometry 取 bbox)导航。`,
+        };
+      }
+      return { error: "no lake-sheet on page (未找到语雀数据表；若确在表格页请等待加载，或用 vortex_screenshot)" };
+    }
     const fk = Object.keys(container).find(
       (k) => k.startsWith("__reactInternalInstance") || k.startsWith("__reactFiber"),
     );
