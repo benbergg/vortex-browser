@@ -1,0 +1,213 @@
+{
+  "cycle": "dogfood-newbeta-2026-07-04",
+  "site": "https://newbeta.bytenew.com/app.html#/applet/appNew/projectNew/58860/1838255",
+  "model": "minimax-cn-coding-plan/MiniMax-M3",
+  "tool_surface": [
+    "vortex_tab_create",
+    "vortex_tab_close",
+    "vortex_wait_for",
+    "vortex_observe",
+    "vortex_query",
+    "vortex_act",
+    "vortex_extract",
+    "vortex_evaluate",
+    "vortex_press"
+  ],
+  "anomalies": [
+    {
+      "id": "A-1",
+      "page": "#/applet/appNew/projectNew/41274/1597041 (新评价模板3.2 → 评价工作表 → 新建 dialog)",
+      "component": "39 form fields (walk-point-body-item × 39) inside w-edit-task-dialog — expected special widgets (image-upload / rich-text / tag-chips) downgraded to edit-string textarea",
+      "tab": "984528435",
+      "primitive": "vortex_observe",
+      "action_sequence": [
+        {
+          "tool": "vortex_act",
+          "args": {"target": "@aae9:e30", "action": "click"},
+          "returned_excerpt": "click 新建 → dialogHit .el-dialog__wrapper + networkSample [getColumnRule, getSubmitCheckRule/41274/1597041]"
+        },
+        {
+          "tool": "vortex_wait_for",
+          "args": {"mode": "idle", "timeout": 3000},
+          "returned_excerpt": "matchedRequests 0"
+        },
+        {
+          "tool": "vortex_observe",
+          "args": {"scope": "viewport", "filter": "interactive"},
+          "returned_excerpt": "dialog 'dialog' with 8 visible textbox (订单号/店铺/产品型号/[PJ]子订单号/买家昵称/商品名称/[PJ]商品ID/SKU属性) + 2 button (提交/提交并新增) + cebiandaohang with desc listing 39 walk-point labels"
+        },
+        {
+          "tool": "vortex_evaluate",
+          "args": {"code": "(function(){const dialogs=document.querySelectorAll('.el-dialog__wrapper');for(const d of dialogs){if(d.textContent.includes('提交并新增')&&getComputedStyle(d).display!=='none'){const items=Array.from(d.querySelectorAll('.edit-task-column-item'));const walkPoints=Array.from(d.querySelectorAll('.walk-point-body-item')).map(w=>w.textContent.trim().replace(/^\\*\\s*/,''));return items.map((item,idx)=>{const widget=item.querySelector('[class*=\"edit-\"]');const widgetClass=widget?.className?.split(' ').filter(c=>c.startsWith('edit-'))[0]||'unknown';return {idx,walkPointLabel:walkPoints[idx]||'(no match)',widgetClass};});}}return 'not found';})()"},
+          "returned_excerpt": "39 form items × {walkPointLabel, widgetClass}. Sample findings: 图片/视频(idx=11)=edit-string(textarea no el-upload), [PJ]评价内容(idx=10)=edit-string(textarea no ql-editor), 追评内容(13)=edit-string, 班牛回评内容(21)=edit-string, 打标详情(23)=edit-string, 回评详情(25)=edit-string, 回复平台详情(27)=edit-string, 平台正面标签(19)=edit-string(no el-tag), 平台负面标签(20)=edit-string, 评价标签(37)=unknown(empty <!----><!----><!---->), 数值(计算组件 C1)=edit-string(no el-input-number). All expected special widgets downgraded to plain textarea."
+        },
+        {
+          "tool": "vortex_evaluate",
+          "args": {"code": "(function(){const items=Array.from(document.querySelectorAll('.edit-task-column-item'));const widgetClassCounts={};items.forEach(item=>{const widget=item.querySelector('[class*=\"edit-\"]');const c=widget?.className?.split(' ').filter(x=>x.startsWith('edit-'))[0]||'unknown';widgetClassCounts[c]=(widgetClassCounts[c]||0)+1;});return JSON.stringify(widgetClassCounts);})()"},
+          "returned_excerpt": "{edit-string:24, edit-select:8, edit-date:4, unknown:7} — only 3 widget types in 39 fields, 7 unknown are 系统自动填充 empty nodes (创建人/创建时间/修改时间/标题/任务完结人/任务完结时间/评价标签)"
+        },
+        {
+          "tool": "vortex_observe",
+          "args": {"scope": "viewport", "filter": "interactive"},
+          "returned_excerpt": "dialog顶 viewport only 8 textbox visible; remaining 24 inputs below fold — workaround: walk-point sidebar 39 labels in observe desc field"
+        }
+      ],
+      "phenomenon": "brief 列出「计算组件 / 新评价模板3.2 / 售后管理 / ERP工作台」作为未评测 app,期望发现新组件类型(图表/公式/树/穿梭框/富文本等)。本轮在 新评价模板3.2 → 评价工作表 → 新建 dialog 探到 39 form 字段,期望的特殊 widget 全部降级为 edit-string text:「图片/视频」本应是 el-upload image picker(实际 textarea,无 .el-upload);「[PJ]评价内容 / 追评内容 / 班牛回评内容 / 打标详情 / 回评详情 / 回复平台详情」6 个大段文本本应是 ql-editor rich text(实际全是 textarea,无 [contenteditable]);「平台正面标签 / 平台负面标签 / 评价标签」3 个 tag 字段本应是 el-tag chip input(实际 textarea);「数值」(计算组件 C1)本应是 el-input-number(实际 textarea)。**vortex 端完美识别**(observe recall walk-point labels + edit-task-column-item + widgetClass 分布;evaluate 三角验证 widget 数量;extract 拿到 dialog 文本),所有非截图路径(observe / extract / query / evaluate)均到位 —— 真正问题在 bytenew 表单配置层把字段 type 都设成 string,不是 vortex 缺陷",
+      "m3_severity": "experience",
+      "evidence": {
+        "tool_return_excerpt": "vortex_observe dialog 顶 viewport: 8 textbox (订单号/店铺/产品型号/[PJ]子订单号/买家昵称/商品名称/[PJ]商品ID/SKU属性) + 2 button + cebiandaohang desc 字段列出 39 walk-point labels. vortex_evaluate 三角: 39 items widgetClass 分布 {edit-string:24, edit-select:8, edit-date:4, unknown:7}. 关键 idx mapping: idx=10 [PJ]评价内容=edit-string(textarea, 无 .ql-editor / [contenteditable]), idx=11 图片/视频=edit-string(textarea, 无 .el-upload), idx=13 追评内容=edit-string, idx=19 平台正面标签=edit-string(无 .el-tag), idx=20 平台负面标签=edit-string(无 .el-tag), idx=21 班牛回评内容=edit-string, idx=23 打标详情=edit-string, idx=25 回评详情=edit-string, idx=27 回复平台详情=edit-string, idx=37 评价标签=unknown(empty <!----><!----><!---->). vortex_observe 顶 viewport 截断到 8 textbox,余 24 fields 在 fold 下,workaround: walk-point sidebar 在 observe desc 字段列出全部 39 labels,evaluate 可全 readout.",
+        "evaluate_dom_truth": "vortex_evaluate 拉 39 items widgetClass 分布: edit-string × 24 (订单号/[PJ]子订单号/买家昵称/商品名称/[PJ]商品ID/SKU属性/SKUID/评价ID/[PJ]评价内容/图片/视频/追评内容/评价回复内容/平台正面标签/平台负面标签/班牛回评内容/打标详情/回评详情/回复平台详情/班牛评价编号 等), edit-select × 8 (店铺/产品型号/评价回复状态/平台评价情感/班牛评价情感/打标进度/回评进度/回复平台进度/任务状态/执行人 等), edit-date × 4 ([PJ]评价时间/追评时间/截止时间 等), unknown × 7 (创建人/创建时间/修改时间/标题/任务完结人/任务完结时间/评价标签 — DOM 内 <!----><!----><!----> 空节点,可能系统自动填充或 lazy load). el-upload count=0, ql-editor count=0, [contenteditable] count=0, el-tag count=0, el-rate count=0, el-cascader count=0, el-tree count=0, el-transfer count=0, el-input-number count=0 — 全 page 0 个 rich text / image upload / tag chip / star rating / cascade / tree / transfer / number widget.",
+        "tried_alternatives": [
+          "vortex_observe {scope:viewport, filter:interactive} × 2: 召回 dialog 8 textbox(顶 viewport) + walk-point sidebar 39 labels(在 cebiandaohang div 的 desc 字段)",
+          "vortex_observe {scope:viewport, filter:interactive} × 1: 关闭 dialog 后重 recall — 回到 worksheet table view,13 records 全部 readout",
+          "vortex_extract {target:'div', maxLength:8000, scroll:true}: worksheet 13 records 全 readout,每行含订单号/店铺/产品型号/[PJ]子订单号/买家昵称 5 列",
+          "vortex_extract {target:'div', maxLength:3000}: 成员权限 29 成员 sample readout",
+          "vortex_query mode=css pattern:'.el-dialog__wrapper' attr:style: 62 dialogs display 状态验证",
+          "vortex_query mode=css pattern:'.el-table__row td:last-child' attr:innerHTML: 操作列 DOM 验证(空 <!---->)",
+          "vortex_evaluate 拉 .edit-task-column-item × 39: widgetClass 分布 + parent label 三角 — 39 fields × widget class 全 readout",
+          "vortex_evaluate 拉 .walk-point-body-item × 39: sidebar labels 全部 39 字符验证",
+          "vortex_act click 「解密显示」(@d701:e68) + evaluate 验证 cell 内容从 '1*****4' 变为 '1.直接联系买家直接拨打隐私号,听到语音提示 输入姓名/地址' — decrypt widget 完全非截图 readout",
+          "vortex_act click 「more」(售后管理 icon-more) + 「基础设置」+ 「成员权限」+ 「操作日志」+ 「权限包」 — 全 admin flow 无 vortex 异常"
+        ]
+      },
+      "new_tab_reproduced": true,
+      "action_path_is_vortex_native": true
+    },
+    {
+      "id": "A-2",
+      "page": "#/applet/appNew/projectNew/58860/1838255 (left menu → 售后管理 / ERP工作台 → empty template sub-worksheet + admin popup)",
+      "component": ".dragItem > .appletMenuList-item-title (售后管理 / ERP工作台) + admin popup (基础设置 / 成员权限 / 删除小程序) + 跳转后 page 类型 (appletPermissionsNew / appletPermissionsLog)",
+      "tab": "984528437",
+      "primitive": "vortex_observe",
+      "action_sequence": [
+        {
+          "tool": "vortex_evaluate",
+          "args": {"code": "(function(){const dragItems=document.querySelectorAll('.dragItem');for(const d of dragItems){if(d.textContent.trim().startsWith('售后管理')){const title=d.querySelector('.appletMenuList-item-title');title.click();return JSON.stringify({titleClicked:true,subItems:Array.from(d.querySelectorAll('.dragWorksheet-item')).map(s=>({id:s.id,title:s.title,text:s.textContent.trim().substring(0,30)})),parentHTML:d.outerHTML.substring(0,2000)});}}return 'not found';})()"},
+          "returned_excerpt": "售后管理 click title → expand → sub-worksheet container still display:none + content only <div class=w-text-center><img 24c3b65ec3 width=110px><div class=w-color-gray>这里空空如也 ~ ~</div></div> + 0 subItems"
+        },
+        {
+          "tool": "vortex_observe",
+          "args": {"scope": "viewport", "filter": "interactive"},
+          "returned_excerpt": "售后管理 / ERP工作台 observe recall: 顶部 nav + 左侧 menu (含 售后管理/ERP工作台 div) + admin popup (基础设置/成员权限/删除小程序) + 主体 worksheet table(工单测试表0611 last opened) + 11 button + 1 table — vortex 自报 blindspots: image(no alt) src=24c3b65ec3 placeholder"
+        },
+        {
+          "tool": "vortex_act",
+          "args": {"target": "@0e3d:e10", "action": "click"},
+          "returned_excerpt": "click 成员权限 → URL change to /appletPermissionsNew/53741 + networkSample [v2/projects/pagePluginsCheck, matomo.bytenew.com/matomo.php] + dialogHit []"
+        },
+        {
+          "tool": "vortex_observe",
+          "args": {"scope": "viewport", "filter": "interactive"},
+          "returned_excerpt": "新 page appletPermissionsNew/53741: 返回小程序 / 操作日志 / 角色 sidebar (所有者/管理员/成员) / 搜索角色 textbox / 成员列表 tab / table (名称/所属部门/操作) + 0 initial members / 1 pagination page"
+        },
+        {
+          "tool": "vortex_act",
+          "args": {"target": "@b01e:e5", "action": "click"},
+          "returned_excerpt": "click 管理员 → ariaChanged:true + networkSample [user/role/searchRoleUser] + 11 checkbox labels added"
+        },
+        {
+          "tool": "vortex_extract",
+          "args": {"target": "div", "maxLength": 3000},
+          "returned_excerpt": "管理员 (29个成员) — 9 sample: 多来米/SRE团队/测试团队; 观隼/产研中心/产品部; 飞燕主账号/SRE团队/测试团队; 虹猫/产研中心/开发部; 鹿鸣/产研中心/解决方案,技术部/技术一组,技术部/工作流群组; 猞猁/产研中心/开发部,技术部; 黄虎/SRE团队/测试团队,技术部/技术一组,技术部/工作流群组; 阿酷/SRE团队/测试团队; 米奇/产研中心/SRE团队,技术部/工作流群组"
+        },
+        {
+          "tool": "vortex_evaluate",
+          "args": {"code": "(function(){const widgetTypes={tree:document.querySelectorAll('.el-tree, [class*=\"tree-\"]').length,transfer:document.querySelectorAll('.el-transfer').length,cascade:document.querySelectorAll('.el-cascader').length,richText:document.querySelectorAll('.ql-editor, [contenteditable=true]').length,rate:document.querySelectorAll('.el-rate').length,upload:document.querySelectorAll('.el-upload').length,tabs:document.querySelectorAll('.el-tabs').length,tables:document.querySelectorAll('.el-table').length,checkboxes:document.querySelectorAll('.el-checkbox').length,selects:document.querySelectorAll('.el-select').length};return JSON.stringify(widgetTypes);})()"},
+          "returned_excerpt": "全 page widget types: tree=0, transfer=0, cascade=0, richText=0, rate=0, upload=0, tabs=1, tables=1, checkboxes=11, selects=1 — 没有任何特殊 widget,只有 table/tabs/checkbox/select 基础"
+        },
+        {
+          "tool": "vortex_act",
+          "args": {"target": "@63f0:e1", "action": "click"},
+          "returned_excerpt": "click 操作日志 → URL change to /appletPermissionsLog/53741 + networkSample [matomo.bytenew.com/matomo.php, user/role/log]"
+        },
+        {
+          "tool": "vortex_extract",
+          "args": {"target": "div", "maxLength": 3000},
+          "returned_excerpt": "权限日志 + 3 tab (角色/成员/部门/权限包) + 开始日期/结束日期/select/重置 + table (操作时间/操作人/角色/操作内容) + 暂无数据"
+        },
+        {
+          "tool": "vortex_act",
+          "args": {"target": "@d1ad:e3", "action": "click"},
+          "returned_excerpt": "click 权限包 tab → ariaChanged:true + table column from 角色 to 权限包 + 暂无数据"
+        }
+      ],
+      "phenomenon": "售后管理 / ERP工作台 2 个未评测 app 都是 admin 没创建 worksheet 的空 template —— sub-worksheet container display:none + 内容 '这里空空如也 ~ ~' + 110px 透明 PNG placeholder。可访问的仅 admin popup (基础设置/成员权限/删除小程序);基础设置 dialog 仅 2 text inputs(名称/描述),成员权限跳转后是 el-table checkbox(无 tree / transfer / cascader / rich-text / rate / upload 等特殊 widget)。本轮无法探到任何业务 widget,因为 admin 没创建内容。**vortex 端完美识别 empty + admin popup + 跳转后 2 种新 page 类型** (`appletPermissionsNew/{id}` 成员权限 + `appletPermissionsLog/{id}` 操作日志),所有非截图路径均到位。问题是 site-issue 数据/配置层 admin 未配置内容,不影响 vortex",
+      "m3_severity": "experience",
+      "evidence": {
+        "tool_return_excerpt": "vortex_evaluate 售后管理 expand: subItems=0, parent HTML含 '这里空空如也 ~ ~' + 110px transparent PNG placeholder (vortex自报blindspot: image no alt). vortex_evaluate ERP工作台 expand: 同样 0 subItems + 同样 empty text. vortex_act click 售后管理 more → popup '基础设置/成员权限/删除小程序'. vortex_act click 基础设置 → dialog '编辑小程序' with 2 textbox (name=售后管理, desc empty). vortex_act click 成员权限 → URL change /appletPermissionsNew/53741 + new page type observe recall. vortex_act click 管理员 → 29 成员 list 加载. vortex_extract 拿到 9 成员 sample (多来米/观隼/飞燕主账号/虹猫/鹿鸣/猞猁/黄虎/阿酷/米奇) with 多层部门路径 (slash-hierarchy + comma-multi-dept: '产研中心/解决方案,技术部/技术一组,技术部/工作流群组'). vortex_act click 操作日志 → URL change /appletPermissionsLog/53741 + 操作日志 page. vortex_act click 权限包 tab → column 切换正常 + 0 data. 全 page widget type 分布: tree=0, transfer=0, cascade=0, richText=0, rate=0, upload=0 — 没特殊 widget.",
+        "evaluate_dom_truth": "售后管理 expand 后 sub-worksheet container: outerHTML='<div class=w-default-wrap style=display:none><!----><div class=w-text-center><img src=https://banniu-work.oss-cn-zhangjiakou.aliyuncs.com/125_10030158_24c3b65ec3...png style=width:110px><div class=w-color-gray>这里空空如也 ~ ~</div></div></div>' — 0 worksheet content, only empty placeholder image + empty text. ERP工作台 sub-worksheet container 同样 pattern. 基础设置 dialog: 2 textbox (请输入名称 value=售后管理/ERP工作台, 请添加描述 empty) + 2 button (取消/确定). 成员权限 page appletPermissionsNew/53741: 角色 sidebar (3 角色: 所有者/管理员/成员) + 成员列表 tab + search textbox + table (3 column: 名称/所属部门/操作) + 10条/页 selector + 1 page pagination. 操作日志 page appletPermissionsLog/53741: 3 tab (角色/成员/部门/权限包) + 开始日期/结束日期/select/重置 + table 4 column (操作时间/操作人/角色|权限包/操作内容) + 暂无数据. 全 page evaluate widgetTypeCounts: tree=0, transfer=0, cascade=0, richText=0, rate=0, upload=0, tabs=1, tables=1, checkboxes=11, selects=1.",
+        "tried_alternatives": [
+          "vortex_evaluate click title (售后管理/ERP工作台) → expand sub-worksheet container: 2 个 app 都是 empty (subItems=0, 这里空空如也 ~ ~, 110px placeholder)",
+          "vortex_evaluate click title (dclick) → same empty, no navigation",
+          "vortex_act click 「more」icon → admin popup 3 项 (基础设置/成员权限/删除小程序) — vortex 完美识别",
+          "vortex_act click 「基础设置」→ dialog '编辑小程序' 仅 2 inputs — vortex 完美识别",
+          "vortex_act click 「成员权限」→ URL change to /appletPermissionsNew/53741 + 新 page 类型 — vortex 完美识别",
+          "vortex_observe + vortex_act 全权限管理 page 操作(管理员/成员 click + 操作日志 button + 权限包 tab) — 全部 success:true",
+          "vortex_extract 管理员 29 成员 sample readout(9 名称 + 多层部门路径) — vortex 完美识别(虽然部门是 slash-separated text,不是 el-tree 结构)",
+          "vortex_evaluate 全 page widget 统计: tree/transfer/cascade/richText/rate/upload 都是 0 — 验证没特殊 widget",
+          "跨 app 复现:售后管理 + ERP工作台 都是同 pattern empty template + admin popup — site-issue 跨 app 一致"
+        ]
+      },
+      "new_tab_reproduced": true,
+      "action_path_is_vortex_native": true
+    }
+  ],
+  "coverage": {
+    "pages_visited": 5,
+    "anomalies": 2,
+    "clean": 0,
+    "tabs_opened": 4,
+    "tab_ids": ["984528433", "984528435", "984528437", "984528439"],
+    "scenario": "newbeta-r7: 未评测 app 探新组件类型 — 计算组件 / 新评价模板3.2 / 售后管理 / ERP工作台 (挑 4 个)",
+    "recognition_boundary": {
+      "non_screenshot_recognizable": [
+        "新评价模板3.2 → 评价工作表 → 「解密显示」decrypt-on-click widget: 默认遮蔽 (1*****4) + 解密链接 (vortex_act click) → 触发 /v2/decrypt/getReceiverInfo API → cell 内容从 1*****4 变为 '1.直接联系买家直接拨打隐私号,听到语音提示 输入姓名/地址' 复合内容 — 完全非截图可识别 (extract/observe/act 全到位)",
+        "新评价模板3.2 → 评价工作表 → 13 records 全部 readout: 订单号/店铺/产品型号/[PJ]子订单号/买家昵称 5 列 + 13 row 数据 (extract / observe 都到位)",
+        "新评价模板3.2 → 评价工作表 → 「新建」dialog 39 form 字段全部 readout: walk-point sidebar 39 labels (observe desc 字段) + edit-task-column-item × 39 widget class (evaluate 三角) — 顶 viewport observe 截断 8 textbox 但 sidebar 全字段 labels workaround 完整",
+        "新评价模板3.2 → 评价工作表 → 「新建」dialog widget 类型分布: edit-string × 24 + edit-select × 8 + edit-date × 4 + unknown × 7 (7 unknown 都是 系统自动填充 字段,可能 lazy load)",
+        "售后管理 → 成员权限 page appletPermissionsNew/53741: 角色 sidebar (3 角色) + 成员列表 table (29 个成员 in 管理员角色) + 操作日志 button — vortex observe/extract/act 全到位",
+        "售后管理 → 操作日志 page appletPermissionsLog/53741: 3 tab (角色/成员/部门/权限包) + 筛选 (开始/结束日期/select/重置) + table — vortex observe/extract/act 全到位",
+        "计算组件 → 基本计算工作表: empty (0 行数据) + 11 button toolbar + 1 row config (9 columns) — vortex observe/extract 全到位",
+        "售后管理 / ERP工作台 empty template 信号: '这里空空如也 ~ ~' + 110px 透明 PNG placeholder + sub-worksheet container display:none — vortex 自报 blindspot (image no alt,装饰性,不影响 empty 语义)"
+      ],
+      "blindspot_must_use_screenshot": [
+        "**0 个** — 本轮核心练功 (4 个未评测 app 探新组件类型) 全部非截图 readout,无内容必须靠 screenshot 才能识别",
+        "vortex 自报的盲点: 售后管理/ERP工作台 empty template 装饰插画 https://banniu-work.oss-cn-zhangjiakou.aliyuncs.com/125_10030158_24c3b65ec3...png (no alt) — 但只是装饰 placeholder,空状态语义已被 '这里空空如也 ~ ~' 文字完整表达,实际不构成识别盲点"
+      ],
+      "new_widget_types_discovered": [
+        "「解密显示」decrypt-on-click widget (新评价模板3.2 → 评价工作表 → [PJ]子订单号 列) — 默认遮蔽 + 「解密显示」actionable link + click 触发 /v2/decrypt/getReceiverInfo API + 返回内容含 '密文 + 操作指引' 复合语义",
+        "walk-point 锚点导航 UI 模式 (新评价模板3.2 → 评价工作表 → 新建 dialog) — 39 字段 sidebar (`walk-point-body-item` × 39) + 主区 39 anchor 目标 (`edit-task-column-item`) + `.walk-point-walker` 蓝条跟随 scroll position 高亮",
+        "appletPermissionsNew/{id} page 类型 (售后管理 / ERP工作台 → 成员权限) — 角色 sidebar + 成员列表 table",
+        "appletPermissionsLog/{id} page 类型 (售后管理 / ERP工作台 → 操作日志) — 3 tab (角色/成员/部门/权限包) + table"
+      ],
+      "new_widget_types_NOT_found": [
+        "el-upload (image upload widget) — 「图片/视频」字段是 edit-string text,不是 image picker",
+        "ql-editor / [contenteditable] (rich text editor) — 「[PJ]评价内容 / 追评内容 / 班牛回评内容 / 打标详情 / 回评详情 / 回复平台详情」6 个大段文本都是 textarea",
+        "el-tag / tag chip input — 「平台正面标签 / 平台负面标签 / 评价标签」3 个 tag 字段都是 textarea",
+        "el-rate (star rating) — 0 个评分 widget",
+        "el-cascader / el-tree / el-transfer — 0 个级联 / 树 / 穿梭框 widget (成员列表的「所属部门」是 slash-separated text,不是 tree 结构)",
+        "el-input-number — 「数值」字段是 edit-string text,不是数字加减控件",
+        "canvas / svg chart — 0 个 echarts / chart (本轮探的 app 没看板)",
+        "x6 / flowchart canvas — 0 个流程画布 (本轮没探工作流 app)"
+      ],
+      "bytenew_config_layer_findings": [
+        "新评价模板3.2 → 评价工作表: 39 字段 widget type 单一 (3 种) — bytenew admin 在 column type 配置时把图片/视频/富文本/标签字段都设成 string,而不是 image-upload/rich-text/tag-chip",
+        "售后管理 / ERP工作台: admin 没创建任何 worksheet (empty template),可访问的仅 admin popup — site-issue 数据/配置层 admin 未配置内容"
+      ]
+    },
+    "non_visual_paths_attempted": [
+      "vortex_extract × ~10 (评价工作表 13 records / dialog 39 fields + walk-point labels / 成员权限 29 成员 sample / 操作日志 0 data)",
+      "vortex_observe scope=viewport filter=interactive × ~12 (评价工作表 / 新建 dialog 顶 viewport 8 textbox / admin popup / 基础设置 dialog / 成员权限 page / 操作日志 page / 权限包 tab)",
+      "vortex_query mode=css × ~5 (.el-dialog__wrapper style 全 62 dialogs display 验证 / .el-table__row td:last-child 操作列查 / .dragItem 找 sub-worksheet)",
+      "vortex_query mode=text × 1 (「计算组件」找 subitem ID)",
+      "vortex_act click × ~10 (评价工作表「新建」/「解密显示」/「close」+ 售后管理「more」/「基础设置」/「成员权限」/「close」/「管理员」/「操作日志」/「权限包」+ ERP「more」/「基础设置」/「close」)",
+      "vortex_press × 2 (Escape 关闭 dialog / 列表设置 dropdown)",
+      "vortex_tab_create × 4 + vortex_tab_close × 4 (C1 计算组件 tab + C2 评价工作表 tab + C3-C4 售后管理 tab + C5 ERP工作台 tab)",
+      "vortex_wait_for idle × 6 (dialog open / API 响应 settle / member list load)",
+      "vortex_evaluate × ~25 (dragItem sub-items 找 / worksheet 表格列 / dialog body inputs 数量 + types / walk-point 39 labels / 评价模板3.2 39 field × widget class 分布 / 操作列 DOM / 角色成员列表 cells / 表格 29 成员 sample / 全 page widget type 统计)"
+    ],
+    "submission_attempted": false,
+    "dirty_data_created": false,
+    "notes": "本轮核心练功点 (4 个未评测 app 探新组件类型) 部分达成 —— 1 个新 widget (解密显示 decrypt-on-click) + 1 个新 UI 模式 (walk-point 锚点导航) + 2 个新 page 类型 (appletPermissionsNew/appletPermissionsLog) + 0 个 vortex 异常。bytenew 配置层发现: 期望的特殊 widget (图片上传/富文本/tag chip/数字加减) 在 admin column type 配置中全部降级为 edit-string text,这是数据/配置层问题 (bytenew admin 未选 image-upload/rich-text/tag-chip type) 而非 vortex 缺陷,vortex 端完美识别所有字段 widgetClass 分布 + walk-point sidebar + extract/observe 全 readout。售后管理/ERP工作台 都是 empty template app (admin 未配置 worksheet),本轮只能探 admin popup (基础设置仅 2 text inputs + 成员权限跳转后新 page 类型) —— site-issue 数据/配置层 admin 未配置内容,不影响 vortex。整体: 探 4 个未评测 app,本轮 0 个 vortex 真实异常,0 个盲区必须截图 (vortex 自报的装饰插画是 phantom blindspot,不影响 empty 语义)。brief 重审建议:「产品体验大盘」(在「评价管理(演示专用)」父级下,是看板类型) 本轮未探 —— r6 已探过同类「退款管理大脑看板」是 echarts canvas + 4 张图文卡片,下一轮 brief 可专门探「产品体验大盘」看 echarts canvas readback + chart blindspot 信号。"
+  }
+}
