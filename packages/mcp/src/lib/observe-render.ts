@@ -315,23 +315,24 @@ function renderCompoundSeg(c: NonNullable<CompactElement["compound"]>): string {
 
 /**
  * 图表库 → readback 方法映射(单一真源)。检测层(blindspot-detect)只设 chartLib 信号,
- * 方法名在此按库映射,加新库只改一处。`method` 用于行内 tag(短名),`hint` 用于 summary(完整)。
- * - echarts:`getOption()`
- * - chartjs:`Chart.getChart(canvas).data`
- * - g2/g2plot(AntV):`getData()/getOptions()`
- * - 未知:`getOption()/getData()` 兜底
+ * 方法名在此按库映射,加新库只改一处。`method` 用于行内 tag(短名),`tool` 用于 summary(完整,agent 直接照抄)。
+ * - echarts:原生 `vortex_query mode=chart`(结构化 readback,无需 evaluate)
+ * - chartjs:`vortex_evaluate Chart.getChart(canvas).data`
+ * - g2/g2plot(AntV):`vortex_evaluate getData()/getOptions()`
+ * - 未知:`vortex_evaluate getOption()/getData()` 兜底
  */
-function chartReadback(chartLib?: string): { method: string; hint: string } {
+function chartReadback(chartLib?: string): { method: string; tool: string } {
   switch ((chartLib ?? "").toLowerCase()) {
     case "echarts":
-      return { method: "getOption", hint: "getOption()" };
+      // mode=chart(echarts adapter)已上线,优先原生结构化 readback 而非 evaluate。
+      return { method: "mode=chart", tool: "vortex_query mode=chart" };
     case "chartjs":
-      return { method: "Chart.getChart", hint: "Chart.getChart(canvas).data" };
+      return { method: "Chart.getChart", tool: "vortex_evaluate Chart.getChart(canvas).data" };
     case "g2":
     case "g2plot":
-      return { method: "getData", hint: "getData()/getOptions()" };
+      return { method: "getData", tool: "vortex_evaluate getData()/getOptions()" };
     default:
-      return { method: "getOption", hint: "getOption()/getData()" };
+      return { method: "getOption", tool: "vortex_evaluate getOption()/getData()" };
   }
 }
 
@@ -348,7 +349,11 @@ function blindspotTag(b?: CompactElement["blindspot"]): string {
     return ` [virtual: ${t}]`;
   }
   if (b.kind === "canvas") {
-    if (b.readback === "chart") return ` [blindspot=canvas chart=${b.chartLib ?? "?"} readback=evaluate:${chartReadback(b.chartLib).method}]`;
+    if (b.readback === "chart") {
+      // echarts 走原生 mode=chart(readback=query),其余库仍走 evaluate。
+      const isEcharts = (b.chartLib ?? "").toLowerCase() === "echarts";
+      return ` [blindspot=canvas chart=${b.chartLib ?? "?"} readback=${isEcharts ? "query:chart" : `evaluate:${chartReadback(b.chartLib).method}`}]`;
+    }
     if (b.readback === "component") return " [blindspot=canvas readback=query:component]";
     return " [blindspot=canvas readback=screenshot]"; // screenshot / 旧无 readback 缺省
   }
@@ -373,7 +378,7 @@ function blindspotSummary(
     const ref = refOf(e, snapshotHash);
     if (b.kind === "virtual") parts.push(`${e.role} ${ref} virtual(${b.total ?? "?"}/${b.rendered ?? "?"})`);
     else if (b.kind === "canvas") {
-      if (b.readback === "chart") parts.push(`${e.role} ${ref} chart(${b.chartLib ?? "?"}) → read via vortex_evaluate ${chartReadback(b.chartLib).hint}`);
+      if (b.readback === "chart") parts.push(`${e.role} ${ref} chart(${b.chartLib ?? "?"}) → read via ${chartReadback(b.chartLib).tool}`);
       else if (b.readback === "component") parts.push(`${e.role} ${ref} canvas → readable via vortex_query mode=component`);
       else parts.push(`${e.role} ${ref} canvas → visual only, use vortex_screenshot`);
     }
@@ -383,7 +388,7 @@ function blindspotSummary(
     for (const b of f.blindspots ?? []) {
       const fr = f.frameId !== 0 ? ` (frame ${f.frameId})` : "";
       if (b.kind === "canvas") {
-        parts.push(`${b.name} chart(${b.chartLib}) → read via vortex_evaluate ${chartReadback(b.chartLib).hint}${fr}`);
+        parts.push(`${b.name} chart(${b.chartLib}) → read via ${chartReadback(b.chartLib).tool}${fr}`);
       } else if (b.kind === "sheet") {
         parts.push(`${b.name} sheet ${b.lib}(${b.rows}×${b.cols}) → readable via vortex_query mode=sheet${fr}`);
       } else if (b.kind === "image") {

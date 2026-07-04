@@ -994,6 +994,136 @@ export const sheetProbeFunc = (
 };
 
 /**
+ * page-side 图表 readback 函数体。mode=chart 注入 MAIN world。
+ * 参数 args: [pattern(预留), format(summary|json), maxPoints(每系列点上限)]。
+ * 返回 { text } 或 { error }。⚠ [inline chart-readback]:注入丢模块作用域,normalize/
+ * serialize/echarts adapter 必须内联;逻辑须与 src/page-side/chart-readback.ts 真源一致
+ * (改一处须改两处),query-chart-parity.test.ts 校验。纯读,不调用图表实例写方法(只读安全)。
+ * MVP:echarts adapter(window.echarts.getInstanceByDom → getOption)。
+ */
+export const chartProbeFunc = (
+  _pattern: string,
+  format: string,
+  maxPoints: number,
+): { text: string } | { error: string } => {
+  try {
+    const doc = document;
+    const win = window as unknown as {
+      echarts?: {
+        getInstanceByDom?: (el: Element) => { getOption?: () => Record<string, unknown> } | null | undefined;
+        getInstanceById?: (id: string) => { getOption?: () => Record<string, unknown> } | null | undefined;
+      };
+    };
+    const ec = win.echarts;
+    const NO_CHART = "no chart on page (未检测到图表；仅支持 echarts，若确在图表页请等待加载，或用 vortex_screenshot)";
+    if (!ec || typeof ec.getInstanceByDom !== "function" || !doc.querySelector("[_echarts_instance_]")) {
+      return { error: NO_CHART };
+    }
+    const cap = maxPoints > 0 ? maxPoints : 200;
+
+    interface ChartSeries { name?: string; type: string; data: unknown[]; truncated?: number; }
+    interface ChartAxis { type?: string; name?: string; data?: unknown[]; }
+    interface ChartData { title?: string; chartType: string; series: ChartSeries[]; xAxis?: ChartAxis[]; yAxis?: ChartAxis[]; legend?: string[]; }
+
+    const normAxis = (ax: unknown): ChartAxis[] | undefined => {
+      if (ax == null) return undefined;
+      const arr = Array.isArray(ax) ? ax : [ax];
+      const out = arr.filter((a) => a && typeof a === "object").map((a) => {
+        const o = a as Record<string, unknown>;
+        const r: ChartAxis = {};
+        if (typeof o.type === "string") r.type = o.type;
+        if (typeof o.name === "string") r.name = o.name;
+        if (Array.isArray(o.data)) r.data = o.data;
+        return r;
+      });
+      return out.length ? out : undefined;
+    };
+    const normLegend = (legend: unknown): string[] | undefined => {
+      if (legend == null) return undefined;
+      const arr = Array.isArray(legend) ? legend : [legend];
+      for (const l of arr) {
+        if (l && typeof l === "object" && Array.isArray((l as Record<string, unknown>).data)) {
+          return ((l as Record<string, unknown>).data as unknown[]).map((x) =>
+            typeof x === "string" ? x : x && typeof x === "object" && "name" in (x as object) ? String((x as Record<string, unknown>).name) : String(x));
+        }
+      }
+      return undefined;
+    };
+    const normTitle = (title: unknown): string | undefined => {
+      if (title == null) return undefined;
+      const arr = Array.isArray(title) ? title : [title];
+      for (const t of arr) {
+        if (t && typeof t === "object") {
+          const o = t as Record<string, unknown>;
+          const txt = (o.text as string) || (o.subtext as string);
+          if (txt) return String(txt);
+        }
+      }
+      return undefined;
+    };
+    const normalizeEchartsOption = (opt: Record<string, unknown>, maxP: number): ChartData => {
+      const rawSeries = Array.isArray(opt.series) ? opt.series : opt.series ? [opt.series] : [];
+      const series: ChartSeries[] = rawSeries.filter((s) => s && typeof s === "object").map((s) => {
+        const o = s as Record<string, unknown>;
+        const data = Array.isArray(o.data) ? o.data : [];
+        const cs: ChartSeries = { type: String(o.type ?? "unknown"), data: data.slice(0, maxP) };
+        if (typeof o.name === "string") cs.name = o.name;
+        if (data.length > maxP) cs.truncated = data.length;
+        return cs;
+      });
+      const cd: ChartData = { chartType: series[0]?.type ?? "unknown", series };
+      const title = normTitle(opt.title); if (title) cd.title = title;
+      const xAxis = normAxis(opt.xAxis); if (xAxis) cd.xAxis = xAxis;
+      const yAxis = normAxis(opt.yAxis); if (yAxis) cd.yAxis = yAxis;
+      const legend = normLegend(opt.legend); if (legend) cd.legend = legend;
+      return cd;
+    };
+    const fmtVals = (data: unknown[], truncated?: number): string => {
+      const shown = data.slice(0, 12).map((d) => {
+        if (d && typeof d === "object") {
+          const o = d as Record<string, unknown>;
+          if ("value" in o) return o.name != null ? `${o.name}:${o.value}` : String(o.value);
+          return JSON.stringify(o);
+        }
+        return String(d);
+      }).join(", ");
+      const more = truncated ? ` …共${truncated}点` : data.length > 12 ? ` …共${data.length}点` : "";
+      return `[${shown}${more}]`;
+    };
+    const renderSummary = (charts: ChartData[]): string => {
+      const lines: string[] = [`检测到 ${charts.length} 个图表(echarts):`];
+      charts.forEach((c, i) => {
+        lines.push(`\n[图表${i + 1}] ${c.title ?? "(无标题)"} — 类型 ${c.chartType}，${c.series.length} 系列`);
+        if (c.xAxis?.[0]?.data) lines.push(`  x轴(${c.xAxis[0].type ?? "?"}): ${fmtVals(c.xAxis[0].data)}`);
+        if (c.legend) lines.push(`  图例: [${c.legend.join(", ")}]`);
+        for (const s of c.series) lines.push(`  系列 ${s.name ?? "(无名)"}(${s.type}): ${fmtVals(s.data, s.truncated)}`);
+      });
+      return lines.join("\n");
+    };
+    const serializeChart = (charts: ChartData[], fmt: string): string =>
+      fmt === "json" ? JSON.stringify({ charts }) : `${renderSummary(charts)}\n\n结构数据:\n${JSON.stringify({ charts })}`;
+
+    // echarts adapter read(内联真源 echartsAdapter.read)
+    const divs = Array.from(doc.querySelectorAll("[_echarts_instance_]"));
+    const charts: ChartData[] = [];
+    for (const div of divs) {
+      let inst = ec.getInstanceByDom ? ec.getInstanceByDom(div) : null;
+      if (!inst && ec.getInstanceById) {
+        const id = div.getAttribute("_echarts_instance_");
+        if (id) inst = ec.getInstanceById(id);
+      }
+      if (inst && typeof inst.getOption === "function") {
+        try { charts.push(normalizeEchartsOption(inst.getOption(), cap)); } catch { /* 单图表失败不阻断 */ }
+      }
+    }
+    if (!charts.length) return { error: NO_CHART };
+    return { text: serializeChart(charts, format) };
+  } catch (e) {
+    return { error: "chart readback error: " + (e instanceof Error ? e.message : String(e)) };
+  }
+};
+
+/**
  * page-side 流程图 readback 函数体。mode=flow 注入 MAIN world。
  * 参数 args: [pattern(adapter/容器提示), format(mermaid|tree|json)]。
  * 返回 { text } 或 { error }。⚠ [inline flow-readback]:注入丢模块作用域,detect/read/
@@ -1119,11 +1249,11 @@ export function registerQueryHandlers(router: ActionRouter): void {
       if (
         !mode ||
         (mode !== "text" && mode !== "css" && mode !== "component" &&
-         mode !== "geometry" && mode !== "style" && mode !== "sheet" && mode !== "flow")
+         mode !== "geometry" && mode !== "style" && mode !== "sheet" && mode !== "flow" && mode !== "chart")
       ) {
         throw vtxError(
           VtxErrorCode.INVALID_PARAMS,
-          `vortex_query: mode must be 'text', 'css', 'component', 'geometry', 'style', 'sheet' or 'flow', got ${String(mode)}`,
+          `vortex_query: mode must be 'text', 'css', 'component', 'geometry', 'style', 'sheet', 'flow' or 'chart', got ${String(mode)}`,
         );
       }
       if (!pattern || typeof pattern !== "string" || !pattern.trim()) {
@@ -1236,6 +1366,27 @@ export function registerQueryHandlers(router: ActionRouter): void {
         }
         if ("error" in res && res.error) {
           throw vtxError(VtxErrorCode.JS_EXECUTION_ERROR, `query.queryPage flow error: ${res.error}`);
+        }
+        return res;
+      } else if (mode === "chart") {
+        // chart 模式:注入 chartProbeFunc,echarts adapter 定位实例→getOption→归一化数据。
+        // pattern 预留(v1 全页);attr = 格式(summary 默认|json);maxResults = 每系列点上限。
+        const format = typeof args.attr === "string" ? args.attr : "summary";
+        const maxPoints = Math.min((args.maxResults as number | undefined) ?? 200, 2000);
+
+        const results = await chrome.scripting.executeScript({
+          target: buildExecuteTarget(tid, frameId),
+          func: chartProbeFunc,
+          args: [pattern, format, maxPoints],
+          world: "MAIN",
+        });
+
+        const res = results[0]?.result as { text: string } | { error: string } | undefined;
+        if (!res) {
+          throw vtxError(VtxErrorCode.JS_EXECUTION_ERROR, "query.queryPage chart: executeScript returned no result");
+        }
+        if ("error" in res && res.error) {
+          throw vtxError(VtxErrorCode.JS_EXECUTION_ERROR, `query.queryPage chart error: ${res.error}`);
         }
         return res;
       } else if (mode === "sheet") {
