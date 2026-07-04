@@ -1,0 +1,219 @@
+{
+  "cycle": "dogfood-newbeta-2026-07-04",
+  "site": "https://newbeta.bytenew.com/app.html#/applet/appNew/projectNew/58860/1838255",
+  "model": "minimax-cn-coding-plan/MiniMax-M3",
+  "tool_surface": [
+    "vortex_tab_create",
+    "vortex_tab_close",
+    "vortex_wait_for",
+    "vortex_observe",
+    "vortex_query",
+    "vortex_evaluate",
+    "vortex_act"
+  ],
+  "anomalies": [
+    {
+      "id": "A-1",
+      "page": "#/applet/appNew/projectNew/58860/1838255 (工单测试表0611) — 流程 dropdown + 列表设置 popover",
+      "component": "流程 dropdown (workflow-dropdown-item) + 列表设置 popover",
+      "tab": "984528415, 984528416",
+      "primitive": "vortex_observe",
+      "action_sequence": [
+        {
+          "tool": "vortex_act",
+          "args": {"target": "@30e2:e19", "action": "click"},
+          "returned_excerpt": "{success:true, element:{tag:button, text:流程}, effect:{dialogHit:[], domMutations:109, userFeedback:mutation, urlChanged:false, windowMs:2500}}"
+        },
+        {
+          "tool": "vortex_observe",
+          "args": {"scope": "viewport", "filter": "interactive"},
+          "returned_excerpt": "tooltip ' 流程设置  流程权限  提醒设置  自动分配  流程参数  流程数据 流程布局 ' [ref=@cdda:e1] + switch + 6 div tab items + i questionmark; background fully leaked (nav + toolbar + filter panel + table); NO '# popover:' line; NO '[behind-popover]' marker; ref @cdda:e2..e8 mixed with background @cdda:e10+ in same namespace"
+        },
+        {
+          "tool": "vortex_act",
+          "args": {"target": "@9ac8:e44", "action": "click"},
+          "returned_excerpt": "{success:true, element:{tag:button, text:列表设置}, effect:{dialogHit:[], domMutations:125, userFeedback:mutation, urlChanged:false}}"
+        },
+        {
+          "tool": "vortex_observe",
+          "args": {"scope": "viewport", "filter": "interactive"},
+          "returned_excerpt": "tooltip '请输入搜索关键字  ...  全部 确定' [ref=@fcca:e24] + 11 checkbox + 1 search textbox + 1 button '确定'; background fully leaked (nav + toolbar + filter panel + table); NO '# popover:' line; NO '[behind-popover]' marker; popover ref @fcca:e0..e12 mixed with background @fcca:e25+ in same namespace"
+        },
+        {
+          "tool": "vortex_evaluate",
+          "args": {"code": "search workflow-dropdown-item + .el-dialog container + role=dialog"},
+          "returned_excerpt": "7 .workflow-dropdown-item found (1 clickable '流程设置' cursor:pointer; 6 disabled .workflow-dropdown-item.disabled cursor:not-allowed); 11 [role='dialog'] elements with aria-modal=true — observe only recognized first match ('帮助' dialog) but not the visible 820x770 workflow-new-guide-modal"
+        }
+      ],
+      "phenomenon": "vortex_observe 把流程 dropdown 和列表设置 popover 都标记为 role=tooltip(实际应为 menu/dropdown/popover);两次弹层打开后都无 '# modal:' / '# popover:' 元信息行;无 '[behind-modal]' / '[behind-popover]' 逃生口标记;背景 80/700+ 元素全部泄露(导航/工具栏/筛选 panel/表格/分页);弹层控件 ref 与背景 ref 混在同一 namespace(如 @fcca:e0-e12 是 popover 控件,e25+ 是背景),调用方从 ref 无法判断作用域归属,只能靠内文理解推断。",
+      "m3_severity": "experience",
+      "evidence": {
+        "tool_return_excerpt": "vortex_observe on 流程 dropdown: tooltip ' 流程设置  流程权限  提醒设置  自动分配  流程参数  流程数据 流程布局 ' [ref=@cdda:e1] + switch e0 + 6 div tabs + i questionmark. NO '# popover:' line. background: listitem 犇犇, listitem 小程序, div moreNav, listitem 搜索, listitem 11, button 新建/添加视图/导入/导出/流程/刷新/分享, table '操作任务状态工单编号...' — full leak. vortex_observe on 列表设置 popover: tooltip '请输入搜索关键字  工单编号 ...  全部 确定' [ref=@fcca:e24] + textbox + 11 checkbox + button '确定'. NO '# popover:' line. background: listitem 犇犇, button 新建/添加视图/.../筛选/列统计/列表设置, table '操作任务状态...' — full leak.",
+        "evaluate_dom_truth": "evaluate: document.querySelectorAll('.workflow-dropdown-item') -> 7 items (1 '流程设置' cursor:pointer; 6 .disabled cursor:not-allowed — '流程权限'/'提醒设置'/'自动分配'/'流程参数'/'流程数据 top'/'流程布局 top'); document.querySelectorAll('[role=\"dialog\"]') -> 11 elements with aria-modal=true; visible 820x770 workflow-new-guide-modal at (305,110) with 25 leaf + 1 button '下一步' + '跳过' button — observe skipped this. document.querySelectorAll('.el-dialog') -> ariaLabel='帮助' first (text '帮助知道了', 2 buttons close+知道了) — observe matched this one as dialog 'dialog'. No el-popper / popover with role=tooltip found in DOM — observe's tooltip role classification is internally generated.",
+        "tried_alternatives": [
+          "vortex_observe {scope:viewport, filter:interactive} x 2 on 流程 dropdown: tooltip role + no scope marker + background leak",
+          "vortex_observe {scope:viewport, filter:interactive} x 2 on 列表设置 popover: tooltip role + no scope marker + background leak",
+          "vortex_observe {scope:viewport, filter:all} x 1 on 筛选 panel: same — no scope marker (brief expected # modal: for filter dialog but actual is inline toolbar expand panel — no modal to crop)",
+          "vortex_query mode=geometry '.filter-dialog, .el-dialog, .ant-modal, [role=dialog]' x 1: 63 elements all bbox=0,0,0,0 occludedBy div.applet-left — no useful geometry info",
+          "vortex_query mode=css 'div.fixed2, .ant-modal, .el-dialog, [role=dialog]' x 1: 0 .fixed2 hits; 63 el-dialog hits (most innerText empty); no outerHTML detail",
+          "vortex_act click on 流程 dropdown tab e6 '流程参数': success=true + domMutations:57 + dialogHit=[] but observe content unchanged — disabled tab is silent",
+          "vortex_act click on 列表设置 确定 button: success=true + domMutations:311 + networkRequests=3 — popover closed and recovered to background (close-recovery works, but no scope to revoke since never appeared)"
+        ]
+      },
+      "new_tab_reproduced": true,
+      "action_path_is_vortex_native": true
+    },
+    {
+      "id": "A-2",
+      "page": "#/applet/appNew/projectNew/58860/1838255 (工单测试表0611) — 流程 dropdown tab items",
+      "component": "流程 dropdown 7 个 tab 项目 (.workflow-dropdown-item)",
+      "tab": "984528415",
+      "primitive": "vortex_observe",
+      "action_sequence": [
+        {
+          "tool": "vortex_act",
+          "args": {"target": "@30e2:e19", "action": "click"},
+          "returned_excerpt": "{success:true, element:{tag:button, text:流程}, effect:{dialogHit:[], domMutations:109, userFeedback:mutation}}"
+        },
+        {
+          "tool": "vortex_observe",
+          "args": {"scope": "viewport", "filter": "interactive"},
+          "returned_excerpt": "tooltip ... + 6 div tabs (流程设置/流程权限/提醒设置/自动分配/流程参数/流程数据) + i 'questionmark' — observe does NOT recognize '流程布局' as tab item"
+        },
+        {
+          "tool": "vortex_evaluate",
+          "args": {"code": "document.querySelectorAll('.workflow-dropdown-item')"},
+          "returned_excerpt": "7 items: '流程设置' (cursor:pointer, clickable) + '流程权限'(disabled, cursor:not-allowed) + '提醒设置'(disabled) + '自动分配'(disabled) + '流程参数'(disabled) + '流程数据'(disabled, top) + '流程布局'(disabled, top)"
+        },
+        {
+          "tool": "vortex_act",
+          "args": {"target": "@cdda:e6", "action": "click"},
+          "returned_excerpt": "{success:true, element:{tag:div, text:流程参数}, effect:{dialogHit:[], domMutations:57, userFeedback:mutation} — click on disabled tab returns success but no actual handler fires}"
+        }
+      ],
+      "phenomenon": "流程 dropdown 的 7 个 tab 项目中,「流程布局」被 observe 识别为 'i questionmark'(iconfont 字形误归类为 icon)而非 tab item — 真实 DOM 中它是 .workflow-dropdown-item.top.disabled 元素,与「流程数据」同级;同时 6 个 disabled tab item 在 observe 输出中没有 disabled 状态表达,ref 全标 [cursor=pointer] 或无,act click 在 disabled tab 上仍返回 success=true 但无实际效果(可能误导调用方认为切换成功)。",
+      "m3_severity": "experience",
+      "evidence": {
+        "tool_return_excerpt": "vortex_observe on 流程 dropdown: tooltip + switch + div 流程设置 [cursor=pointer] + div 流程权限 [no marker] + div 提醒设置 [no marker] + div 自动分配 [no marker] + div 流程参数 [no marker] + div 流程数据 [no marker] + i 'questionmark'. NO '流程布局' tab item. NO disabled state on any item. vortex_act click @cdda:e6 (流程参数, disabled in DOM): success=true domMutations:57 — no visible effect.",
+        "evaluate_dom_truth": "evaluate: document.querySelectorAll('.workflow-dropdown-item') -> 7 items. Item 1 '流程设置': className='workflow-dropdown-item', cursor:pointer, opacity:1, rect=(1138,103,128,36). Item 2 '流程权限': className='workflow-dropdown-item disabled', cursor:not-allowed. Item 3 '提醒设置': className='workflow-dropdown-item disabled', cursor:not-allowed. Item 4 '自动分配': className='workflow-dropdown-item disabled', cursor:not-allowed. Item 5 '流程参数': className='workflow-dropdown-item disabled', cursor:not-allowed, rect=(1138,247,128,36). Item 6 '流程数据': className='workflow-dropdown-item top disabled', cursor:not-allowed, rect=(1138,283,128,36). Item 7 '流程布局': className='workflow-dropdown-item top disabled', cursor:not-allowed, rect=(1138,319,128,36) — observe's 'i questionmark' maps to this.",
+        "tried_alternatives": [
+          "vortex_observe {scope:viewport, filter:interactive} on 流程 dropdown: '流程布局' NOT surfaced as tab item, recognized as i iconfont instead",
+          "vortex_observe {scope:viewport, filter:interactive} x 2 (re-observe after clicking 流程参数): same tooltip content, no refresh, '流程布局' still i questionmark",
+          "vortex_evaluate '.workflow-dropdown-item' full list: 7 items — 6 disabled .workflow-dropdown-item.disabled cursor:not-allowed; 1 clickable .workflow-dropdown-item cursor:pointer",
+          "vortex_query mode=geometry '[role=dialog], [role=tooltip]' x 1: 147 elements all bbox=0,0,0,0 occluded — no geometry",
+          "vortex_act click on disabled '流程参数' tab e6: success=true + domMutations:57 + dialogHit=[] — silent success on disabled item"
+        ]
+      },
+      "new_tab_reproduced": true,
+      "action_path_is_vortex_native": true
+    },
+    {
+      "id": "A-3",
+      "page": "#/applet/appNew/projectNew/58860/1838255 → /workflowMixConfig/workflowMixSetting/58860/1838255/2587o1m31c3k00 (跳转工作流配置)",
+      "component": "跳转后的多 dialog/drawer 场景 — 11 个 [role=dialog] 同时存在 + el-drawer × 3",
+      "tab": "984528415",
+      "primitive": "vortex_observe",
+      "action_sequence": [
+        {
+          "tool": "vortex_act",
+          "args": {"target": "@f2bf:e2", "action": "click"},
+          "returned_excerpt": "{success:true, element:{tag:div, text:流程设置}, effect:{dialogHit:['.el-dialog__wrapper', '[role=dialog]'], domMutations:319, networkRequests:15, urlChanged:true, userFeedback:dialog, windowMs:1050}}"
+        },
+        {
+          "tool": "vortex_observe",
+          "args": {"scope": "viewport", "filter": "interactive"},
+          "returned_excerpt": "# modal: dialog 'dialog' (suppressed 112 background elements)\\n\\n- dialog 'dialog' [ref=@d6dc:e0]:\\n  - div 'close' [ref=@d6dc:e1] [cursor=pointer]\\n\\n# frame 275..286 scanned, 0 interactive elements (9 iframes listed)"
+        },
+        {
+          "tool": "vortex_wait_for",
+          "args": {"mode": "idle", "timeout": 3000},
+          "returned_excerpt": "{idle:true, waitedMs:200, matchedRequests:0}"
+        },
+        {
+          "tool": "vortex_observe",
+          "args": {"scope": "viewport", "filter": "interactive"},
+          "returned_excerpt": "Same as previous — '# modal: dialog 'dialog' (suppressed 112)' + dialog e0 + div 'close' e1. NO content refresh. 9 iframes listed all 0 interactive."
+        },
+        {
+          "tool": "vortex_evaluate",
+          "args": {"code": "document.querySelectorAll('[role=dialog]') + .workflow-new-guide-modal detail"},
+          "returned_excerpt": "11 [role=dialog] elements: idx 0 '帮助'(text='帮助知道了', 2 buttons) / idx 1 '搜索节点&连接线' el-drawer / idx 2 'drawer-setting' el-drawer / idx 3 'dialog'(empty) / idx 4 'dialog'(empty) / idx 5 'node-template' el-drawer / idx 6 'OpenTipModal' / idx 7 'LineCopyModal'(text='连接线复制取 消确 定') / idx 8 '接口请求日志' / idx 9 'called-tel-dialog' / idx 10 'workflow-new-guide-modal'(text='工作流配置引导 ... 跳过 (1/3) 下一步', rect=(305,110,820,770), opacity:1, leafCount:25, interactiveCount:1 [button '下一步']) — VISIBLE"
+        }
+      ],
+      "phenomenon": "跳转后页面同时存在 11 个 role=dialog 元素 + 3 个 el-drawer,observe 触发模态裁剪('# modal: dialog \"dialog\" (suppressed 112 background elements)')但只识别 1 个 dialog =「帮助」弹窗(ariaLabel='帮助', text='帮助知道了', 2 button close+知道了),observe 仅召回 1 个「div 'close'」按钮,**漏掉「知道了」按钮**;真正可见的主 dialog「工作流配置引导」(class=workflow-new-guide-modal, 820×770 大对话框, opacity=1, 含 25 leaf + button '下一步' + '跳过' button)observe 完全没召回。在 dialog 打开后多次重 observe(wait_for idle 3 秒后)内容也不变,observe 在 dialog 内没有刷新机制 —— 业务上 dialog 内容完全不可用。",
+      "m3_severity": "suspected-blocking",
+      "evidence": {
+        "tool_return_excerpt": "vortex_observe on 跳转后 dialog: '# modal: dialog \"dialog\" (suppressed 112 background elements)\\n\\n- dialog \"dialog\" [ref=@d6dc:e0]:\\n  - div \"close\" [ref=@d6dc:e1] [cursor=pointer] [listener]\\n\\n# frame 275 scanned, 0 interactive elements ... # frame 286 scanned, 0 interactive elements' — only 1 button surfaced inside the dialog despite 11 [role=dialog] + 3 el-drawer in DOM. vortex_observe after wait_for idle (3 sec): same exact output, no content refresh.",
+        "evaluate_dom_truth": "evaluate: document.querySelectorAll('[role=\"dialog\"]') -> 11 elements all with aria-modal=true. The visible main dialog is .workflow-new-guide-modal (idx 10): rect=(305,110,820,770), opacity=1, display=block, visibility=visible, innerText='工作流配置引导 | 配置流程中需要执行的节点 | 拖拽到面板即可添加节点，A 节点到 B 节点可添加连接线，选中后 delete/回退键 删除连接线。 | 跳过 (1/3) | 下一步', leafCount=25, interactiveCount=1 (button '下一步' 68x32 @ 1033,838). The '帮助' dialog (idx 0): ariaLabel='帮助', rect=(0,0,0,0), display=block, opacity=1, innerText='帮助知道了', leafCount=8, interactiveCount=2 (close icon button + button '知道了' — both visible=false since rect=0,0,0,0 but opacity=1). 9 iframes scanned by observe all 0 interactive.",
+        "tried_alternatives": [
+          "vortex_observe {scope:viewport, filter:interactive} immediately after click 流程设置: '# modal: dialog \"dialog\" (suppressed 112)' + dialog e0 + div 'close' e1 — only 1 button",
+          "vortex_wait_for {mode:idle, timeout:3000} + re-observe: same exact output, no content refresh after waiting",
+          "vortex_evaluate querySelectorAll('[role=dialog]') full list: 11 dialogs + 3 drawers — observe only matched idx 0 '帮助' (the first in DOM order), missed idx 10 'workflow-new-guide-modal' (visible 820x770 main dialog)",
+          "vortex_evaluate '.workflow-new-guide-modal' detail: 820x770 visible main dialog with '跳过 (1/3)' + '下一步' buttons — observe didn't surface any of this",
+          "vortex_evaluate '帮助' dialog detail: 2 interactive buttons (close icon + '知道了') — observe only surfaced 'div close', missed '知道了' button (visible=false due to rect=0,0,0,0)"
+        ]
+      },
+      "new_tab_reproduced": true,
+      "action_path_is_vortex_native": true
+    }
+  ],
+  "coverage": {
+    "pages_visited": 3,
+    "anomalies": 3,
+    "clean": 0,
+    "tabs_opened": 2,
+    "tab_ids": ["984528415", "984528416"],
+    "scenario": "newbeta-r4: 弹窗/浮层 模态作用域 observe (筛选/流程/列表设置 dialog + 嵌套浮层)",
+    "modal_scope_recall": {
+      "filter_panel_inline_expand": {
+        "is_real_modal": false,
+        "observe_modal_scope": "absent (correct — not a modal)",
+        "observe_role": "inline toolbar expand, no tooltip/dialog role",
+        "ghost_ref_fixed2": true,
+        "brief_assumption": "brief assumed dialog; actual is inline toolbar expand — mismatch not vortex defect"
+      },
+      "flow_dropdown_after_clicking_流程": {
+        "is_real_modal": false,
+        "observe_modal_scope": "absent",
+        "observe_role": "tooltip (mis-classified, should be menu/dropdown)",
+        "tab_items_recalled": "6/7 (流程布局 mis-classified as i 'questionmark' iconfont)",
+        "disabled_state_expressed": false
+      },
+      "workflow_new_guide_modal_after_clicking_流程设置": {
+        "is_real_modal": true,
+        "observe_modal_scope": "present (# modal: dialog 'dialog' (suppressed 112 background elements)) — only scenario where modal scope works",
+        "observe_role": "dialog (correct, but accessible name is generic 'dialog' not semantic)",
+        "content_recalled": "1 button ('close' icon only — missed '知道了' button)",
+        "main_dialog_workflow_new_guide_820x770": "NOT recalled (severe)",
+        "content_refresh_on_reobserve": "no (waited 3s + re-observe, same output)"
+      },
+      "list_settings_popover": {
+        "is_real_modal": false,
+        "observe_modal_scope": "absent",
+        "observe_role": "tooltip (mis-classified, should be popover/menu)",
+        "content_recalled": "complete (11 checkbox + search + 确定 button, checked states correct)",
+        "close_recovery": "works — popover removed from output, background restored"
+      },
+      "nested_dropdown_in_filter_panel_添加筛选条件": {
+        "is_real_modal": false,
+        "observe_popover_scope": "absent",
+        "observe_role": "listitems (not under any popover wrapper)",
+        "content_recalled": "complete (11 listitem + 2 search boxes)",
+        "scope_separation_from_background": "none (ref mixed with background in same namespace)"
+      }
+    },
+    "non_visual_paths_attempted": [
+      "vortex_observe scope=viewport filter=interactive x 8 (工单表/筛选 panel/嵌套 dropdown/流程 dropdown/跳转 dialog/列表设置 popover/关闭后/重 observe)",
+      "vortex_observe scope=viewport filter=all x 1 (筛选 panel)",
+      "vortex_query mode=geometry x 2 (find dialog/drawer bbox — 63/147 elements all bbox=0,0,0,0)",
+      "vortex_query mode=css x 1 (find .filter-dialog/.el-dialog/[role=dialog]/.fixed2)",
+      "vortex_evaluate x 11 (DOM truth only: filter real DOM / el-dialog list / flow dropdown / modal physics / disabled state / workflow-new-guide-modal / nested popover)",
+      "vortex_act click x 7 (筛选/嵌套 listitem/流程/流程参数 disabled tab/流程设置/列表设置/确定)",
+      "vortex_wait_for idle x 2 (wait dialog content)",
+      "vortex_tab_create x 2 + vortex_tab_close x 2 (per-scenario tab isolation)"
+    ],
+    "submission_attempted": false,
+    "dirty_data_created": false,
+    "notes": "3 anomalies captured (A-1, A-2, A-3). vortex_observe 模态作用域裁剪仅在 1 个场景出现(点「流程设置」跳转触发 workflow-new-guide-modal 时)且形式为 '# modal: dialog \"dialog\" (suppressed 112 background elements)' — observe 只识别第一个 [role=dialog] =「帮助」弹窗,召回 close 按钮,漏掉「知道了」按钮 + 完全漏掉 820×770 主 dialog「工作流配置引导」(evaluate 验证该 dialog visible=true 含 25 leaf + 「跳过」「下一步」按钮)。其他弹层(筛选 panel / 流程 dropdown / 列表设置 popover / 嵌套 dropdown)observe 无任何 modal/popover scope 标记,背景 80/700+ 元素全部泄露,弹层被 observe 误标为 role=tooltip(非 menu/dropdown/popover),ref 与背景混在同一 namespace。brief 假设「筛选」是 modal dialog 实际是工具栏内联展开 panel(worksheet-main-content-search-main-bottom 容器,与「保存/重置/收起」同级,无 overlay)—— 这不是 vortex 缺陷,是 brief 与实现不一致。流程 dropdown 7 tab 中 6 个 disabled(cursor:not-allowed)在 observe 中无 disabled 状态表达,act click disabled tab 静默 success。关闭恢复正常(列表设置 popover 点「确定」后 observe 恢复背景全量),但因整轮无 popover scope 标记,只能验证 popover 节点从输出移除,无法验证 scope 撤销。"
+  }
+}
