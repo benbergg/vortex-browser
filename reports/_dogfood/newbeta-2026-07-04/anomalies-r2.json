@@ -1,0 +1,226 @@
+{
+  "cycle": "dogfood-newbeta-2026-07-04",
+  "site": "https://newbeta.bytenew.com/app.html#/applet/appNew/projectNew/58860/1838255",
+  "model": "minimax-cn-coding-plan/MiniMax-M3",
+  "tool_surface": [
+    "vortex_tab_create",
+    "vortex_tab_close",
+    "vortex_wait_for",
+    "vortex_observe",
+    "vortex_query",
+    "vortex_act",
+    "vortex_fill",
+    "vortex_press",
+    "vortex_mouse_click",
+    "vortex_evaluate"
+  ],
+  "anomalies": [
+    {
+      "id": "A-1",
+      "page": "#/applet/appNew/projectNew/58860/1838255 (新建工单 dialog)",
+      "component": "el-select filterable (执行人 / 任务状态)",
+      "tab": "984528396",
+      "primitive": "vortex_fill",
+      "action_sequence": [
+        {
+          "tool": "vortex_fill",
+          "args": {"target": "@a3ba:e0", "value": "青蛙", "widget": "select"},
+          "returned_excerpt": "Error [COMMIT_FAILED]: Selected option(s) not reflected after commit: 青蛙 (trigger shows \"\"). Likely a disabled option, a dropped click, or a single-select given multiple labels. Hint: Commit driver failed mid-flow. Inspect context.extras.stage (open-picker / navigate-month / click-day / confirm / verify) to see which step broke; the page state may have changed or the framework version may not be matched by any driver."
+        },
+        {
+          "tool": "vortex_fill",
+          "args": {"target": "@a3ba:e1", "value": "处理中", "widget": "select"},
+          "returned_excerpt": "Error [COMMIT_FAILED]: Selected option(s) not reflected after commit: 处理中 (trigger shows \"\"). Likely a disabled option, a dropped click, or a single-select given multiple labels."
+        },
+        {
+          "tool": "vortex_observe",
+          "args": {"filter": "all"},
+          "returned_excerpt": "textbox \"请选择\" [ref=@ddb1:e0] [readonly] [cursor=pointer] value=青蛙 ; textbox \"请选择\" [ref=@ddb1:e1] [readonly] [cursor=pointer] value=处理中"
+        }
+      ],
+      "phenomenon": "vortex_fill widget=select 对 el-select filterable 系统性返回 COMMIT_FAILED (trigger shows '')，但 observe 读回的 value=写入值，DOM 真值 = 写入值；即 vortex 报错而 v-model 实际已 commit（'fill 假失败'，与 brief 关注的 'fill 假成功' 成镜像）",
+      "m3_severity": "experience",
+      "evidence": {
+        "tool_return_excerpt": "Error [COMMIT_FAILED]: Selected option(s) not reflected after commit: 青蛙 (trigger shows \"\"). Likely a disabled option, a dropped click, or a single-select given multiple labels.",
+        "evaluate_dom_truth": "执行人: input[0].value = '青蛙' (Default v-model label rendered); 任务状态: input[1].value = '处理中' (was '待处理' default, model changed). query mode=css .el-dialog .edit-select input[placeholder='请选择'] attr=value -> [{value:'青蛙'},{value:'处理中'}]",
+        "tried_alternatives": [
+          "vortex_fill widget=select on ref @a3ba:e0 (执行人) -> COMMIT_FAILED but DOM value='青蛙' (5 ref retries all same)",
+          "vortex_fill widget=select on ref @a3ba:e1 (任务状态, default 待处理) -> COMMIT_FAILED but DOM value='处理中' (model flipped)",
+          "vortex_fill widget=aria-select on ref @0db9:e0 -> COMMIT_FAILED 'ARIA listbox did not open within timeout (no visible [role=option] appeared)' (el-select 不挂 role=option, aria path dead end)",
+          "evaluate input.value after error: 0='青蛙' / 1='处理中' (TRUE v-model write)",
+          "query mode=css .el-dialog .edit-select input[placeholder='请选择'] attr=value -> [青蛙, 处理中] (TRUE readback)",
+          "observe all: textbox '请选择' value=青蛙 / value=处理中 (TRUE a11y readback)"
+        ]
+      },
+      "new_tab_reproduced": true,
+      "action_path_is_vortex_native": true
+    },
+    {
+      "id": "A-2",
+      "page": "#/applet/appNew/projectNew/58860/1838255 (新建工单 dialog)",
+      "component": "el-date-editor--datetime (截止时间)",
+      "tab": "984528396",
+      "primitive": "vortex_fill",
+      "action_sequence": [
+        {
+          "tool": "vortex_act",
+          "args": {"target": "@4390:e3", "action": "click", "options": {"observeEffect": true, "windowMs": 1000}},
+          "returned_excerpt": "{success:true, effect:{domMutations:73, focusChanged:true, userFeedback:'dialog'}} (date popper opened)"
+        },
+        {
+          "tool": "vortex_fill",
+          "args": {"target": "@4390:e3", "value": "2026-07-15 10:30:00"},
+          "returned_excerpt": "{focused:true, success:true}"
+        },
+        {
+          "tool": "vortex_evaluate",
+          "args": {"code": "document.querySelectorAll('.el-dialog input')[2].value"},
+          "returned_excerpt": "\"\" (empty string — write='2026-07-15 10:30:00', readback='', MISMATCH)"
+        },
+        {
+          "tool": "vortex_press",
+          "args": {"key": "Enter"},
+          "returned_excerpt": "{success:true, focusedElement:'input'}"
+        },
+        {
+          "tool": "vortex_evaluate",
+          "args": {"code": "document.querySelectorAll('.el-dialog input')[2].value"},
+          "returned_excerpt": "\"2026-07-15 10:30:00\" (after Enter — now committed)"
+        }
+      ],
+      "phenomenon": "vortex_fill 对 el-date-editor--datetime 单步返回 {focused:true, success:true}，但 model value 为空（evaluate 读 ''，css value 读 ''）—— 即 brief 重点关注的 'fill 假成功'（vortex success 但 readback != write）。必须 fill + Enter 才落地。",
+      "m3_severity": "suspected-blocking",
+      "evidence": {
+        "tool_return_excerpt": "{focused:true, success:true} (vortex claims success)",
+        "evaluate_dom_truth": "After vortex_fill alone: document.querySelectorAll('.el-dialog input')[2].value = '' (empty). query mode=css '.el-dialog .el-date-editor input' attr='value' -> [{value:''}]. After vortex_press Enter: input[2].value = '2026-07-15 10:30:00' (now committed).",
+        "tried_alternatives": [
+          "vortex_fill value='2026-07-15 10:30:00' (no widget) on ref @4390:e3 -> success=true but input.value='' (write/readback MISMATCH)",
+          "vortex_fill value='2026-07-15 10:30:00' (no widget) on ref @3063:e3 (same tab) -> same success=true / input.value=''",
+          "Tab 984528398 fresh reproduction: vortex_fill value='2026-07-15 10:30:00' on ref @cd73:e3 -> success=true, evaluate input.value='', then Enter -> value='2026-07-15 10:30:00' (CONFIRMED REPRO)",
+          "vortex_press Enter -> commit works around the issue",
+          "vortex_mouse_click on popper '15' cell (CDP coord) -> no cell selectable, popper has el-zoom-in-top-leave class and td bbox h=0"
+        ]
+      },
+      "new_tab_reproduced": true,
+      "action_path_is_vortex_native": true
+    },
+    {
+      "id": "A-3",
+      "page": "#/applet/appNew/projectNew/58860/1838255 (新建工单 dialog)",
+      "component": "el-date-editor--datetime (截止时间)",
+      "tab": "984528398",
+      "primitive": "vortex_fill",
+      "action_sequence": [
+        {
+          "tool": "vortex_fill",
+          "args": {"target": "@cd73:e3", "value": "abc-invalid-date"},
+          "returned_excerpt": "{focused:true, success:true}"
+        },
+        {
+          "tool": "vortex_evaluate",
+          "args": {"code": "document.querySelectorAll('.el-dialog input')[2].value"},
+          "returned_excerpt": "\"abc-invalid-date\" (typed into input; not formatted-validated)"
+        },
+        {
+          "tool": "vortex_press",
+          "args": {"key": "Enter"},
+          "returned_excerpt": "{success:true, focusedElement:'input'}"
+        },
+        {
+          "tool": "vortex_evaluate",
+          "args": {"code": "document.querySelectorAll('.el-dialog input')[2].value"},
+          "returned_excerpt": "\"abc-invalid-date\" (still — el-date-editor rejected invalid format, model not committed)"
+        }
+      ],
+      "phenomenon": "vortex_fill 对 el-date-editor 不做 format 预校验：传非法字符串 'abc-invalid-date' 拿到 success=true + input.value 写入；Enter 后 model 仍未 commit。css value 回读 == write（严格按 brief 字面定义不是 fill 假成功），但语义上 vortex 没给任何'无效输入'信号。",
+      "m3_severity": "experience",
+      "evidence": {
+        "tool_return_excerpt": "{focused:true, success:true} (vortex accepts arbitrary string)",
+        "evaluate_dom_truth": "After fill: input[2].value = 'abc-invalid-date' (visual echoes typed text). query mode=css '.el-dialog .el-date-editor input' attr='value' -> [{value:'abc-invalid-date'}] (DOM readback == write, so per brief's literal definition NOT 'fill 假成功'). After Enter: input[2].value still = 'abc-invalid-date' (el-date-editor 拒绝非法格式，model 未 commit，但视觉仍是输入串).",
+        "tried_alternatives": [
+          "vortex_fill value='abc-invalid-date' on ref @cd73:e3 -> success=true (no format validation)",
+          "vortex_evaluate input[2].value -> 'abc-invalid-date' (DOM readback == write, no MISMATCH in this case)",
+          "vortex_press Enter -> no commit (el-date-editor internal parser rejects format)",
+          "compare with valid format on same ref (vortex_fill '2026-07-15 10:30:00' + Enter -> committed) -> the issue is format validation surface, not commit itself"
+        ]
+      },
+      "new_tab_reproduced": true,
+      "action_path_is_vortex_native": true
+    }
+  ],
+  "coverage": {
+    "pages_visited": 1,
+    "anomalies": 3,
+    "clean": 0,
+    "tabs_opened": 2,
+    "tab_ids": ["984528396", "984528398"],
+    "scenario": "newbeta-r2: 新建工单表单 fill + readback 校验 (文本/下拉/日期/单选多选)",
+    "controls_tested": {
+      "text_textarea_必填测试": {
+        "write": "vortex测试工单",
+        "vortex_fill_return": "{focused:true, success:true}",
+        "readback_css_value": "vortex测试工单",
+        "match": true
+      },
+      "select_el-select_filterable_执行人": {
+        "write": "青蛙 (default empty)",
+        "vortex_fill_return": "Error COMMIT_FAILED (trigger shows '')",
+        "readback_css_value": "青蛙",
+        "match": true,
+        "vortex_reported": "FAIL but actual true",
+        "anomaly": "A-1"
+      },
+      "select_el-select_任务状态": {
+        "write": "处理中 (default 待处理)",
+        "vortex_fill_return": "Error COMMIT_FAILED (trigger shows '')",
+        "readback_css_value": "处理中",
+        "match": true,
+        "vortex_reported": "FAIL but actual true",
+        "anomaly": "A-1"
+      },
+      "date_el-date-editor-datetime_截止时间": {
+        "write": "2026-07-15 10:30:00",
+        "vortex_fill_return_alone": "{focused:true, success:true}",
+        "readback_css_value_alone": "",
+        "match_alone": false,
+        "vortex_fill_with_Enter": "value committed",
+        "readback_css_value_with_Enter": "2026-07-15 10:30:00",
+        "match_with_Enter": true,
+        "anomaly": "A-2"
+      },
+      "date_el-date-editor_invalid_format_截止时间": {
+        "write": "abc-invalid-date",
+        "vortex_fill_return": "{focused:true, success:true}",
+        "readback_css_value": "abc-invalid-date",
+        "match": true,
+        "match_note": "DOM echoes typed text but model not committed (readback==write but semantics broken)",
+        "anomaly": "A-3"
+      },
+      "radio": {
+        "exists_in_form": false,
+        "note": "本 dialog 无可见 radio 控件"
+      },
+      "checkbox": {
+        "exists_in_form": "yes (回写此任务组件信息到订单备注) but display:none",
+        "interactive": false,
+        "note": "唯一 el-checkbox 隐藏，无法测试"
+      }
+    },
+    "non_visual_paths_attempted": [
+      "vortex_observe filter=interactive x 1",
+      "vortex_observe filter=all x 6 (dialog modal forces all)",
+      "vortex_query mode=css x 5 (input/textarea value, select input value, el-date-editor value, select dropdown list, date popper td available)",
+      "vortex_query mode=text x 3 (label grep, el-select-dropdown__item, ^15$)",
+      "vortex_act click x 4 (新建, close, popper open, date input re-open)",
+      "vortex_fill x 5 (textarea, select widget=select, select widget=aria-select, date value, date invalid)",
+      "vortex_press x 3 (Escape x 1, Enter x 2)",
+      "vortex_evaluate x 7 (input.value / select popper structure / el-checkbox state / Vue data探查 / popper 退场类名 / td bbox 0 高度)",
+      "vortex_mouse_click x 1 (CDP coord 试 popper '15' cell)",
+      "vortex_wait_for idle x 2",
+      "vortex_tab_create x 2 + vortex_tab_close x 2 (per-scenario tab isolation)"
+    ],
+    "submission_attempted": false,
+    "dirty_data_created": false,
+    "notes": "3 anomalies captured: (A-1) vortex_fill widget=select on el-select filterable returns COMMIT_FAILED but actual v-model commits — 'fill 假失败' 镜像 (vortex reports FAIL but truth is success). (A-2) vortex_fill on el-date-editor--datetime alone returns success=true but model empty (Enter needed) — brief 重点关注的 'fill 假成功' 真实命中，severity suspected-blocking. (A-3) vortex_fill on el-date-editor doesn't validate format — invalid string accepted, returns success=true, no model commit even after Enter. Per brief 要求未提交工单，dialog 关闭直接 tab close，表格仍只 1 行（无脏数据）。fill 假成功 (brief 字面定义 readback!=write) 仅 A-2 严格命中；A-1 是反向镜像（vortex 报错但 readback==write），A-3 是格式无校验（readback==write 但 model 未 commit）。3 类 fill/工具信号失真都该报。"
+  }
+}

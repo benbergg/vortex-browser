@@ -267,12 +267,26 @@
     const itemEls = wrapper.querySelectorAll(
       ".el-tag, .el-select__selected-item, .el-select__tags-text",
     );
-    const displayed = norm(wrapper.innerText || "");
+    // el-select 单选(旧版 Element Plus / 班牛自定义 edit-select 包装)把已选 label
+    // 渲染进只读 <input>.value——input.value 既不计入 innerText 也不是 selected-item
+    // span,若不显式并入回读,「值已 commit 但触发器无 span/文本」会被误判
+    // COMMIT_FAILED(newbeta.bytenew edit-select 实证 2026-07-04,与 aria-select
+    // react-select 假 COMMIT_FAILED 同族:verify 回读面窄于渲染面)。filterInput 上面
+    // 已 writeFilter("") 清空,不会污染;multi-select 的值走 .el-tag,input 空被 Boolean 滤除。
+    const inputVals = Array.from(wrapper.querySelectorAll("input"))
+      .map((i) => norm((i as HTMLInputElement).value || ""))
+      .filter(Boolean);
+    const displayed = [norm(wrapper.innerText || ""), ...inputVals]
+      .filter(Boolean)
+      .join(" ");
     // verify 的 label 也过 norm,与匹配步(norm 折叠空白 #25)口径一致,否则
     // 含内部空白的 label 在匹配步命中却在此假报 COMMIT_FAILED(评审 R1-MEDIUM)。
+    const itemTexts = [
+      ...Array.from(itemEls).map((e) => norm((e as HTMLElement).textContent || "")),
+      ...inputVals,
+    ];
     let notReflected: string[];
-    if (itemEls.length > 0) {
-      const itemTexts = Array.from(itemEls).map((e) => norm((e as HTMLElement).textContent || ""));
+    if (itemTexts.length > 0) {
       notReflected = labels.filter((l) => {
         const w = norm(l);
         return !itemTexts.some((t) => t === w || t.includes(w));

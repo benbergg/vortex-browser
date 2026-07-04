@@ -60,9 +60,11 @@ describe("族 A #20 — el-select COMMIT verify 最终态", () => {
     expect(SELECT_DRIVER_SRC).toMatch(/notReflected = labels\.filter/);
   });
 
-  it("优先读独立已选项元素(tag/selected-item)做精确匹配避免子串误判(评审 M2)", () => {
+  it("优先读独立已选项元素(tag/selected-item)+input.value 精确匹配避免子串误判(评审 M2 / bytenew edit-select 修复)", () => {
     expect(SELECT_DRIVER_SRC).toMatch(/\.el-tag, \.el-select__selected-item/);
-    expect(SELECT_DRIVER_SRC).toMatch(/itemEls\.length > 0/);
+    expect(SELECT_DRIVER_SRC).toMatch(/itemTexts\.length > 0/);
+    // 单选值渲染进只读 input 时并入回读(bytenew edit-select 假 COMMIT_FAILED 修复,2026-07-04)
+    expect(SELECT_DRIVER_SRC).toMatch(/wrapper\.querySelectorAll\("input"\)/);
   });
 
   it("未反映报 COMMIT_FAILED 而非假成功(对照 checkbox-group 范式)", () => {
