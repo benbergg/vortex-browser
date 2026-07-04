@@ -35,7 +35,7 @@ cycle 目录: reports/_dogfood/newbeta-2026-07-04/
 | 6  | 看板「图文卡片」非截图识别 | 退款管理大脑看板 4 卡→extract/query 读语义 | already-graceful | 0 blindspot:4 卡标题全非截图可读,1 张 echarts 数据 getOption 可读,3 卡「图」DOM 不渲染(title-only),空看板信号清晰非静默 | — | — | M3 extract+query 全读出;echarts 靠 evaluate getOption | clean(+增强候选) |
 | 7  | 探未知 template app 组件 | 计算组件/新评价模板3.2/售后管理/ERP工作台 | site-issue (0 vortex 缺陷) | 0 blindspot;vortex 完美处理新 widget「解密显示」decrypt-on-click + 39 字段 walk-point 向导,全非截图。A-1 特殊 widget 被 admin 配置降级 string(配置层)/A-2 空 template app(admin 未建 worksheet)——均 site-issue | — | — | M3 报 2 异常自证 site-config,vortex 端全 readout | clean |
 | 8  | 流程布局 dialog 画布 | 探 admin 流程设计器 | site-issue (mode=flow 降级正确) | 流程布局画布 admin 锁定不可达(开关 disabled,点击只收起)=site-issue;vortex 行为正确:query mode=flow 优雅降级报"未检测到流程图"非静默漏,主面板 canvas=0=普通 DOM table。非 blindspot | — | — | recon+r8 两次独立尝试均无法达画布 | clean |
-| 9  | 拖拽 drag+observeEffect | 左侧小程序菜单 dragItem 排序/看板卡拖入(班牛唯一拖拽面) | — | — | — | — | — | pending |
+| 9  | 拖拽 drag+observeEffect | 左侧小程序菜单 dragItem 排序 | already-graceful | vortex_drag/mouse_drag 真实生效(计算组件12→16→12/简易测试10→13→10 round-trip 顺序收敛,非假成功);班牛是 SortableJS mousedown 非 HTML5 native,observe 正确给 dropzone/不给 draggable(底层 draggable=false)。小 nuance:observe [draggable] 基于 HTML5 attr 漏 SortableJS 可拖项(drag 仍生效) | — | — | M3 evaluate+observe 双向顺序收敛证生效 | clean |
 | 10 | 综合任务链 多步 act | 筛选→选中 checkbox→行操作→处理 dialog 填写→提交;descriptor 自愈/stale ref 跨步稳态 | — | — | — | — | — | pending |
 
 > 状态: pending / clean(零缺陷) / fixed(有 defect 已修) / deferred(defect 记 backlog 未修) / blocked

@@ -1,0 +1,102 @@
+{
+  "cycle": "dogfood-newbeta-2026-07-04",
+  "site": "newbeta.bytenew.com",
+  "model": "minimax-cn-coding-plan/MiniMax-M3",
+  "tool_surface": [
+    "vortex_tab_create",
+    "vortex_observe",
+    "vortex_query",
+    "vortex_evaluate",
+    "vortex_act",
+    "vortex_drag",
+    "vortex_mouse_drag",
+    "vortex_wait_for"
+  ],
+  "anomalies": [
+    {
+      "id": "A-1",
+      "page": "/app.html#/applet/appNew/projectNew/58860/1838255",
+      "component": "左侧小程序菜单 / .dragItem / .appletMenuList-item / observe 拖拽信号",
+      "tab": "984528443",
+      "primitive": "vortex_observe",
+      "action_sequence": [
+        {
+          "tool": "vortex_tab_create",
+          "args": {
+            "url": "https://newbeta.bytenew.com/app.html#/applet/appNew/projectNew/58860/1838255",
+            "active": true
+          },
+          "returned_excerpt": "{ id: 984528443, url: '', title: '' }"
+        },
+        {
+          "tool": "vortex_observe",
+          "args": {
+            "scope": "viewport",
+            "filter": "interactive",
+            "tabId": 984528443
+          },
+          "returned_excerpt": "recall 28 cube list (vx预发评测0611 / 新评价模板测试中 / 新评价模板3.2 / 新评价模板3.1 / 计算组件 / 活动返现 / ...) — 所有项只有 [cursor=pointer] [listener],无 [draggable] 信号"
+        },
+        {
+          "tool": "vortex_query",
+          "args": {
+            "mode": "css",
+            "pattern": "[draggable=true] ",
+            "maxResults": 50,
+            "tabId": 984528443
+          },
+          "returned_excerpt": "{ elements: [], showing: 0, total: 0 }"
+        },
+        {
+          "tool": "vortex_evaluate",
+          "args": {
+            "code": "(function(){var d=document.querySelectorAll('[draggable]');var res={count:d.length,items:[]};for(var i=0;i<Math.min(d.length,5);i++){var el=d[i];res.items.push({tag:el.tagName,cls:el.className.substring(0,200),text:(el.textContent||'').substring(0,30)});}return JSON.stringify(res);})()",
+            "tabId": 984528443
+          },
+          "returned_excerpt": "{\"count\":0,\"items\":[]}"
+        },
+        {
+          "tool": "vortex_observe",
+          "args": {
+            "scope": "full",
+            "filter": "all",
+            "includeBoxes": true,
+            "tabId": 984528443
+          },
+          "returned_excerpt": "recall 主容器 [ref=@7a00:e20] [listener] [dropzone] bbox=[60,96,239,1276] + 嵌套子组 [ref=@7a00:e22] [listener] [dropzone] bbox=[60,140,239,44];所有 .appletMenuList-item 卡片只有 [cursor=pointer] [listener]"
+        },
+        {
+          "tool": "vortex_evaluate",
+          "args": {
+            "code": "(function(){var all=document.querySelectorAll('.dragItem, .appletMenuList-item, .appletMenuList-item-title, .appletMenuList');var res=[];all.forEach(function(el){res.push({tag:el.tagName,cls:el.className.substring(0,100),draggable:el.draggable,id:el.id||''});});return JSON.stringify({total:all.length,sample:res.slice(0,5)});})()",
+            "tabId": 984528443
+          },
+          "returned_excerpt": "{\"total\":84,\"sample\":[{\"tag\":\"DIV\",\"cls\":\"w-default-wrap dragItem\",\"draggable\":false,\"id\":\"\"},{\"tag\":\"DIV\",\"cls\":\"w-default-wrap appletMenuList-item\",\"draggable\":false,\"id\":\"\"},{\"tag\":\"DIV\",\"cls\":\"appletMenuList-item-title w-text-over\",\"draggable\":false,\"id\":\"\"},...]"
+        }
+      ],
+      "phenomenon": "左侧小程序菜单 `.dragItem` / `.appletMenuList-item` 卡片,observe 只在主容器和 1 处嵌套子组标了 `[dropzone]`,**没在源项卡片上标 [draggable]/[grabbed]/[aria-grabbed] 等拖拽源语义属性**;底层 DOM 真值是 28+ 个 .dragItem 全部 `draggable=false`(document.querySelectorAll('[draggable]').length===0),observe 是如实反映,非漏报;但 brief 期望给完整信号 — 信号给了一半(dropzone 给 / draggable 没给)",
+      "m3_severity": "unsure",
+      "evidence": {
+        "tool_return_excerpt": "vortex_observe scope=full filter=all includeBoxes=true: 主容器 dropzone ✓ + 嵌套 dropzone ✓ + 28 项子卡片 [cursor=pointer] 无 [draggable];vortex_query mode=css pattern=[draggable=true]: total:0;vortex_evaluate document.querySelectorAll('[draggable]').length: 0;84 个 .dragItem/appletMenuList-item 全部 draggable=false",
+        "evaluate_dom_truth": "document.querySelectorAll('[draggable]').length===0;全部 84 个 .dragItem / .appletMenuList-item / .appletMenuList-item-title draggable=false;容器 DOM <div class='w-default-wrap dragItem'><div class='w-default-wrap appletMenuList-item' data-vortex-react-clickable=1>...</div></div>;observe 主 dropzone bbox=[60,96,239,1276] 嵌套 dropzone bbox=[60,140,239,44]",
+        "tried_alternatives": [
+          "vortex_observe scope=viewport filter=interactive: 28 项子项只有 [cursor=pointer] [listener] 没 [draggable]",
+          "vortex_observe scope=full filter=all includeBoxes=true: 主容器 + 嵌套 dropzone 给,但 28 项子项仍只有 [cursor=pointer]",
+          "vortex_query mode=css pattern=[draggable=true]: 0 个匹配",
+          "vortex_query mode=css pattern='div[draggable]': 0 个匹配",
+          "vortex_evaluate document.querySelectorAll('[draggable]').length: 0(全页面零 draggable 元素)",
+          "vortex_evaluate .dragItem × 84 个 draggable=false(确认是 mousedown-based SortableJS 类,非 HTML5 dragstart/dragover/drop)",
+          "底层 DOM 真值拖拽照样生效: vortex_drag ref-based sort 顺序真变化 + evaluate 双向验证 — 因此 observe 不标 [draggable] 是事实真理(via a11y),非工具误判"
+        ]
+      },
+      "new_tab_reproduced": false,
+      "action_path_is_vortex_native": true
+    }
+  ],
+  "coverage": {
+    "pages_visited": 1,
+    "anomalies": 1,
+    "clean": 0,
+    "notes": "本轮 r9 评测了 1 个 page(项目首页左小程序菜单)。核心结论:拖拽机制 = SortableJS 类 mousedown-based(非 HTML5 native),vortex_drag(ref)与 vortex_mouse_drag(coord)双路径均真实生效(顺序真变化 + evaluate 双向验证 + round-trip 恢复成功,非假成功);observe 信号给了一半(dropzone 给 / draggable 没给),这是底层 DOM 真值正确反映(全部 84 个 .dragItem.draggable=false),不算 vortex 缺陷。盲区诚实边界:看板拖拽(添加图表→拖入)在 cube admin 配置层,site-issue 跳过,本轮未覆盖。本轮 observe 调用 7 次 + query 5 次 + evaluate 6 次 + drag 2 次 + mouse_drag 3 次 + act 1 次 + wait_for 1 次 + tab_create 1 次,共 26 次(在 30 预算内)。异常只记 1 个 unsure(信号部分缺失),不算 vortex 缺陷 — 拖拽本身工具完全有效。"
+  }
+}
