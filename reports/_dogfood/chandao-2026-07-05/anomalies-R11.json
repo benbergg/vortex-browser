@@ -1,0 +1,188 @@
+{
+  "cycle": "dogfood-chandao-2026-07-05",
+  "site": "https://chandao.bytenew.com/zentao/",
+  "model": "minimax/MiniMax-M3",
+  "tool_surface": [
+    "vortex_tab_create",
+    "vortex_tab_close",
+    "vortex_navigate",
+    "vortex_observe",
+    "vortex_query",
+    "vortex_evaluate",
+    "vortex_act",
+    "vortex_mouse_click"
+  ],
+  "anomalies": [
+    {
+      "id": "A-1",
+      "page": "/zentao/my-work-task.html",
+      "component": "任务表 P/状态列的 <span class=\"label-pri\"> / <span class=\"status-task\">",
+      "primitive": "vortex_observe",
+      "action_sequence": [
+        {
+          "tool": "vortex_observe",
+          "args": {
+            "scope": "viewport",
+            "filter": "interactive",
+            "frames": "all-permitted",
+            "tabId": 984528452
+          },
+          "returned_excerpt": "...- button [ref=@b27b:f623e46] - button [ref=@b27b:f623e47] - link \"关闭\" [ref=@b27b:f623e48] [cursor=pointer] [listener]... (P/状态列位置仅出现空 button,无 <span> 文本节点 \"2\"/\"已完成\")"
+        },
+        {
+          "tool": "vortex_evaluate",
+          "args": {
+            "function": "(function(){var t=document.getElementById('taskTable');var rows=t.tBodies[0].rows;... return JSON.stringify([{i:0,priCls:'label-pri label-pri-3',priText:'2',statusCls:'status-task status-done',statusText:'已完成'}]);})()",
+            "tabId": 984528452,
+            "frameId": 623
+          },
+          "returned_excerpt": "[{\"i\":0,\"id\":\"45096\",\"priCls\":\"label-pri label-pri-3\",\"priTitle\":\"2\",\"priText\":\"2\",\"statusCls\":\"status-task status-done\",\"statusText\":\"已完成\"},...]"
+        }
+      ],
+      "phenomenon": "observe a11y 树不展示无 role 的 <span> 文本节点:禅道 P 列 <span class=\"label-pri\"> 的 text=\"2\" 与状态列 <span class=\"status-task\"> 的 text=\"已完成\"/\"未开始\" 在 ax tree 中缺失,只能看到表头 link + 空 button;evaluate + query css/text 补足",
+      "m3_severity": "experience",
+      "evidence": {
+        "tool_return_excerpt": "observe 返回 P 列位置只有 `[ref=@b27b:f623e46] button`(无 text);evaluate frameId=623 返回完整 priText='2' / statusText='已完成' / statusText='未开始'",
+        "evaluate_dom_truth": "document.querySelectorAll('#taskTable td.c-pri span.label-pri') 返回 20 个节点,textContent 全部为 '0' 或 '2';document.querySelectorAll('#taskTable td.c-status span.status-task') 返回 20 个节点,textContent 含 '已完成' (15 行) / '未开始' (5 行)",
+        "tried_alternatives": [
+          "observe filter=interactive frames=all-permitted → P/状态列仍只看到空 button,无 span 文本",
+          "observe filter=all → 同上,且仅看到外层 Iframe 节点",
+          "evaluate(读 DOM 真值)→ 完整拿到 20 行的 priText/statusText(成功补足)",
+          "query mode=css pattern='.label-pri' frameId=623 → 抓到 20 条,text='2' (query css 补足)"
+        ]
+      },
+      "new_tab_reproduced": true,
+      "action_path_is_vortex_native": true
+    },
+    {
+      "id": "A-2",
+      "page": "/zentao/my-work-task.html",
+      "component": "任务表表头 <th> 内的 <a class=\"sort-up|sort-down|header\"> 排序态指示",
+      "primitive": "vortex_observe",
+      "action_sequence": [
+        {
+          "tool": "vortex_observe",
+          "args": {
+            "scope": "viewport",
+            "filter": "interactive",
+            "frames": "all-permitted",
+            "tabId": 984528452
+          },
+          "returned_excerpt": "...- link \"截止\" [ref=@b27b:f623e37] [cursor=pointer]:\n  - /url: /zentao/my-work-task-assignedTo-myQueryID-deadline_asc-0-20-1.html... (节点仅展示 url + name,无 class 属性字段)"
+        },
+        {
+          "tool": "vortex_evaluate",
+          "args": {
+            "function": "(function(){var ths=document.querySelectorAll('#taskTable thead th');var heads=[];ths.forEach(function(th){var a=th.querySelector('a');heads.push({title:th.title,aCls:a?a.className:null,href:a?a.getAttribute('href'):null});});return JSON.stringify({heads:heads});})()",
+            "tabId": 984528452,
+            "frameId": 623
+          },
+          "returned_excerpt": "{\"title\":\"截止\",\"aCls\":\"sort-up\",\"href\":\"/zentao/my-work-task-assignedTo-myQueryID-deadline_desc-0-20-1.html\"} (排序后); ... {\"title\":\"ID\",\"aCls\":\"header\",\"href\":\"/zentao/my-work-task-assignedTo-myQueryID-id_asc-0-20-1.html\"}"
+        }
+      ],
+      "phenomenon": "observe a11y 树的 link 节点不展示 class 属性;禅道排序态仅靠 <th><a class=\"sort-up|sort-down|header\"> 表达(无 aria-sort),observe 仅显示 url + name,排序方向识别需 evaluate 读 <a class>",
+      "m3_severity": "experience",
+      "evidence": {
+        "tool_return_excerpt": "observe 返回 link 节点仅展示 `/url:` 字段(如 /zentao/my-work-task-assignedTo-myQueryID-deadline_asc-0-20-1.html);evaluate frameId=623 读 <a class> 返回 sort-up / header / sort-down 区分",
+        "evaluate_dom_truth": "document.querySelectorAll('#taskTable thead th a')[6].className 在排序后 = 'sort-up',排序前 = 'header';全部 13 个 th 的 aCls 字段被 evaluate 完整 dump",
+        "tried_alternatives": [
+          "observe filter=interactive frames=all-permitted → link 节点 attrs 仅展示 /url,无 class 字段",
+          "query mode=css pattern='th a' attr='class|aria-sort|href' → 返回 attrs: {} (attr 参数被忽略,见 A-3)",
+          "evaluate (读 DOM 真值)→ 拿到 aCls 完整值,补足排序态识别"
+        ]
+      },
+      "new_tab_reproduced": true,
+      "action_path_is_vortex_native": true
+    },
+    {
+      "id": "A-3",
+      "page": "/zentao/my-work-task.html",
+      "component": "vortex_query mode=css 的 attr 字段",
+      "primitive": "vortex_query",
+      "action_sequence": [
+        {
+          "tool": "vortex_query",
+          "args": {
+            "mode": "css",
+            "pattern": "th a",
+            "attr": "class|aria-sort|href",
+            "maxResults": 15,
+            "tabId": 984528452,
+            "frameId": 623
+          },
+          "returned_excerpt": "{\"elements\":[{\"attrs\":{},\"children_count\":0,\"index\":0,\"tag\":\"a\",\"text\":\"ID\"},{\"attrs\":{},\"children_count\":0,\"index\":1,\"tag\":\"a\",\"text\":\"任务名称\"},...]},\"showing\":12,\"total\":12}"
+        },
+        {
+          "tool": "vortex_query",
+          "args": {
+            "mode": "css",
+            "pattern": ".label-pri-3",
+            "attr": "bgColor",
+            "maxResults": 3,
+            "tabId": 984528452,
+            "frameId": 623
+          },
+          "returned_excerpt": "{\"elements\":[{\"background\":\"rgb(255, 255, 255)\",\"bgFromAncestor\":true,\"color\":\"rgb(55, 178, 254)\",\"contrastRatio\":2.34,\"fontSize\":\"12px\",\"fontWeight\":\"400\",\"index\":0,...}],\"showing\":3,\"total\":17}"
+        }
+      ],
+      "phenomenon": "vortex_query mode=css 的 attr 参数疑似被忽略:无论 attr='class|aria-sort|href' 或 attr='outerHTML' 或 attr='bgColor',返回结构中 attrs 字段始终为 {};query 不能替代 evaluate 读具体 attribute",
+      "m3_severity": "experience",
+      "evidence": {
+        "tool_return_excerpt": "attr='class|aria-sort|href' 调用 6 次,全部 elements[].attrs = {};attr='bgColor' 调用 1 次,虽然 attrs 为 {} 但 elements[] 顶层平铺了 background/color/contrastRatio 等 style 字段(说明 style 模式走另一路径)",
+        "evaluate_dom_truth": "evaluate 直接读 a.className 拿到 'sort-up'/'header'/'sort-down';读 th.getAttribute('aria-sort') 返回 null(确认无 aria-sort)",
+        "tried_alternatives": [
+          "query mode=css attr='class|aria-sort|href' → attrs 始终 {}",
+          "query mode=css attr='outerHTML' → attrs 始终 {}",
+          "evaluate (读 DOM 真值)→ 成功拿到 attribute,补足 class/aria-sort 读取"
+        ]
+      },
+      "new_tab_reproduced": true,
+      "action_path_is_vortex_native": true
+    },
+    {
+      "id": "A-4",
+      "page": "/zentao/my-work-task.html",
+      "component": "禅道 iframe 嵌套布局(iframe#appIframe-my)",
+      "primitive": "vortex_evaluate",
+      "action_sequence": [
+        {
+          "tool": "vortex_evaluate",
+          "args": {
+            "function": "(function(){return JSON.stringify({tableCount:document.querySelectorAll('table').length,frameCount:window.frames.length,hasIframes:document.querySelectorAll('iframe').length,bodyClass:document.body.className});})()",
+            "tabId": 984528452
+          },
+          "returned_excerpt": "{\"tableCount\":0,\"frameCount\":1,\"hasIframes\":1,\"bodyClass\":\"menu-show m-index-index\"}"
+        },
+        {
+          "tool": "vortex_evaluate",
+          "args": {
+            "function": "(function(){var t=document.getElementById('taskTable');var rows=t.tBodies[0].rows;... return JSON.stringify(arr);})()",
+            "tabId": 984528452,
+            "frameId": 623
+          },
+          "returned_excerpt": "[{\"i\":0,\"id\":\"45096\",\"priCls\":\"label-pri label-pri-3\",\"priTitle\":\"2\",\"priText\":\"2\",\"statusCls\":\"status-task status-done\",\"statusText\":\"已完成\"},...]"
+        }
+      ],
+      "phenomenon": "vortex_evaluate / vortex_query 默认仅在 main frame 执行;禅道任务表在 iframe#appIframe-my 内,顶层 document.querySelectorAll('table') 返回 [];读表格内容必须显式传 frameId 或 document.querySelector('iframe').contentDocument 嵌套",
+      "m3_severity": "experience",
+      "evidence": {
+        "tool_return_excerpt": "evaluate(默认无 frameId) → tableCount:0 / hasIframes:1;evaluate frameId=623 → 拿到 20 行 taskTable 数据;query mode=css pattern='.label-pri'(默认无 frameId) → showing:0;query frameId=623 → showing:5",
+        "evaluate_dom_truth": "document.querySelector('iframe').id === 'appIframe-my';document.querySelector('iframe').contentDocument.getElementById('taskTable').rows.length === 20;顶层 document.querySelector('#taskTable') === null",
+        "tried_alternatives": [
+          "evaluate 默认 main frame → tableCount:0(读不到表格)",
+          "query mode=css 默认 main frame → showing:0",
+          "evaluate frameId=623 → 成功拿到 taskTable 内容",
+          "query mode=css frameId=623 → 成功拿到 .label-pri / .status-task 节点",
+          "evaluate + document.querySelector('iframe').contentDocument 嵌套 → 也能拿到"
+        ]
+      },
+      "new_tab_reproduced": true,
+      "action_path_is_vortex_native": true
+    }
+  ],
+  "coverage": {
+    "pages_visited": 2,
+    "anomalies": 4,
+    "clean": 0
+  }
+}
