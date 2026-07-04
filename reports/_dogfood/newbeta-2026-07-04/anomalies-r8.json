@@ -1,0 +1,227 @@
+{
+  "cycle": "dogfood-newbeta-2026-07-04",
+  "site": "newbeta.bytenew.com",
+  "model": "minimax-cn-coding-plan/MiniMax-M3",
+  "tool_surface": [
+    "vortex_tab_create",
+    "vortex_tab_list",
+    "vortex_navigate",
+    "vortex_observe",
+    "vortex_act",
+    "vortex_press",
+    "vortex_query",
+    "vortex_extract",
+    "vortex_wait_for",
+    "vortex_evaluate",
+    "vortex_tab_close"
+  ],
+  "anomalies": [
+    {
+      "id": "A-1",
+      "page": "/app.html#/applet/appNew/projectNew/30009/1086546",
+      "component": "workflow-worksheet / 流程按钮 dropdown / 流程布局 开关",
+      "tab": "984528441",
+      "primitive": "vortex_act",
+      "action_sequence": [
+        {
+          "tool": "vortex_tab_create",
+          "args": {
+            "url": "https://newbeta.bytenew.com/app.html#/applet/appNew/projectNew/30009/1086546",
+            "active": true
+          },
+          "returned_excerpt": "{ id: 984528441, url: '', title: '' }"
+        },
+        {
+          "tool": "vortex_navigate",
+          "args": {
+            "url": "https://newbeta.bytenew.com/app.html#/applet/appNew/projectNew/30009/1086546",
+            "waitUntil": "load",
+            "tabId": 984528441
+          },
+          "returned_excerpt": "{ url: 'https://newbeta.bytenew.com/app.html#/applet/appNew/projectNew/30009/1086546', status: 'complete' }"
+        },
+        {
+          "tool": "vortex_observe",
+          "args": {
+            "scope": "viewport",
+            "filter": "interactive",
+            "tabId": 984528441
+          },
+          "returned_excerpt": "recall 流程 button @364e:e30 desc='流程设置 流程权限 提醒设置 自动分配 流程参数 流程数据 流程布局 dialog' + 11 toolbar buttons + 6 cols + 10 rows"
+        },
+        {
+          "tool": "vortex_act",
+          "args": {
+            "target": "@364e:e30",
+            "action": "click",
+            "options": {
+              "observeEffect": true
+            },
+            "tabId": 984528441
+          },
+          "returned_excerpt": "{ success: true, element: { tag: 'button', text: '流程' }, x: 1230, y: 74, mode: 'realMouse', effect: { ariaChanged: false, domMutations: 231, networkRequests: 0, urlChanged: false } }"
+        },
+        {
+          "tool": "vortex_evaluate",
+          "args": {
+            "code": "document.getElementById('el-popover-6342') ? document.getElementById('el-popover-6342').outerHTML : 'NOT_FOUND'",
+            "tabId": 984528441
+          },
+          "returned_excerpt": "<div role=tooltip id=el-popover-6342 class='el-popover el-popper workflow-dropdown-popover'> ... <div class='workflow-dropdown-item top disabled'> <div role=switch aria-checked=true aria-disabled=true class='el-switch is-disabled is-checked'> ... <span>流程布局</span> <i class='el-tooltip right-icon wicon icon-questionmark'></i> </div>"
+        },
+        {
+          "tool": "vortex_act",
+          "args": {
+            "target": "@0056:e8",
+            "action": "click",
+            "options": {
+              "observeEffect": true
+            },
+            "tabId": 984528441
+          },
+          "returned_excerpt": "{ success: true, element: { tag: 'div', text: '流程布局' }, effect: { ariaChanged: false, dialogHit: [], domMutations: 191, networkRequests: 0, urlChanged: false } }"
+        },
+        {
+          "tool": "vortex_evaluate",
+          "args": {
+            "code": "JSON.stringify({visibleCount: Array.from(document.querySelectorAll('.el-dialog, .el-dialog__wrapper, [role=dialog]')).filter(d => d.offsetParent !== null).length, items: []})",
+            "tabId": 984528441
+          },
+          "returned_excerpt": "{ visibleCount: 0, items: [] }"
+        }
+      ],
+      "phenomenon": "[blindspot] 流程设计器画布本体不可达:工作流演示 worksheet「流程」按钮 dropdown 内「流程布局」开关处于 disabled+checked 状态(admin 锁定),act click 仅收起 popper,无新 dialog/canvas 出现,流程图结构 readback 无法触达",
+      "m3_severity": "experience",
+      "evidence": {
+        "tool_return_excerpt": "vortex_act success=true + effect.dialogHit=[] + effect.networkRequests=0 + effect.urlChanged=false; vortex_evaluate el-dialog visibleCount=0",
+        "evaluate_dom_truth": "dropdown item DOM: <div class='workflow-dropdown-item top disabled'><div role=switch aria-checked=true aria-disabled=true class='el-switch el-inner-text-switch is-disabled is-checked'><input type=checkbox disabled='disabled' class='el-switch__input'>...</div><span>流程布局</span><i class='el-tooltip right-icon wicon icon-questionmark'></i></div>; .el-dialog 全部 visibleCount=0",
+        "tried_alternatives": [
+          "observe dropdown 召回完整(switch checked disabled)",
+          "act click 流程布局 @0056:e8: domMutations 191 但 dialogHit=[] + networkRequests=0 + urlChanged=false",
+          "evaluate .el-dialog 全部 visibleCount=0(无新对话框)",
+          "navigate #/applet/appNew/projectNew/30009/admin/flow: 主面板空白, canvas=0, svg=0, 无 workflow-design 类",
+          "worksheet dropdown 内 21 个 admin 项全部 active,但没有「流程布局」入口 — 流程结构是 cube 维度锁定,与 worksheet 配置层不同权限"
+        ]
+      },
+      "new_tab_reproduced": false,
+      "action_path_is_vortex_native": true
+    },
+    {
+      "id": "A-2",
+      "page": "/app.html#/applet/appNew/projectNew/30009/1086546",
+      "component": "workflow-worksheet / 主面板 / vortex_query mode=flow 降级",
+      "tab": "984528441",
+      "primitive": "vortex_query",
+      "action_sequence": [
+        {
+          "tool": "vortex_query",
+          "args": {
+            "mode": "flow",
+            "pattern": "*",
+            "tabId": 984528441
+          },
+          "returned_excerpt": "Error [JS_EXECUTION_ERROR]: query.queryPage flow error: no flow diagram on page (未检测到流程图;若确在流程页请等待加载,或用 vortex_screenshot)"
+        },
+        {
+          "tool": "vortex_query",
+          "args": {
+            "mode": "css",
+            "pattern": "canvas, svg, .x6-graph, [class*=x6], [class*=antv], [class*=logic-flow], [class*=flow-node], [class*=flow-edge]",
+            "maxResults": 50,
+            "tabId": 984528441
+          },
+          "returned_excerpt": "{ elements: [2 svg icons], showing: 2, total: 2 }"
+        },
+        {
+          "tool": "vortex_extract",
+          "args": {
+            "target": "div[ref*='bd0d:e50'], .workflow-worksheet, .workflow-node-list, main",
+            "maxLength": 8192,
+            "includeAlt": true,
+            "tabId": 984528441
+          },
+          "returned_excerpt": "完整 10 行工单表(工单编号/任务编号/节点名称/节点类型/产生时间/等待时长/操作),无 svg/canvas/flow 嵌入"
+        }
+      ],
+      "phenomenon": "vortex_query mode=flow 在 worksheet 主面板主动报错 no flow diagram on page,提示建议 vortex_screenshot;主面板 canvas=0 + svg=2(图标级)+ 无 x6/antv/logic-flow 类 — worksheet 主面板不是流程画布,是普通 DOM table。vortex 给出明确 graceful degradation,但降级提示依赖 screenshot 路径",
+      "m3_severity": "experience",
+      "evidence": {
+        "tool_return_excerpt": "JS_EXECUTION_ERROR: query.queryPage flow error: no flow diagram on page (未检测到流程图;若确在流程页请等待加载,或用 vortex_screenshot)",
+        "evaluate_dom_truth": "query mode=css 返回 total:2(都是 svg 图标级,无 class);query mode=flow 主动 throw 'no flow diagram on page';extract readout 10 行普通 DOM table,无任何 svg/canvas/flow 嵌入",
+        "tried_alternatives": [
+          "vortex_query mode=flow pattern=*: JS_EXECUTION_ERROR 主动报错",
+          "vortex_query mode=css pattern=canvas,svg,.x6-graph,...: total:2(都是 svg 图标级)",
+          "vortex_extract 完整 readout 10 行 DOM table,确认主面板是普通 <table> 不是画布",
+          "vortex_observe filter=interactive: recall 完整 toolbar + 10 行 cell,无 [blindspot] 降级信号(因为不是画布场景)"
+        ]
+      },
+      "new_tab_reproduced": false,
+      "action_path_is_vortex_native": true
+    },
+    {
+      "id": "A-3",
+      "page": "/app.html#/applet/appNew/projectNew/30009/admin/flow",
+      "component": "admin cube 配置页 / 流程设计器入口",
+      "tab": "984528441",
+      "primitive": "vortex_navigate",
+      "action_sequence": [
+        {
+          "tool": "vortex_navigate",
+          "args": {
+            "url": "https://newbeta.bytenew.com/app.html#/applet/appNew/projectNew/30009/admin/flow",
+            "tabId": 984528441
+          },
+          "returned_excerpt": "{ url: 'https://newbeta.bytenew.com/app.html#/applet/appNew/projectNew/30009/admin/flow', status: 'complete' }"
+        },
+        {
+          "tool": "vortex_observe",
+          "args": {
+            "scope": "full",
+            "filter": "all",
+            "tabId": 984528441
+          },
+          "returned_excerpt": "recall 80+ elements 全部是左侧 nav,主面板为空"
+        },
+        {
+          "tool": "vortex_extract",
+          "args": {
+            "target": "body",
+            "maxLength": 3000,
+            "tabId": 984528441
+          },
+          "returned_excerpt": "首页 犇犇 小程序 搜索 11 小程序 vx预发评测0611 新评价模板(测试中) ... 26 个 cube 名 — 仅 nav 列表,主面板空白"
+        },
+        {
+          "tool": "vortex_query",
+          "args": {
+            "mode": "css",
+            "pattern": "canvas, .x6-graph, [class*=x6], [class*=antv], [class*=logic-flow], [class*=flow-node], [class*=flow-edge], [class*=workflow-design]",
+            "maxResults": 50,
+            "tabId": 984528441
+          },
+          "returned_excerpt": "{ elements: [], showing: 0, total: 0 }"
+        }
+      ],
+      "phenomenon": "admin/flow hash (#/applet/appNew/projectNew/30009/admin/flow) navigate 后主面板空白,canvas=0/svg=0,无任何 x6/antv/logic-flow/workflow-design 类 — 流程设计器 admin 入口不在该 hash。本轮未找到正确的 admin 流程编辑器入口",
+      "m3_severity": "experience",
+      "evidence": {
+        "tool_return_excerpt": "navigate status:complete 但 observe 主面板空白 + extract 仅 nav 文本 + query mode=css total:0",
+        "evaluate_dom_truth": "vortex_query mode=css total:0(无 canvas/svg/x6/antv/logic-flow/workflow-design);vortex_extract 仅 nav 列表,主面板空",
+        "tried_alternatives": [
+          "navigate #/applet/appNew/projectNew/30009/admin/flow: status=complete 但主面板空白",
+          "observe scope=full filter=all: recall 80+ elements 全部是左侧 nav",
+          "extract target=body: 仅 nav 列表 + 26 个 cube 名",
+          "query mode=css pattern=canvas/svg/x6/antv/logic-flow/workflow-design: total:0"
+        ]
+      },
+      "new_tab_reproduced": false,
+      "action_path_is_vortex_native": true
+    }
+  ],
+  "coverage": {
+    "pages_visited": 2,
+    "anomalies": 3,
+    "clean": 0,
+    "notes": "本轮 r8 评测了 2 个 page(worksheet 主面板 + admin/flow hash)。核心结论:流程设计器画布本体因 admin 锁定不可达(site-issue),vortex 在 worksheet 层和 admin 层都给出明确非截图降级信号(query mode=flow 主动报错 + query mode=css total:0)。盲区诚实边界:画布本体不可达,因此画布技术栈(x6/antv/logic-flow/svg/canvas)未确认;节点 act 交互未测试(画布本体不在)。本轮 query 调用 8 次 + observe 8 次 + act 5 次 + extract 3 次 + evaluate 3 次 + navigate 3 次 + 其他 1 次,共 ~31 次(略超 30 预算,因 admin hash 试错消耗)。"
+  }
+}
