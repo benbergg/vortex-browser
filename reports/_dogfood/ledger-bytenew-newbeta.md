@@ -44,7 +44,7 @@ cycle 目录: reports/_dogfood/newbeta-2026-07-04/
 （逐轮累积: 哪类内容非截图无法识别 + 现有工具为何盖不到 + 是否转 vortex-defect）
 
 ## backlog (非 vortex-defect 或未修)
-- **[r2 A-2 确诊待 spike]** `vortex_fill`(无 widget) 对 el-date-editor--datetime 单步返回 success 但 model 空、须 Enter 才 commit(fill 假成功)。单 datetime 无对应 commit driver kind(仅 daterange/datetimerange/time)。真因需 spike:el-date-editor commit 时序 + 是否补 `datetime` commit driver。**优先级高**(silent 数据丢失)。
+- **[r2 A-2 — Spike2 推翻误诊]** 原判"datetime fill 假成功"**不成立**。Spike2 live:`vortex_fill` 对 bytenew 截止时间 el-date-editor 填 `2026-07-15 10:30:00` → query mode=css 回读值**留存并提交**(popper 开/关均可,面板开启时也不清空)。M3 的 A-2 证据是 `fill @e3` 后读 `.el-dialog input[2]`,但本 dialog input 顺序 [2]=请输入内容(文本框,未填故空) ≠ date(e3=[3])——**M3 索引错位读错字段的伪缺陷**。真实 datetime fill 无缺陷。曾据 A-2 加 fill 异步再验(dom.ts RAF re-check),因目标不可复现 + 给核心 fill 每次加 RAF 属无 live 证据投机改动,**已回退**(承重墙纪律)。
 - **[r2 A-3 by-design/低]** `vortex_fill` 对 el-date-editor 不做格式预校验,非法串 `abc-invalid-date` 返回 success+input.value 写入,Enter 后 model 不 commit。readback==write(非严格 fill 假成功);fill 只管输入、app 拒格式。倾向 by-design,暂不修。
 - **[r3 observe 漏 vxe 冻结列 — Spike1 推翻误诊,降级]** 原判"observe 盲于冻结列"**不成立**。真相:vxe fixed-left 是 absolute 覆盖层(z5),body checkbox 被其遮挡→observe occlusion 门正确丢弃;fixed-left checkbox 是顶层、过 occlusion+controlRoleFromClass 命名=**已收集**。控件时隐时现于 observe 输出=**80-item 显示截断变异**(左侧 26 app 启动栏 DOM 序在前吃半配额),非扫描盲区。→ 非缺陷。**残留低优观察**:密集表 + 常驻左栏时行控件易被挤出 80 显示窗,agent 拿不到 ref 则不可达。属截断/排序取舍(既有 80-cap),若要改=提 cap 或"in-content 控件优先于常驻 nav"排序,属产品决策非 bug,暂不动。
 - **[r2 observe filter=all 间歇超时]** M3 在重 DOM churn 下撞 observe.snapshot 30s MCP 超时 2 次,Claude live 同页 filter=all 正常返回(784 候选)未复现。间歇性、无确定性 repro→无法 TDD。列 watch-item,若后续轮复现且可稳定触发再开 spike。
