@@ -1,0 +1,276 @@
+{
+  "cycle": "dogfood-newbeta-2026-07-04",
+  "site": "https://newbeta.bytenew.com/app.html#/applet/appNew/projectNew/58860/1838255",
+  "model": "minimax-cn-coding-plan/MiniMax-M3",
+  "tool_surface": [
+    "vortex_tab_create",
+    "vortex_tab_close",
+    "vortex_wait_for",
+    "vortex_observe",
+    "vortex_query",
+    "vortex_act",
+    "vortex_mouse_click",
+    "vortex_press"
+  ],
+  "anomalies": [
+    {
+      "id": "A-1",
+      "page": "#/applet/appNew/projectNew/58860/1838255 (工单测试表0611) + /applet/appNew/projectNew/30009/1086546 (工作流演示) — 每页条数下拉",
+      "component": "el-pagination .el-pagination__sizes .el-input__inner (只读 input)",
+      "tab": "984528421, 984528423",
+      "primitive": "vortex_observe",
+      "action_sequence": [
+        {
+          "tool": "vortex_mouse_click",
+          "args": {"x": 1106, "y": 576, "coordSpace": "viewport"},
+          "returned_excerpt": "{success:true, x:1106, y:576, button:left, mode:realMouse} — opened el-select dropdown"
+        },
+        {
+          "tool": "vortex_query",
+          "args": {"mode": "css", "pattern": ".el-select-dropdown__item"},
+          "returned_excerpt": "5 items: 10条/页 (selected) / 20条/页 / 30条/页 / 40条/页 / 50条/页"
+        },
+        {
+          "tool": "vortex_mouse_click",
+          "args": {"x": 1111, "y": 424, "coordSpace": "viewport"},
+          "returned_excerpt": "{success:true} — clicked 20条/页 li"
+        },
+        {
+          "tool": "vortex_query",
+          "args": {"mode": "css", "pattern": ".el-pagination__sizes .el-input__inner", "attr": "value"},
+          "returned_excerpt": "{attrs:{value:'20条/页'}, text:''} — input.value 已 commit 为 20条/页"
+        },
+        {
+          "tool": "vortex_observe",
+          "args": {"scope": "viewport", "filter": "interactive"},
+          "returned_excerpt": "observe 看不到分页器(wrapper innerText='',observe 截断到 80 candidates 把 el-pagination__sizes 挡在区间外)"
+        },
+        {
+          "tool": "vortex_observe",
+          "args": {"scope": "viewport", "filter": "interactive"},
+          "returned_excerpt": "observe 截断到 80/720+ candidates;返回的 80 candidates 是 viewport 内的导航/工具栏/筛选 panel/表格 + 行,分页器在 80 之后不可见"
+        },
+        {
+          "tool": "vortex_observe",
+          "args": {"scope": "viewport", "filter": "interactive"},
+          "returned_excerpt": "当添加筛选条件 dropdown 弹出时,observe 召回 'textbox \"请选择\" value=20条/页' — 因为 dropdown 弹出挤占 80 配额,分页器被收纳进去,value=20条/页 才被看到"
+        }
+      ],
+      "phenomenon": "act 点 20条/页 后真实 DOM 验证 .el-pagination__sizes .el-input__inner attr.value='20条/页' 已 commit,但 el-pagination__sizes wrapper innerText=''(因为 input 是 readonly 只读,value 不进入 DOM text),observe 默认输出在 dropdown 关闭后看不到任何「20条/页」标记;observe 截断 80 candidates 也常把分页器挡在可见区间外;只有当另一个 dropdown 弹出时,observe 才偶然借机召回 textbox value=20条/页——observe 回读每页条数状态不可靠。",
+      "m3_severity": "experience",
+      "evidence": {
+        "tool_return_excerpt": "vortex_mouse_click on 分页器下拉 (1106,576) → success:true opened dropdown. vortex_query .el-select-dropdown__item → 5 items (10条/页 selected / 20条/页 / 30条/页 / 40条/页 / 50条/页). vortex_mouse_click on 20条/页 li (1111,424) → success:true. vortex_query .el-pagination__sizes .el-input__inner attr=value → {attrs:{value:'20条/页'}, text:''} (commit confirmed). vortex_observe after dropdown close → 80/720 candidates truncated,分页器在 80 之后不可见,.el-pagination__sizes wrapper innerText=''.",
+        "evaluate_dom_truth": "vortex_evaluate 全程返回 undefined(MCP 服务临时不可用);改用 query mode=css attr=value / attr=class 三角验证 — .el-pagination__sizes .el-input__inner attr.value='20条/页' = commit 已生效;.el-pagination__sizes wrapper innerText='' = readonly input 不进 text;.el-pagination__total text='共 1 条' = 总数据未变(只有 1 条数据,选择更大页大小无变化)。同样的现象在工作流演示 tab (984528423) 上复现:点 20条/页 后 query attr.value='20条/页',observe 同样看不到分页器当前值。",
+        "tried_alternatives": [
+          "vortex_observe scope=viewport filter=interactive × 4 (工单表初始 / dropdown 弹出后 / dropdown 关闭后 / 添加筛选条件弹出后):分页器始终在 80 截断外,observe 看不到当前选中值",
+          "vortex_observe scope=full filter=interactive × 1:同样截断到 80,分页器仍不可见",
+          "vortex_query mode=css attr=value .el-pagination__sizes .el-input__inner → '20条/页' — commit 确认(非默认路径)",
+          "vortex_query mode=geometry .el-pagination__sizes .el-input__inner → bbox [1056,562,100,28] (在视口内,但 observe 仍不收纳)",
+          "vortex_query mode=css .el-pagination__total → '共 1 条' (总条数未变,符合 select 20条/页 数据无变化预期)",
+          "vortex_query mode=text '条/页' → 0 命中(dom text 不含 '条/页',因为 readonly input.value 不在 text)",
+          "工单表 + 工作流演示两个 tab 都触发同一现象 — 跨 app 复现"
+        ]
+      },
+      "new_tab_reproduced": true,
+      "action_path_is_vortex_native": true
+    },
+    {
+      "id": "A-2",
+      "page": "#/applet/appNew/projectNew/58860/1838255 (工单测试表0611) — 列排序",
+      "component": "el-table + vxe-table worksheetHeader-sort-icon",
+      "tab": "984528421",
+      "primitive": "vortex_observe",
+      "action_sequence": [
+        {
+          "tool": "vortex_act",
+          "args": {"target": "@4f7d:e73", "action": "click"},
+          "returned_excerpt": "{success:true, element:{tag:i, text:''}} — clicked 创建人列旁的 arrow 3 lower icon"
+        },
+        {
+          "tool": "vortex_observe",
+          "args": {"scope": "viewport", "filter": "interactive"},
+          "returned_excerpt": "排序 dropdown 弹出:div '正序' / div '倒序' / div '取消排序' / div '包含任一项' + 2 textbox — observe 召回完整"
+        },
+        {
+          "tool": "vortex_act",
+          "args": {"target": "@5da7:e55", "action": "click"},
+          "returned_excerpt": "{success:true, element:{tag:div, text:' 倒序'}} — clicked 倒序"
+        },
+        {
+          "tool": "vortex_query",
+          "args": {"mode": "css", "pattern": ".worksheetHeader-sort-icon", "attr": "class"},
+          "returned_excerpt": "{attrs:{class:'worksheetHeader-sort-icon iconfont icon-sort5 desc'}} — sort 状态 = desc(降序激活)"
+        },
+        {
+          "tool": "vortex_query",
+          "args": {"mode": "geometry", "pattern": ".worksheetHeader-sort-icon"},
+          "returned_excerpt": "{bbox:[775,323,16,22]} — 在「创建人」列头位置(728,321,78,26 列内)"
+        },
+        {
+          "tool": "vortex_mouse_click",
+          "args": {"x": 200, "y": 200, "coordSpace": "viewport"},
+          "returned_excerpt": "{success:true} — clicked 空白处关闭 dropdown"
+        },
+        {
+          "tool": "vortex_observe",
+          "args": {"scope": "viewport", "filter": "interactive"},
+          "returned_excerpt": "observe 召回:创建人列头旁 i 'arrow 3 lower' [cursor=pointer] — 无 [sort=desc] / aria-sort=descending 表达;dropdown 中的「倒序」项不被标 checked/selected"
+        }
+      ],
+      "phenomenon": "点列头排序 dropdown 后真实 DOM worksheetHeader-sort-icon.icon-sort5.desc 在「创建人」列头位置(query mode=css 命中),排序状态变为 desc(降序激活)。但 observe 默认输出:列头旁的 i 元素仍标 'arrow 3 lower',无 [sort=desc] / aria-sort=descending / 不同视觉描述;dropdown 中的「倒序」项也不被 observe 标 checked/selected。observe 完全不知道排序状态,无法区分 asc/desc/none。",
+      "m3_severity": "experience",
+      "evidence": {
+        "tool_return_excerpt": "vortex_act click @4f7d:e73 (创建人列旁的 i arrow 3 lower) → success:true. vortex_observe → 排序 dropdown 召回:div '正序' / div '倒序' / div '取消排序' / div '包含任一项' + 2 textbox. vortex_act click @5da7:e55 (倒序) → success:true. vortex_query .worksheetHeader-sort-icon attr=class → 'worksheetHeader-sort-icon iconfont icon-sort5 desc' (sort 状态 = desc). vortex_query geometry .worksheetHeader-sort-icon → bbox [775,323,16,22] 在「创建人」列内. vortex_mouse_click 空白关闭 dropdown. vortex_observe 重 observe → 排序 dropdown 已关闭,「创建人」列旁的 i 元素被 observe 描述为 'arrow 3 lower' [cursor=pointer],无 sort 方向表达,无 aria-sort 属性.",
+        "evaluate_dom_truth": "vortex_evaluate 全程 undefined;改用 query mode=css attr=class 三角验证 — 排序前:i.iconfont.icon-sort5(无 desc);排序点「倒序」后:i.worksheetHeader-sort-icon.iconfont.icon-sort5.desc(确认 desc 激活)。同一列头位置从 [496,382,12,36] 变为 [775,323,16,22](在创建人列内,bbox 与表头 728,321,78,26 重合)。observe 输出列头旁的 i 元素 tag/class 与真实 DOM 不完全匹配(observe 把 desc className 表达为 'arrow 3 lower' 通用 iconfont 名称),无 [sort] / [asc] / [desc] 状态属性。",
+        "tried_alternatives": [
+          "vortex_observe scope=viewport filter=interactive × 3 (排序前 / dropdown 弹出后 / 关闭后):列头 i 始终标 'arrow 3 lower',无 [sort] 属性,dropdown 中的「倒序」项不被标 checked",
+          "vortex_query mode=css attr=class .worksheetHeader-sort-icon → 'worksheetHeader-sort-icon iconfont icon-sort5 desc' (确认 sort 状态 = desc,非默认路径)",
+          "vortex_query mode=css attr=class i.iconfont → 2 个元素 (icon-sort5 无 desc / icon-sort5 desc),确认只有 1 个 desc 激活",
+          "vortex_query mode=geometry .worksheetHeader-sort-icon → [775,323,16,22] 在创建人列内",
+          "vortex_act click @5da7:e55 (倒序) → success:true 但 observe 不更新 sort 状态(同 tab 重 observe 3 次都同样结果)",
+          "vortex_act click disabled 「流程参数」流程 dropdown tab(similar pattern) → success:true 静默成功(R4 A-2 已记录同族 disabled 不表达)"
+        ]
+      },
+      "new_tab_reproduced": true,
+      "action_path_is_vortex_native": true
+    },
+    {
+      "id": "A-3",
+      "page": "#/applet/appNew/projectNew/30009/1086546 (工作流演示) — 视图 tab + 状态 tab",
+      "component": ".workflow-worksheet-tab-item + .workflow-worksheet-tab-item.status",
+      "tab": "984528423",
+      "primitive": "vortex_observe",
+      "action_sequence": [
+        {
+          "tool": "vortex_act",
+          "args": {"target": "@89ac:e55", "action": "click"},
+          "returned_excerpt": "{success:true, element:{tag:div, text:全部工单}} — clicked 全部工单 tab"
+        },
+        {
+          "tool": "vortex_query",
+          "args": {"mode": "css", "pattern": ".workflow-worksheet-tab-item.active", "attr": "class"},
+          "returned_excerpt": "{attrs:{class:'workflow-worksheet-tab-item active'}, text:'全部工单'} — 全部工单 active 确认"
+        },
+        {
+          "tool": "vortex_query",
+          "args": {"mode": "css", "pattern": ".el-pagination__total"},
+          "returned_excerpt": "{text:'共 22 条'} — 数据从 5 条变 22 条(全部工单视图)"
+        },
+        {
+          "tool": "vortex_observe",
+          "args": {"scope": "viewport", "filter": "interactive"},
+          "returned_excerpt": "observe 召回:div '流程待办' / div '流程工单' / div '全部工单' — 3 项无 [active] / aria-selected / 不同视觉状态"
+        },
+        {
+          "tool": "vortex_act",
+          "args": {"target": "@d634:e24", "action": "click"},
+          "returned_excerpt": "{success:true, element:{tag:div, text:流程待办}} — clicked 流程待办"
+        },
+        {
+          "tool": "vortex_mouse_click",
+          "args": {"x": 452, "y": 192, "coordSpace": "viewport"},
+          "returned_excerpt": "{success:true} — clicked 待领取· 5 status tab"
+        },
+        {
+          "tool": "vortex_query",
+          "args": {"mode": "css", "pattern": ".workflow-worksheet-tab-item.status.active", "attr": "class"},
+          "returned_excerpt": "{attrs:{class:'workflow-worksheet-tab-item status active'}, text:'待领取· 5'} — 待领取 active 确认"
+        },
+        {
+          "tool": "vortex_observe",
+          "args": {"scope": "viewport", "filter": "interactive"},
+          "returned_excerpt": "observe 召回:div '待处理· 5' / div '待领取· 5' — 2 项无 [active] / aria-selected,无法区分当前激活状态 tab"
+        },
+        {
+          "tool": "vortex_query",
+          "args": {"mode": "style", "pattern": ".workflow-worksheet-tab-item"},
+          "returned_excerpt": "未激活:bg rgba(0,0,0,0.04), color rgba(0,0,0,0.65), fontWeight 400 | 激活:bg rgb(255,255,255), color rgb(39,131,242), fontWeight 500(蓝色粗体)— mode=style 可区分,但非 observe 默认"
+        }
+      ],
+      "phenomenon": "视图 tab 切换(流程待办→全部工单)+ 状态 tab 切换(待处理→待领取)真实 DOM .workflow-worksheet-tab-item.active / .workflow-worksheet-tab-item.status.active class 正确切换(query mode=css 命中),数据从 5 条变 22 条,表格列从工单编号切换到订单号。但 observe 输出 3 个视图 tab / 2 个状态 tab 都是相同 div 描述,无 [active] / aria-selected / 不同视觉状态描述——observe 完全不知道哪个 tab 是当前激活的,3 次 observe 切换(全部工单 → 流程待办 → 待领取)输出都长一样。",
+      "m3_severity": "suspected-blocking",
+      "evidence": {
+        "tool_return_excerpt": "vortex_act click @89ac:e55 (全部工单) → success:true. vortex_query .workflow-worksheet-tab-item.active → '全部工单' active. vortex_query .el-pagination__total → '共 22 条'(数据从 5 → 22). vortex_observe → div '流程待办' / div '流程工单' / div '全部工单' 三项无 active 标记. vortex_act click @d634:e24 (流程待办) → success:true. vortex_mouse_click (452,192 待领取· 5) → success:true. vortex_query .workflow-worksheet-tab-item.status.active → '待领取· 5' active. vortex_observe → div '待处理· 5' / div '待领取· 5' 两项无 active 标记. vortex_query mode=style → 激活:bg rgb(255,255,255), color rgb(39,131,242), fontWeight 500;未激活:bg rgba(0,0,0,0.04), color rgba(0,0,0,0.65), fontWeight 400 — 视觉可区分但 observe 不读.",
+        "evaluate_dom_truth": "vortex_evaluate 全程 undefined;改用 query mode=css attr=class 三角验证 — .workflow-worksheet-tab-item.active 在「全部工单」上(其他两个 tab active class 移除);切回「流程待办」后 active 回到「流程待办」;状态 tab 切换:active 从「待处理· 5」移到「待领取· 5」(其他 status tab active class 移除);.el-pagination__total text='共 22 条' 验证视图切换触发数据刷新。observe 输出 3 次切换中 3 个视图 tab / 2 个状态 tab 都是相同描述,无任何状态属性。",
+        "tried_alternatives": [
+          "vortex_observe scope=viewport filter=interactive × 4 (工作流演示初始 / 全部工单激活后 / 流程待办激活后 / 待领取激活后):3 个视图 tab 始终描述一致,2 个状态 tab 始终描述一致,无 [active]",
+          "vortex_query mode=css attr=class .workflow-worksheet-tab-item.active → '全部工单' / '流程待办' / '待领取· 5' (分别验证 3 次切换,非默认路径)",
+          "vortex_query mode=css .workflow-worksheet-tab-item → 3 视图 tab + 2 状态 tab 共 5 个 div,active class 正确切换",
+          "vortex_query mode=style .workflow-worksheet-tab-item → 视觉可区分(蓝色粗体 vs 灰色常规),但 observe 默认不读 style",
+          "vortex_query mode=geometry .workflow-worksheet-tab-item.status → [331,178,78,28] + [409,178,86,28] — 位置确认在视口内,但 observe 不读 className / style",
+          "vortex_query .el-pagination__total → 5 条 → 22 条 → 5 条 数据变化作为 tab 切换的间接验证"
+        ]
+      },
+      "new_tab_reproduced": true,
+      "action_path_is_vortex_native": true
+    }
+  ],
+  "coverage": {
+    "pages_visited": 2,
+    "anomalies": 3,
+    "clean": 0,
+    "tabs_opened": 2,
+    "tab_ids": ["984528421", "984528423"],
+    "scenario": "newbeta-r5: 分页/筛选/下拉/排序 act + observe 状态回读(工单表 1 行 + 工作流演示 22 行)",
+    "operations_summary": {
+      "C1_every_page_size_dropdown": {
+        "operation": "act select 20条/页",
+        "act_result": "success",
+        "real_dom_state": "input.value='20条/页' (query mode=css attr=value 验证)",
+        "observe_default_visible": false,
+        "data_change": "无变化 (只有 1 条数据,选择更大页大小无变化)",
+        "anomaly_id": "A-1"
+      },
+      "C2_column_sort": {
+        "operation": "act click 创建人列旁 arrow → click '倒序'",
+        "act_result": "success",
+        "real_dom_state": "worksheetHeader-sort-icon.icon-sort5.desc 在创建人列头 [775,323,16,22] (query mode=css attr=class 验证)",
+        "observe_default_visible": false,
+        "data_change": "无明显变化 (只有 1 条数据,排序无视觉差异)",
+        "anomaly_id": "A-2"
+      },
+      "C3_pagination_prev_next": {
+        "operation": "act click btn-next / act fill type 2 + Enter 前往页",
+        "act_result": "success (mouse click on disabled 静默成功;type 2 + Enter 被系统回滚)",
+        "real_dom_state": "btn-prev/btn-next disabled;editor input.value='1' 回滚(只有 1 页)",
+        "observe_default_visible": "observe 看不到分页器(在 80 截断外)",
+        "data_change": "无",
+        "anomaly_id": "none — disabled 是正确实现,act 静默 success 是 vortex 设计选择"
+      },
+      "C4_filter": {
+        "operation": "act click '添加筛选条件' → click '任务状态' → click panel '筛选'",
+        "act_result": "success × 3",
+        "real_dom_state": "panel 中显示「任务状态 包含任一项」(query mode=text 命中)",
+        "observe_default_visible": "panel 内 textbox + select 内容可见 (observe 在 panel 内联显示时回读面比 readonly input 宽)",
+        "data_change": "无 (「任务状态=待处理」与原数据匹配,共 1 条)",
+        "anomaly_id": "none"
+      },
+      "C5_workflow_view_tabs": {
+        "operation": "act click '全部工单' → click '流程待办' → mouse click '待领取· 5'",
+        "act_result": "success × 3",
+        "real_dom_state": ".workflow-worksheet-tab-item.active / .workflow-worksheet-tab-item.status.active class 正确切换 (query mode=css attr=class 验证);数据从 5 条变 22 条",
+        "observe_default_visible": false,
+        "data_change": "5 → 22 条 (视图 tab 切换);5 条数据本身不变 (状态 tab 待处理 ↔ 待领取各 5 条)",
+        "anomaly_id": "A-3"
+      }
+    },
+    "non_visual_paths_attempted": [
+      "vortex_observe scope=viewport filter=interactive × 8 (工单表初始 / dropdown 弹出 / 列排序 dropdown / 关闭后 / 添加筛选条件 dropdown / 任务状态选中 / 工作流演示初始 / 切换后)",
+      "vortex_observe scope=full filter=interactive × 1 (同样截断到 80)",
+      "vortex_query mode=css × 12 (分页器/排序/tab/select 等)",
+      "vortex_query mode=css attr=value × 4 (验证 el-pagination__sizes input.value / editor input.value)",
+      "vortex_query mode=geometry × 6 (bbox / 位置 / 激活状态间接验证)",
+      "vortex_query mode=text × 2 (grep 文本位置 / element_path 追溯)",
+      "vortex_query mode=style × 1 (active tab 视觉区分)",
+      "vortex_mouse_click × 4 (分页器下拉 / 20条/页 / 待领取· 5 / 空白关闭)",
+      "vortex_act click × 6 (排序 / 倒序 / 添加筛选条件 / 任务状态 / 筛选提交 / 工作流演示切换)",
+      "vortex_act fill + type + press × 1 (前往页 2 + Enter)",
+      "vortex_wait_for idle × 6 (操作后等异步 settle)",
+      "vortex_tab_create × 2 + vortex_tab_close × 2 (每页新 tab 隔离)",
+      "vortex_evaluate × 0 — MCP evaluate 服务本轮全程返回 undefined(临时不可用),所有 DOM 真值证据改用 query mode=css attr=value / attr=class 三角验证"
+    ],
+    "submission_attempted": false,
+    "dirty_data_created": false,
+    "notes": "3 anomalies 全部都是「observe 默认回读不到操作后状态变化」的盲点,不是「act 失败」或「假成功」。所有 act 操作真实 DOM 状态变化通过 query mode=css attr=class / attr=value 三角验证。A-1 (每页条数下拉值在 observe 不可见):dropdown 关闭后 el-pagination__sizes wrapper innerText='' 因为 readonly input.value 不在 text,observe 截断 80 candidates 也常把分页器挡在区间外,只有当另一个 dropdown 弹出「借机」挤占 80 配额时 observe 才偶然召回 value。A-2 (列排序状态不表达):worksheetHeader-sort-icon.icon-sort5.desc 在 el-table 自定义排序图标中没有 ARIA 表达,observe 不读 className,只暴露 a11y 树上的 role/name/state,无法区分 asc/desc/none,dropdown 当前选中项也不被 observe 标 checked。A-3 (tab active 状态不表达):.workflow-worksheet-tab-item.active class 在 3 个视图 tab + 2 个状态 tab 切换中正确,observe 输出 3 次切换中 3 视图 tab / 2 状态 tab 都是相同描述,无 [active] / aria-selected / 不同视觉状态描述——调用方拿到 tab ref 后无法判断当前激活,只有 query mode=css attr=class / mode=style 才能补回(非默认路径)。3 类盲点都是真实 DOM 状态不在 a11y 树上(vortex_observe 的语义边界)——是「observe 默认输出不可信」而不是「vortex 缺陷」,但对调用方有实际影响。可补回的路径都已记录到 tried_alternatives。"
+  }
+}
