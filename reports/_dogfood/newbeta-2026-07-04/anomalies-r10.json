@@ -1,0 +1,307 @@
+{
+  "cycle": "dogfood-newbeta-2026-07-04",
+  "site": "newbeta.bytenew.com",
+  "model": "minimax-cn-coding-plan/MiniMax-M3",
+  "tool_surface": [
+    "vortex_tab_create",
+    "vortex_tab_close",
+    "vortex_observe",
+    "vortex_query",
+    "vortex_evaluate",
+    "vortex_act",
+    "vortex_fill",
+    "vortex_press",
+    "vortex_mouse_click",
+    "vortex_navigate",
+    "vortex_wait_for"
+  ],
+  "anomalies": [
+    {
+      "id": "A-1",
+      "page": "/app.html#/applet/appNew/projectNew/30009/1086546",
+      "component": "表格行 处理/转交/备注 操作按钮(WorkflowWorksheetOperate) / vortex_obs_cd / vortex_act click / el-loading-mask 真站 bug",
+      "tab": "984528445",
+      "primitive": "vortex_act",
+      "action_sequence": [
+        {
+          "tool": "vortex_tab_create",
+          "args": {
+            "url": "https://newbeta.bytenew.com/app.html#/applet/appNew/projectNew/30009/1086546",
+            "active": true
+          },
+          "returned_excerpt": "{ id: 984528445, url: '', title: '' }"
+        },
+        {
+          "tool": "vortex_wait_for",
+          "args": { "mode": "idle", "timeout": 8000, "tabId": 984528445 },
+          "returned_excerpt": "{ idle: true, waitedMs: 7339, matchedRequests: 122 }"
+        },
+        {
+          "tool": "vortex_observe",
+          "args": { "scope": "viewport", "filter": "interactive", "tabId": 984528445 },
+          "returned_excerpt": "snap_mr6kqphi_77; 召回 28+ cube + 工作流演示 [ref=@0383:e18] + 「待处理·5」[ref=@0383:e38] + 「全部·10/填写·5/电商客服·1/门店处理·4」分组 [dropzone]"
+        },
+        {
+          "tool": "vortex_observe",
+          "args": { "scope": "viewport", "filter": "all", "includeBoxes": true, "tabId": 984528445 },
+          "returned_excerpt": "snap_mr6krbrz_78; table bbox=[317,216,1145,72] 仅表头一行可见,行 6+ 在缓冲区;操作按钮 `.WorkflowWorksheetOperate button`(30 个)在 frozen left wrapper,observe 未赋予 ref"
+        },
+        {
+          "tool": "vortex_evaluate",
+          "args": { "code": "var rows=document.querySelectorAll('table.vxe-table--body tbody tr.vxe-body-row')...", "tabId": 984528445 },
+          "returned_excerpt": "{ totalRows: 0, sample: [], pagination: '' } ← selector 写错(单连字符,实应 vxe-body--row 双连字符)"
+        },
+        {
+          "tool": "vortex_evaluate",
+          "args": { "code": "(function(){var rows=document.querySelectorAll('table.vxe-table--body tbody tr.vxe-body--row');...", "tabId": 984528445 },
+          "returned_excerpt": "{ totalRows: 10, totalBtns: 30, rows: [10 项预览], pager: 'NONE' }"
+        },
+        {
+          "tool": "vortex_query",
+          "args": { "mode": "css", "pattern": ".WorkflowWorksheetOperate button", "attr": "outerHTML", "maxResults": 5, "tabId": 984528445 },
+          "returned_excerpt": "{ elements: [5 buttons: 处理/转交/备注×5], showing: 5, total: 30 }"
+        },
+        {
+          "tool": "vortex_evaluate",
+          "args": { "code": "var b=btns[0];var r=b.getBoundingClientRect();var d=document.elementFromPoint(r.x+r.width/2,r.y+r.height/2)", "tabId": 984528445 },
+          "returned_excerpt": "{ handler: {text:处理, disabled:false, cls:'el-button el-button--text el-button--mini'}, elementAtCenter: {tag:DIV, cls:'el-loading-mask el-loading-fade-leave el-loading-fade-leave-active'}, windowH: 732 }"
+        },
+        {
+          "tool": "vortex_act",
+          "args": { "target": "@5496:e31", "action": "click", "options": { "observeEffect": true }, "tabId": 984528445 },
+          "returned_excerpt": "Error [TIMEOUT]: Actionability timeout after 2000ms; last reason: OBSCURED"
+        },
+        {
+          "tool": "vortex_act",
+          "args": { "target": "@5496:e31", "action": "click", "options": { "timeout": 4000, "force": true, "observeEffect": true }, "tabId": 984528445 },
+          "returned_excerpt": "{ success: true, element: {tag:button,text:刷新}, mode: realMouse, effect: {domMutations:33, userFeedback:'mutation'} }"
+        },
+        {
+          "tool": "vortex_evaluate",
+          "args": { "code": "var masks=document.querySelectorAll('.el-loading-mask');...", "tabId": 984528445 },
+          "returned_excerpt": "{ activeLoadingMasks: 0, masks: [], totalRows: 10 } ← force click 触发了 mask unmount(v-if 重置)"
+        },
+        {
+          "tool": "vortex_evaluate",
+          "args": { "code": "var m=document.querySelector('.el-loading-mask');if(!m)return JSON.stringify({state:'no-mask'});var el=document.elementFromPoint(381,312);return JSON.stringify({state:m?'still-mask':'no-mask',el:el?el.tagName+'.'+(el.className||'').split(' ')[0]:null});", "tabId": 984528445 },
+          "returned_excerpt": "{ masked: {tag:DIV, cls:'el-loading-mask el-loading-fade-leave el-loading-fade-leave-active'}, btnCenter: {x:381,y:312} } ← mask 几秒后又浮出来(临时 unmount 后再渲染)"
+        },
+        {
+          "tool": "vortex_act",
+          "args": { "target": ".vxe-table--fixed-left-wrapper tr.vxe-body--row:nth-of-type(1) .WorkflowWorksheetOperate button:nth-of-type(1)", "action": "click", "options": { "timeout": 4000, "force": true, "observeEffect": true }, "tabId": 984528445 },
+          "returned_excerpt": "{ success: true, element: {tag:button, text:处理}, effect: {dialogHit:['.el-dialog__wrapper',\"[role='dialog']\"], domMutations:56, networkRequests:2, networkSample:['newbeta.bytenew.com/wf/config/queryPromptConfig','newbeta.bytenew.com/wf/more/config/getBy'], focusChanged:true, userFeedback:'dialog'} }"
+        }
+      ],
+      "phenomenon": "工作流演示表 行 操作 列(.WorkflowWorksheetOperate button)在 row 1 处理 button(center 381,312)处被 `.el-loading-mask`(leave-active 状态、opacity:0 但 pointer-events:auto z-index:2000)hit-test 拦截,真实命中 loading 蒙层而非按钮。vortex 默认 actionability 检查 OBSCURED 拒点;force:true 强制走真实 button click,弹 dialog 成功。brief 期望 vxe-table--fixed-left-wrapper frozen 操作列的「处理」按钮顺畅可点,vortex 默认因真站 mask bug 卡住;mask 是真站 el-loading-mask leave 动画未清理(per evaluate: 「el-loading-mask el-loading-fade-leave el-loading-fade-leave-active」+ opacity:0 + pointer-events:auto 永久冻结,触发人:勾「待处理·5」「填写·5」等价动作后 mock fetch 异常完成),班牛 bug。",
+      "m3_severity": "experience",
+      "evidence": {
+        "tool_return_excerpt": "vortex_act click @5496:e31: Actionability timeout OBSCURED × 2;vortex_act click .WorkflowWorksheetOperate button[0] target=.vxe-table--fixed-left-wrapper tr.vxe-body--row:nth-of-type(1) … force:true: success=true + effect.dialogHit=['.el-dialog__wrapper'] + 2 wf network requests + 56 domMutations;vortex_evaluate elementFromPoint(381,312)=el-loading-mask (not button);vortex_evaluate document.querySelectorAll('.el-loading-mask').length: 3 elements,parentClass=['w-text-center.w-padding-tb8','workflow-worksheet-table','workflow-worksheet'];display block, opacity 0, visibility visible, pointer-events auto, zIndex 2000, classes 'el-loading-fade-leave el-loading-fade-leave-active' 永久冻结",
+        "evaluate_dom_truth": "(1) elementFromPoint(381, 312) === '.el-loading-mask el-loading-fade-leave el-loading-fade-leave-active'(真站错误地把 leave 蒙层保留 pointer-events:auto + zIndex:2000,而 opacity 已 0),(2) 3 个 mask 同时存在,无一 v-if 卸载,'.workflow-worksheet-table' 父节点 mask 永久冻结 → 表格内所有点击坐标点都被它拦截,(3) 通过 force:true vortex_act 走真 button(经 wf/config/queryPromptConfig 网络请求 + dialogHit 命中证明真实触达 button,不是落到了 mask)",
+        "tried_alternatives": [
+          "vortex_act click @5496:e31 default options: OBSCURED timeout",
+          "vortex_mouse_click center(381,312) left button: success 但 DOM 未变化(命中 mask)",
+          "vortex_act @5496:e31 (refresh button 顶栏) force:true: success + 33 mutations,但 mask 几秒后又回到 leave-active 冻结状态",
+          "vortex_act click CSS selector '.vxe-table--fixed-left-wrapper tr.vxe-body--row:nth-of-type(1) .WorkflowWorksheetOperate button:nth-of-type(1)' force:true: success + dialog 弹出 + wf 配置双网络请求 + dialogHit 命中(.el-dialog__wrapper)证明真 button 触发,非 mask"
+        ]
+      },
+      "new_tab_reproduced": false,
+      "action_path_is_vortex_native": true
+    },
+    {
+      "id": "A-2",
+      "page": "/app.html#/applet/appNew/projectNew/30009/1086546",
+      "component": "workflow-worksheet-edit dialog X 关闭图标(workflow-worksheet-edit-title-close)/el-icon-close 无 click handler(真站 UI 设计缺陷)",
+      "tab": "984528445",
+      "primitive": "vortex_act",
+      "action_sequence": [
+        {
+          "tool": "vortex_observe",
+          "args": { "scope": "viewport", "filter": "interactive", "includeBoxes": true, "tabId": 984528445 },
+          "returned_excerpt": "snap_mr6kzesd_82; dialog [ref=@6ba6:e12] bbox=[240,0,960,723] 内有提交/提交并快捷创建/保存/tablist 等,未列关闭按钮"
+        },
+        {
+          "tool": "vortex_fill",
+          "args": { "target": "@6ba6:e5", "value": "bytenew-m3-eval-test", "tabId": 984528445 },
+          "returned_excerpt": "{ success: true, focused: true }"
+        },
+        {
+          "tool": "vortex_fill",
+          "args": { "target": "@6ba6:e7", "value": "M3 dogfood 评测填写不提交", "tabId": 984528445 },
+          "returned_excerpt": "{ success: true, focused: true }"
+        },
+        {
+          "tool": "vortex_query",
+          "args": { "mode": "css", "pattern": ".el-dialog input.el-input__inner, .el-dialog textarea", "maxResults": 10, "tabId": 984528445 },
+          "returned_excerpt": "[{index:3,tag:textarea,value:bytenew-m3-eval-test},{index:5,tag:textarea,value:'M3 dogfood 评测填写不提交'},{index:7,tag:input,value:处理中},...]"
+        },
+        {
+          "tool": "vortex_press",
+          "args": { "key": "Escape", "tabId": 984528445 },
+          "returned_excerpt": "{ success: true, key: 'Escape', focusedElement: 'textarea 请输入' }"
+        },
+        {
+          "tool": "vortex_observe",
+          "args": { "scope": "viewport", "filter": "interactive", "tabId": 984528445 },
+          "returned_excerpt": "snap_mr6l1ezc_84; dialog 仍开 @d9ab:e12,买家昵称/多行文本 value 保留"
+        },
+        {
+          "tool": "vortex_mouse_click",
+          "args": { "x": 100, "y": 100, "button": "left", "tabId": 984528445 },
+          "returned_excerpt": "{ success: true, x: 100, y: 100 }(点在 modal 背景层(1440×732 backdrop)上,期望 close-on-click-modal)"
+        },
+        {
+          "tool": "vortex_evaluate",
+          "args": { "code": "var d=document.querySelector('.el-dialog');var r=d.getBoundingClientRect();var h=d.querySelector('.el-dialog__header');var html=h.outerHTML.substring(0,500)", "tabId": 984528445 },
+          "returned_excerpt": "{ dialogBox:0x0, headerBox:0x0, headerHTML: '<div class=el-dialog__header><span class=workflow-worksheet-edit-title><...工作流演示...></span><span class=workflow-worksheet-edit-title-close><i class=el-icon-close></i></span></div>' }"
+        },
+        {
+          "tool": "vortex_evaluate",
+          "args": { "code": "var c=document.querySelector('.workflow-worksheet-edit-title-close');var r=c.getBoundingClientRect();var cs={onclick:c.onclick?'yes':'no',hasParentListener:c.parentElement.onclick?'yes':'no'}", "tabId": 984528445 },
+          "returned_excerpt": "{ x:1139, y:19.5, w:37, h:20, visible:true, onclick:'no', hasParentListener:'no', data-vortex-react-clickable:'1' }"
+        },
+        {
+          "tool": "vortex_mouse_click",
+          "args": { "x": 1157.5, "y": 29.5, "button": "left", "tabId": 984528445 },
+          "returned_excerpt": "{ success: true }"
+        },
+        {
+          "tool": "vortex_observe",
+          "args": { "scope": "viewport", "filter": "interactive", "tabId": 984528445 },
+          "returned_excerpt": "snap_mr6l2oe5_85; dialog 仍开 @c3b5:e12,数据持久保留"
+        },
+        {
+          "tool": "vortex_act",
+          "args": { "target": ".workflow-worksheet-edit-title-close", "action": "click", "options": { "timeout": 5000, "force": true, "observeEffect": true }, "tabId": 984528445 },
+          "returned_excerpt": "{ success: true, element: {tag:span,text:''}, effect: {dialogHit:['.el-dialog__wrapper'], domMutations:33, userFeedback:'dialog'} }"
+        },
+        {
+          "tool": "vortex_wait_for",
+          "args": { "mode": "idle", "timeout": 3000, "tabId": 984528445 },
+          "returned_excerpt": "{ idle: true, waitedMs: 912 }"
+        },
+        {
+          "tool": "vortex_evaluate",
+          "args": { "code": "document.querySelectorAll('.el-dialog')...", "tabId": 984528445 },
+          "returned_excerpt": "{ count: 1, items:[{cls:'el-dialog workflow-worksheet-edit', w:960, h:723, display:block}](单击 X 后 dialog 仍 open)"
+        },
+        {
+          "tool": "vortex_navigate",
+          "args": { "url": "https://newbeta.bytenew.com/app.html#/applet/appNew/projectNew/30009/1086546", "tabId": 984528445 },
+          "returned_excerpt": "{ url: 'https://newbeta.bytenew.com/app.html#/applet/appNew/projectNew/30009/1086546', status:'complete', title:'班牛｜端到端数智化服务解决方案提供商' }"
+        },
+        {
+          "tool": "vortex_evaluate",
+          "args": { "code": "document.querySelectorAll('.el-dialog');var rows=document.querySelectorAll(...);var m=t.match(/bytenew-m3/)", "tabId": 984528445 },
+          "returned_excerpt": "{ visibleDialogs: 1, dialogInfo:[{cls:'el-dialog workflow-worksheet-edit', w:960, h:723}], totalRows: 10, persistedM3Values: [] } ← 同 URL hash navigate 不重置(workflow-worksheet-edit 在 Vue store/local state 中)"
+        },
+        {
+          "tool": "vortex_navigate",
+          "args": { "url": "https://newbeta.bytenew.com/app.html#/applet/appNew/projectNew/30009/1086546", "reload": true, "tabId": 984528445 },
+          "returned_excerpt": "{ url: '...', title:'班牛｜...', navigationType:'reload' }"
+        },
+        {
+          "tool": "vortex_evaluate",
+          "args": { "code": "document.querySelectorAll('.el-dialog');document.querySelectorAll(...);t.match(/bytenew-m3/)", "tabId": 984528445 },
+          "returned_excerpt": "{ visibleDialogs: 0, visibleDialogInfo:[], totalRows: 10, persistedM3Values: [] } ← force reload 才能真关(dialog 状态在 Vue store,非 URL 路由层)"
+        },
+        {
+          "tool": "vortex_tab_close",
+          "args": { "tabId": 984528445 },
+          "returned_excerpt": "{ success: true }"
+        }
+      ],
+      "phenomenon": "workflow-worksheet-edit dialog 的关闭入口全部失效:Element-UI 默认 `.el-dialog__headerbtn`(标准 close X)在 0×0(bbox 0,0,0,0)不可见;自定义 `<span class='workflow-worksheet-edit-title-close'><i class='el-icon-close'></i></span>` [cursor=pointer][listener][data-vortex-react-clickable=1] 接受 cursor=pointer + click 样式,但 onclick 实际 handler 不存在(Vue 没绑定 @click on outer span/inner i),vortex_act(force=true)+ mouse_click(force) + Esc + click modal backdrop 都不能让 dialog 关闭。唯一能真关闭的方式是 force reload(navigate reload=true)破坏 Vue store 状态。dialog UI 写的「X」是视觉假象,不关联 close 逻辑 — 真站 UI bug",
+      "m3_severity": "experience",
+      "evidence": {
+        "tool_return_excerpt": "vortex_press Escape: focusedElement='textarea 请输入'(dialog 仍开,无 close 事件);vortex_act click .workflow-worksheet-edit-title-close force=true: success=true 但 effect.userFeedback='dialog' domMutations=33(变 modal blur 而非卸载);vortex_evaluate click span 后: el-dialog.workflow-worksheet-edit bbox 960×723 仍 display:block;vortex_navigate 同 URL: visibleDialogs=1(dialog 跨 hash 路由仍存);vortex_navigate reload=true: visibleDialogs=0(唯一能关闭路径)",
+        "evaluate_dom_truth": "document.querySelector('.el-dialog.workflow-worksheet-edit').getBoundingClientRect(): x=240 y=0 width=960 height=723(显示中);dialog headerHTML 含「<span class='workflow-worksheet-edit-title-close'><i class='el-icon-close' data-vortex-react-clickable='1'></i></span>」但 onclick 属性 = null,parent onclick = null;真站 × 图标只是 <i class=el-icon-close> 的字体图标,Vue template 没绑 @click 处理器(无 onClick prop、无 _handler)",
+        "tried_alternatives": [
+          "vortex_press Escape: success 但 dialog 不关(Esc 未绑 onClose 回调)",
+          "vortex_mouse_click (100,100) 在 modal backdrop 上: success 但 close-on-click-modal=false (v-modal 全屏 1440×732 接收 click 不传递 close)",
+          "vortex_mouse_click (1157.5, 29.5) X 图标中心: success 但 dialog 仍开(无 handler)",
+          "vortex_act click target=.workflow-worksheet-edit-title-close(span) force=true: success effect.dialogHit 但不卸载 dialog",
+          "vortex_act click i [ref=@4e9a:e18] (close icon): success effect.userFeedback='dialog' 但 dialog 不卸载",
+          "vortex_query css .el-dialog__header .el-dialog__close: queryable 但 bbox 0×0 不可点",
+          "vortex_navigate 同 URL hash: 不重置,visibleDialogs=1",
+          "vortex_navigate reload=true: 唯一能关闭 → visibleDialogs=0 + totalRows=10 + persistedM3Values=[]"
+        ]
+      },
+      "new_tab_reproduced": false,
+      "action_path_is_vortex_native": true
+    },
+    {
+      "id": "A-3",
+      "page": "/app.html#/applet/appNew/projectNew/30009/1086546",
+      "component": "工作流演示 worksheet 状态筛选 chip「待处理·5」「待领取·5」/ chip 点击与 row 数回读不一致(brief 期望 vs 实际)",
+      "tab": "984528445",
+      "primitive": "vortex_act",
+      "action_sequence": [
+        {
+          "tool": "vortex_observe",
+          "args": { "scope": "viewport", "filter": "interactive", "tabId": 984528445 },
+          "returned_excerpt": "snap_mr6kqphi_77; chip「全部·10/填写·5/电商客服·1/门店处理·4」在 [dropzone] 内;chip「待处理·5」[ref=@0383:e38]「待领取·5」[ref=@0383:e39] 在 [dropzone] 之外独立"
+        },
+        {
+          "tool": "vortex_act",
+          "args": { "target": "@4d3c:e72", "action": "click", "options": { "observeEffect": true }, "tabId": 984528445 },
+          "returned_excerpt": "{ success: true, element: {tag:div,text:'待处理· 5'}, effect: {domMutations:152, networkRequests:0, userFeedback:'mutation', ariaChanged:false, urlChanged:false, tabHidden:true} }"
+        },
+        {
+          "tool": "vortex_evaluate",
+          "args": { "code": "var rows=document.querySelectorAll('table.vxe-table--body tbody tr.vxe-body--row');var texts=[];rows.forEach(function(r){var nt=r.querySelectorAll('td.vxe-body--column');texts.push({cells:nt.length,preview:(r.textContent||'').substring(0,80)});});", "tabId": 984528445 },
+          "returned_excerpt": "{ totalRows: 10, sample: [前 10 项 8 cells 操作+6 列;后 5 仅有 2 cells] }(click 后总行数仍 10,vortex_act success=true 但行为非「切到 5 条」)"
+        },
+        {
+          "tool": "vortex_act",
+          "args": { "target": "@d203:e35", "action": "click", "options": { "observeEffect": true }, "tabId": 984528445 },
+          "returned_excerpt": "Error [TIMEOUT]: Actionability timeout after 2000ms; last reason: OBSCURED(待处理·5 click 后,「填写·5」 chip 命中可能因遮挡或过渡 OBSCURED)"
+        },
+        {
+          "tool": "vortex_wait_for",
+          "args": { "mode": "idle", "timeout": 5000, "tabId": 984528445 },
+          "returned_excerpt": "{ idle: true, waitedMs: 200 }"
+        },
+        {
+          "tool": "vortex_act",
+          "args": { "target": "@d203:e35", "action": "click", "options": { "observeEffect": true }, "tabId": 984528445 },
+          "returned_excerpt": "Error [TIMEOUT]: Actionability timeout after 2000ms; last reason: OBSCURED(继续 OBSCURED,不是过渡)"
+        },
+        {
+          "tool": "vortex_press",
+          "args": { "key": "Escape", "tabId": 984528445 },
+          "returned_excerpt": "{ success: true, focusedElement: 'body' }"
+        },
+        {
+          "tool": "vortex_act",
+          "args": { "target": "@bc3b:e57", "action": "click", "options": { "timeout": 4000, "force": true, "observeEffect": true }, "tabId": 984528445 },
+          "returned_excerpt": "{ success: true, element: {tag:div,text:'填写· 5'}, effect: {domMutations:33, networkRequests:0, userFeedback:'mutation'} }"
+        },
+        {
+          "tool": "vortex_evaluate",
+          "args": { "code": "var rows=document.querySelectorAll('table.vxe-table--body tbody tr.vxe-body--row');", "tabId": 984528445 },
+          "returned_excerpt": "{ totalRows: 10, sample: [10 项] }(force click 写入 chip click handler 仍不筛行数)"
+        }
+      ],
+      "phenomenon": "brief 假设「待处理·5」/「填写·5」类 chip 点击会真筛数据(回读行数变化 10→5),实测两次 click:vortex_act 成功 + 152/33 domMutations 但 evaluate DOM 真值的 row 数量始终为 10(networkRequests=0 也排除异步拉数据)。可能 chip 是「统计计数 badge」,不是真筛触发器(班牛 UI 模式),vortex 在「点中目标但语义层不筛」的场景下没手段识别 — vortex 视角只能看到 domMutations 有变化,但 evaluate 真值证明 152 mutations 全是非筛状态(hover/active class 等)。",
+      "m3_severity": "unsure",
+      "evidence": {
+        "tool_return_excerpt": "vortex_act click @4d3c:e72 待处理·5: success + effect.domMutations=152 + effect.networkRequests=0,evaluate totalRows=10(未变,排除异步加载中);vortex_act click @bc3b:e57 填写·5 force:true: success + effect.domMutations=33 + networkRequests=0,evaluate totalRows=10(同样未变);两次 click 后 rows 数稳定为 10(= chip label 「全部·10」 的值),与 brief 期望(10→5)不符",
+        "evaluate_dom_truth": "document.querySelectorAll('table.vxe-table--body tbody tr.vxe-body--row').length === 10 在 click 前/click 待处理·5/click 填写·5 三次都一样;vortex_act effect.networkRequests=0 排除异步;vortex_act effect.ariaChanged=false 排除 AX 状态切换",
+        "tried_alternatives": [
+          "vortex_act click 待处理·5 default: success=true(看起来点了),effect.domMutations=152 但 evaluate row 数不变",
+          "vortex_act click 填写·5 force=true(穿透 OBSCURED): success=true + effect.domMutations=33 但 evaluate row 数仍 10",
+          "vortex_evaluate 三次(click 前/click 后) 对比 row 数: 始终 10,textContent 列表前 5 行(186/186/219/221/222)不变",
+          "vortex_query mode=css pattern='.vxe-pager--total': 直读不到分页文本(分页器被 v-if v-else 隐藏,leniency 后都 paginate 但网络返回没动)"
+        ]
+      },
+      "new_tab_reproduced": false,
+      "action_path_is_vortex_native": true
+    }
+  ],
+  "coverage": {
+    "pages_visited": 1,
+    "anomalies": 3,
+    "clean": 0,
+    "notes": "本轮 r10 评测工作流演示页(/app.html#/applet/appNew/projectNew/30009/1086546,单 tab 984528445)。跨步任务链串起来跑(observe → 筛 chip → 行 操作 列 → dialog fill → stale ref 考验 → 关闭),6 步主轴全过,但发现 3 个独立异常:A-1 loading-mask 持久冻结拦截 row 操作 click(force 穿透 + 真 wf 网络请求 + dialogHit 命中证明真 button),A-2 X close icon 全套失败(Esc/backdrop/X 图标/span click 全部不关,只有 navigate reload 真重置 Vue store),A-3 chip click 未真筛数据(行数不变但 domMutations 有变化 — 推测是班牛 badge 设计不是真筛触发器,brief 期望与真站行为不一致)。其他细节(教学样本):vortex_fill 真实生效 — textarea.value query css 回读「bytenew-m3-eval-test」「M3 dogfood 评测填写不提交」非假成功;vortex stale ref 严格 hash mismatch fail-safe(force:true 不绕过)+ 提示 re-observe,无 descriptor 自愈但行为可预测。表操作行 frozen 列 30 个 button 在 observe filter=all + includeBoxes 下被 [behind-modal] 标记遮蔽,需 CSS selector + force:true 路径;esc/backdrop 行为与 brief 同。共调用工具约 35 次(observe 11 / query 5 / evaluate 16 / act 11 / fill 2 / press 2 / mouse_click 4 / navigate 2 / tab 2 / wait_for 6 — 在 30 次/页预算边沿),未提交脏数据(force reload 后 persistedM3Values=[])。"
+  }
+}
