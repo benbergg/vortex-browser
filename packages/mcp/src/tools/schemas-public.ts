@@ -418,7 +418,7 @@ export const PUBLIC_TOOLS: ToolDef[] = [
         isRegex: { type: "boolean" },
         caseSensitive: { type: "boolean" },
         contextChars: { type: "number" },
-        attr: { type: "string" },
+        attr: { type: "string", description: "css: 属性名, 多个用 , 或 | 分隔(如 'class|title'); chart/sheet/flow: 输出格式" },
         includeText: { type: "boolean" },
         maxResults: { type: "number" },
         ...tabFields,

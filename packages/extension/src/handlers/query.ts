@@ -1239,6 +1239,23 @@ export const flowProbeFunc = (
   }
 };
 
+/**
+ * 归一化 vortex_query mode=css 的 `attr` 参数为属性名数组(去空)。
+ *
+ * 接受: 单属性("class") / 分隔符拼接的多属性("class|title" 或 "class,title") /
+ * 已构建的数组 / undefined。空段与空白自动过滤; 若无有效项返回 null,
+ * 调用方据此完全跳过属性提取。
+ *
+ * R11 修复: 此前畸形复合串如 "class|title" 被直接传给 getAttribute("class|title"),
+ * 静默返回 null, 向 agent 隐藏了 attrs 为空的真实原因。
+ */
+export function normalizeCssAttrParam(attr: string | string[] | undefined): string[] | null {
+  if (attr == null) return null;
+  const raw = Array.isArray(attr) ? attr : attr.split(/[,|]/);
+  const out = raw.map((a) => a.trim()).filter(Boolean);
+  return out.length > 0 ? out : null;
+}
+
 export function registerQueryHandlers(router: ActionRouter): void {
   router.registerAll({
     [QueryActions.QUERY_PAGE]: async (args, tabId) => {
@@ -1295,14 +1312,7 @@ export function registerQueryHandlers(router: ActionRouter): void {
         return res;
       } else if (mode === "css") {
         // css query 模式
-        const attr = args.attr as string | string[] | undefined;
-        // attr 可以是单个字符串或数组
-        const attributes: string[] | null =
-          attr == null
-            ? null
-            : Array.isArray(attr)
-            ? attr
-            : [attr];
+        const attributes: string[] | null = normalizeCssAttrParam(args.attr as string | string[] | undefined);
         const maxResults = Math.min((args.maxResults as number | undefined) ?? 20, 100);
         const includeText = (args.includeText as boolean | undefined) ?? true;
 
