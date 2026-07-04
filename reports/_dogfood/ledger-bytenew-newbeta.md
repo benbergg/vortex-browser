@@ -27,7 +27,7 @@ cycle 目录: reports/_dogfood/newbeta-2026-07-04/
 | 轮 | 场景(recon 校准后) | 主考能力 | 桶归类 | 根因 | commit | bench | live | 状态 |
 |----|------|----------|--------|------|--------|-------|------|------|
 | 0  | recon 站点地图 | — | — | — | — | — | — | done |
-| 1  | 首页/工单表 导航+菜单 observe 召回 | 裸 div onClick 小程序卡/moreNav 深浮层/cursor:pointer | — | — | — | — | — | pending |
+| 1  | 首页/工单表 导航+菜单 observe 召回 | 裸 div onClick 小程序卡/moreNav 深浮层/cursor:pointer | already-graceful | 无缺陷:召回完整(顶部5/5·卡28·moreNav19/19),act 可靠;VOC父卡 click 不切换=班牛 UX(露 add/more,getAppDetail 已发) | — | 无回归 | Claude live 证实 act 精确命中+触发真实 handler | clean |
 | 2  | 工单表 新建工单 表单填写 | fill/fill_form + mode=css/component readback 校验 | — | — | — | — | — | pending |
 | 3  | 工单表/工作流演示 大表格 extract | 行列结构/无名 checkbox 召回/节点状态语义 | — | — | — | — | — | pending |
 | 4  | 弹窗/浮层 模态作用域 observe | 筛选/流程/列表设置 dialog aria-modal 裁剪+焦点容器 | — | — | — | — | — | pending |

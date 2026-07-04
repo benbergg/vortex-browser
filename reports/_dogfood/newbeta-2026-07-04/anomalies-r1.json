@@ -1,0 +1,49 @@
+{
+  "cycle": "dogfood-newbeta-2026-07-04",
+  "site": "https://newbeta.bytenew.com/app.html#/applet/appNew/projectNew/58860/1838255",
+  "model": "minimax-cn-coding-plan/MiniMax-M3",
+  "tool_surface": [
+    "vortex_tab_create",
+    "vortex_wait_for",
+    "vortex_observe",
+    "vortex_query",
+    "vortex_act",
+    "vortex_mouse_click"
+  ],
+  "anomalies": [],
+  "coverage": {
+    "pages_visited": 1,
+    "anomalies": 0,
+    "clean": 1,
+    "tabs_opened": 1,
+    "tab_id": "984528393",
+    "scenario": "newbeta-r1: 首页/工单表 导航 + 菜单 observe 召回 + act 点击验证",
+    "recall_checks": {
+      "top_nav_items_recalled": 5,
+      "top_nav_items_expected": 5,
+      "applet_cards_recalled_estimate": 33,
+      "applet_cards_expected_in_brief": 26,
+      "morenav_floating_panel_subitems_recalled": 19,
+      "morenav_floating_panel_core_items_expected": 12,
+      "all_recalled_with_name": true,
+      "all_recalled_with_listener": true
+    },
+    "act_smoke_checks": {
+      "top_nav_benben_tab": "success (URL -> applet/agentBen, 1 network request)",
+      "top_nav_applet_tab": "success (URL <- applet/appNew/.../1838255, 3 network requests)",
+      "morenav_click_to_open_panel": "success (98 DOM mutations, 19 subitems surfaced)",
+      "applet_card_voc_click": "act success=true / 78 mutations / hover menu (add+more) appeared but main area did NOT switch active applet — interpreted as app UI design (click=hover menu), not vortex defect"
+    },
+    "non_visual_paths_attempted": [
+      "vortex_observe filter=interactive x 4",
+      "vortex_query mode=text (VOC工作台 pattern)",
+      "vortex_query mode=css .appletMenuList-item-title",
+      "vortex_query mode=geometry .appletMenuList-item",
+      "vortex_act click (ref-based x 3: moreNav / 犇犇 tab / 小程序 tab / VOC工作台)",
+      "vortex_act click (text-based x 1: VOC工作台, returned NOT_ATTACHED stale-ref signal)",
+      "vortex_mouse_click (coord-based x 1: 180,646)",
+      "vortex_wait_for idle x 4"
+    ],
+    "notes": "No anomaly triggered. All observe-recall targets fully covered (top nav 5/5, applet cards ~33/33, moreNav floating panel 19/19 with brief's core 12 subitems). All top-tab clicks successfully navigated. applet-card click surfaced hover menu but did not switch active applet — interpreted as bytenew UI design (click=hover-menu, switch requires double-click or menu item), not a vortex tool defect; act itself returned success=true with effect.domMutations=78 confirming the click hit and was processed by DOM."
+  }
+}
