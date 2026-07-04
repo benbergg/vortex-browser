@@ -1,0 +1,172 @@
+{
+  "cycle": "dogfood-newbeta-2026-07-04",
+  "site": "https://newbeta.bytenew.com/app.html#/applet/appNew/projectNew/58860/1838255",
+  "model": "minimax-cn-coding-plan/MiniMax-M3",
+  "tool_surface": [
+    "vortex_tab_create",
+    "vortex_tab_close",
+    "vortex_wait_for",
+    "vortex_observe",
+    "vortex_query",
+    "vortex_extract",
+    "vortex_act",
+    "vortex_evaluate"
+  ],
+  "anomalies": [
+    {
+      "id": "A-1",
+      "page": "#/applet/appNew/projectNew/58860/1838255 (工单测试表0611) → #/applet/appNew/projectNew/30009/1086546 (工作流演示)",
+      "component": "vxe-table 冻结列 (fixed-left wrapper) — checkbox 列 + 操作列",
+      "tab": "984528404",
+      "primitive": "vortex_observe",
+      "action_sequence": [
+        {
+          "tool": "vortex_act",
+          "args": {"target": "@a35c:e40", "action": "click"},
+          "returned_excerpt": "{success:true, effect:{urlChanged:true, domMutations:1343, networkRequests:16, userFeedback:'mutation'}}"
+        },
+        {
+          "tool": "vortex_extract",
+          "args": {"maxLength": 12288},
+          "returned_excerpt": "...表头 11 数据列齐全 + 数据 5 行 × 11 列全部对齐 + 行尾拼接'操作/处理/转交/备注'(漏'结束任务''结束流程' 2 按钮)..."
+        },
+        {
+          "tool": "vortex_extract",
+          "args": {"maxLength": 12288, "scroll": true},
+          "returned_excerpt": "Same as default extract (no virtual scroll container — evaluate scrollers=[])"
+        },
+        {
+          "tool": "vortex_observe",
+          "args": {"scope": "viewport", "filter": "interactive"},
+          "returned_excerpt": "table '工单编号任务编号节点名称节点类型产生时间等待时长处理人订单号平台店铺买家昵称' [ref=@ed25:e46] + 11 data cells (e68..e78). NO checkbox cell. NO operations cell. (fixed-left wrapper skipped)"
+        },
+        {
+          "tool": "vortex_evaluate",
+          "args": {"code": "document.querySelectorAll('table tbody tr:first-child td:nth-child(2) span')"},
+          "returned_excerpt": "5 leaf buttons: 处理 / 转交 / 备注 / 结束任务 / 结束流程 (+ 1 wrapper text='结束任务结束流程')"
+        },
+        {
+          "tool": "vortex_query",
+          "args": {"mode": "css", "pattern": "table tbody tr td.vxe-body--column.col--checkbox, table tbody tr td.vxe-body--column.col--fixed", "attr": "full"},
+          "returned_excerpt": "10 td found (5 rows × 2 frozen cols: checkbox + operations) — DOM truth confirms frozen-left structure exists"
+        }
+      ],
+      "phenomenon": "工作流演示页采用 vxe-table 冻结列(fixed-left wrapper)布局时,vortex_observe 完全漏召回冻结列(checkbox 列 + 操作列)的 cell — accessible table name 只覆盖 body wrapper 的 11 列数据,fixed-left wrapper 整个被跳过;vortex_extract 把操作列内容当 row-level info 拼到每行末尾(非独立列),且 5 个 leaf 按钮文本只输出 3 按钮+列标题(漏'结束任务''结束流程')。同一表 query mode=css 能拿到全部 cell 文本(5 按钮 + 2 frozen cell),evaluate DOM 真值齐全 — 单纯依赖 vortex_observe / vortex_extract 两条原生召回路径,冻结列 cell 控件均无法完整获得。",
+      "m3_severity": "experience",
+      "evidence": {
+        "tool_return_excerpt": "vortex_observe interactive on 工作流演示: table accessible name = '工单编号任务编号节点名称节点类型产生时间等待时长处理人订单号平台店铺买家昵称' (11 cols, no checkbox/operations col), data cells = 11 cells (186, 1037050591145496944, 门店处理, 填写节点, 2024-09-27 14:29:54, 15486 小时 30 分钟52秒, 213412341234, 186, 1037050591875305840, 电商客服, 填写节点...). NO '全选/取消' span, NO checkbox span, NO operations cell. vortex_extract output: 表头 11 数据列 + 数据 5 行对齐 + 行尾'操作\\n\\t\\n处理\\n\\t\\n转交\\n\\t\\n备注' (4 fields, 5 actual buttons per row -> 3 buttons + col header).",
+        "evaluate_dom_truth": "evaluate on 工作流演示: document.querySelectorAll('.vxe-table--header-wrapper') => 2 wrappers — (a) body--wrapper (13 cols full header: [empty=checkbox, 操作, 工单编号, 任务编号, 节点名称, 节点类型, 产生时间, 等待时长, 处理人, 订单号, 平台, 店铺, 买家昵称]) (b) fixed-left--wrapper (2 cols: [empty=checkbox, 操作]). DOM truth: 工作流演示 tr children count = 13 (checkbox + operations + 11 data cols). row 1 operations cell leaf buttons = 5 (处理/转交/备注/结束任务/结束流程).",
+        "tried_alternatives": [
+          "vortex_observe {scope:viewport, filter:interactive} on 工作流演示 (snapshot @ed25): table accessible name 含 11 数据列,无 checkbox/operations col;data cells 11 个,无 frozen-left cell",
+          "vortex_observe {scope:viewport, filter:all, prevSnapshotId} (snapshots 9,10,11): 80-of-853 truncated,still same first 80 lines (sidebar + header + 5 stat cards),unable to reach table region with prevSnapshotId",
+          "vortex_extract 默认 + vortex_extract {scroll:true}: 都是行尾拼接'操作/处理/转交/备注'(5 按钮漏 2)",
+          "vortex_extract {include:['text','value']} on 工单表: 文本字段与默认一致,controls 字段仅 input.value 与表格数据无关 (controls field 不影响 cell 提取)",
+          "vortex_query mode=css 'table tbody tr td.vxe-body--column.col--checkbox, table tbody tr td.vxe-body--column.col--fixed' -> 10 td (5 rows × 2 frozen cols) — DOM truth confirms frozen-left structure EXISTS but observe/extract do not surface it",
+          "vortex_query mode=geometry 'table tbody tr:first-child td' -> 13 td bbox (all inViewport=true except last clipped by viewport right edge, which is 买家昵称 not frozen column) — DOM truth confirms frozen cells are physically visible & clickable",
+          "evaluate DOM structure: document.querySelectorAll('.vxe-table--header-wrapper') returned 2 wrappers — body (13 cols) + fixed-left (2 cols);same vxe-table but observer only sees body wrapper"
+        ]
+      },
+      "new_tab_reproduced": true,
+      "action_path_is_vortex_native": true
+    }
+  ],
+  "coverage": {
+    "pages_visited": 2,
+    "anomalies": 1,
+    "clean": 1,
+    "tabs_opened": 2,
+    "tab_ids": ["984528404", "984528406"],
+    "scenario": "newbeta-r3: 大表格 extract 行/列 + 无名 checkbox 召回 + 节点状态语义",
+    "extract_alignment": {
+      "ticket_table": {
+        "header_columns": 9,
+        "data_columns": 9,
+        "data_rows": 1,
+        "dom_th_count": 10,
+        "dom_td_count": 10,
+        "alignment_match": true,
+        "row_data": ["待处理", "823290", "青蛙", "", "", "2026-06-11 16:26:57", "", "", ""],
+        "checkbox_column_in_extract": "preserved as empty leading tab (column 0 placeholder)"
+      },
+      "workflow_demo_table": {
+        "header_columns": 11,
+        "data_columns": 11,
+        "data_rows": 5,
+        "dom_th_count": 13,
+        "dom_td_count": 13,
+        "alignment_match": true,
+        "checkbox_column_in_extract": "absent (no leading placeholder; fixed-left wrapper skipped by extract row scan)",
+        "operations_column_in_extract": "appended as row-level info (操作/处理/转交/备注), NOT as a cell column; 5 leaf buttons -> 3 leaf buttons + col header (missing '结束任务' and '结束流程')"
+      }
+    },
+    "checkbox_recall": {
+      "ticket_table": {
+        "header_checkbox_observed": true,
+        "header_checkbox_ref": "@a35c:e60 (span '全选/取消')",
+        "row_checkbox_observed": true,
+        "row_checkbox_ref": "@a35c:e78 (span 'checkbox')"
+      },
+      "workflow_demo_table": {
+        "header_checkbox_observed": false,
+        "row_checkbox_observed": false,
+        "dom_checkbox_cells_present": true,
+        "dom_checkbox_td_count": 5,
+        "reason": "vxe-table fixed-left wrapper skipped by observe; only body wrapper's 11 data cells surfaced"
+      }
+    },
+    "row_operations_recall": {
+      "ticket_table": {
+        "operations_cell_observed": true,
+        "operations_cell_ref": "@a35c:e79 (cell '   ')",
+        "individual_button_refs": false,
+        "dom_button_count": 4,
+        "icon_classes": ["icon-a-xinfengxinxixiaoxi", "icon-edit1", "icon-news1", "icon-more3"],
+        "all_have_title_or_aria_label": false
+      },
+      "workflow_demo_table": {
+        "operations_cell_observed": false,
+        "operations_cell_ref": null,
+        "extract_output_row_tail": "操作 / 处理 / 转交 / 备注 (4 items)",
+        "dom_button_count": 5,
+        "dom_button_texts": ["处理", "转交", "备注", "结束任务", "结束流程"],
+        "extract_buttons_extracted": ["处理", "转交", "备注"],
+        "extract_buttons_missing": ["结束任务", "结束流程"]
+      }
+    },
+    "scroll_lazy_load": {
+      "workflow_demo_table": {
+        "scroll_container_present": false,
+        "evaluate_scrollers_found": 0,
+        "total_rows_shown": 5,
+        "scroll_true_changed_result": false
+      }
+    },
+    "controls_tested": {
+      "ticket_table_extract_default": {"alignment": "match", "columns": 9, "rows": 1, "anomaly": null},
+      "ticket_table_extract_with_include": {"alignment": "match", "columns": 9, "rows": 1, "controls_added": "pagination + search inputs only", "anomaly": null},
+      "ticket_table_observe_checkbox": {"header": "recalled (span '全选/取消')", "row": "recalled (span 'checkbox')", "anomaly": null},
+      "ticket_table_observe_row_operations": {"cell": "recalled (cell '   ')", "individual_buttons": "not split (no title/aria-label)", "anomaly": null},
+      "workflow_demo_extract_default": {"alignment": "match", "columns": 11, "rows": 5, "anomaly": null},
+      "workflow_demo_extract_with_scroll": {"alignment": "match (no scroll container)", "columns": 11, "rows": 5, "anomaly": null},
+      "workflow_demo_observe_checkbox_frozen": {"header": "NOT recalled", "row": "NOT recalled", "anomaly": "A-1"},
+      "workflow_demo_observe_row_operations_frozen": {"cell": "NOT recalled", "anomaly": "A-1"},
+      "workflow_demo_extract_row_operations_buttons": {"buttons_extracted": 3, "buttons_actual": 5, "missing": ["结束任务", "结束流程"], "anomaly": "A-1"}
+    },
+    "non_visual_paths_attempted": [
+      "vortex_extract default x 2 (ticket / workflow-demo)",
+      "vortex_extract include=[text,value] x 1 (ticket)",
+      "vortex_extract scroll=true x 1 (workflow-demo)",
+      "vortex_observe scope=viewport filter=interactive x 5 (multiple fresh snapshots)",
+      "vortex_observe scope=viewport filter=all prevSnapshotId x 3 (full snapshots)",
+      "vortex_query mode=css x 6 (th/td, vxe-cell--title/label, row1 td nth-child(2) full + span, frozen cols, all td in row1)",
+      "vortex_query mode=geometry x 2 (operation icons bbox, workflow-demo 13 td bbox)",
+      "vortex_act click x 1 (workflow-demo sidebar nav)",
+      "vortex_wait_for idle x 2",
+      "vortex_evaluate x 5 (DOM truth only: row structure, frozen wrapper detection, leaf button list, child title vs visible text, virtual scroll container detection)",
+      "vortex_tab_create x 2 + vortex_tab_close x 2 (per-scenario tab isolation)"
+    ],
+    "submission_attempted": false,
+    "dirty_data_created": false,
+    "notes": "1 anomaly captured (A-1): 工作流演示表的冻结列(checkbox + 操作列)在 vortex_observe 和 vortex_extract 两条原生路径下都不完整 — observe 完全漏召回 fixed-left wrapper 的 cell;extract 把操作列内容当 row-level info 拼接,且 5 个 leaf button 只输出 3 个 + 列标题(query mode=css 验证 DOM 真实有 5 个按钮,只是 extract 取不全)。工单表 extract 行/列对齐完美(9 列 × 1 行 DOM 真值完全一致);checkbox 召回修复点在工单表已生效(span 'checkbox' + span '全选/取消' 都召回);行操作图标(4 个 wicon 无 title/aria-label)在 observe 中被压成 1 个 cell 是 vxe-table 普遍行为,不算新缺陷。scroll:true 在工作流演示无效 — 该表无虚拟滚动容器(evaluate scrollers=[]),共 5 条已一次性渲染,scroll 不触发额外加载。行 3 买家昵称 cell 的 child title='手动阀十分'(=extract 输出)与 visible text='1.直接联系买家直接拨打隐私号...'(=el-popover 长说明)有差异,但 cell 业务语义'短名'=title,extract 策略合理,不构成异常。"
+  }
+}

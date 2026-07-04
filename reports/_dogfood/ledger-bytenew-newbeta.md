@@ -29,7 +29,7 @@ cycle 目录: reports/_dogfood/newbeta-2026-07-04/
 | 0  | recon 站点地图 | — | — | — | — | — | — | done |
 | 1  | 首页/工单表 导航+菜单 observe 召回 | 裸 div onClick 小程序卡/moreNav 深浮层/cursor:pointer | already-graceful | 无缺陷:召回完整(顶部5/5·卡28·moreNav19/19),act 可靠;VOC父卡 click 不切换=班牛 UX(露 add/more,getAppDetail 已发) | — | 无回归 | Claude live 证实 act 精确命中+触发真实 handler | clean |
 | 2  | 工单表 新建工单 表单填写 | fill/fill_form + mode=css/component readback 校验 | **vortex-defect** (A-1) | el-select verify 只读 wrapper.innerText+selected-item span,不含只读 `<input>.value`;班牛单选值渲染进 input→假报 COMMIT_FAILED(同族 aria-select 2026-06-14) | 见提交 | 5744 过/select 全绿 | live 双证:filterable执行人+任务状态 fill widget=select 均 success 且真提交 | fixed |
-| 3  | 工单表/工作流演示 大表格 extract | 行列结构/无名 checkbox 召回/节点状态语义 | — | — | — | — | — | pending |
+| 3  | 工单表/工作流演示 大表格 extract | 行列结构/无名 checkbox 召回/节点状态语义 | **vortex-defect** (deferred) | observe 漏 vxe-table `.vxe-table--fixed-left-wrapper` 冻结列(checkbox+操作列);body wrapper 11 列召回正常,冻结 2 列整体被跳过 | 待 spike | — | live 证:query mode=css 冻结列存在(5行×2列 checkbox+处理/转交/备注/结束任务/结束流程),observe 表头仅11列 | deferred |
 | 4  | 弹窗/浮层 模态作用域 observe | 筛选/流程/列表设置 dialog aria-modal 裁剪+焦点容器 | — | — | — | — | — | pending |
 | 5  | 分页/筛选/下拉/排序 act+状态回读 | 10条/页 select/排序 arrow/视图 tab 切换 | — | — | — | — | — | pending |
 | 6  | 看板「图文卡片」非截图识别 | 退款管理大脑看板 4 卡 img alt/text→extract/query 读语义(替原 echarts 轮) | — | — | — | — | — | pending |
@@ -46,4 +46,5 @@ cycle 目录: reports/_dogfood/newbeta-2026-07-04/
 ## backlog (非 vortex-defect 或未修)
 - **[r2 A-2 确诊待 spike]** `vortex_fill`(无 widget) 对 el-date-editor--datetime 单步返回 success 但 model 空、须 Enter 才 commit(fill 假成功)。单 datetime 无对应 commit driver kind(仅 daterange/datetimerange/time)。真因需 spike:el-date-editor commit 时序 + 是否补 `datetime` commit driver。**优先级高**(silent 数据丢失)。
 - **[r2 A-3 by-design/低]** `vortex_fill` 对 el-date-editor 不做格式预校验,非法串 `abc-invalid-date` 返回 success+input.value 写入,Enter 后 model 不 commit。readback==write(非严格 fill 假成功);fill 只管输入、app 拒格式。倾向 by-design,暂不修。
+- **[r3 observe 漏 vxe 冻结列 — 确诊待 spike，优先级高]** observe 漏 `.vxe-table--fixed-left-wrapper`(vxe-table 冻结左列:selection checkbox + 行操作列)。工单表(非冻结)checkbox 召回正常,工作流演示(冻结)整列漏。根因需白盒 observe.ts scanOneFrame 遮挡/去重:冻结 wrapper 是 absolute 覆盖层,body 左列可能空占位→冻结内容只在 fixed wrapper 却被 observe 当遮挡重复丢弃。影响:冻结列的行选择+操作按钮(结束任务/结束流程)不可达。修需谨慎(observe 是核心承重墙,90+ bench + overlay 测试锁),留专门 spike round。
 - **[r2 observe filter=all 间歇超时]** M3 在重 DOM churn 下撞 observe.snapshot 30s MCP 超时 2 次,Claude live 同页 filter=all 正常返回(784 候选)未复现。间歇性、无确定性 repro→无法 TDD。列 watch-item,若后续轮复现且可稳定触发再开 spike。
