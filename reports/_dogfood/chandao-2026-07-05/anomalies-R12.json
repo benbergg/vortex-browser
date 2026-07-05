@@ -1,0 +1,199 @@
+{
+  "cycle": "dogfood-chandao-2026-07-05",
+  "site": "https://chandao.bytenew.com/zentao/",
+  "model": "minimax/MiniMax-M3",
+  "tool_surface": [
+    "vortex_tab_create",
+    "vortex_tab_close",
+    "vortex_navigate",
+    "vortex_observe",
+    "vortex_query",
+    "vortex_evaluate",
+    "vortex_extract"
+  ],
+  "anomalies": [
+    {
+      "id": "A-1",
+      "page": "/zentao/task-view-44929.html",
+      "component": "禅道详情页 #legendLife / #legendTeam / #legendMisc 三个 detail panel(默认 CSS display:none)",
+      "primitive": "vortex_extract",
+      "action_sequence": [
+        {
+          "tool": "vortex_extract",
+          "args": {
+            "target": "#legendLife",
+            "depth": 3,
+            "maxLength": 4096,
+            "frameId": 650,
+            "tabId": 984528458
+          },
+          "returned_excerpt": "\"\""
+        },
+        {
+          "tool": "vortex_evaluate",
+          "args": {
+            "function": "(function(){var doc=document.querySelector('iframe#appIframe-execution').contentDocument;var ll=doc.getElementById('legendLife');var tc=ll.textContent.indexOf('由谁创建');var it=ll.innerText.indexOf('由谁创建');return JSON.stringify({hasByWhoCreated_textContent:tc,hasByWhoCreated_innerText:it,tcSample:ll.textContent.slice(0,100)});})()",
+            "tabId": 984528458
+          },
+          "returned_excerpt": "{\"hasByWhoCreated_textContent\":45,\"hasByWhoCreated_innerText\":45,\"tcSample\":\"\\n            \\n              \\n                由谁创建\\n                虹猫 于 2026-06-17 16:09:04\\n         \"}"
+        },
+        {
+          "tool": "vortex_query",
+          "args": {
+            "mode": "css",
+            "pattern": "table.table-data tr",
+            "attr": "textContent",
+            "maxResults": 50,
+            "frameId": 650,
+            "tabId": 984528458
+          },
+          "returned_excerpt": "{\"elements\":[...{\"i\":9,\"text\":\"由谁创建\\n                虹猫 于 2026-06-17 16:09:04\"},{\"i\":10,\"text\":\"由谁完成\\n                暂无\"},...]...],\"showing\":24,\"total\":24}"
+        }
+      ],
+      "phenomenon": "extract target=display:none div 返回空字符串:禅道详情页 5 个 panel 中 3 个默认 display:none(#legendLife 任务的一生 / #legendTeam 团队 / #legendMisc 其他相关),extract 拿不到任何字段文本;DOM 上有完整 6 行 label-value(由谁创建/由谁完成/...)但 extract 短路",
+      "m3_severity": "experience",
+      "evidence": {
+        "tool_return_excerpt": "extract target=#legendLife depth=3 → \"\";extract target=#legendMisc depth=3 → \"\";evaluate 读 legendLife.textContent 含 \"由谁创建 虹猫 于 2026-06-17 16:09:04\" (45 字符位置),innerText 同样;query css tr 24 行全部 label+value 拼接可见,无视 display:none",
+        "evaluate_dom_truth": "document.querySelector('iframe#appIframe-execution').contentDocument.getElementById('legendLife').textContent 含 '由谁创建 虹猫 于 2026-06-17 16:09:04'(true),getComputedStyle(legendLife).display === 'none'(true);同 query css tr frameId=650 拿到 index=9 '由谁创建\\n虹猫 于 2026-06-17 16:09:04' tr.text",
+        "tried_alternatives": [
+          "extract target=#legendLife depth=3 → 空字符串(默认 visibility filter 短路 display:none)",
+          "extract target=#legendLife depth=3 scroll=true → 仍空字符串(不展开隐藏 panel)",
+          "query mode=text pattern='由谁创建' frameId=650 → 0 matches(query text 也读 display:none panel 字段名)",
+          "query mode=css pattern='table.table-data tr' frameId=650 → 24 行全部可见,无视 display:none(补足路径)",
+          "evaluate + document.querySelector('iframe#appIframe-execution').contentDocument.getElementById('legendLife').textContent → 完整 6 行 label-value(补足路径)"
+        ]
+      },
+      "new_tab_reproduced": true,
+      "action_path_is_vortex_native": true
+    },
+    {
+      "id": "A-2",
+      "page": "/zentao/task-view-44929.html",
+      "component": "禅道详情页字段区 <table.table-data> 内的 <th> label 与 <td> value 节点(无 ARIA role)",
+      "primitive": "vortex_observe",
+      "action_sequence": [
+        {
+          "tool": "vortex_observe",
+          "args": {
+            "scope": "viewport",
+            "filter": "interactive",
+            "frames": "all-permitted",
+            "tabId": 984528458
+          },
+          "returned_excerpt": "...- button [ref=@ed05:f650e46] - button [ref=@ed05:f650e47] - button [ref=@ed05:f650e48] - link \"基本信息\" [ref=@ed05:f650e47]: /url: #legendBasic - link \"任务的一生\" [ref=@ed05:f650e48]: /url: #legendLife... (字段区 P/状态/优先级等位置仅出现空 button,无 <th>/<td> 文本节点 \"所属执行\"/\"voc日常迭代\"/\"0\"/\"未开始\"/\"2026-07-10\")"
+        },
+        {
+          "tool": "vortex_observe",
+          "args": {
+            "scope": "full",
+            "filter": "all",
+            "frames": "all-permitted",
+            "tabId": 984528458
+          },
+          "returned_excerpt": "...- table [ref=@c814:f650e66]:\\n  - tr [ref=@c814:f650e74]:\\n    - th \\\"所属执行\\\" [ref=@c814:f650e75]\\n    - td [ref=@c814:f650e76]:\\n      - link \\\"voc日常迭代\\\" [ref=@c814:f650e55]: /url: /zentao/execution-view-2028.html\\n  - tr \\\"所属模块 /\\\" [ref=@c814:f650e77]:\\n    - th \\\"所属模块\\\" [ref=@c814:f650e78]\\n    - td \\\"/\\\" [ref=@c814:f650e79]\\n  ... (filter=all 完整召回 tr.th+td 配对,9+5=14 行,只覆盖 display:block panel)"
+        },
+        {
+          "tool": "vortex_query",
+          "args": {
+            "mode": "css",
+            "pattern": "table.table-data tr",
+            "attr": "textContent",
+            "maxResults": 50,
+            "frameId": 650,
+            "tabId": 984528458
+          },
+          "returned_excerpt": "{\"elements\":[{\"i\":0,\"text\":\"所属执行\\n                  \\n                    voc日常迭代\"},{\"i\":7,\"text\":\"优先级\\n                  0\"},{\"i\":9,\"text\":\"由谁创建\\n                虹猫 于 2026-06-17 16:09:04\"},{\"i\":21,\"text\":\"截止日期\\n                \\n                  2026-07-10\"},...],\"showing\":24,\"total\":24}"
+        }
+      ],
+      "phenomenon": "observe filter=interactive 不展示无 role 的 <th> / <td> 文本节点:禅道详情页字段区的 <th>\"所属执行\" / <td>\"voc日常迭代\" / <th>\"优先级\" / <td>\"0\" / <th>\"截止日期\" / <td>\"2026-07-10\" 在 ax tree 中缺失;filter=all + scope=full 才能在 a11y 树看到完整 tr.th+td 配对(且仅限 display:block panel,#legendLife/#legendMisc display:none 仍跳过)",
+      "m3_severity": "experience",
+      "evidence": {
+        "tool_return_excerpt": "observe filter=interactive frames=all-permitted 字段区只看到空 button + 各种 link,无 th/td 文本;observe filter=all scope=full 完整召回 14 行 tr(th+td 配对,9 字段基本信息 + 5 字段工时信息)但截断 returned 80 of ~251 candidates",
+        "evaluate_dom_truth": "document.querySelector('iframe#appIframe-execution').contentDocument.querySelectorAll('table.table-data').length === 5;th 总数 28,td 总数 23(5 个无配对 td 是工时表头行);evaluate 直接读 th.textContent 与 td.textContent 拿到全部 28 对 label-value(其中 23 对 th+td 配对 + 5 个工时表头 th)",
+        "tried_alternatives": [
+          "observe filter=interactive frames=all-permitted → 字段区只看到空 button,无 th/td 文本",
+          "observe filter=all scope=full → 完整 14 行 tr.th+td 配对(只 display:block panel),但树大被截断到 80 candidates",
+          "observe filter=all scope=full → display:none panel #legendLife/#legendMisc 仍跳过,不展示",
+          "query mode=css tr frameId=650 → 24 行全部 label+value 拼接可见(无视 display:none,补足路径)",
+          "query mode=css th/td frameId=650 → 28 th + 23 td 按 index 配对(补足路径)",
+          "extract target=#legendBasic frameId=650 → 9 行 label\\tvalue 完美(只 display:block)",
+          "evaluate + contentDocument → 全部 28 对配对(补足路径)"
+        ]
+      },
+      "new_tab_reproduced": true,
+      "action_path_is_vortex_native": true
+    },
+    {
+      "id": "A-3",
+      "page": "/zentao/task-view-44929.html",
+      "component": "vortex_query mode=text 的 display:none 节点过滤",
+      "primitive": "vortex_query",
+      "action_sequence": [
+        {
+          "tool": "vortex_query",
+          "args": {
+            "mode": "text",
+            "pattern": "由谁创建",
+            "contextChars": 30,
+            "maxResults": 3,
+            "frameId": 650,
+            "tabId": 984528458
+          },
+          "returned_excerpt": "{\"has_more\":false,\"matches\":[],\"total\":0}"
+        },
+        {
+          "tool": "vortex_query",
+          "args": {
+            "mode": "text",
+            "pattern": "优先级",
+            "contextChars": 15,
+            "maxResults": 3,
+            "frameId": 650,
+            "tabId": 984528458
+          },
+          "returned_excerpt": "{\"matches\":[{\"context\":\"...型开发任务状态 未开始进度0%优先级0抄送给...\",\"element_path\":\"main#main > div.container > div#mainContent > div.side-col.col-4 > div.cell > div.tabs > div.tab-content > div#legendBasic > table.table.table-data > tbody > tr > th\",\"match_text\":\"优先级\"}],\"total\":1}"
+        },
+        {
+          "tool": "vortex_query",
+          "args": {
+            "mode": "css",
+            "pattern": "table.table-data tr",
+            "attr": "textContent",
+            "maxResults": 50,
+            "frameId": 650,
+            "tabId": 984528458
+          },
+          "returned_excerpt": "{\"elements\":[{\"i\":9,\"text\":\"由谁创建\\n                虹猫 于 2026-06-17 16:09:04\"},{\"i\":10,\"text\":\"由谁完成\\n                暂无\"},...{\"i\":21,\"text\":\"截止日期\\n                \\n                  2026-07-10\"}],\"showing\":24,\"total\":24}"
+        },
+        {
+          "tool": "vortex_evaluate",
+          "args": {
+            "function": "(function(){var doc=document.querySelector('iframe#appIframe-execution').contentDocument;var ll=doc.getElementById('legendLife');return JSON.stringify({legendLifeDisplay:getComputedStyle(ll).display,hasTextContent:ll.textContent.indexOf('由谁创建')>-1,hasInnerText:ll.innerText.indexOf('由谁创建')>-1});})()",
+            "tabId": 984528458
+          },
+          "returned_excerpt": "{\"legendLifeDisplay\":\"none\",\"hasTextContent\":true,\"hasInnerText\":true}"
+        }
+      ],
+      "phenomenon": "vortex_query mode=text 在 CSS display:none 节点短路:#legendLife display:none 内 DOM textContent 含 '由谁创建 虹猫 于 2026-06-17 16:09:04',innerText 同样有,但 query text 报 0 matches;同一 query 在 display:block panel(#legendBasic '优先级')命中 1 条;query mode=css `table.table-data tr` 不受 display:none 影响(24 行全可见)",
+      "m3_severity": "experience",
+      "evidence": {
+        "tool_return_excerpt": "query text '由谁创建' frameId=650 → 0 matches(legendLife display:none);query text '优先级' frameId=650 → 1 match(legendBasic display:block,context 串 4 字段邻接);query css tr frameId=650 → 24 行(legendLife index=9 '由谁创建\\n虹猫 于...' 仍可见)",
+        "evaluate_dom_truth": "document.querySelector('iframe#appIframe-execution').contentDocument.getElementById('legendLife').textContent 含 '由谁创建'(textContent indexOf=45),innerText 同样含(45),getComputedStyle(legendLife).display === 'none';同源 query mode=css tr 拿到 index=9 tr 含 '由谁创建\\n虹猫 于 2026-06-17 16:09:04'",
+        "tried_alternatives": [
+          "query mode=text '由谁创建' frameId=650 → 0 matches(visibility 短路)",
+          "query mode=text '截止日期' frameId=650 → 1 match(因为实际在 #legendEffort display:block,而非 #legendMisc display:none)",
+          "query mode=css tr frameId=650 → 24 行无视 display:none(补足路径)",
+          "query mode=css #legendLife th frameId=650 → 6 个 th 节点全可见,text 字段含 label(补足路径)",
+          "evaluate + contentDocument.getElementById('legendLife').textContent → 完整 6 行 label-value(补足路径)"
+        ]
+      },
+      "new_tab_reproduced": true,
+      "action_path_is_vortex_native": true
+    }
+  ],
+  "coverage": {
+    "pages_visited": 2,
+    "anomalies": 3,
+    "clean": 0
+  }
+}

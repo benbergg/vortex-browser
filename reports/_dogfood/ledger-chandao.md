@@ -41,7 +41,7 @@ cycle 目录: reports/_dogfood/chandao-2026-07-05/
 |----|------|----------|--------|------|--------|-------|------|------|
 | R0 | recon 站点地图 | — | — | — | — | — | Claude live observe 地盘 | done |
 | R11 | 我的任务列表 | 行/状态/优先级/排序/翻页非截图识别 | already-graceful×3 + m3-error×1(+DX改进) | A1 observe不召回纯文本span→extract一次读全表(状态/优先级齐)=分工正确; A2 排序态无aria-sort→href含_asc/_desc+query attr=class可读; A3 attr管道"class 竖 title"静默{}→单属性正常=m3误用,采纳DX改进(attr分隔符拆分+消静默空); A4 iframe需frameId=by-design(observe ref前缀已暴露frameId=640) | `daddd2b`(DX) | 1850/1850 无回归 | Claude live白盒+双证: extract全表齐/attr单属正常/observe穿iframe640/**attr=class竖href 修复后返双键(修前{})** | fixed(DX改进) |
-| R12 | 任务详情 | — | — | — | — | — | — | pending |
+| R12 | 任务详情 | label-value配对/工时/隐藏tab | already-graceful×3 | A1 extract隐藏target空→act激活tab后extract完美读(由谁创建\t虹猫...)+query css直读; A2 observe filter=interactive不给th/td→filter=all优秀配对(tr name拼"字段 值"如"优先级 0"/"最初预计 32工时")=M3用错filter; A3 query text过滤display:none→可见性语义,激活tab/query css可达 | — | 无回归 | Claude live: observe filter=all全配对+act点tab激活+extract隐藏panel读全 | clean |
 | R13 | 需求筛选搜索 | — | — | — | — | — | — | pending |
 | R14 | Bug 翻页排序 | — | — | — | — | — | — | pending |
 | R15 | 看板浏览 | — | — | — | — | — | — | pending |
@@ -56,8 +56,10 @@ cycle 目录: reports/_dogfood/chandao-2026-07-05/
 ## blindspot 清单 (截图硬门槛副产)
 （逐轮累积: 哪类内容非截图无法识别 + 现有工具为何盖不到 + 是否转 vortex-defect）
 - **[R11] 无 true blindspot**。任务表所有语义(任务名/状态/优先级/工时/截止)均非截图可读:observe 召回交互元素(任务名/操作 link)、**extract 一次读全表**(含状态"已完成"/优先级"2")、query mode=css/style 补属性/颜色。observe 不召回无 role 纯文本 span(状态/优先级)属 filter 分工(extract 覆盖),非盲区。
+- **[R12] 无 true blindspot**。任务详情 label-value 配对非截图完全可识别:observe filter=all 把"字段 值"拼进 tr accessible name(`tr "优先级 0"`/`tr "指派给 青蛙 于..."`)+th/td 嵌套;隐藏 tab panel(display:none)经 act 点 tab 激活后 extract/observe 读全,或 query mode=css 无视可见性直读。
 
 ## backlog (非 vortex-defect 或未修)
 （逐轮累积）
 - **[R11 A-2 排序态 class 推断 — 增强候选,延续上轮 R5]** 禅道表头排序态用 `<a class="sort-up|sort-down|header">` 无 aria-sort,observe 忠实读 ARIA 故不表达方向;补足路径足够(href 含 `_asc/_desc` 方向 + query attr=class 可读)。增强项=observe 从常见排序 class 推断 `[sort=asc/desc]`,与上轮"class-based 状态推断(.active/.selected)"同族,同样有 FP 风险,留产品决策。
 - **[R11 A-4 iframe 需 frameId — by-design,已优雅]** evaluate/query 默认 main frame,禅道任务表在 iframe#appIframe-my 需显式 frameId;observe frames=all-permitted 自动穿透且 ref 前缀暴露 frameId(如 @ebbe:f640e49),agent 可据前缀传 frameId。非缺陷。
+- **[R12 extract/query-text 隐藏 target 静默空 — 弱增强候选,呼应 R11 静默空主题]** extract target=display:none 元素返回 `""`、query mode=text 对隐藏节点 0 matches(可见性语义,合理)。但**静默空无提示**:agent 传隐藏 tab panel target 得空,可能误判"panel 为空"而非"需激活 tab"(M3 R12 正踩此:全程未用 act 点 tab,硬读隐藏 DOM 记异常)。增强=extract 检测 target 自身 display:none 时返回 `[hidden: display:none, N chars in DOM]` 提示。优先级低:有 act 激活 tab + query mode=css 两条可达路径,正常 agent 流程会先激活 tab。
