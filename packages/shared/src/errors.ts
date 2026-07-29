@@ -56,6 +56,9 @@ export const VtxErrorCode = {
   DISABLED: "DISABLED",
   /** Actionability: fill/type target is readonly or non-input */
   NOT_EDITABLE: "NOT_EDITABLE",
+  /** target 不是合法 CSS selector（querySelector 抛 SyntaxError）。多为误用 Playwright
+   *  语法(`text=` / `>>` / `:has-text()`)或直接传自然语言文本。不可重试。 */
+  INVALID_SELECTOR: "INVALID_SELECTOR",
   /** Fallback chain exhausted all paths */
   ACTION_FAILED_ALL_PATHS: "ACTION_FAILED_ALL_PATHS",
   /** Drag operation but CDP unavailable */

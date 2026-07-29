@@ -26,6 +26,19 @@ export function isStaleNotAttached(err: unknown): boolean {
   );
 }
 
+/** 选择器不可用（零命中 或 语法非法）→ 握有 descriptor 时值得按 descriptor 重定位。
+ *
+ * INVALID_SELECTOR 必须纳入：observe 的 buildSelector 用 aria-label / data-testid 拼锚点时
+ * 不转义裸换行（observe.ts:1786/1805），折行的 aria-label 会生成语法非法的选择器。这类
+ * selector 是 vortex **自己**生成的、调用方只传了 @ref，走不到自愈就只能硬失败，
+ * 且诊断会建议"改用 @ref"——而它传的就是 @ref。INVALID_SELECTOR 落地前，这条路径
+ * 靠 NOT_ATTACHED 自旋到 TIMEOUT 反而能自愈，不纳入即是能力退化。 */
+export function isHealableSelectorFailure(err: unknown): boolean {
+  if (!err) return false;
+  if ((err as { code?: string }).code === VtxErrorCode.INVALID_SELECTOR) return true;
+  return isStaleNotAttached(err);
+}
+
 // 内联匹配体（自包含，无模块引用）。与 page-side/heal-resolve.matchByDescriptor 同语义；
 // heal-inline-alignment.test.ts 校验对齐。导出字符串供注入与单测共用同一真源。
 // 名来源顺序对齐 observe getAccessibleName：

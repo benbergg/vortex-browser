@@ -57,8 +57,10 @@ describe("VtxError", () => {
 });
 
 describe("VtxErrorCode enum", () => {
-  it("includes all 47 error codes (24 base + 2 组件 + 9 L2 + 9 L3 + 2 L4 + 1 act-verify)", () => {
-    expect(Object.keys(VtxErrorCode)).toHaveLength(47);
+  // 48 = 47 + INVALID_SELECTOR（L2）。target 非法 CSS 此前被 probe 吞成可重试的
+  // NOT_ATTACHED，空转满 timeout 后抛反方向的 "detached from DOM" 诊断。
+  it("includes all 48 error codes (24 base + 2 组件 + 10 L2 + 9 L3 + 2 L4 + 1 act-verify)", () => {
+    expect(Object.keys(VtxErrorCode)).toHaveLength(48);
   });
 
   it("each constant equals its own string value (self-describing)", () => {

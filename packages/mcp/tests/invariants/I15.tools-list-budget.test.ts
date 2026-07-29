@@ -72,6 +72,21 @@
 // 不入 schema(handler 读取,省预算)。payload 实测 7773B,cap +100 留 ~80B 余量。
 // 沿用"加能力调 cap 不压字符"惯例。
 //
+// query mode=css attr 多属性: 8500 → 8600 B,description 180 → 230 char。
+// daddd2b(feat: query mode=css attr 支持分隔符拆分多属性)只改了 schemas-public.ts
+// 一行(给 attr 加 description),**漏了配套的 cap 与豁免同步**,致本不变式自该提交起
+// 一直红着(实测 8522 > 8500、vortex_query description 222 > 180、attr 带 description)。
+// 本次补齐该收尾:
+//   - 字节 8500 → 8600:实测 8522,+100 同历次步长,留 78B 余量。
+//   - description 180 → 230:超标的只有 vortex_query 一个(222,其余最长 174=vortex_act)。
+//     222 是 8 个 mode 各一段真能力说明累加的结果(text/css/component/geometry/style/
+//     sheet/flow/chart),压到 180 必须删掉某个 mode 的说明 → 该 mode 对 LLM 不可发现。
+//     沿本文件既有判断("压缩损 LLM 可读性",见 mode=flow 段)不压字符,调阈值。
+//   - attr 进 description 豁免名单(第三处,前两处为 debug_read.filter / act.fingerprint):
+//     判据同 filter —— handler 已实现的真能力,且它修的正是 R11 禅道 dogfood 实测的
+//     静默失败(attr="class|title" 被当单个畸形属性名 getAttribute 掉,静默返回空 attrs,
+//     误导 agent 判定 attr 参数失效)。移除豁免 = 让该 dogfood 真发现复发。
+//
 // vortex_query mode=flow: 7900 → 8100 B。vortex_query mode 枚举新增
 // flow(ipaas 流程图 readback → mermaid/tree/json),description 同步追加
 // "; flow=流程图→mermaid."。flowProbeFunc 自包含内联 detect+read+serialize
@@ -91,7 +106,7 @@ describe("I15: tools/list budget + count + internalized grep", () => {
     defs.map(d => ({ name: d.name, description: d.description, inputSchema: d.schema })),
   );
 
-  it("tools/list 字节 ≤ 8500 B (vortex_mouse_click 坐标点击, 实测 8378 留 ~122B buffer)", () => {
+  it("tools/list 字节 ≤ 8600 B (query attr 多属性说明, 实测 8522 留 78B buffer)", () => {
     // V2 P0 修复 D16: filter 子字段 description 是必要的文档化豁免
     // (handler 已实现 console.ts:160 level / network.ts:305-321 pattern+statusMin/Max),
     // 移除豁免会触发 V2 D16 真发现复发 (LLM 不知可用子字段)。
@@ -108,7 +123,7 @@ describe("I15: tools/list budget + count + internalized grep", () => {
     // (handler mouse.click 早已实现,含 frame→viewport 换算,此前只暴露坐标版 mouse.drag;
     // canvas/地图/无 ref 场景刚需,补齐"坐标 click"能力缺口)。schema 块 +~366B,payload
     // 实测 8378B,cap +400 至 8500 留 ~122B 余量。沿用"加能力调 cap 不压字符"惯例。
-    expect(toolsListPayload.length).toBeLessThanOrEqual(8500);
+    expect(toolsListPayload.length).toBeLessThanOrEqual(8600);
   });
 
   it("公开工具数量 = 21（20 + vortex_mouse_click 坐标点击）", () => {
@@ -175,11 +190,13 @@ describe("I15: tools/list budget + count + internalized grep", () => {
     }
   });
 
-  it("description 长度 ≤ 180 char", () => {
+  it("description 长度 ≤ 230 char", () => {
     // 120 → 180: vortex_act description 恢复原始 hint + 追加 onDialog clause = 174 char。
     // 174 = 120 原始 + 54 onDialog 子句，是真新增能力驱动的增长。
+    // 180 → 230: 仅 vortex_query 超(222)，是 8 个 mode 各一段真能力说明累加的结果；
+    // 其余工具最长 174(vortex_act)，阈值放宽不会掩盖别处膨胀。
     for (const d of defs) {
-      expect(d.description.length).toBeLessThanOrEqual(180);
+      expect(d.description.length).toBeLessThanOrEqual(230);
     }
   });
 
@@ -206,6 +223,11 @@ describe("I15: tools/list budget + count + internalized grep", () => {
               // 必须文档化让 LLM 知道 record→fingerprint / verify→drift / autoRecover
               // (handler 真公开能力,server.ts applyFingerprint/shouldRecover)。沿
               // filter 单点豁免先例,1 段 description 字节远低于 82B buffer 损耗。
+            } else if (toolName === "vortex_query" && k === "attr") {
+              // query attr 多属性豁免(daddd2b): attr 支持 , / | 分隔多属性是 handler
+              // 已实现的真能力(normalizeCssAttrParam)。不文档化则复发 R11 禅道 dogfood
+              // 实测的静默失败——attr="class|title" 被当单个畸形属性名 getAttribute 掉,
+              // 静默返回空 attrs,agent 误判 attr 参数失效。同 filter 的豁免判据。
             } else {
               throw new Error(`${path}.properties.${k} has description (forbidden by §0.2.1)`);
             }

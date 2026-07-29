@@ -20,7 +20,10 @@ export type ActionabilityFailure =
   | "NOT_EDITABLE"
   // Tier 2 起不再由 probe 发射：findInOpenShadow 已让 open-shadow 元素可解析。保留作安全网——
   // 若未来出现不可解析的 shadow 路径，此非重试分支避免 TIMEOUT 空转。
-  | "OPEN_SHADOW";
+  | "OPEN_SHADOW"
+  // selector 不是合法 CSS（querySelector 抛 SyntaxError）。与 NOT_ATTACHED 分开——
+  // 语法错误重试到天荒地老也不会变合法，必须立即失败并告知正确语法。
+  | "INVALID_SELECTOR";
 
 export type ActionabilityResult =
   | { ok: true; rect: { x: number; y: number; w: number; h: number } }
@@ -274,15 +277,22 @@ export type ActionabilityResult =
     needsEditable: boolean,
     force = false,
   ): Promise<ActionabilityResult> {
-    // querySelector throws SyntaxError on invalid CSS (e.g. raw v0.5-style
-    // snapshot ref slipped past mcp ref-parser). Swallow it as not-attached
-    // so the host wrapper sees a structured result instead of a nullish
-    // chrome.scripting result triggering `null.ok` JS_EXECUTION_ERROR.
+    // querySelector 对非法 CSS 抛 SyntaxError。此前一律 catch 成 el=null → NOT_ATTACHED
+    // (可重试)，让 Playwright 语法(`text=` / `>>` / `:has-text()`)与自然语言 target 空转满
+    // timeout 预算，最后抛出方向完全相反的 "Element detached from DOM" 诊断
+    // (2026-07-29 iPaaS 实战：加大 timeout / wait idle 全部无效)。语法错不会因重试变合法，
+    // 单列为不可重试的 INVALID_SELECTOR，由 host 侧 auto-wait 给出正确语法。
     let el: Element | null;
     try {
       // light-DOM 优先；落空时穿 open shadow 兜底（Tier 2：shadow-internal 元素现可操作）。
       el = document.querySelector(selector) ?? findInOpenShadow(selector);
-    } catch {
+    } catch (err) {
+      // 主判据是 `.name`：DOM spec 规定 querySelector 抛的是 **DOMException**（name
+      // 为 "SyntaxError"），`instanceof SyntaxError` 恒 false（实测已确认）。保留
+      // instanceof 仅作跨引擎防御，不要以为它才是生效的那半。
+      if ((err as { name?: string })?.name === "SyntaxError" || err instanceof SyntaxError) {
+        return { ok: false, reason: "INVALID_SELECTOR" };
+      }
       el = null;
     }
     if (!el) {

@@ -108,13 +108,16 @@ describe("A4 截断量化", () => {
 });
 
 describe("frame 级 canvas 盲区 (compact)", () => {
-  it("frame 级 chart canvas 盲区 → summary 指向 vortex_evaluate", () => {
+  // 0bf8fbc(feat: query mode=chart) 起,echarts 盲区改指向专用的结构化 readback
+  // vortex_query mode=chart(优于让 LLM 手搓 evaluate getOption()),该提交漏同步本断言。
+  // 非 echarts 的 chartLib(chartjs/g2)仍走 vortex_evaluate,见 chartReadback()。
+  it("frame 级 chart canvas 盲区 → summary 指向 vortex_query mode=chart", () => {
     const out = renderObserveCompact(
       { snapshotId: "s", url: "u", elements: [],
         frames: [{ frameId: 12, url: "about:srcdoc", scanned: true, elementCount: 0, offset: { x: 0, y: 0 },
           blindspots: [{ kind: "canvas", name: "图表", chartLib: "echarts", readback: "chart" }] }] } as any,
       null);
-    expect(out).toContain("图表 chart(echarts) → read via vortex_evaluate getOption()");
+    expect(out).toContain("图表 chart(echarts) → read via vortex_query mode=chart");
     expect(out).toContain("(frame 12)");
   });
 
@@ -139,15 +142,18 @@ describe("frame 级 canvas 盲区 (compact)", () => {
 });
 
 describe("canvas readback 指路 (compact)", () => {
-  it("canvas chart 渲染 chart + readback=evaluate", () => {
+  it("canvas chart 渲染 chart + readback=mode=chart", () => {
     const out = renderObserveCompact(
       { snapshotId: "s", url: "u", elements: [
         { index: 0, tag: "canvas", role: "img", name: "C", frameId: 0,
           blindspot: { kind: "canvas", readback: "chart", chartLib: "echarts" } },
       ] } as any, null);
-    expect(out).toContain("[blindspot=canvas chart=echarts readback=evaluate:getOption]");
+    expect(out).toContain("[blindspot=canvas chart=echarts readback=query:chart]");
     expect(out).toContain("chart(echarts)"); // 顶部 summary 指路
-    expect(out).toContain("vortex_evaluate"); // 顶部 summary 必须指向正确通道(getOption),挡"指错工具"回归
+    // 顶部 summary 必须指向正确通道,挡"指错工具"回归。0bf8fbc 起 echarts 的正确
+    // 通道是 vortex_query mode=chart(结构化 readback),不再是 evaluate getOption()。
+    expect(out).toContain("vortex_query mode=chart");
+    expect(out).not.toContain("vortex_evaluate");
   });
 
   it("canvas chart 缺 chartLib → fallback chart=?", () => {
