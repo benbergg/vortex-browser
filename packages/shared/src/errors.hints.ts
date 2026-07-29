@@ -144,6 +144,10 @@ export const DEFAULT_ERROR_META: Record<VtxErrorCode, VtxErrorMeta> = {
     hint: "Element detached from DOM. Call vortex_observe to re-locate the element and retry vortex_act with the fresh ref.",
     recoverable: true,
   },
+  INVALID_SELECTOR: {
+    hint: "target is not valid CSS. Use a CSS selector (e.g. button.save-btn, input[placeholder='Name']) or an @ref from vortex_observe. Playwright syntax (text=, >>, :has-text()) and plain text are not supported; to match by text call vortex_observe and use its ref.",
+    recoverable: false,
+  },
   NOT_VISIBLE: {
     hint: "Element not visible (display:none / visibility:hidden / 0x0 box). Call vortex_wait_for with mode='element' on a parent visibility marker, or check whether the parent container is hidden.",
     recoverable: true,

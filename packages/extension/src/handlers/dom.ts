@@ -20,7 +20,7 @@ import {
 } from "../patterns/index.js";
 import { waitActionable } from "../action/auto-wait.js";
 import { waitActionableAutoForce } from "../action/wait-actionable-auto-force.js";
-import { isStaleNotAttached, tryHealSelector } from "../action/heal.js";
+import { isHealableSelectorFailure, tryHealSelector } from "../action/heal.js";
 
 /**
  * 判断元素是否为"瞬态覆盖层"(react-virtuoso 动画层 / popper 浮层 / 滚动视口
@@ -106,7 +106,7 @@ export async function healAwareGate(
     await waitActionableAutoForce(tabId, frameId, selector, options, force);
     return { selector, healed: false };
   } catch (err) {
-    if (descriptor && isStaleNotAttached(err)) {
+    if (descriptor && isHealableSelectorFailure(err)) {
       const healed = await tryHealSelector(tabId, frameId, descriptor); // 抛 AMBIGUOUS_DESCRIPTOR/STALE_REF
       await waitActionableAutoForce(tabId, frameId, healed, options, force);
       return { selector: healed, healed: true };
