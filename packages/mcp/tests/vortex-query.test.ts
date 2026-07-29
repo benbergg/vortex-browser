@@ -23,9 +23,11 @@ describe("vortex_query schema 注册", () => {
     expect(def!.description.toLowerCase()).toMatch(/css|find/);
   });
 
-  it("vortex_query description 长度 ≤ 180 char", () => {
+  // 与 I15 的 description 上限保持一致(180 → 230)。8 个 mode 各一段真能力说明
+  // 累加到 222,压缩必须删掉某个 mode 的说明 → 该 mode 对 LLM 不可发现。
+  it("vortex_query description 长度 ≤ 230 char", () => {
     const def = getToolDef("vortex_query");
-    expect(def!.description.length).toBeLessThanOrEqual(180);
+    expect(def!.description.length).toBeLessThanOrEqual(230);
   });
 
   it("vortex_query schema 有 mode 和 pattern 字段", () => {
