@@ -55,6 +55,19 @@ importers:
         specifier: ^2.1.0
         version: 2.1.9(@types/node@25.6.0)(jsdom@29.1.0)
 
+  packages/hub:
+    dependencies:
+      '@vortex-browser/shared':
+        specifier: workspace:*
+        version: link:../shared
+    devDependencies:
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.0
+        version: 2.1.9(@types/node@25.6.0)(jsdom@29.1.0)
+
   packages/mcp:
     dependencies:
       '@modelcontextprotocol/sdk':

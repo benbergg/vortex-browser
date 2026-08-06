@@ -26,6 +26,7 @@ const TARGETS = [
   "packages/extension/src/handlers",
   "packages/extension/src/lib",
   "packages/mcp/src/lib",
+  "packages/hub/src",
 ];
 
 const SOURCE_EXT = /\.(ts|tsx|js|mjs)$/;
