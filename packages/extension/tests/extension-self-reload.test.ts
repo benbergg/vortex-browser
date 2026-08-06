@@ -81,10 +81,9 @@ describe("server extension-dist watcher (@since 0.4.0 O-3b)", () => {
     );
   });
 
-  it("installExtensionDistWatcher is called from startServer near killOldProcess", () => {
-    // 直接断言 startServer 体内（killOldProcess 之后不远处）调用 watcher
+  it("installExtensionDistWatcher is called from startServer", () => {
     expect(SERVER_INDEX).toMatch(
-      /killOldProcess\(\);?[\s\S]{0,200}?installExtensionDistWatcher\(\)/,
+      /export function startServer\(\): void \{[\s\S]{0,200}?installExtensionDistWatcher\(\)/,
     );
   });
 

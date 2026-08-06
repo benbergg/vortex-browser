@@ -187,6 +187,14 @@ export function registerEventSources(dispatcher: EventDispatcher): void {
     );
   });
 
+  chrome.tabs.onCreated.addListener((tab) => {
+    dispatcher.emit(
+      VtxEventType.USER_OPENED_TAB,
+      { openerTabId: tab.openerTabId },
+      { tabId: tab.id },
+    );
+  });
+
   chrome.tabs.onRemoved.addListener((tabId, removeInfo) => {
     dispatcher.emit(
       VtxEventType.USER_CLOSED_TAB,
