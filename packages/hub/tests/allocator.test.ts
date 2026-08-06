@@ -46,7 +46,7 @@ function browserMap(...entries: BrowserEntry[]): ReadonlyMap<string, BrowserEntr
 }
 
 const sleepingBrowserMap = browserMap(
-  browser("sleeping", { nmConnected: false }),
+  browser("sleeping", { connectedAt: 0, nmConnected: false }),
   browser("available"),
 );
 
