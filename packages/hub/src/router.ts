@@ -124,6 +124,10 @@ export class HubRouter {
       tabIdBackfilledByHub = preparation.tabIdBackfilledByHub;
     } catch (error: unknown) {
       if (!this.sessions.has(sessionId)) return;
+      if (!this.browsers.get(browserId)?.ws) {
+        this.bufferOrFail(session, request);
+        return;
+      }
       this.failTabResolution(sessionId, browserId, request, error);
       return;
     }

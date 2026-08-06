@@ -55,6 +55,79 @@ describe("tab resolution failures", () => {
     });
   });
 
+  it("buffers a request when the browser disconnects during tab resolution", async () => {
+    const started = await startTestHub();
+    closeHub = started.close;
+    agent = await connectFakeAgent(started.port, {
+      browserId: "browser-a",
+      handle: async (request): Promise<VtxResponse> => {
+        if (request.action === "tab.list") {
+          await agent?.close();
+          return new Promise<VtxResponse>(() => {});
+        }
+        return { action: request.action, id: request.id, result: { ok: true } };
+      },
+    });
+    client = await connectClient(started.port, { sessionId: "session-a" });
+
+    const request: VtxRequest = {
+      action: "page.navigate",
+      params: { url: "https://target.test" },
+      id: "buffer-after-drop",
+    };
+    client.ws.send(JSON.stringify({ ...request, type: "request" }));
+
+    await client.waitFor((message): message is { type: "notice"; notice: string } =>
+      typeof message === "object" && message !== null &&
+      (message as { type?: unknown }).type === "notice" &&
+      (message as { notice?: unknown }).notice === "browser-lost",
+    );
+
+    expect(client.responses).toHaveLength(0);
+    expect(started.hub.sessions.get("session-a")?.buffer).toHaveLength(1);
+    expect(started.hub.sessions.get("session-a")?.buffer[0]).toMatchObject(request);
+  });
+
+  it("flushes a buffered request when the same browser returns within grace", async () => {
+    const started = await startTestHub();
+    closeHub = started.close;
+    agent = await connectFakeAgent(started.port, {
+      browserId: "browser-a",
+      handle: async (request): Promise<VtxResponse> => {
+        if (request.action === "tab.list") {
+          await agent?.close();
+          return new Promise<VtxResponse>(() => {});
+        }
+        return { action: request.action, id: request.id, result: { ok: true } };
+      },
+    });
+    client = await connectClient(started.port, { sessionId: "session-a" });
+
+    const buffered = client.request({
+      action: "page.navigate",
+      params: { url: "https://target.test" },
+      id: "flush-after-restore",
+    });
+    await client.waitFor((message): message is { type: "notice"; notice: string } =>
+      typeof message === "object" && message !== null &&
+      (message as { type?: unknown }).type === "notice" &&
+      (message as { notice?: unknown }).notice === "browser-lost",
+    );
+
+    const restored = await connectFakeAgent(started.port, { browserId: "browser-a" });
+    agent = restored;
+    await client.waitFor((message): message is { type: "notice"; notice: string } =>
+      typeof message === "object" && message !== null &&
+      (message as { type?: unknown }).type === "notice" &&
+      (message as { notice?: unknown }).notice === "browser-restored",
+    );
+
+    await expect(buffered).resolves.toMatchObject({
+      id: "flush-after-restore",
+      result: { echo: { url: "https://target.test" } },
+    });
+  });
+
   it("fails closed when tab.list never responds", async () => {
     const warnings: Array<{ message: string; details: Record<string, unknown> }> = [];
     const started = await startTestHub({
