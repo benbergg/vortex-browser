@@ -1,3 +1,7 @@
+/**
+ * Author: qingwa
+ * Description: Defines shared action names and tableless action membership.
+ */
 export const TabActions = {
   LIST: "tab.list",
   CREATE: "tab.create",
@@ -133,6 +137,13 @@ export const DiagnosticsActions = {
   /** 返回扩展版本 + 支持的 action 列表指纹，供 MCP ping 做版本协商。@since 0.4.0 */
   VERSION: "diagnostics.version",
 } as const;
+
+export const TABLESS_ACTIONS = new Set<string>([
+  TabActions.LIST,
+  TabActions.CREATE,
+  DiagnosticsActions.VERSION,
+  EventsActions.DRAIN,
+]);
 
 export const QueryActions = {
   /** 零 LLM 探测:text grep 页面可见文本 / css 查询元素。@since 0.9.x */

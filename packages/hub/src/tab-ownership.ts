@@ -3,6 +3,7 @@
  * Description: Resolves session tab ownership and request tab binding.
  */
 import {
+  TABLESS_ACTIONS,
   VtxErrorCode,
   vtxError,
   type VtxRequest,
@@ -10,7 +11,7 @@ import {
 } from "@vortex-browser/shared";
 import { type BrowserEntry, type SessionEntry } from "./registry.js";
 
-export const GLOBAL_ACTIONS = new Set(["tab.list", "tab.create", "diagnostics.version", "events.drain"]);
+export const GLOBAL_ACTIONS = TABLESS_ACTIONS;
 
 export type BrowserCall = (request: VtxRequest) => Promise<VtxResponse>;
 export type ClaimRetryPolicy = (error: unknown) => boolean;

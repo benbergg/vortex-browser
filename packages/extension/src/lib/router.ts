@@ -1,9 +1,7 @@
 import type { NmRequest, NmResponse } from "@vortex-browser/shared";
 import {
   DEFAULT_ERROR_META,
-  DiagnosticsActions,
-  EventsActions,
-  TabActions,
+  TABLESS_ACTIONS,
   VtxError,
   VtxErrorCode,
 } from "@vortex-browser/shared";
@@ -11,12 +9,7 @@ import {
 type Handler = (args: Record<string, unknown>, tabId?: number) => Promise<unknown>;
 type StrictTabRequest = NmRequest & { strictTab?: boolean };
 
-export const TABLESS_ACTIONS = new Set<string>([
-  TabActions.LIST,
-  TabActions.CREATE,
-  DiagnosticsActions.VERSION,
-  EventsActions.DRAIN,
-]);
+export { TABLESS_ACTIONS };
 
 export class ActionRouter {
   private handlers = new Map<string, Handler>();
