@@ -45,6 +45,11 @@ function browserMap(...entries: BrowserEntry[]): ReadonlyMap<string, BrowserEntr
   return new Map(entries.map((entry) => [entry.browserId, entry]));
 }
 
+const sleepingBrowserMap = browserMap(
+  browser("sleeping", { nmConnected: false }),
+  browser("available"),
+);
+
 describe("allocate", () => {
   it("returns null when no browser is available", () => {
     expect(allocate(session("s1"), new Map())).toBeNull();
@@ -130,5 +135,16 @@ describe("allocate", () => {
     const results = Array.from({ length: 5 }, () => allocate(session("s1"), browsers));
 
     expect(results).toEqual(["a", "a", "a", "a", "a"]);
+  });
+
+  it("SW 休眠不触发改嫁：sticky 仍命中 map 中的 NM 断开浏览器", () => {
+    const sticky = session("sticky");
+    sticky.browserId = "sleeping";
+
+    expect(allocate(sticky, sleepingBrowserMap)).toBe("sleeping");
+  });
+
+  it("SW 休眠不触发误分配：全新 session 走规则 4 时跳过 NM 断开浏览器", () => {
+    expect(allocate(session("new"), sleepingBrowserMap)).toBe("available");
   });
 });
