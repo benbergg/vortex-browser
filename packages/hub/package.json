@@ -6,7 +6,9 @@
     "dist"
   ],
   "exports": {
-    "./main": "./dist/src/main.js"
+    "./main": "./dist/src/main.js",
+    "./paths": "./dist/src/paths.js",
+    "./spawn": "./dist/src/spawn.js"
   },
   "bin": {
     "vortex-hub": "dist/src/main.js"
