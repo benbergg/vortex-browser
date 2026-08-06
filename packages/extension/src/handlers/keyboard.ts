@@ -1,6 +1,7 @@
 import { KeyboardActions, VtxErrorCode, vtxError } from "@vortex-browser/shared";
 import type { ActionRouter } from "../lib/router.js";
 import type { DebuggerManager } from "../lib/debugger-manager.js";
+import { getActiveTabId } from "../lib/tab-utils.js";
 
 // DOM key → windowsVirtualKeyCode 映射
 const KEY_CODES: Record<string, number> = {
@@ -115,13 +116,6 @@ export function editingCommandsForKey(
   if (!meta || ctrl || alt || shift) return undefined;
   if (code === "KeyA") return ["selectAll"];
   return undefined;
-}
-
-async function getActiveTabId(tabId?: number): Promise<number> {
-  if (tabId) return tabId;
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (!tab?.id) throw vtxError(VtxErrorCode.TAB_NOT_FOUND, "No active tab found");
-  return tab.id;
 }
 
 /**

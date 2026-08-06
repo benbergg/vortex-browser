@@ -5,6 +5,7 @@ import type { ActionRouter } from "../lib/router.js";
 import type { DebuggerManager } from "../lib/debugger-manager.js";
 import type { NativeMessagingClient } from "../lib/native-messaging.js";
 import type { EventDispatcher } from "../events/dispatcher.js";
+import { getActiveTabId } from "../lib/tab-utils.js";
 
 interface NetworkEntry {
   requestId: string;
@@ -42,13 +43,6 @@ const pendingRequests = new Map<string, NetworkEntry>();
 const subscribedTabs = new Set<number>();
 const MAX_RESPONSE_BODIES = 100;
 const responseBodies = new Map<string, { tabId: number; body: string; encoding: string }>();
-
-async function getActiveTabId(tabId?: number): Promise<number> {
-  if (tabId) return tabId;
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (!tab?.id) throw vtxError(VtxErrorCode.TAB_NOT_FOUND, "No active tab found");
-  return tab.id;
-}
 
 /**
  * 自动订阅：首次调用 get_logs / get_errors / filter / get_response_body 时
