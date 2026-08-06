@@ -10,6 +10,8 @@ export interface HubPending {
   browserId: string;
   request: VtxRequest;
   timeout: ReturnType<typeof setTimeout>;
+  retryCount?: number;
+  deadline?: number;
   fail(error: VtxErrorPayload): void;
 }
 
