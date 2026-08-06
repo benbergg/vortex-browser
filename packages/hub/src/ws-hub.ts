@@ -126,7 +126,11 @@ export class WsHub {
       ws.close(1008, "invalid hello");
       return undefined;
     }
-    if (hello.role === "browser-agent") return this.acceptBrowser(ws, hello);
+    if (isBrowserHello(hello)) return this.acceptBrowser(ws, hello);
+    if (!isSessionHello(hello)) {
+      ws.close(1008, "invalid hello");
+      return undefined;
+    }
     return this.acceptSession(ws, hello);
   }
 
@@ -245,4 +249,12 @@ export class WsHub {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isBrowserHello(hello: VtxHello): hello is VtxHello & { role: "browser-agent" } {
+  return hello.role === "browser-agent";
+}
+
+function isSessionHello(hello: VtxHello): hello is VtxHello & { role: "mcp" | "cli" } {
+  return hello.role === "mcp" || hello.role === "cli";
 }
