@@ -79,6 +79,7 @@ export class HubLink {
   private nativeHelloTimer: ReturnType<typeof setTimeout> | null = null;
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
   private nativeHello: NmHello | null = null;
+  private usingLegacyIdentity = false;
   private nativeConnected = false;
   private failures = 0;
   private running = false;
@@ -128,9 +129,24 @@ export class HubLink {
   handleNmMessage(message: NmMessageFromExtension): void {
     this.nativeConnected = true;
     if (message.type === "hello") {
+      const previousHello = this.nativeHello;
       this.nativeHello = message;
       if (this.nativeHelloTimer !== null) clearTimeout(this.nativeHelloTimer);
       this.nativeHelloTimer = null;
+      if (
+        this.usingLegacyIdentity &&
+        previousHello?.browserId !== message.browserId &&
+        this.socket !== null
+      ) {
+        const oldSocket = this.socket;
+        this.socket = null;
+        this.pending.clear();
+        this.usingLegacyIdentity = false;
+        oldSocket.close();
+        this.dial();
+        return;
+      }
+      this.usingLegacyIdentity = false;
       if (this.running && this.socket === null && this.reconnectTimer === null) this.dial();
       return;
     }
@@ -151,6 +167,7 @@ export class HubLink {
       extensionVersion: this.extensionVersion,
       ...(this.getBuildStamp() ? { buildStamp: this.getBuildStamp()! } : {}),
     };
+    this.usingLegacyIdentity = true;
     this.nativeHelloTimer = null;
     this.dial();
   }
