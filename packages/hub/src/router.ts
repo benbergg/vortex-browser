@@ -5,6 +5,7 @@
 import {
   VtxErrorCode,
   VtxEventType,
+  vtxError,
   type VtxErrorPayload,
   type VtxEvent,
   type VtxFrameFromAgent,
@@ -55,7 +56,11 @@ export async function ensureCurrentTab(
       params: {},
       id: `hub-tab-list-${session.sessionId}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     });
-    if (listResponse.error) throw new Error(listResponse.error.message);
+    if (listResponse.error) {
+      throw vtxError(VtxErrorCode.INTERNAL_ERROR, listResponse.error.message, {
+        extras: { action: "tab.list" },
+      });
+    }
     const tabs = tabRecords(listResponse.result);
     const usable = tabs.filter((tab) => tab.id !== undefined && !isInternalUrl(tab.url));
     const active = usable.find((tab) => tab.active && browser.tabOwner.get(tab.id!) === undefined);
@@ -70,9 +75,17 @@ export async function ensureCurrentTab(
       params: { active: false },
       id: `hub-tab-create-${session.sessionId}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     });
-    if (createResponse.error) throw new Error(createResponse.error.message);
+    if (createResponse.error) {
+      throw vtxError(VtxErrorCode.INTERNAL_ERROR, createResponse.error.message, {
+        extras: { action: "tab.create" },
+      });
+    }
     const createdId = tabIdFromResult(createResponse.result);
-    if (createdId === undefined) throw new Error("tab.create did not return a tab id");
+    if (createdId === undefined) {
+      throw vtxError(VtxErrorCode.INTERNAL_ERROR, "tab.create did not return a tab id", {
+        extras: { action: "tab.create" },
+      });
+    }
     claimWithoutAdoption(session, browser, createdId);
     return createdId;
   })();

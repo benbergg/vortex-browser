@@ -156,7 +156,7 @@ export class WsHub {
       currentTabId: null,
       claiming: null,
       pinned: false,
-      strictTab: false,
+      strictTab: process.env.VORTEX_STRICT_TAB === "1",
     };
     session.ws = ws;
     session.role = hello.role;

@@ -1,7 +1,22 @@
 import type { NmRequest, NmResponse } from "@vortex-browser/shared";
-import { VtxError, VtxErrorCode, DEFAULT_ERROR_META } from "@vortex-browser/shared";
+import {
+  DEFAULT_ERROR_META,
+  DiagnosticsActions,
+  EventsActions,
+  TabActions,
+  VtxError,
+  VtxErrorCode,
+} from "@vortex-browser/shared";
 
 type Handler = (args: Record<string, unknown>, tabId?: number) => Promise<unknown>;
+type StrictTabRequest = NmRequest & { strictTab?: boolean };
+
+export const TABLESS_ACTIONS = new Set<string>([
+  TabActions.LIST,
+  TabActions.CREATE,
+  DiagnosticsActions.VERSION,
+  EventsActions.DRAIN,
+]);
 
 export class ActionRouter {
   private handlers = new Map<string, Handler>();
@@ -23,6 +38,21 @@ export class ActionRouter {
         type: "tool_response",
         requestId: request.requestId,
         error: { code: VtxErrorCode.UNKNOWN_ACTION, message: `Unknown action: ${request.tool}` },
+      };
+    }
+
+    const strictTab = (request as StrictTabRequest).strictTab === true;
+    if (strictTab && request.tabId == null && !TABLESS_ACTIONS.has(request.tool)) {
+      return {
+        type: "tool_response",
+        requestId: request.requestId,
+        error: {
+          code: VtxErrorCode.TAB_NOT_FOUND,
+          message: `strictTab requires tabId for ${request.tool}`,
+          hint: "strictTab is enabled. Provide a tabId or let the hub backfill a current tab before retrying.",
+          recoverable: false,
+          context: { extras: { action: request.tool, strictTab: true } },
+        },
       };
     }
 
