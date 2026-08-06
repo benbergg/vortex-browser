@@ -11,6 +11,13 @@ const [loader, main] = process.argv.slice(2);
 const runtime = process.env.VORTEX_RUNTIME_DIR;
 let port;
 let children = [];
+let cleanupPromise;
+
+process.once("SIGTERM", () => {
+  void cleanupChildren().then(() => {
+    process.exitCode = 143;
+  });
+});
 
 try {
   port = await freePort();
@@ -20,19 +27,22 @@ try {
   ], { env: { ...process.env, VORTEX_RUNTIME_DIR: runtime }, stdio: "ignore" }));
   const exits = children.map(waitForExit);
   await waitForHealth(port);
-  const stablePid = children.find((child) => child.exitCode === null)?.pid;
-  if (!stablePid) throw new Error("No stable hub process");
+  await waitForExitCount(children, exits, 4);
+  const stable = children.filter(isRunning);
+  if (stable.length !== 1 || stable[0].pid === undefined) throw new Error("Expected one stable hub process");
+  const stablePid = stable[0].pid;
+  const stablePidSamples = await sampleStablePid(children, stablePid);
   await shutdown(port);
   await waitForGone(port);
   await Promise.all(exits);
   const result = {
     stablePid,
+    stablePidSamples,
     children: children.map((child) => ({ pid: child.pid, exitCode: child.exitCode, signal: child.signalCode })),
   };
   await writeFile(join(runtime, "race-result.json"), JSON.stringify(result));
 } catch (error) {
-  if (port !== undefined) await shutdown(port);
-  await Promise.all(children.map(waitForExit));
+  await cleanupChildren();
   await writeFile(join(runtime, "race-error"), String(error));
   process.exitCode = 1;
 }
@@ -64,6 +74,30 @@ async function shutdown(port) {
   await fetch(`http://127.0.0.1:${port}/hub/shutdown`, { method: "POST" }).catch(() => {});
 }
 
+async function waitForExitCount(children, exits, count) {
+  const pending = new Map(children.map((child, index) => [child, exits[index]]));
+  for (let exited = 0; exited < count; exited += 1) {
+    const child = await Promise.race([...pending].map(async ([candidate, exit]) => {
+      await exit;
+      return candidate;
+    }));
+    pending.delete(child);
+  }
+}
+
+async function sampleStablePid(children, stablePid) {
+  const samples = [];
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const live = children.filter(isRunning);
+    if (live.length !== 1 || live[0].pid !== stablePid) {
+      throw new Error(`Stable hub pid changed: expected ${stablePid}, got ${live.map((child) => child.pid).join(",")}`);
+    }
+    samples.push(live[0].pid);
+    if (attempt < 4) await delay(25);
+  }
+  return samples;
+}
+
 async function waitForGone(port) {
   for (let attempt = 0; attempt < 100; attempt += 1) {
     try {
@@ -80,4 +114,30 @@ async function waitForGone(port) {
 function waitForExit(child) {
   if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve();
   return new Promise((resolve) => child.once("exit", resolve));
+}
+
+function isRunning(child) {
+  return child.exitCode === null && child.signalCode === null;
+}
+
+async function cleanupChildren() {
+  if (cleanupPromise) return cleanupPromise;
+  cleanupPromise = (async () => {
+    if (port !== undefined) await shutdown(port);
+    await Promise.all(children.map(stopChild));
+  })();
+  return cleanupPromise;
+}
+
+async function stopChild(child) {
+  if (!isRunning(child)) return;
+  const exit = waitForExit(child);
+  child.kill("SIGTERM");
+  await Promise.race([exit, delay(1_000)]);
+  if (isRunning(child)) child.kill("SIGKILL");
+  await exit;
+}
+
+function delay(milliseconds) {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }

@@ -21,6 +21,7 @@ describe("hub listen race", () => {
   });
 
   afterEach(async () => {
+    if (runner && runner.exitCode === null && runner.signalCode === null) runner.kill("SIGTERM");
     if (runner) await waitForClose(runner);
     if (previousRuntime === undefined) delete process.env.VORTEX_RUNTIME_DIR;
     else process.env.VORTEX_RUNTIME_DIR = previousRuntime;
@@ -40,6 +41,7 @@ describe("hub listen race", () => {
     const exit = await waitForClose(runner);
     const result = JSON.parse(await readFile(join(runtime, "race-result.json"))) as {
       stablePid: number;
+      stablePidSamples: number[];
       children: Array<{ pid: number; exitCode: number | null; signal: string | null }>;
     };
 
@@ -47,6 +49,8 @@ describe("hub listen race", () => {
     expect(result.children).toHaveLength(5);
     expect(result.children.filter((child) => child.pid !== result.stablePid)).toHaveLength(4);
     expect(result.children.filter((child) => child.pid !== result.stablePid).every((child) => child.exitCode === 0)).toBe(true);
+    expect(result.stablePidSamples.length).toBeGreaterThanOrEqual(3);
+    expect(result.stablePidSamples.every((pid) => pid === result.stablePid)).toBe(true);
   }, 60_000);
 });
 
