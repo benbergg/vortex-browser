@@ -2,8 +2,8 @@ import { describe, it, expect } from "vitest";
 import { VtxEventType, EVENT_LEVEL, eventLevelOf } from "../src/events.js";
 
 describe("VtxEventType enum", () => {
-  it("defines 11 event types", () => {
-    expect(Object.keys(VtxEventType)).toHaveLength(11);
+  it("defines 12 event types", () => {
+    expect(Object.keys(VtxEventType)).toHaveLength(12);
   });
 
   it("each value follows namespace.event_name convention", () => {
@@ -30,6 +30,7 @@ describe("EVENT_LEVEL mapping", () => {
   });
 
   it("maps navigation / errors / form to 'notice'", () => {
+    expect(EVENT_LEVEL["user.opened_tab"]).toBe("notice");
     expect(EVENT_LEVEL["page.navigated"]).toBe("notice");
     expect(EVENT_LEVEL["console.error"]).toBe("notice");
     expect(EVENT_LEVEL["network.error_detected"]).toBe("notice");

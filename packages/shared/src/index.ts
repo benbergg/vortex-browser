@@ -1,4 +1,5 @@
 export * from "./protocol.js";
+export * from "./wire.js";
 export * from "./errors.js";
 export * from "./errors.hints.js";
 export * from "./actions.js";

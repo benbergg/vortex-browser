@@ -11,6 +11,7 @@ export const VtxEventType = {
   // urgent
   USER_SWITCHED_TAB: "user.switched_tab",
   USER_CLOSED_TAB: "user.closed_tab",
+  USER_OPENED_TAB: "user.opened_tab",
   DIALOG_OPENED: "dialog.opened",
   DOWNLOAD_COMPLETED: "download.completed",
   EXTENSION_DISCONNECTED: "extension.disconnected",
@@ -35,6 +36,7 @@ export type VtxEventType = (typeof VtxEventType)[keyof typeof VtxEventType];
 export const EVENT_LEVEL: Record<string, VtxEventLevel> = {
   "user.switched_tab": "urgent",
   "user.closed_tab": "urgent",
+  "user.opened_tab": "notice",
   "dialog.opened": "urgent",
   "download.completed": "urgent",
   "extension.disconnected": "urgent",
