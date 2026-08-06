@@ -20,11 +20,10 @@ import {
   SessionRegistry,
 } from "./registry.js";
 import { PendingTable, type HubPending } from "./pending.js";
-import { prepareRequest } from "./tab-ownership.js";
+import { prepareRequestWithState } from "./tab-ownership.js";
 
 export const REQUEST_TIMEOUT_MS = 30_000;
 export const REBIND_GRACE_MS = 15_000;
-const TAB_RESOLUTION_TIMEOUT_MS = 100;
 
 interface InternalPending {
   browserId: string;
@@ -34,11 +33,20 @@ interface InternalPending {
   timeout: ReturnType<typeof setTimeout>;
 }
 
+class InternalRequestTimeoutError extends Error {
+  constructor(action: string) {
+    super(`Internal request ${action} timed out`);
+    this.name = "InternalRequestTimeoutError";
+  }
+}
+
 export interface RouterOptions {
   sessions: SessionRegistry;
   browsers: BrowserRegistry;
   pending?: PendingTable;
   now?: () => number;
+  requestTimeoutMs?: number;
+  onWarn?: (message: string, details: object) => void;
   sendToSession: (sessionId: string, frame: object) => void;
   sendToBrowser: (browserId: string, frame: object) => void;
 }
@@ -53,6 +61,8 @@ export class HubRouter {
   private readonly sessions: SessionRegistry;
   private readonly browsers: BrowserRegistry;
   private readonly now: () => number;
+  private readonly requestTimeoutMs: number;
+  private readonly onWarn: NonNullable<RouterOptions["onWarn"]>;
   private readonly sendToSession: RouterOptions["sendToSession"];
   private readonly sendToBrowser: RouterOptions["sendToBrowser"];
   private readonly lostBrowsers = new Map<string, LostBrowser>();
@@ -65,6 +75,10 @@ export class HubRouter {
     this.browsers = options.browsers;
     this.pending = options.pending ?? new PendingTable();
     this.now = options.now ?? Date.now;
+    this.requestTimeoutMs = options.requestTimeoutMs ?? REQUEST_TIMEOUT_MS;
+    this.onWarn = options.onWarn ?? ((message, details) => {
+      console.warn(`[hub] ${message}`, details);
+    });
     this.sendToSession = options.sendToSession;
     this.sendToBrowser = options.sendToBrowser;
   }
@@ -77,7 +91,7 @@ export class HubRouter {
     sessionId: string,
     request: VtxRequest,
     retryCount = 0,
-    deadline = this.now() + REQUEST_TIMEOUT_MS,
+    deadline = this.now() + this.requestTimeoutMs,
   ): Promise<void> {
     const session = this.sessions.get(sessionId);
     if (!session) return;
@@ -90,20 +104,45 @@ export class HubRouter {
     }
 
     let prepared: VtxRequest = request;
+    let needsTabResolution = false;
+    let tabIdBackfilledByHub = false;
     try {
-      prepared = await prepareRequest(
+      const preparation = await prepareRequestWithState(
         session,
         browser,
         request,
-        (internalRequest) => this.callBrowser(browserId, sessionId, internalRequest),
+        (internalRequest) => this.callBrowser(
+          browserId,
+          sessionId,
+          internalRequest,
+          Math.max(0, deadline - this.now()),
+        ),
+        (error) => error instanceof InternalRequestTimeoutError && deadline > this.now(),
       );
-    } catch {
+      prepared = preparation.request;
+      needsTabResolution = preparation.needsTabResolution;
+      tabIdBackfilledByHub = preparation.tabIdBackfilledByHub;
+    } catch (error: unknown) {
       if (!this.sessions.has(sessionId)) return;
-      const currentBrowser = this.browsers.get(browserId);
-      if (!currentBrowser?.ws) {
-        this.bufferOrFail(session, request);
-        return;
-      }
+      this.failTabResolution(sessionId, browserId, request, error);
+      return;
+    }
+    if (needsTabResolution && deadline <= this.now()) {
+      if (!this.sessions.has(sessionId)) return;
+      this.failTabResolution(
+        sessionId,
+        browserId,
+        request,
+        new InternalRequestTimeoutError(request.action),
+      );
+      return;
+    }
+    if (deadline <= this.now()) {
+      if (!this.sessions.has(sessionId)) return;
+      this.sendResponse(sessionId, request, browserId, {
+        error: this.error(VtxErrorCode.TIMEOUT, `Request ${request.action} timed out`),
+      });
+      return;
     }
     if (prepared.strictTab === undefined && session.strictTab) {
       prepared = { ...prepared, strictTab: true };
@@ -123,6 +162,7 @@ export class HubRouter {
       timeout,
       retryCount,
       deadline,
+      tabIdBackfilledByHub,
       fail: (error) => this.sendResponse(sessionId, prepared, browserId, { error }),
     };
     this.pending.add(pending);
@@ -363,7 +403,7 @@ export class HubRouter {
 
   private shouldHealTab(pending: HubPending, response: VtxResponse): boolean {
     return response.error?.code === VtxErrorCode.TAB_NOT_FOUND &&
-      pending.request.tabIdBackfilled === true &&
+      pending.tabIdBackfilledByHub &&
       (pending.retryCount ?? 0) === 0;
   }
 
@@ -476,13 +516,14 @@ export class HubRouter {
     browserId: string,
     sessionId: string,
     request: VtxRequest,
-    timeoutMs = TAB_RESOLUTION_TIMEOUT_MS,
+    timeoutMs: number,
   ): Promise<VtxResponse> {
+    if (timeoutMs <= 0) return Promise.reject(new InternalRequestTimeoutError(request.action));
     const id = `hub-internal-${++this.internalRequestCounter}`;
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
         this.internalPending.delete(id);
-        reject(new Error(`Internal request ${request.action} timed out`));
+        reject(new InternalRequestTimeoutError(request.action));
       }, timeoutMs);
       this.internalPending.set(id, { browserId, sessionId, resolve, reject, timeout });
       this.sendToBrowser(browserId, {
@@ -526,6 +567,29 @@ export class HubRouter {
       ...payload,
       sessionId,
       browserId,
+    });
+  }
+
+  private failTabResolution(
+    sessionId: string,
+    browserId: string,
+    request: VtxRequest,
+    cause: unknown,
+  ): void {
+    const reason = cause instanceof Error ? cause.message : String(cause);
+    const details = { sessionId, action: request.action, reason, browserId };
+    try {
+      this.onWarn("tab resolution failed", details);
+    } catch {
+      // Warning sinks are diagnostic only and must not prevent fail-closed responses.
+    }
+    this.sendResponse(sessionId, request, browserId, {
+      error: vtxError(
+        VtxErrorCode.TAB_NOT_FOUND,
+        `Hub could not resolve current tab for ${request.action}: ${reason}`,
+        { extras: details },
+        { hint: "Hub tab resolution failed: unable to resolve the current tab; check the browser agent and retry." },
+      ).toJSON(),
     });
   }
 

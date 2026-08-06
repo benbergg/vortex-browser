@@ -12,6 +12,7 @@ export interface HubPending {
   timeout: ReturnType<typeof setTimeout>;
   retryCount?: number;
   deadline?: number;
+  tabIdBackfilledByHub: boolean;
   fail(error: VtxErrorPayload): void;
 }
 

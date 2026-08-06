@@ -13,6 +13,8 @@ import type { PendingTable } from "./pending.js";
 export interface HubOptions {
   port?: number;
   now?: () => number;
+  requestTimeoutMs?: number;
+  onWarn?: (message: string, details: object) => void;
 }
 
 export interface HubHandle {
@@ -33,6 +35,8 @@ export async function createHub(options: HubOptions = {}): Promise<HubHandle> {
     sessions,
     browsers,
     now,
+    requestTimeoutMs: options.requestTimeoutMs,
+    onWarn: options.onWarn,
     sendToSession: (sessionId, frame) => wsHub?.sendToSession(sessionId, frame),
     sendToBrowser: (browserId, frame) => wsHub?.sendToBrowser(browserId, frame),
   });

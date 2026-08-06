@@ -33,12 +33,12 @@ describe("pending partition", () => {
 
   it("fails only the pending requests belonging to a disconnected browser", async () => {
     const a = [
-      clientA.request({ action: "a.one", id: "a-1" }),
-      clientA.request({ action: "a.two", id: "a-2" }),
+      clientA.request({ action: "a.one", id: "a-1", tabId: 1 }),
+      clientA.request({ action: "a.two", id: "a-2", tabId: 1 }),
     ];
     const b = [
-      clientB.request({ action: "b.one", id: "b-1" }),
-      clientB.request({ action: "b.two", id: "b-2" }),
+      clientB.request({ action: "b.one", id: "b-1", tabId: 1 }),
+      clientB.request({ action: "b.two", id: "b-2", tabId: 1 }),
     ];
 
     await clientA.close();

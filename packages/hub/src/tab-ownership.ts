@@ -13,6 +13,13 @@ import { type BrowserEntry, type SessionEntry } from "./registry.js";
 export const GLOBAL_ACTIONS = new Set(["tab.list", "tab.create", "diagnostics.version", "events.drain"]);
 
 export type BrowserCall = (request: VtxRequest) => Promise<VtxResponse>;
+export type ClaimRetryPolicy = (error: unknown) => boolean;
+
+export interface PreparedRequest {
+  request: VtxRequest;
+  needsTabResolution: boolean;
+  tabIdBackfilledByHub: boolean;
+}
 
 export function isInternalUrl(url: unknown): boolean {
   if (typeof url !== "string") return false;
@@ -30,11 +37,25 @@ export async function ensureCurrentTab(
   session: SessionEntry,
   browser: BrowserEntry,
   call: BrowserCall,
+  shouldRetryClaim: ClaimRetryPolicy = () => false,
 ): Promise<number> {
-  if (session.currentTabId !== null && browser.tabOwner.get(session.currentTabId) === session.sessionId) {
-    return session.currentTabId;
+  if (hasOwnedCurrentTab(session, browser)) {
+    return session.currentTabId!;
   }
-  if (session.claiming) return session.claiming;
+  let existingClaim = session.claiming;
+  while (existingClaim) {
+    try {
+      return await existingClaim;
+    } catch (error: unknown) {
+      if (!shouldRetryClaim(error)) throw error;
+      const nextClaim = session.claiming;
+      if (nextClaim && nextClaim !== existingClaim) {
+        existingClaim = nextClaim;
+        continue;
+      }
+      break;
+    }
+  }
 
   const claiming = (async () => {
     const listResponse = await call({
@@ -88,11 +109,32 @@ export async function prepareRequest(
   browser: BrowserEntry,
   request: VtxRequest,
   call: BrowserCall,
+  shouldRetryClaim: ClaimRetryPolicy = () => false,
 ): Promise<VtxRequest> {
-  if (request.tabId != null) return request;
-  if (GLOBAL_ACTIONS.has(request.action)) return request;
-  const tabId = await ensureCurrentTab(session, browser, call);
-  return { ...request, tabId, tabIdBackfilled: true };
+  const prepared = await prepareRequestWithState(session, browser, request, call, shouldRetryClaim);
+  return prepared.request;
+}
+
+export async function prepareRequestWithState(
+  session: SessionEntry,
+  browser: BrowserEntry,
+  request: VtxRequest,
+  call: BrowserCall,
+  shouldRetryClaim: ClaimRetryPolicy = () => false,
+): Promise<PreparedRequest> {
+  if (request.tabId != null) {
+    return { request, needsTabResolution: false, tabIdBackfilledByHub: false };
+  }
+  if (GLOBAL_ACTIONS.has(request.action)) {
+    return { request, needsTabResolution: false, tabIdBackfilledByHub: false };
+  }
+  const needsTabResolution = !hasOwnedCurrentTab(session, browser);
+  const tabId = await ensureCurrentTab(session, browser, call, shouldRetryClaim);
+  return {
+    request: { ...request, tabId, tabIdBackfilled: true },
+    needsTabResolution,
+    tabIdBackfilledByHub: true,
+  };
 }
 
 interface TabRecord {
@@ -118,4 +160,9 @@ function claimWithoutAdoption(session: SessionEntry, browser: BrowserEntry, tabI
   browser.tabOwner.set(tabId, session.sessionId);
   session.ownedTabs.add(tabId);
   session.currentTabId = tabId;
+}
+
+function hasOwnedCurrentTab(session: SessionEntry, browser: BrowserEntry): boolean {
+  return session.currentTabId !== null &&
+    browser.tabOwner.get(session.currentTabId) === session.sessionId;
 }

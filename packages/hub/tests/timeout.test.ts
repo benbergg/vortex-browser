@@ -39,7 +39,7 @@ describe("hub request timeout", () => {
       };
       agent.ws.on("message", listener);
     });
-    const response = client.request({ action: "slow.action", id: "slow-1" });
+    const response = client.request({ action: "slow.action", id: "slow-1", tabId: 1 });
     await arrived;
     await vi.advanceTimersByTimeAsync(30_000);
     vi.useRealTimers();

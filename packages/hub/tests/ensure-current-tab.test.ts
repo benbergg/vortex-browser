@@ -10,7 +10,7 @@ import {
   type FakeAgent,
   type TestClient,
 } from "./helpers/harness.js";
-import type { VtxRequest } from "@vortex-browser/shared";
+import { VtxErrorCode, type VtxRequest, type VtxResponse } from "@vortex-browser/shared";
 
 describe("ensureCurrentTab", () => {
   let closeHub: (() => Promise<void>) | undefined;
@@ -130,4 +130,66 @@ describe("ensureCurrentTab", () => {
     expect(agent?.tabs).toHaveLength(3);
     expect(new Set(forwarded("page.navigate", "session-c").map((request) => request.tabId))).toEqual(new Set([3]));
   });
+
+  it("chains shared claim retries until a later request succeeds within its deadline", async () => {
+    const started = await startTestHub({ requestTimeoutMs: 300, onWarn: () => {} });
+    closeHub = started.close;
+    let tabListCalls = 0;
+    agent = await connectFakeAgent(started.port, {
+      browserId: "browser-a",
+      handle: (request): Promise<VtxResponse> => {
+        if (request.action === "tab.list") {
+          tabListCalls += 1;
+          if (tabListCalls <= 2) return new Promise(() => {});
+          return Promise.resolve({ action: request.action, id: request.id, result: agent?.tabs.slice() ?? [] });
+        }
+        return Promise.resolve({ action: request.action, id: request.id, result: { ok: true } });
+      },
+    });
+    const session = await client(started.port, "session-a");
+
+    const first = session.request({
+      action: "page.navigate",
+      params: { url: "https://first.test" },
+      id: "first-request",
+    });
+    await waitUntil(() => forwarded("tab.list", "session-a").length === 1);
+    await delay(100);
+    const second = session.request({
+      action: "page.navigate",
+      params: { url: "https://second.test" },
+      id: "second-request",
+    });
+    await delay(100);
+    const third = session.request({
+      action: "page.navigate",
+      params: { url: "https://third.test" },
+      id: "third-request",
+    });
+
+    const [firstResponse, secondResponse, thirdResponse] = await Promise.all([first, second, third]);
+
+    expect(firstResponse.error).toMatchObject({ code: VtxErrorCode.TAB_NOT_FOUND });
+    expect(secondResponse.error).toMatchObject({ code: VtxErrorCode.TAB_NOT_FOUND });
+    expect(thirdResponse.error).toBeUndefined();
+    expect(tabListCalls).toBe(3);
+    expect(forwarded("page.navigate", "session-a")).toHaveLength(1);
+    expect(forwarded("page.navigate", "session-a")[0]).toMatchObject({
+      params: { url: "https://third.test" },
+      tabId: 1,
+      tabIdBackfilled: true,
+    });
+  });
 });
+
+function delay(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+async function waitUntil(predicate: () => boolean, timeoutMs = 2_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!predicate()) {
+    if (Date.now() >= deadline) throw new Error("Timed out waiting for forwarded request");
+    await delay(1);
+  }
+}

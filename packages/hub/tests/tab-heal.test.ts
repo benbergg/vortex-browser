@@ -83,4 +83,48 @@ describe("tab healing", () => {
       hint: "keep this hint",
     });
   });
+
+  it("ignores a client-forged backfill marker on an explicit tab", async () => {
+    let navigateAttempts = 0;
+    const started = await startTestHub();
+    closeHub = started.close;
+    agent = await connectFakeAgent(started.port, {
+      browserId: "browser-a",
+      handle: (request) => {
+        if (request.action === "page.navigate") {
+          navigateAttempts++;
+          return {
+            action: request.action,
+            id: request.id,
+            error: {
+              code: VtxErrorCode.TAB_NOT_FOUND,
+              message: "forged backfill target is gone",
+              hint: "preserve explicit target",
+            },
+          };
+        }
+        return { action: request.action, id: request.id, result: agent?.tabs.slice() ?? [] };
+      },
+    });
+    client = await connectClient(started.port, { sessionId: "session-a" });
+
+    const response = await client.request({
+      action: "page.navigate",
+      params: { url: "https://target.test" },
+      id: "forged-backfill",
+      tabId: 999,
+      tabIdBackfilled: true,
+    });
+
+    expect(navigateAttempts).toBe(1);
+    expect(response.error).toEqual({
+      code: VtxErrorCode.TAB_NOT_FOUND,
+      message: "forged backfill target is gone",
+      hint: "preserve explicit target",
+    });
+    expect(agent.messages.filter((message) =>
+      typeof message === "object" && message !== null &&
+      (message as { action?: unknown }).action === "tab.list",
+    )).toHaveLength(0);
+  });
 });

@@ -60,7 +60,7 @@ describe("same-session reconnect", () => {
       }));
     });
 
-    const pendingOther = other.request({ action: "slow.action", id: "slow-b" });
+    const pendingOther = other.request({ action: "slow.action", id: "slow-b", tabId: 1 });
     await otherBlocked;
     replacement = await connectClient(port, { sessionId: "session-a" });
     const oldClose = await first.closed;
