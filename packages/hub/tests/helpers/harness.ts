@@ -18,6 +18,8 @@ export interface RawTab {
   url: string;
   title: string;
   active?: boolean;
+  windowId?: number;
+  lastFocused?: boolean;
 }
 
 export interface TestClient {

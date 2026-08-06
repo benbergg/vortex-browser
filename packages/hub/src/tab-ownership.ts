@@ -70,8 +70,11 @@ export async function ensureCurrentTab(
     }
     const tabs = tabRecords(listResponse.result);
     const usable = tabs.filter((tab) => tab.id !== undefined && !isInternalUrl(tab.url));
+    const lastFocusedActive = usable.find((tab) =>
+      tab.active && tab.lastFocused && browser.tabOwner.get(tab.id!) === undefined,
+    );
     const active = usable.find((tab) => tab.active && browser.tabOwner.get(tab.id!) === undefined);
-    const unowned = active ?? usable.find((tab) => browser.tabOwner.get(tab.id!) === undefined);
+    const unowned = lastFocusedActive ?? active ?? usable.find((tab) => browser.tabOwner.get(tab.id!) === undefined);
     if (unowned?.id !== undefined) {
       claimWithoutAdoption(session, browser, unowned.id);
       return unowned.id;
@@ -141,6 +144,7 @@ interface TabRecord {
   id?: number;
   url?: string;
   active?: boolean;
+  lastFocused?: boolean;
 }
 
 function tabRecords(result: unknown): TabRecord[] {
