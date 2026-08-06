@@ -5,7 +5,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { VtxRequest, VtxResponse } from "@vortex-browser/shared";
 import type { BrowserEntry, SessionEntry } from "../src/registry.js";
-import { GLOBAL_ACTIONS, prepareRequest } from "../src/router.js";
+import { GLOBAL_ACTIONS, prepareRequest } from "../src/tab-ownership.js";
 
 function session(): SessionEntry {
   return {

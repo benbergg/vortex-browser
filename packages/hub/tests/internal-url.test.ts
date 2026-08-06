@@ -3,7 +3,7 @@
  * Description: Verifies browser-internal pages are never claimed as work tabs.
  */
 import { afterEach, describe, expect, it } from "vitest";
-import { isInternalUrl } from "../src/router.js";
+import { isInternalUrl } from "../src/tab-ownership.js";
 import { connectClient, connectFakeAgent, startTestHub, type FakeAgent, type TestClient } from "./helpers/harness.js";
 
 describe("internal tab URLs", () => {
