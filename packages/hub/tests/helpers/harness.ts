@@ -41,6 +41,7 @@ export interface FakeAgent {
   readonly tabs: RawTab[];
   readonly messages: unknown[];
   readonly closed: Promise<{ code: number; reason: string }>;
+  waitFor<T>(predicate: (message: unknown) => message is T, timeoutMs?: number): Promise<T>;
   emit(event: Omit<VtxEvent, "type" | "timestamp" | "browserId">): void;
   close(): Promise<void>;
 }
@@ -71,15 +72,28 @@ export async function connectFakeAgent(
     browserId: string;
     tabs?: RawTab[];
     handle?: (req: VtxRequest) => VtxResponse | Promise<VtxResponse>;
+    hello?: Partial<Pick<VtxHello, "label" | "peerVersion" | "extensionVersion" | "buildStamp" | "extDist" | "repoRoot">>;
   },
 ): Promise<FakeAgent> {
   const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`);
   const messages: unknown[] = [];
+  const waiters: Array<{
+    predicate: (message: unknown) => boolean;
+    resolve: (message: unknown) => void;
+    reject: (error: Error) => void;
+    timer: ReturnType<typeof setTimeout>;
+  }> = [];
   const tabs = opts.tabs ?? [{ id: 1, url: "about:blank", title: "Blank", active: true }];
   const closed = closePromise(ws);
   ws.on("message", (data) => {
     const message = JSON.parse(data.toString()) as Record<string, unknown>;
     messages.push(message);
+    for (const waiter of [...waiters]) {
+      if (!waiter.predicate(message)) continue;
+      clearTimeout(waiter.timer);
+      waiters.splice(waiters.indexOf(waiter), 1);
+      waiter.resolve(message);
+    }
     if (message.type !== "request") return;
     const request = message as unknown as VtxRequest;
     void respondToRequest(ws, request, tabs, opts.handle);
@@ -90,6 +104,7 @@ export async function connectFakeAgent(
     wireVersion: 2,
     role: "browser-agent",
     browserId: opts.browserId,
+    ...opts.hello,
   });
 
   return {
@@ -98,6 +113,17 @@ export async function connectFakeAgent(
     tabs,
     messages,
     closed,
+    waitFor<T>(predicate: (message: unknown) => message is T, timeoutMs = 2_000) {
+      return new Promise((resolve, reject) => {
+        const existing = messages.find(predicate);
+        if (existing !== undefined) {
+          resolve(existing as T);
+          return;
+        }
+        const timer = setTimeout(() => reject(new Error("Timed out waiting for agent message")), timeoutMs);
+        waiters.push({ predicate, resolve: (message) => resolve(message as T), reject, timer });
+      });
+    },
     emit(event) {
       ws.send(JSON.stringify({ ...event, type: "event", timestamp: Date.now() }));
     },

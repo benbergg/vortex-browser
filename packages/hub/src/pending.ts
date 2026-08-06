@@ -20,6 +20,7 @@ export class PendingTable {
   private readonly byId = new Map<string, HubPending>();
   private readonly bySession = new Map<string, Set<string>>();
   private readonly byBrowser = new Map<string, Set<string>>();
+  private readonly emptyWaiters = new Set<() => void>();
 
   add(pending: HubPending): void {
     this.byId.set(pending.hubRequestId, pending);
@@ -42,11 +43,36 @@ export class PendingTable {
     this.failIndex(this.byBrowser, browserId, error);
   }
 
+  failAll(error: VtxErrorPayload): void {
+    for (const pending of [...this.byId.values()]) {
+      const current = this.take(pending.hubRequestId);
+      current?.fail(error);
+    }
+  }
+
+  waitForEmpty(timeoutMs: number): Promise<boolean> {
+    if (this.byId.size === 0) return Promise.resolve(true);
+    return new Promise((resolve) => {
+      let timer: ReturnType<typeof setTimeout>;
+      const onEmpty = () => {
+        clearTimeout(timer);
+        this.emptyWaiters.delete(onEmpty);
+        resolve(true);
+      };
+      timer = setTimeout(() => {
+        this.emptyWaiters.delete(onEmpty);
+        resolve(false);
+      }, Math.max(0, timeoutMs));
+      this.emptyWaiters.add(onEmpty);
+    });
+  }
+
   clear(): void {
     for (const pending of this.byId.values()) clearTimeout(pending.timeout);
     this.byId.clear();
     this.bySession.clear();
     this.byBrowser.clear();
+    this.notifyEmpty();
   }
 
   get size(): number {
@@ -83,6 +109,7 @@ export class PendingTable {
     this.byId.delete(pending.hubRequestId);
     this.removeFromIndex(this.bySession, pending.sessionId, pending.hubRequestId);
     this.removeFromIndex(this.byBrowser, pending.browserId, pending.hubRequestId);
+    this.notifyEmpty();
   }
 
   private removeFromIndex(index: Map<string, Set<string>>, key: string, id: string): void {
@@ -90,5 +117,10 @@ export class PendingTable {
     if (!ids) return;
     ids.delete(id);
     if (ids.size === 0) index.delete(key);
+  }
+
+  private notifyEmpty(): void {
+    if (this.byId.size !== 0) return;
+    for (const waiter of [...this.emptyWaiters]) waiter();
   }
 }

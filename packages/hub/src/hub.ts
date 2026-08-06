@@ -4,6 +4,7 @@
  */
 import { createServer, type Server } from "node:http";
 import express from "express";
+import { VtxErrorCode, type VtxErrorPayload } from "@vortex-browser/shared";
 import { BrowserRegistry, SessionRegistry } from "./registry.js";
 import { HubRouter } from "./router.js";
 import { createHttpRoutes } from "./http-routes.js";
@@ -15,6 +16,8 @@ export interface HubOptions {
   now?: () => number;
   requestTimeoutMs?: number;
   onWarn?: (message: string, details: object) => void;
+  hubVersion?: string;
+  shutdownTimeoutMs?: number;
 }
 
 export interface HubHandle {
@@ -27,6 +30,8 @@ export interface HubHandle {
 
 export async function createHub(options: HubOptions = {}): Promise<HubHandle> {
   const now = options.now ?? (() => Date.now());
+  const hubVersion = options.hubVersion ?? "1.0.0";
+  const shutdownTimeoutMs = Math.max(0, options.shutdownTimeoutMs ?? 5_000);
   const sessions = new SessionRegistry();
   const browsers = new BrowserRegistry();
   let wsHub: WsHub | undefined;
@@ -45,9 +50,18 @@ export async function createHub(options: HubOptions = {}): Promise<HubHandle> {
   const close = async (): Promise<void> => {
     if (closePromise) return closePromise;
     closePromise = (async () => {
-      router.pending.clear();
+      const shutdownNotice = { type: "notice", notice: "hub-shutdown" } as const;
+      for (const session of sessions.values()) wsHub?.sendToSession(session.sessionId, shutdownNotice);
+      for (const browser of browsers.values()) wsHub?.sendToBrowser(browser.browserId, shutdownNotice);
+      const routerShutdown = router.beginShutdown();
+
+      const httpClosePromise = closeHttpServer(httpServer);
+      void httpClosePromise.catch(() => {});
+      await routerShutdown;
+      const drained = await router.pending.waitForEmpty(shutdownTimeoutMs);
+      if (!drained) router.pending.failAll(shutdownTimeoutError());
       await wsHub?.close();
-      await closeHttpServer(httpServer);
+      await httpClosePromise;
     })();
     return closePromise;
   };
@@ -55,8 +69,11 @@ export async function createHub(options: HubOptions = {}): Promise<HubHandle> {
     now,
     nmConnected: () => [...browsers.values()].some((browser) => browser.nmConnected),
     shutdown: close,
+    hubVersion,
+    browsers,
+    sessions,
   }));
-  wsHub = new WsHub({ httpServer, sessions, browsers, router, now });
+  wsHub = new WsHub({ httpServer, sessions, browsers, router, now, hubVersion });
   const port = await listen(httpServer, options.port ?? 0);
   return { port, sessions, browsers, pending: router.pending, close };
 }
@@ -87,4 +104,12 @@ function closeHttpServer(server: Server): Promise<void> {
   return new Promise((resolve, reject) => {
     server.close((error) => error ? reject(error) : resolve());
   });
+}
+
+function shutdownTimeoutError(): VtxErrorPayload {
+  return {
+    code: VtxErrorCode.TIMEOUT,
+    message: "Hub shutdown timed out waiting for a pending request",
+    recoverable: false,
+  };
 }

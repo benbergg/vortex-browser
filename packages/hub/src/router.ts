@@ -67,8 +67,11 @@ export class HubRouter {
   private readonly sendToBrowser: RouterOptions["sendToBrowser"];
   private readonly lostBrowsers = new Map<string, LostBrowser>();
   private readonly internalPending = new Map<string, InternalPending>();
+  private readonly inFlight = new Set<Promise<unknown>>();
   private requestCounter = 0;
   private internalRequestCounter = 0;
+  private acceptingRequests = true;
+  private shutdownPromise: Promise<void> | undefined;
 
   constructor(options: RouterOptions) {
     this.sessions = options.sessions;
@@ -84,7 +87,31 @@ export class HubRouter {
   }
 
   handleRequest(sessionId: string, request: VtxRequest): void {
-    void this.forwardRequest(sessionId, request);
+    if (!this.acceptingRequests) {
+      const session = this.sessions.get(sessionId);
+      if (session) {
+        this.sendResponse(sessionId, request, session.browserId ?? "", {
+          error: this.error(VtxErrorCode.TIMEOUT, "Hub is shutting down"),
+        });
+      }
+      return;
+    }
+    void this.track(this.forwardRequest(sessionId, request));
+  }
+
+  beginShutdown(): Promise<void> {
+    if (this.shutdownPromise) return this.shutdownPromise;
+    this.acceptingRequests = false;
+    const error = this.error(VtxErrorCode.TIMEOUT, "Hub is shutting down");
+    for (const session of this.sessions.values()) {
+      const buffered = session.buffer.splice(0);
+      for (const request of buffered) {
+        this.sendResponse(session.sessionId, request, session.browserId ?? "", { error });
+      }
+    }
+    this.failAllInternal(new InternalRequestTimeoutError("hub shutdown"));
+    this.shutdownPromise = this.waitForInFlight();
+    return this.shutdownPromise;
   }
 
   private async forwardRequest(
@@ -95,6 +122,12 @@ export class HubRouter {
   ): Promise<void> {
     const session = this.sessions.get(sessionId);
     if (!session) return;
+    if (!this.acceptingRequests) {
+      this.sendResponse(sessionId, request, session.browserId ?? "", {
+        error: this.error(VtxErrorCode.TIMEOUT, "Hub is shutting down"),
+      });
+      return;
+    }
     const browserId = this.ensureBrowser(session, request);
     if (!browserId) return;
     const browser = this.browsers.get(browserId);
@@ -123,12 +156,28 @@ export class HubRouter {
       needsTabResolution = preparation.needsTabResolution;
       tabIdBackfilledByHub = preparation.tabIdBackfilledByHub;
     } catch (error: unknown) {
+      if (!this.acceptingRequests) {
+        if (this.sessions.has(sessionId)) {
+          this.sendResponse(sessionId, request, browserId, {
+            error: this.error(VtxErrorCode.TIMEOUT, "Hub is shutting down"),
+          });
+        }
+        return;
+      }
       if (!this.sessions.has(sessionId)) return;
       if (!this.browsers.get(browserId)?.ws) {
         this.bufferOrFail(session, request);
         return;
       }
       this.failTabResolution(sessionId, browserId, request, error);
+      return;
+    }
+    if (!this.acceptingRequests) {
+      if (this.sessions.has(sessionId)) {
+        this.sendResponse(sessionId, request, browserId, {
+          error: this.error(VtxErrorCode.TIMEOUT, "Hub is shutting down"),
+        });
+      }
       return;
     }
     if (needsTabResolution && deadline <= this.now()) {
@@ -192,7 +241,11 @@ export class HubRouter {
       const pending = this.pending.take(frame.id);
       if (!pending) return;
       if (this.shouldHealTab(pending, frame)) {
-        void this.healTab(pending);
+        if (!this.acceptingRequests) {
+          pending.fail(this.error(VtxErrorCode.TIMEOUT, "Hub is shutting down"));
+          return;
+        }
+        void this.track(this.healTab(pending));
         return;
       }
       this.updateTabState(pending, frame);
@@ -522,6 +575,7 @@ export class HubRouter {
     request: VtxRequest,
     timeoutMs: number,
   ): Promise<VtxResponse> {
+    if (!this.acceptingRequests) return Promise.reject(new InternalRequestTimeoutError(request.action));
     if (timeoutMs <= 0) return Promise.reject(new InternalRequestTimeoutError(request.action));
     const id = `hub-internal-${++this.internalRequestCounter}`;
     return new Promise((resolve, reject) => {
@@ -556,6 +610,27 @@ export class HubRouter {
       clearTimeout(pending.timeout);
       pending.reject(error);
     }
+  }
+
+  private failAllInternal(error: Error): void {
+    for (const [id, pending] of this.internalPending) {
+      this.internalPending.delete(id);
+      clearTimeout(pending.timeout);
+      pending.reject(error);
+    }
+  }
+
+  private track<T>(task: Promise<T>): Promise<T> {
+    this.inFlight.add(task);
+    void task.then(
+      () => this.inFlight.delete(task),
+      () => this.inFlight.delete(task),
+    );
+    return task;
+  }
+
+  private async waitForInFlight(): Promise<void> {
+    while (this.inFlight.size > 0) await Promise.allSettled([...this.inFlight]);
   }
 
   private sendResponse(
