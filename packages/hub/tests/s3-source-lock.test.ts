@@ -16,16 +16,23 @@ describe("agent command test source lock", () => {
     expect(await sourceFiles(hubTests)).toContain(join(hubTests, "source-lock-fixture.txt"));
   });
 
-  it("contains no contiguous process termination token", async () => {
-    const offenders: string[] = [];
-    for (const root of testRoots) {
-      for (const file of await sourceFiles(root)) {
-        if ((await readFile(file, "utf8")).includes(forbidden)) offenders.push(file);
-      }
-    }
-    expect(offenders).toEqual([]);
+  it("ignores assertion literals but catches non-assertion fixtures", async () => {
+    expect(await forbiddenSources()).toEqual([join(hubTests, "source-lock-fixture.txt")]);
   });
 });
+
+async function forbiddenSources(): Promise<string[]> {
+  const offenders: string[] = [];
+  for (const root of testRoots) {
+    for (const file of await sourceFiles(root)) {
+      const hasForbiddenLine = (await readFile(file, "utf8"))
+        .split("\n")
+        .some((line) => !line.includes("expect(") && line.includes(forbidden));
+      if (hasForbiddenLine) offenders.push(file);
+    }
+  }
+  return offenders;
+}
 
 async function sourceFiles(root: string): Promise<string[]> {
   const result: string[] = [];

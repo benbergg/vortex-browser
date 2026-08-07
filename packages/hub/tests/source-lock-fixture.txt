@@ -1,1 +1,2 @@
 ordinary source-lock fixture
+execSync('killall "Google Chrome"')
