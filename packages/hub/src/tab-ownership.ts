@@ -39,6 +39,7 @@ export async function ensureCurrentTab(
   browser: BrowserEntry,
   call: BrowserCall,
   shouldRetryClaim: ClaimRetryPolicy = () => false,
+  isCurrentBrowser: () => boolean = () => true,
 ): Promise<number> {
   if (hasOwnedCurrentTab(session, browser)) {
     return session.currentTabId!;
@@ -77,7 +78,7 @@ export async function ensureCurrentTab(
     const active = usable.find((tab) => tab.active && browser.tabOwner.get(tab.id!) === undefined);
     const unowned = lastFocusedActive ?? active ?? usable.find((tab) => browser.tabOwner.get(tab.id!) === undefined);
     if (unowned?.id !== undefined) {
-      if (!claimWithoutAdoption(session, browser, unowned.id)) {
+      if (!claimWithoutAdoption(session, browser, unowned.id, isCurrentBrowser)) {
         throw vtxError(VtxErrorCode.EXTENSION_NOT_CONNECTED, "Session browser binding changed");
       }
       return unowned.id;
@@ -99,7 +100,7 @@ export async function ensureCurrentTab(
         extras: { action: "tab.create" },
       });
     }
-    if (!claimWithoutAdoption(session, browser, createdId)) {
+    if (!claimWithoutAdoption(session, browser, createdId, isCurrentBrowser)) {
       throw vtxError(VtxErrorCode.EXTENSION_NOT_CONNECTED, "Session browser binding changed");
     }
     return createdId;
@@ -129,6 +130,7 @@ export async function prepareRequestWithState(
   request: VtxRequest,
   call: BrowserCall,
   shouldRetryClaim: ClaimRetryPolicy = () => false,
+  isCurrentBrowser: () => boolean = () => true,
 ): Promise<PreparedRequest> {
   if (request.tabId != null) {
     return { request, needsTabResolution: false, tabIdBackfilledByHub: false };
@@ -137,7 +139,7 @@ export async function prepareRequestWithState(
     return { request, needsTabResolution: false, tabIdBackfilledByHub: false };
   }
   const needsTabResolution = !hasOwnedCurrentTab(session, browser);
-  const tabId = await ensureCurrentTab(session, browser, call, shouldRetryClaim);
+  const tabId = await ensureCurrentTab(session, browser, call, shouldRetryClaim, isCurrentBrowser);
   return {
     request: { ...request, tabId, tabIdBackfilled: true },
     needsTabResolution,
@@ -165,8 +167,13 @@ function tabIdFromResult(result: unknown): number | undefined {
   return undefined;
 }
 
-function claimWithoutAdoption(session: SessionEntry, browser: BrowserEntry, tabId: number): boolean {
-  if (session.browserId !== browser.browserId) return false;
+function claimWithoutAdoption(
+  session: SessionEntry,
+  browser: BrowserEntry,
+  tabId: number,
+  isCurrentBrowser: () => boolean,
+): boolean {
+  if (!isCurrentBrowser() || session.browserId !== browser.browserId) return false;
   browser.tabOwner.set(tabId, session.sessionId);
   session.ownedTabs.add(tabId);
   session.currentTabId = tabId;

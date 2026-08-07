@@ -190,7 +190,15 @@ export class WsHub {
       this.router.failAgentCommandsOnReconnect(browserId, existing.ws);
       existing.ws.close(1000, "replaced by browser reconnect");
     }
-    const entry: BrowserEntry = existing ?? {
+    const replaced = existing?.ws !== undefined && existing.ws !== ws;
+    const entry: BrowserEntry = existing && replaced
+      ? {
+        ...existing,
+        sessions: new Set(existing.sessions),
+        tabOwner: new Map(existing.tabOwner),
+        opener: new Map(existing.opener),
+      }
+      : existing ?? {
       browserId,
       label: hello.label ?? browserId,
       ws,
@@ -246,7 +254,7 @@ export class WsHub {
     }
     if (peer.role === "browser-agent") {
       if (frame.type === "response" || frame.type === "event" || frame.type === "agent-result") {
-        this.router.handleAgentFrame(peer.id, frame);
+        this.router.handleAgentFrame(peer.id, frame, ws);
       }
       return;
     }

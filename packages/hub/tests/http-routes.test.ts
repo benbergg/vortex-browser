@@ -5,12 +5,14 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   VtxErrorCode,
+  VtxEventType,
   type VtxAgentCommand,
   type VtxAgentResult,
   type VtxRequest,
   type VtxResponse,
 } from "@vortex-browser/shared";
 import {
+  connectClient,
   connectFakeAgent,
   startTestHub,
   type FakeAgent,
@@ -65,6 +67,58 @@ describe("hub HTTP command routes", () => {
     }
   });
 
+  it("keeps an active WebSocket session visible while an HTTP sink is attached", async () => {
+    started = await startTestHub({ requestTimeoutMs: 1_000 });
+    let resolveAgent: ((response: VtxResponse) => void) | undefined;
+    const agent = await addAgent(started, {
+      browserId: "browser-shared-ws",
+      handle: (request) => new Promise<VtxResponse>((resolve) => {
+        resolveAgent = () => resolve({
+          action: request.action,
+          id: request.id,
+          result: { accepted: true },
+        });
+      }),
+    });
+    const client = await connectClient(started.port, { sessionId: "shared-ws" });
+
+    try {
+      const httpResponsePromise = fetch(`http://127.0.0.1:${started.port}/api/tab/list`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-vortex-session": "shared-ws",
+        },
+        body: JSON.stringify({}),
+      });
+      await agent.waitFor((message): message is { type: "request"; action: string } =>
+        typeof message === "object" && message !== null &&
+        (message as { type?: unknown }).type === "request" &&
+        (message as { action?: unknown }).action === "tab.list",
+      );
+
+      const wsEventPromise = client.waitFor((message): message is { type: "event"; event: string } =>
+        typeof message === "object" && message !== null &&
+        (message as { type?: unknown }).type === "event" &&
+        typeof (message as { event?: unknown }).event === "string",
+      );
+      const wsResponsePromise = client.waitFor((message): message is VtxResponse =>
+        typeof message === "object" && message !== null &&
+        (message as { type?: unknown }).type === "response" &&
+        (message as { action?: unknown }).action === "tab.list",
+      );
+      agent.emit({ event: "shared-session-event", data: {} });
+      await expect(wsEventPromise).resolves.toMatchObject({ event: "shared-session-event" });
+
+      resolveAgent?.({ action: "tab.list", id: "late", result: { accepted: true } });
+      const httpResponse = await httpResponsePromise;
+      expect(httpResponse.status).toBe(200);
+      await expect(wsResponsePromise).resolves.toMatchObject({ action: "tab.list", result: { accepted: true } });
+    } finally {
+      await client.close();
+    }
+  });
+
   it("sweeps idle virtual sessions before creating the current session", async () => {
     let now = 1_000;
     started = await startTestHub({ now: () => now, virtualSessionIdleMs: 100, requestTimeoutMs: 1_000 });
@@ -80,6 +134,224 @@ describe("hub HTTP command routes", () => {
     expect(response.status).toBe(200);
     expect(started.hub.sessions.get("stale")).toBeUndefined();
     expect(started.hub.sessions.get("fresh")).toBeDefined();
+  });
+
+  it("cleans live browser ownership and opener state before collecting an idle session", async () => {
+    let now = 1_000;
+    started = await startTestHub({ now: () => now, virtualSessionIdleMs: 100, requestTimeoutMs: 1_000 });
+    const agent = await addAgent(started, "browser-gc-live");
+    const headers = {
+      "content-type": "application/json",
+      "x-vortex-browser": "browser-gc-live",
+      "x-vortex-session": "gc-live",
+    };
+
+    const createResponse = await fetch(`http://127.0.0.1:${started.port}/api/tab/create`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({}),
+    });
+    expect(createResponse.status).toBe(200);
+    agent.emit({
+      event: VtxEventType.USER_OPENED_TAB,
+      data: { openerTabId: 2 },
+      tabId: 3,
+    });
+    const session = started.hub.sessions.get("gc-live");
+    const browser = started.hub.browsers.get("browser-gc-live");
+    if (!session || !browser) throw new Error("Test harness did not register GC session and browser");
+    session.lastSeenAt = 0;
+    now = 1_000;
+
+    const triggerResponse = await fetch(`http://127.0.0.1:${started.port}/api/tab/list`, {
+      method: "POST",
+      headers: { "x-vortex-session": "gc-trigger" },
+      body: JSON.stringify({}),
+    });
+
+    expect(triggerResponse.status).toBe(200);
+    expect(started.hub.sessions.get("gc-live")).toBeUndefined();
+    expect(browser.sessions.has("gc-live")).toBe(false);
+    expect(browser.tabOwner.has(2)).toBe(false);
+    expect(browser.tabOwner.has(3)).toBe(false);
+    expect(browser.opener.has(3)).toBe(false);
+    expect(session.buffer).toEqual([]);
+    expect(session.ownedTabs).toEqual(new Set());
+    expect(session.currentTabId).toBeNull();
+    expect(session.claiming).toBeNull();
+  });
+
+  it("cleans lost opener relations that point to a collected session tab", async () => {
+    let now = 1_000;
+    started = await startTestHub({ now: () => now, virtualSessionIdleMs: 100, requestTimeoutMs: 1_000 });
+    const agent = await addAgent(started, "browser-gc-lost");
+    const request = (sessionId: string, body: Record<string, unknown> = {}) => fetch(
+      `http://127.0.0.1:${started!.port}/api/tab/list`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-vortex-browser": "browser-gc-lost",
+          "x-vortex-session": sessionId,
+        },
+        body: JSON.stringify(body),
+      },
+    );
+
+    const ownerCreate = await fetch(`http://127.0.0.1:${started.port}/api/tab/create`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-vortex-browser": "browser-gc-lost",
+        "x-vortex-session": "gc-lost-owner",
+      },
+      body: JSON.stringify({}),
+    });
+    expect(ownerCreate.status).toBe(200);
+    agent.emit({
+      event: VtxEventType.USER_OPENED_TAB,
+      data: { openerTabId: 2 },
+      tabId: 3,
+    });
+    const childAdopt = await fetch(`http://127.0.0.1:${started.port}/api/page/info`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-vortex-browser": "browser-gc-lost",
+        "x-vortex-session": "gc-lost-child",
+      },
+      body: JSON.stringify({ tabId: 3 }),
+    });
+    expect(childAdopt.status).toBe(200);
+
+    const owner = started.hub.sessions.get("gc-lost-owner");
+    if (!owner) throw new Error("Test harness did not register lost GC owner session");
+    owner.lastSeenAt = 0;
+    await agent.close();
+
+    const triggerResponse = await request("gc-lost-trigger");
+    expect(triggerResponse.status).toBe(503);
+    expect(started.hub.sessions.get("gc-lost-owner")).toBeUndefined();
+
+    const restored = await addAgent(started, "browser-gc-lost");
+    expect(restored).toBeDefined();
+    expect(started.hub.browsers.get("browser-gc-lost")?.opener.has(3)).toBe(false);
+    expect(started.hub.browsers.get("browser-gc-lost")?.tabOwner.has(2)).toBe(false);
+  });
+
+  it("does not collect an idle session while internal tab resolution is in flight", async () => {
+    let now = 1_000;
+    let resolveInternal: (() => void) | undefined;
+    started = await startTestHub({
+      now: () => now,
+      virtualSessionIdleMs: 100,
+      requestTimeoutMs: 1_000,
+      virtualSessionRequestTimeoutMs: 1_000,
+    });
+    const agentA = await addAgent(started, {
+      browserId: "browser-gc-internal",
+      handle: (request) => {
+        if (request.action === "tab.list") {
+          return new Promise<VtxResponse>((resolve) => {
+            resolveInternal = () => resolve({
+              action: request.action,
+              id: request.id,
+              result: [{ id: 1, url: "https://gc.test", active: true }],
+            });
+          });
+        }
+        return { action: request.action, id: request.id, result: { accepted: true } };
+      },
+    });
+    await addAgent(started, "browser-gc-trigger");
+
+    const oldResponsePromise = fetch(`http://127.0.0.1:${started.port}/api/page/info`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-vortex-browser": "browser-gc-internal",
+        "x-vortex-session": "gc-internal",
+      },
+      body: JSON.stringify({}),
+    });
+    await agentA.waitFor((message): message is { type: "request"; action: string } =>
+      typeof message === "object" && message !== null &&
+      (message as { type?: unknown }).type === "request" &&
+      (message as { action?: unknown }).action === "tab.list",
+    );
+    const session = started.hub.sessions.get("gc-internal");
+    if (!session) throw new Error("Test harness did not register GC internal session");
+    session.lastSeenAt = 0;
+    now = 1_000;
+
+    const triggerResponse = await fetch(`http://127.0.0.1:${started.port}/api/tab/list`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-vortex-browser": "browser-gc-trigger",
+        "x-vortex-session": "gc-trigger-internal",
+      },
+      body: JSON.stringify({}),
+    });
+
+    expect(triggerResponse.status).toBe(200);
+    expect(started.hub.sessions.get("gc-internal")).toBe(session);
+    resolveInternal?.();
+    expect((await oldResponsePromise).status).toBe(200);
+  });
+
+  it("flushes a browser-lost buffer when an existing session rebinds online", async () => {
+    started = await startTestHub({ requestTimeoutMs: 1_000 });
+    let agentA: FakeAgent | undefined;
+    agentA = await addAgent(started, {
+      browserId: "browser-buffer-a",
+      handle: async (request) => {
+        if (request.action === "tab.list") {
+          await agentA?.close();
+          return new Promise<VtxResponse>(() => {});
+        }
+        return { action: request.action, id: request.id, result: { echo: request.params ?? null } };
+      },
+    });
+    await addAgent(started, "browser-buffer-b");
+    const client = await connectClient(started.port, {
+      sessionId: "buffer-rebind",
+      preferBrowserId: "browser-buffer-a",
+    });
+
+    try {
+      const bufferedResponsePromise = client.request({
+        action: "page.info",
+        params: { from: "buffer" },
+        id: "buffer-rebind-request",
+      });
+      await client.waitFor((message): message is { type: "notice"; notice: string } =>
+        typeof message === "object" && message !== null &&
+        (message as { type?: unknown }).type === "notice" &&
+        (message as { notice?: unknown }).notice === "browser-lost",
+      );
+
+      const session = started.hub.sessions.get("buffer-rebind");
+      expect(session?.buffer).toHaveLength(1);
+      const rebindResponse = await fetch(`http://127.0.0.1:${started.port}/api/tab/list`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-vortex-browser": "browser-buffer-b",
+          "x-vortex-session": "buffer-rebind",
+        },
+        body: JSON.stringify({}),
+      });
+
+      expect(rebindResponse.status).toBe(200);
+      expect(session?.buffer).toEqual([]);
+      await expect(bufferedResponsePromise).resolves.toMatchObject({
+        id: "buffer-rebind-request",
+        result: { echo: { from: "buffer" } },
+      });
+    } finally {
+      await client.close();
+    }
   });
 
   it("keeps different session headers independent", async () => {
@@ -463,7 +735,7 @@ describe("hub HTTP command routes", () => {
       body: JSON.stringify({}),
     });
     expect(rebindResponse.status).toBe(200);
-    await oldResponsePromise;
+    expect((await oldResponsePromise).status).toBe(503);
     resolveInternal?.();
     await new Promise((resolve) => setTimeout(resolve, 20));
 
@@ -515,6 +787,140 @@ describe("hub HTTP command routes", () => {
       expect(session.ownedTabs).toEqual(new Set());
       expect(session.currentTabId).toBeNull();
     }
+  });
+
+  it("does not claim through a replaced BrowserEntry", async () => {
+    started = await startTestHub({ requestTimeoutMs: 1_000 });
+    await addAgent(started, "browser-entry-identity");
+    const browser = started.hub.browsers.get("browser-entry-identity");
+    if (!browser) throw new Error("Test harness did not register browser-entry-identity");
+    const session = started.hub.getOrCreateVirtualSession("entry-identity", {
+      preferBrowserId: "browser-entry-identity",
+      pinned: true,
+    });
+
+    const error = await ensureCurrentTab(
+      session,
+      browser,
+      async (request) => ({
+        action: request.action,
+        id: request.id,
+        result: [{ id: 7, url: "https://identity.test", active: true }],
+      }),
+      () => false,
+      () => false,
+    ).then(() => undefined, (caught: unknown) => caught);
+
+    expect(error).toMatchObject({ code: VtxErrorCode.EXTENSION_NOT_CONNECTED });
+    expect(browser.tabOwner.has(7)).toBe(false);
+    expect(session.ownedTabs).toEqual(new Set());
+  });
+
+  it("returns a binding error when the browser changes after tab preparation", async () => {
+    started = await startTestHub({ requestTimeoutMs: 1_000, virtualSessionRequestTimeoutMs: 200 });
+    await addAgent(started, "browser-await-a");
+    await addAgent(started, "browser-await-b");
+    const session = started.hub.getOrCreateVirtualSession("await-binding", {
+      preferBrowserId: "browser-await-a",
+      pinned: true,
+    });
+    let resolveClaim: ((tabId: number) => void) | undefined;
+    session.claiming = new Promise<number>((resolve) => {
+      resolveClaim = resolve;
+    }).then((tabId) => {
+      started!.hub.getOrCreateVirtualSession("await-binding", {
+        preferBrowserId: "browser-await-b",
+        pinned: true,
+      });
+      return tabId;
+    });
+
+    const responsePromise = fetch(`http://127.0.0.1:${started.port}/api/page/info`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-vortex-browser": "browser-await-a",
+        "x-vortex-session": "await-binding",
+      },
+      body: JSON.stringify({}),
+    });
+    await waitUntil(() => session.sink !== undefined);
+    resolveClaim?.(1);
+    const resolvedResponse = await responsePromise;
+
+    expect(resolvedResponse.status).toBe(503);
+    expect((await resolvedResponse.json()).error.code).toBe(VtxErrorCode.EXTENSION_NOT_CONNECTED);
+  });
+
+  it("returns 503 immediately when the first HTTP request has no browser", async () => {
+    started = await startTestHub({ requestTimeoutMs: 1_000, virtualSessionRequestTimeoutMs: 200 });
+
+    const response = await fetch(`http://127.0.0.1:${started.port}/api/tab/list`, {
+      method: "POST",
+      headers: { "x-vortex-session": "no-browser-first-request" },
+      body: JSON.stringify({}),
+    });
+
+    expect(response.status).toBe(503);
+    expect((await response.json()).error.code).toBe(VtxErrorCode.EXTENSION_NOT_CONNECTED);
+  });
+
+  it("fails a pending request when an agent with the same browserId replaces it", async () => {
+    started = await startTestHub({ requestTimeoutMs: 1_000, virtualSessionRequestTimeoutMs: 200 });
+    const oldAgent = await addAgent(started, {
+      browserId: "browser-same-id",
+      handle: () => new Promise<VtxResponse>(() => {}),
+    });
+    const responsePromise = fetch(`http://127.0.0.1:${started.port}/api/test/slow`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-vortex-browser": "browser-same-id",
+        "x-vortex-session": "same-id-pending",
+      },
+      body: JSON.stringify({ tabId: 1 }),
+    });
+    await oldAgent.waitFor((message): message is { type: "request"; action: string } =>
+      typeof message === "object" && message !== null &&
+      (message as { type?: unknown }).type === "request" &&
+      (message as { action?: unknown }).action === "test.slow",
+    );
+
+    await addAgent(started, "browser-same-id");
+
+    const response = await responsePromise;
+    expect(response.status).toBe(503);
+    expect((await response.json()).error.code).toBe(VtxErrorCode.EXTENSION_NOT_CONNECTED);
+  });
+
+  it("fails internal tab resolution when an agent with the same browserId replaces it", async () => {
+    started = await startTestHub({ requestTimeoutMs: 1_000, virtualSessionRequestTimeoutMs: 200 });
+    const oldAgent = await addAgent(started, {
+      browserId: "browser-same-id-internal",
+      handle: (request) => request.action === "tab.list"
+        ? new Promise<VtxResponse>(() => {})
+        : { action: request.action, id: request.id, result: { accepted: true } },
+    });
+    const responsePromise = fetch(`http://127.0.0.1:${started.port}/api/page/info`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-vortex-browser": "browser-same-id-internal",
+        "x-vortex-session": "same-id-internal",
+      },
+      body: JSON.stringify({}),
+    });
+    await oldAgent.waitFor((message): message is { type: "request"; action: string } =>
+      typeof message === "object" && message !== null &&
+      (message as { type?: unknown }).type === "request" &&
+      (message as { action?: unknown }).action === "tab.list",
+    );
+
+    await addAgent(started, "browser-same-id-internal");
+
+    const response = await responsePromise;
+    expect(response.status).toBe(503);
+    expect((await response.json()).error.code).toBe(VtxErrorCode.EXTENSION_NOT_CONNECTED);
   });
 
   it("maps agent errors to the API status and body contract", async () => {
@@ -958,4 +1364,12 @@ function isAgentCommand(message: unknown): message is VtxAgentCommand {
   if (!message || typeof message !== "object") return false;
   const frame = message as Partial<VtxAgentCommand>;
   return frame.type === "agent-command" && typeof frame.id === "string" && typeof frame.command === "string";
+}
+
+async function waitUntil(predicate: () => boolean, timeoutMs = 2_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!predicate()) {
+    if (Date.now() >= deadline) throw new Error("Timed out waiting for hub state");
+    await new Promise((resolve) => setTimeout(resolve, 1));
+  }
 }

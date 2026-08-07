@@ -40,6 +40,7 @@ export interface HubRouteOptions {
   getVirtualSession: (name: string, preferBrowserId?: string) => SessionEntry;
   submitRequest: (sessionId: string, request: VtxRequest) => void;
   hasPending: (sessionId: string) => boolean;
+  onVirtualSessionRemoved?: (session: SessionEntry) => void;
   virtualSessionIdleMs?: number;
   virtualSessionRequestTimeoutMs?: number;
 }
@@ -87,6 +88,7 @@ export function createHttpRoutes(options: HubRouteOptions): Router {
         { sessions: options.sessions, now: options.now },
         options.virtualSessionIdleMs ?? DEFAULT_VIRTUAL_SESSION_IDLE_MS,
         options.hasPending,
+        options.onVirtualSessionRemoved,
       );
     }
 

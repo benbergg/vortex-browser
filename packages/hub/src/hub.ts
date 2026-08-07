@@ -71,9 +71,8 @@ export async function createHub(options: HubOptions = {}): Promise<HubHandle> {
       const session = sessions.get(sessionId);
       if (session?.sink) {
         session.sink(frame);
-        return;
       }
-      wsHub?.sendToSession(sessionId, frame);
+      if (session?.ws || !session?.sink) wsHub?.sendToSession(sessionId, frame);
     },
     sendToBrowser: (browserId, frame) => wsHub?.sendToBrowser(browserId, frame) ?? false,
   });
@@ -130,7 +129,8 @@ export async function createHub(options: HubOptions = {}): Promise<HubHandle> {
       preferBrowserId === undefined ? undefined : { preferBrowserId, pinned: true },
     ),
     submitRequest: (sessionId, request: VtxRequest) => router.handleRequest(sessionId, request),
-    hasPending: (sessionId) => router.pending.countBySession(sessionId) > 0,
+    hasPending: (sessionId) => router.hasPendingForSession(sessionId),
+    onVirtualSessionRemoved: (session) => router.cleanupSession(session),
     virtualSessionIdleMs: options.virtualSessionIdleMs,
     virtualSessionRequestTimeoutMs: options.virtualSessionRequestTimeoutMs,
   }));

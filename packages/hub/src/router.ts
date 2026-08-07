@@ -203,6 +203,7 @@ export class HubRouter {
           Math.max(0, deadline - this.now()),
         ),
         (error) => error instanceof InternalRequestTimeoutError && deadline > this.now(),
+        () => this.browsers.get(browserId) === browser,
       );
       prepared = preparation.request;
       needsTabResolution = preparation.needsTabResolution;
@@ -222,11 +223,17 @@ export class HubRouter {
         this.bufferOrFail(session, request);
         return;
       }
-      if (!this.isBoundToBrowser(session, browserId, browser)) return;
+      if (!this.isBoundToBrowser(session, browserId, browser)) {
+        this.failBindingMismatch(sessionId, browserId, request);
+        return;
+      }
       this.failTabResolution(sessionId, browserId, request, error);
       return;
     }
-    if (!this.isBoundToBrowser(session, browserId, browser)) return;
+    if (!this.isBoundToBrowser(session, browserId, browser)) {
+      this.failBindingMismatch(sessionId, browserId, request);
+      return;
+    }
     if (!this.acceptingRequests) {
       if (this.sessions.has(sessionId)) {
         this.sendResponse(sessionId, request, browserId, {
@@ -283,7 +290,8 @@ export class HubRouter {
     });
   }
 
-  handleAgentFrame(browserId: string, frame: VtxFrameFromAgent): void {
+  handleAgentFrame(browserId: string, frame: VtxFrameFromAgent, ws?: BrowserEntry["ws"]): void {
+    if (ws !== undefined && this.browsers.get(browserId)?.ws !== ws) return;
     if (frame.type === "agent-result") {
       const pending = this.agentCommandPending.get(frame.id);
       if (!pending || pending.browserId !== browserId) return;
@@ -362,6 +370,9 @@ export class HubRouter {
   failAgentCommandsOnReconnect(browserId: string, ws: BrowserEntry["ws"]): void {
     if (this.browsers.get(browserId)?.ws !== ws) return;
     this.failAgentCommands(browserId, new Error("Browser agent disconnected"));
+    const error = this.error(VtxErrorCode.EXTENSION_NOT_CONNECTED, "Browser agent replaced");
+    this.pending.failBrowser(browserId, error);
+    this.failInternal(browserId, new Error(error.message));
   }
 
   unregisterBrowser(browserId: string, ws: BrowserEntry["ws"]): void {
@@ -419,6 +430,24 @@ export class HubRouter {
     return browserId;
   }
 
+  hasPendingForSession(sessionId: string): boolean {
+    const session = this.sessions.get(sessionId);
+    return this.pending.countBySession(sessionId) > 0 ||
+      [...this.internalPending.values()].some((pending) => pending.sessionId === sessionId) ||
+      (session?.buffer.length ?? 0) > 0 ||
+      session?.claiming != null;
+  }
+
+  cleanupSession(session: SessionEntry): void {
+    const cleanupError = this.error(VtxErrorCode.EXTENSION_NOT_CONNECTED, "Virtual session was collected");
+    this.pending.failSession(session.sessionId, cleanupError);
+    this.failInternalForSession(session.sessionId, new Error(cleanupError.message));
+    session.claiming = null;
+    session.buffer.splice(0);
+    this.clearSessionBinding(session);
+    session.sink = undefined;
+  }
+
   rebindSession(session: SessionEntry, browserId: string, notify = false): string | null {
     if (
       session.browserId === browserId &&
@@ -446,6 +475,7 @@ export class HubRouter {
         browserLabel: browser.label,
       });
     }
+    this.flushBuffer(session);
     return browserId;
   }
 
@@ -473,7 +503,12 @@ export class HubRouter {
       this.bufferOrFail(session, request);
       return null;
     }
-    return this.assignSession(session);
+    const browserId = this.assignSession(session);
+    if (browserId) return browserId;
+    this.sendResponse(session.sessionId, request, "", {
+      error: this.error(VtxErrorCode.EXTENSION_NOT_CONNECTED, "No browser agent is available"),
+    });
+    return null;
   }
 
   private bindSession(session: SessionEntry, browserId: string, notify: boolean): void {
@@ -505,18 +540,28 @@ export class HubRouter {
       const browser = this.browsers.get(browserId);
       if (!browser) continue;
       browser.sessions.delete(session.sessionId);
+      const ownedTabIds = new Set(session.ownedTabs);
       for (const [tabId, ownerSessionId] of browser.tabOwner) {
-        if (ownerSessionId === session.sessionId) browser.tabOwner.delete(tabId);
+        if (ownerSessionId !== session.sessionId) continue;
+        ownedTabIds.add(tabId);
+        browser.tabOwner.delete(tabId);
+      }
+      for (const [tabId, relation] of browser.opener) {
+        if (ownedTabIds.has(tabId) || ownedTabIds.has(relation.openerTabId)) browser.opener.delete(tabId);
       }
     }
     for (const browserId of browserIds) {
       const lost = this.lostBrowsers.get(browserId);
       if (!lost) continue;
       lost.entry.sessions.delete(session.sessionId);
+      const ownedTabIds = new Set(session.ownedTabs);
       for (const [tabId, ownerSessionId] of lost.entry.tabOwner) {
         if (ownerSessionId !== session.sessionId) continue;
+        ownedTabIds.add(tabId);
         lost.entry.tabOwner.delete(tabId);
-        lost.entry.opener.delete(tabId);
+      }
+      for (const [tabId, relation] of lost.entry.opener) {
+        if (ownedTabIds.has(tabId) || ownedTabIds.has(relation.openerTabId)) lost.entry.opener.delete(tabId);
       }
     }
     session.ownedTabs.clear();
@@ -529,7 +574,6 @@ export class HubRouter {
     for (const session of this.sessions.values()) {
       if (session.pinned && session.browserId === browserId && !browser.sessions.has(session.sessionId)) {
         this.rebindSession(session, browserId, false);
-        this.flushBuffer(session);
         continue;
       }
       if (session.browserId) continue;
@@ -824,6 +868,13 @@ export class HubRouter {
         { extras: details },
         { hint: "Hub tab resolution failed: unable to resolve the current tab; check the browser agent and retry." },
       ).toJSON(),
+    });
+  }
+
+  private failBindingMismatch(sessionId: string, browserId: string, request: VtxRequest): void {
+    if (!this.sessions.has(sessionId)) return;
+    this.sendResponse(sessionId, request, browserId, {
+      error: this.error(VtxErrorCode.EXTENSION_NOT_CONNECTED, "Session browser binding changed"),
     });
   }
 

@@ -47,12 +47,15 @@ export function sweepIdleVirtualSessions(
   deps: VirtualSessionDeps,
   idleMs: number,
   hasPending: (sessionId: string) => boolean,
+  onRemove?: (session: SessionEntry) => void,
 ): string[] {
   const now = deps.now();
   const removed: string[] = [];
   for (const [sessionId, session] of deps.sessions.entries()) {
     if (session.ws !== null || now - session.lastSeenAt <= idleMs || hasPending(sessionId)) continue;
-    if (deps.sessions.delete(sessionId)) removed.push(sessionId);
+    if (!deps.sessions.delete(sessionId)) continue;
+    onRemove?.(session);
+    removed.push(sessionId);
   }
   return removed;
 }
