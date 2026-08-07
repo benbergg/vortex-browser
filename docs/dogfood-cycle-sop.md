@@ -7,10 +7,10 @@
 
 M3（opencode）自主跑评测产出 `anomalies.json`，**默认不可信**。Claude 的唯一职责是用 vortex 工具在清洁新 tab 逐条复现，把每条异常归入四桶之一，只有 `vortex-defect` 才进入修复。
 
-## 0. 浏览器串行铁律
+## 0. 浏览器并发与复测边界
 
-- M3 与 Claude 共用同一个 vortex-server(6800) → 同一个 Chrome，**无法并发**。
-- Claude 接手校验**前**必须确认 M3 子进程已退出（`run-opencode-eval.mjs` 阻塞返回即代表退出）。
+- M3 与 Claude 是两个 session，可通过同一个 hub(6800) 并行；各自可落在不同 browser，或同一 browser 的不同 tab，hub 用 `browserId` 区分 browser。
+- Claude 接手校验**前**仍必须确认 M3 子进程已退出（`run-opencode-eval.mjs` 阻塞返回即代表退出）。理由不再是抢浏览器，而是固定“移动靶”：M3 退出后不再继续创建或修改 tab，校验结果对应同一现场。
 - 校验前 `vortex_tab_list` 确认无 M3 残留 tab；每条异常复测都开**全新 tab**，测完关掉（防 page-side 缓存漂移，0008 实证）。
 
 ## 1. 摄取 + 旁路自动筛查（零浏览器成本，先跑）
