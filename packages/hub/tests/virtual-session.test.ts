@@ -85,6 +85,22 @@ describe("virtual session transport", () => {
       assignSession.mockRestore();
     }
   });
+
+  it("defaults preferred virtual sessions to pinned and respects an explicit false", async () => {
+    const hub = await createHub({ port: 0, now: () => 100 });
+    closeHub = hub.close;
+
+    const defaultPinned = hub.getOrCreateVirtualSession("virtual-default-pinned", {
+      preferBrowserId: "browser-preferred",
+    });
+    const explicitlyUnpinned = hub.getOrCreateVirtualSession("virtual-explicit-unpinned", {
+      preferBrowserId: "browser-preferred",
+      pinned: false,
+    });
+
+    expect(defaultPinned.pinned).toBe(true);
+    expect(explicitlyUnpinned.pinned).toBe(false);
+  });
 });
 
 describe("virtual session lifecycle", () => {
