@@ -82,12 +82,16 @@ The extension ID is pinned in `manifest.json` (`fbonhjdohmkcejfgmaicnkknpfafihnd
 
 > **Different build?** If you're loading a build with a different ID (e.g. a Chrome Web Store version), pass the ID explicitly: `vortex-server install <your-extension-id>`
 
+> **Using Edge, Canary, or Chromium?** The manifest directory is per-product, not shared across browsers. Run `vortex-server install --all-channels` to register with every Chromium-based browser found on the machine (Chrome stable/Beta/Dev/Canary/for Testing, Chromium, Edge stable/Beta/Dev/Canary). Only browsers that are actually installed are touched — no empty directories are created for the rest.
+
 This command writes the Native Messaging host manifest (`com.vortexbrowser.host`) to the correct system path:
 
 | OS | Path |
 |----|------|
 | macOS | `~/Library/Application Support/Google/Chrome/NativeMessagingHosts/com.vortexbrowser.host.json` |
 | Linux | `~/.config/google-chrome/NativeMessagingHosts/com.vortexbrowser.host.json` |
+
+With `--all-channels` the same manifest is written under each product's own directory, e.g. `~/Library/Application Support/Microsoft Edge/NativeMessagingHosts/` on macOS or `~/.config/microsoft-edge/NativeMessagingHosts/` on Linux.
 | Windows | `%LOCALAPPDATA%\Google\Chrome\User Data\NativeMessagingHosts\com.vortexbrowser.host.json` |
 
 After running the command, go back to `chrome://extensions/` and click **Reload** on the Vortex extension. Chrome will now auto-start `vortex-server` when the extension activates — you never need to run `vortex-server` manually.
