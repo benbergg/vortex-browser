@@ -1,7 +1,12 @@
 import WebSocket from "ws";
 import type { VtxEvent, VtxRequest, VtxResponse } from "@vortex-browser/shared";
-import { VtxEventType } from "@vortex-browser/shared";
+import { VtxEventType, VTX_WIRE_VERSION } from "@vortex-browser/shared";
 import { eventStore } from "./lib/event-store.js";
+import { currentSessionId } from "./lib/session-id.js";
+
+// hub 把连接的第一帧当 hello，不是 hello 就 close(1008)。等 welcome 而非 open 才算连上，
+// 否则请求会赶在握手完成前发出去。超时后仍放行：对端可能是不认 hello 的旧 server。
+const WELCOME_TIMEOUT_MS = 1500;
 
 interface PendingRequest {
   resolve: (resp: VtxResponse) => void;
@@ -28,9 +33,11 @@ class VortexClient {
   private pending = new Map<string, PendingRequest>();
   private requestCounter = 0;
   private port: number;
+  private readonly sessionId: string;
 
   constructor(port: number) {
     this.port = port;
+    this.sessionId = currentSessionId();
   }
 
   private async ensureConnected(): Promise<void> {
@@ -44,16 +51,38 @@ class VortexClient {
         reject(new Error(`Failed to connect to vortex-server at localhost:${this.port} (timeout)`));
       }, 5000);
 
-      ws.on("open", () => {
-        clearTimeout(connectTimeout);
+      let settled = false;
+      let welcomeTimer: ReturnType<typeof setTimeout> | undefined;
+      const ready = (): void => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(welcomeTimer);
         this.ws = ws;
         this.connecting = null;
         resolve();
+      };
+
+      ws.on("open", () => {
+        clearTimeout(connectTimeout);
+        ws.send(
+          JSON.stringify({
+            type: "hello",
+            wireVersion: VTX_WIRE_VERSION,
+            role: "mcp",
+            sessionId: this.sessionId,
+            label: this.sessionId,
+          }),
+        );
+        welcomeTimer = setTimeout(ready, WELCOME_TIMEOUT_MS);
       });
 
       ws.on("message", (data) => {
         try {
           const msg = JSON.parse(data.toString());
+          if (msg.type === "welcome") {
+            ready();
+            return;
+          }
           // tool response：按 id 路由到 pending
           if (msg.id && this.pending.has(msg.id)) {
             const p = this.pending.get(msg.id)!;
@@ -73,16 +102,24 @@ class VortexClient {
 
       ws.on("error", (err) => {
         clearTimeout(connectTimeout);
-        if (this.connecting) {
+        clearTimeout(welcomeTimer);
+        if (!settled) {
+          settled = true;
           this.connecting = null;
           reject(new Error(`Failed to connect to vortex-server at localhost:${this.port}: ${err.message}`));
         }
       });
 
       ws.on("close", () => {
+        clearTimeout(welcomeTimer);
         const wasConnected = this.ws !== null;
         this.ws = null;
         this.connecting = null;
+        // 握手期就被关掉（hub 对非法 hello 回 1008）：别等 welcome 超时把死连接当可用
+        if (!settled) {
+          settled = true;
+          reject(new Error(`Connection closed during handshake with vortex-server at localhost:${this.port}`));
+        }
         // reject all pending
         for (const [, p] of this.pending) {
           clearTimeout(p.timer);
@@ -122,9 +159,11 @@ class VortexClient {
       this.pending.set(id, { resolve, reject, timer });
 
       const req: VtxRequest = {
+        type: "request",
         action,
         params,
         id,
+        sessionId: this.sessionId,
         ...(tabId != null ? { tabId } : {}),
       };
       this.ws!.send(JSON.stringify(req));

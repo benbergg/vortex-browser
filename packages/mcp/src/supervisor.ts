@@ -10,6 +10,7 @@ import {
   isResponse,
   type JsonRpcMessage,
 } from "./lib/jsonrpc-stream.js";
+import { currentSessionId } from "./lib/session-id.js";
 
 export interface SupervisorDeps {
   /** 子进程入口脚本绝对路径(默认同目录 server.js,可经 env/测试覆盖)。 */
@@ -47,6 +48,7 @@ const MAX_INIT_RETRIES = 3;
 
 export function createSupervisor(deps: SupervisorDeps): SupervisorHandle {
   const spawnFn = deps.spawnFn ?? nodeSpawn;
+  const sessionId = currentSessionId();
   const drainTimeoutMs = deps.drainTimeoutMs ?? 10_000;
   const killTimeoutMs = deps.killTimeoutMs ?? 3_000;
   const reinitTimeoutMs = deps.reinitTimeoutMs ?? drainTimeoutMs;
@@ -94,7 +96,9 @@ export function createSupervisor(deps: SupervisorDeps): SupervisorHandle {
   // ---- 子进程生命周期 ----
   function spawnChild(): void {
     const c = spawnFn(process.execPath, [deps.childEntry, ...deps.childArgs], {
-      env: { ...process.env, VORTEX_MCP_SUPERVISED: "1" },
+      // sessionId 在 supervisor 侧算一次并固定下来：每次热换 child 都传同一个值，
+      // 否则 hub 会把重启后的 child 当成新客户端，tab 与 browser 绑定全丢。
+      env: { ...process.env, VORTEX_MCP_SUPERVISED: "1", VORTEX_SESSION_ID: sessionId },
       stdio: ["pipe", "pipe", "inherit"], // stderr 直通 supervisor stderr
     });
     c.stdout!.on("data", onChildData);
