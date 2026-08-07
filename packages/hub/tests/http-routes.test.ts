@@ -16,6 +16,7 @@ import {
   type FakeAgent,
 } from "./helpers/harness.js";
 import { HubRouter } from "../src/router.js";
+import { ensureCurrentTab } from "../src/tab-ownership.js";
 
 const agents: FakeAgent[] = [];
 
@@ -478,6 +479,42 @@ describe("hub HTTP command routes", () => {
     });
     expect(started.hub.sessions.get("claim-rebind")?.ownedTabs).toEqual(new Set());
     expect(started.hub.browsers.get("browser-a")?.tabOwner.has(1)).toBe(false);
+  });
+
+  it("reports binding loss as an extension connection error before either claim writes ownership", async () => {
+    started = await startTestHub({ requestTimeoutMs: 1_000 });
+    await addAgent(started, "browser-a");
+    const browser = started.hub.browsers.get("browser-a");
+    if (!browser) throw new Error("Test harness did not register browser-a");
+
+    for (const [name, tabs] of [
+      ["active-binding-error", [{ id: 1, url: "https://active.test", active: true }]],
+      ["create-binding-error", []],
+    ] as const) {
+      const session = started.hub.getOrCreateVirtualSession(name, {
+        preferBrowserId: "browser-a",
+        pinned: true,
+      });
+      const error = await ensureCurrentTab(
+        session,
+        browser,
+        async (request) => {
+          if (request.action === "tab.list") {
+            if (tabs.length === 0) {
+              return { action: request.action, id: request.id, result: tabs };
+            }
+            session.browserId = "browser-lost";
+            return { action: request.action, id: request.id, result: tabs };
+          }
+          session.browserId = "browser-lost";
+          return { action: request.action, id: request.id, result: { id: 2 } };
+        },
+      ).then(() => undefined, (caught: unknown) => caught);
+
+      expect(error).toMatchObject({ code: VtxErrorCode.EXTENSION_NOT_CONNECTED });
+      expect(session.ownedTabs).toEqual(new Set());
+      expect(session.currentTabId).toBeNull();
+    }
   });
 
   it("maps agent errors to the API status and body contract", async () => {

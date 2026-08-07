@@ -78,7 +78,7 @@ export async function ensureCurrentTab(
     const unowned = lastFocusedActive ?? active ?? usable.find((tab) => browser.tabOwner.get(tab.id!) === undefined);
     if (unowned?.id !== undefined) {
       if (!claimWithoutAdoption(session, browser, unowned.id)) {
-        throw new Error("Session browser binding changed");
+        throw vtxError(VtxErrorCode.EXTENSION_NOT_CONNECTED, "Session browser binding changed");
       }
       return unowned.id;
     }
@@ -100,7 +100,7 @@ export async function ensureCurrentTab(
       });
     }
     if (!claimWithoutAdoption(session, browser, createdId)) {
-      throw new Error("Session browser binding changed");
+      throw vtxError(VtxErrorCode.EXTENSION_NOT_CONNECTED, "Session browser binding changed");
     }
     return createdId;
   })();
