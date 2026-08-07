@@ -140,6 +140,16 @@ export class HubLink {
   }
 
   stop(intent: StopIntent = "manual"): void {
+    if (intent === "hub-shutdown") {
+      if (!this.running) return;
+      this.stopIntent = null;
+      this.pending.clear();
+      const socket = this.socket;
+      this.socket = null;
+      socket?.close();
+      this.scheduleReconnect();
+      return;
+    }
     this.running = false;
     this.stopIntent = intent;
     if (this.reconnectTimer !== null) clearTimeout(this.reconnectTimer);
@@ -376,6 +386,10 @@ export class HubLink {
     if (this.socket !== socket) return;
     this.socket = null;
     this.pending.clear();
+    this.scheduleReconnect();
+  }
+
+  private scheduleReconnect(): void {
     if (!this.running || this.stopIntent !== null || this.reconnectTimer !== null) return;
     const attempt = this.failures++;
     const port = this.resolvePort();

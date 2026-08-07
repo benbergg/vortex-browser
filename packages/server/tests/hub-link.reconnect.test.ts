@@ -79,7 +79,7 @@ describe("HubLink reconnect", () => {
     link.stop();
   });
 
-  it("stops without reconnecting when the hub announces shutdown", () => {
+  it("reconnects after the hub announces shutdown", () => {
     const sockets: FakeSocket[] = [];
     const ensureHubRunning = vi.fn(async () => ({ status: "ok" }));
     const link = new HubLink({
@@ -94,6 +94,7 @@ describe("HubLink reconnect", () => {
         return socket;
       },
       ensureHubRunning,
+      relaunchTrusted: vi.fn(),
       random: () => 0.5,
     });
     link.handleNmMessage(hello());
@@ -106,12 +107,79 @@ describe("HubLink reconnect", () => {
 
       expect(sockets[0].closeCalls).toBe(1);
       expect(ensureHubRunning).not.toHaveBeenCalled();
-      vi.advanceTimersByTime(60_000);
+      vi.advanceTimersByTime(199);
       expect(sockets).toHaveLength(1);
-      expect(ensureHubRunning).not.toHaveBeenCalled();
+      vi.advanceTimersByTime(1);
+      expect(sockets).toHaveLength(2);
     } finally {
       link.stop();
     }
+  });
+
+  it("rechecks hub after five failed reconnects from hub shutdown", () => {
+    const sockets: FakeSocket[] = [];
+    const ensureHubRunning = vi.fn(async () => ({ status: "ok" }));
+    const relaunchTrusted = vi.fn();
+    const link = new HubLink({
+      stdout: { write: vi.fn() } as unknown as NodeJS.WritableStream,
+      extensionDist: "/worktree/packages/extension/dist",
+      repoRoot: "/worktree",
+      ppid: 123,
+      resolvePort: () => 4321,
+      createSocket: () => {
+        const socket = new FakeSocket();
+        sockets.push(socket);
+        return socket;
+      },
+      ensureHubRunning,
+      relaunchTrusted,
+      random: () => 0.5,
+    });
+    link.handleNmMessage(hello());
+    link.start();
+
+    try {
+      sockets[0].emit("message", JSON.stringify({ type: "notice", notice: "hub-shutdown" }));
+      for (const delay of [200, 400, 800, 1600]) {
+        vi.advanceTimersByTime(delay);
+        sockets[sockets.length - 1].close();
+      }
+
+      expect(sockets).toHaveLength(5);
+      expect(ensureHubRunning).toHaveBeenCalledTimes(1);
+      expect(ensureHubRunning).toHaveBeenCalledWith({ port: 4321, role: "browser-agent" });
+      expect(relaunchTrusted).not.toHaveBeenCalled();
+    } finally {
+      link.stop();
+    }
+  });
+
+  it("does not reconnect after a manual stop", () => {
+    const sockets: FakeSocket[] = [];
+    const ensureHubRunning = vi.fn(async () => ({ status: "ok" }));
+    const link = new HubLink({
+      stdout: { write: vi.fn() } as unknown as NodeJS.WritableStream,
+      extensionDist: "/worktree/packages/extension/dist",
+      repoRoot: "/worktree",
+      ppid: 123,
+      resolvePort: () => 4321,
+      createSocket: () => {
+        const socket = new FakeSocket();
+        sockets.push(socket);
+        return socket;
+      },
+      ensureHubRunning,
+      relaunchTrusted: vi.fn(),
+      random: () => 0.5,
+    });
+    link.handleNmMessage(hello());
+    link.start();
+
+    link.stop("manual");
+    vi.advanceTimersByTime(60_000);
+
+    expect(sockets).toHaveLength(1);
+    expect(ensureHubRunning).not.toHaveBeenCalled();
   });
 
   it("reconnects with the real browserId when NmHello arrives after fallback", () => {
