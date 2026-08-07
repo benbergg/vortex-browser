@@ -416,6 +416,28 @@ export class HubRouter {
     return browserId;
   }
 
+  rebindSession(session: SessionEntry, browserId: string, notify = false): string | null {
+    if (session.browserId === browserId && this.browsers.get(browserId)?.sessions.has(session.sessionId)) {
+      return browserId;
+    }
+    this.clearSessionBinding(session);
+    session.browserId = browserId;
+    session.lastBrowserId = browserId;
+    session.rebindUntil = 0;
+    const browser = this.browsers.get(browserId);
+    if (!browser) return null;
+    browser.sessions.add(session.sessionId);
+    if (notify) {
+      this.sendToSession(session.sessionId, {
+        type: "notice",
+        notice: "browser-assigned",
+        browserId: browser.browserId,
+        browserLabel: browser.label,
+      });
+    }
+    return browserId;
+  }
+
   routeEvent(browserId: string, event: VtxEvent): void {
     const browser = this.browsers.get(browserId);
     if (!browser) return;
@@ -461,6 +483,22 @@ export class HubRouter {
         browserLabel: browser.label,
       });
     }
+  }
+
+  private clearSessionBinding(session: SessionEntry): void {
+    const browserIds = new Set<string>();
+    if (session.browserId) browserIds.add(session.browserId);
+    if (session.lastBrowserId) browserIds.add(session.lastBrowserId);
+    for (const browserId of browserIds) {
+      const browser = this.browsers.get(browserId);
+      if (!browser) continue;
+      browser.sessions.delete(session.sessionId);
+      for (const [tabId, ownerSessionId] of browser.tabOwner) {
+        if (ownerSessionId === session.sessionId) browser.tabOwner.delete(tabId);
+      }
+    }
+    session.ownedTabs.clear();
+    session.currentTabId = null;
   }
 
   private assignWaitingSessions(browserId: string): void {

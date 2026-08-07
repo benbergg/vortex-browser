@@ -81,7 +81,13 @@ export async function createHub(options: HubOptions = {}): Promise<HubHandle> {
     const existing = sessions.get(name);
     const session = getOrCreateVirtualSessionEntry({ sessions, now }, name);
     if (options.sink !== undefined) session.sink = options.sink;
-    if (options.preferBrowserId !== undefined) session.browserId = options.preferBrowserId;
+    if (options.preferBrowserId !== undefined) {
+      if (existing && session.browserId !== options.preferBrowserId) {
+        router.rebindSession(session, options.preferBrowserId);
+      } else {
+        session.browserId = options.preferBrowserId;
+      }
+    }
     if (options.preferBrowserId !== undefined && options.pinned === undefined) session.pinned = true;
     if (options.pinned !== undefined) session.pinned = options.pinned;
     if (!existing) router.assignSession(session, false);

@@ -229,6 +229,81 @@ describe("hub HTTP command routes", () => {
     });
   });
 
+  it("rebinds an existing named session and clears ownership when its browser changes", async () => {
+    started = await startTestHub({ requestTimeoutMs: 1_000 });
+    await addAgent(started, "browser-a");
+    await addAgent(started, "browser-b");
+    const headersFor = (browserId: string) => ({
+      "content-type": "application/json",
+      "x-vortex-browser": browserId,
+      "x-vortex-session": "switchable",
+    });
+
+    const createResponse = await fetch(`http://127.0.0.1:${started.port}/api/tab/create`, {
+      method: "POST",
+      headers: headersFor("browser-a"),
+      body: JSON.stringify({}),
+    });
+    expect(createResponse.status).toBe(200);
+
+    const firstSession = started.hub.sessions.get("switchable");
+    expect(firstSession).toMatchObject({ browserId: "browser-a", currentTabId: 2 });
+    expect(started.hub.browsers.get("browser-a")?.sessions.has("switchable")).toBe(true);
+    expect(started.hub.browsers.get("browser-a")?.tabOwner.get(2)).toBe("switchable");
+    expect(firstSession?.ownedTabs).toEqual(new Set([2]));
+
+    const listResponse = await fetch(`http://127.0.0.1:${started.port}/api/tab/list`, {
+      method: "POST",
+      headers: headersFor("browser-b"),
+      body: JSON.stringify({}),
+    });
+    expect(listResponse.status).toBe(200);
+
+    const session = started.hub.sessions.get("switchable");
+    expect(session).toMatchObject({ browserId: "browser-b", lastBrowserId: "browser-b", currentTabId: null });
+    expect(session?.ownedTabs).toEqual(new Set());
+    expect(started.hub.browsers.get("browser-a")?.sessions.has("switchable")).toBe(false);
+    expect(started.hub.browsers.get("browser-a")?.tabOwner.has(2)).toBe(false);
+    expect(started.hub.browsers.get("browser-b")?.sessions.has("switchable")).toBe(true);
+  });
+
+  it("clears the old binding when a preferred target browser is offline", async () => {
+    started = await startTestHub({ requestTimeoutMs: 1_000 });
+    await addAgent(started, "browser-a");
+    const headersFor = (browserId: string) => ({
+      "content-type": "application/json",
+      "x-vortex-browser": browserId,
+      "x-vortex-session": "offline-switch",
+    });
+
+    const createResponse = await fetch(`http://127.0.0.1:${started.port}/api/tab/create`, {
+      method: "POST",
+      headers: headersFor("browser-a"),
+      body: JSON.stringify({}),
+    });
+    expect(createResponse.status).toBe(200);
+
+    const response = await fetch(`http://127.0.0.1:${started.port}/api/tab/list`, {
+      method: "POST",
+      headers: headersFor("browser-offline"),
+      body: JSON.stringify({}),
+    });
+    const body = await response.json() as { error?: { code?: string } };
+
+    expect(response.status).toBe(503);
+    expect(body.error?.code).toBe(VtxErrorCode.EXTENSION_NOT_CONNECTED);
+    expect(started.hub.browsers.get("browser-a")?.sessions.has("offline-switch")).toBe(false);
+    expect(started.hub.browsers.get("browser-a")?.tabOwner.has(2)).toBe(false);
+    expect(started.hub.browsers.get("browser-offline")).toBeUndefined();
+    expect(started.hub.sessions.get("offline-switch")).toMatchObject({
+      browserId: "browser-offline",
+      lastBrowserId: "browser-offline",
+      currentTabId: null,
+      pinned: true,
+    });
+    expect(started.hub.sessions.get("offline-switch")?.ownedTabs).toEqual(new Set());
+  });
+
   it("maps agent errors to the API status and body contract", async () => {
     started = await startTestHub({ requestTimeoutMs: 1_000 });
     const errors: Record<string, VtxResponse["error"]> = {
