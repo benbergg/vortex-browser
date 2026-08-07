@@ -10,11 +10,12 @@ import {
   type VtxAgentResult,
   type VtxErrorPayload,
 } from "@vortex-browser/shared";
-import { BrowserRegistry, SessionRegistry } from "./registry.js";
+import { BrowserRegistry, SessionRegistry, type SessionEntry } from "./registry.js";
 import { HubRouter } from "./router.js";
 import { createHttpRoutes } from "./http-routes.js";
 import { WsHub } from "./ws-hub.js";
 import type { PendingTable } from "./pending.js";
+import { getOrCreateVirtualSession as getOrCreateVirtualSessionEntry } from "./virtual-session.js";
 
 export interface HubOptions {
   port?: number;
@@ -31,12 +32,22 @@ export interface HubHandle {
   sessions: SessionRegistry;
   browsers: BrowserRegistry;
   pending: PendingTable;
+  getOrCreateVirtualSession(
+    name: string,
+    options?: VirtualSessionOptions,
+  ): SessionEntry;
   sendAgentCommand(
     browserId: string,
     command: VtxAgentCommand["command"],
     reason?: string,
   ): Promise<VtxAgentResult>;
   close(): Promise<void>;
+}
+
+export interface VirtualSessionOptions {
+  sink?: (frame: object) => void;
+  preferBrowserId?: string;
+  pinned?: boolean;
 }
 
 export async function createHub(options: HubOptions = {}): Promise<HubHandle> {
@@ -63,6 +74,15 @@ export async function createHub(options: HubOptions = {}): Promise<HubHandle> {
     },
     sendToBrowser: (browserId, frame) => wsHub?.sendToBrowser(browserId, frame) ?? false,
   });
+  const getOrCreateVirtualSession: HubHandle["getOrCreateVirtualSession"] = (name, options = {}) => {
+    const existing = sessions.get(name);
+    const session = getOrCreateVirtualSessionEntry({ sessions, now }, name);
+    if (options.sink !== undefined) session.sink = options.sink;
+    if (options.preferBrowserId !== undefined) session.browserId = options.preferBrowserId;
+    if (options.pinned !== undefined) session.pinned = options.pinned;
+    if (!existing) router.assignSession(session, false);
+    return session;
+  };
   const sendAgentCommand: HubHandle["sendAgentCommand"] = (browserId, command, reason) =>
     router.sendAgentCommand(browserId, command, reason);
   const app = express();
@@ -103,6 +123,7 @@ export async function createHub(options: HubOptions = {}): Promise<HubHandle> {
     sessions,
     browsers,
     pending: router.pending,
+    getOrCreateVirtualSession,
     sendAgentCommand,
     close,
   };

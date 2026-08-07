@@ -5,6 +5,7 @@
 import { createHub } from "../src/hub.js";
 import { VTX_WIRE_VERSION } from "@vortex-browser/shared";
 import { SessionRegistry } from "../src/registry.js";
+import { HubRouter } from "../src/router.js";
 import {
   getOrCreateVirtualSession,
   sweepIdleVirtualSessions,
@@ -60,6 +61,28 @@ describe("virtual session transport", () => {
       expect(sendToSession).not.toHaveBeenCalled();
     } finally {
       sendToSession.mockRestore();
+    }
+  });
+
+  it("assigns a new virtual session once and preserves browser preferences on reuse", async () => {
+    const assignSession = vi.spyOn(HubRouter.prototype, "assignSession");
+    const hub = await createHub({ port: 0, now: () => 100 });
+    closeHub = hub.close;
+
+    try {
+      const first = hub.getOrCreateVirtualSession("virtual-preferred", {
+        preferBrowserId: "browser-preferred",
+        pinned: true,
+      });
+      const reused = hub.getOrCreateVirtualSession("virtual-preferred");
+
+      expect(reused).toBe(first);
+      expect(first.browserId).toBe("browser-preferred");
+      expect(first.pinned).toBe(true);
+      expect(assignSession).toHaveBeenCalledTimes(1);
+      expect(assignSession).toHaveBeenCalledWith(first, false);
+    } finally {
+      assignSession.mockRestore();
     }
   });
 });
