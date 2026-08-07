@@ -1,6 +1,6 @@
 /**
- * Author: qingwa
- * Description: Resolves the workspace shared source during hub tests without a build.
+ * Description: Runs only the process-spawning integration tests, serially.
+ * Mirrors vitest.config.ts's shared-source alias so they resolve identically.
  */
 import { fileURLToPath, URL } from "node:url";
 import { defineConfig, configDefaults } from "vitest/config";
@@ -12,10 +12,11 @@ export default defineConfig({
     },
   },
   test: {
+    include: ["**/*.integration.test.ts"],
+    exclude: [...configDefaults.exclude],
     fileParallelism: false,
     maxWorkers: 1,
     minWorkers: 1,
-    // spawn 真子进程的用例改由 test:integration 单独跑
-    exclude: [...configDefaults.exclude, "**/*.integration.test.ts"],
+    testTimeout: 60000,
   },
 });

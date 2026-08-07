@@ -7,10 +7,10 @@ Thanks for contributing! This guide covers the local dev loop, testing, and conv
 ```bash
 pnpm install
 pnpm -r build      # build all packages once
-pnpm -r test       # run all test suites
+pnpm test          # run all unit tests (pnpm test:integration for process-spawning ones)
 ```
 
-Requires Node 20+ and pnpm. The monorepo has five packages (`shared`, `extension`, `server`, `cli`, `mcp`) — see [README → Packages](README.md#packages).
+Requires Node 20+ and pnpm. The monorepo has six packages (`shared`, `extension`, `server`, `cli`, `mcp`, `hub`) — see [README → Packages](README.md#packages).
 
 ## Dev loop
 
@@ -59,11 +59,14 @@ For day-to-day work this isn't worth it: load once in your normal Chrome, and `@
 ## Testing
 
 ```bash
-pnpm -r test                                   # everything
+pnpm test                                      # unit tests, all packages
+pnpm test:integration                          # process-spawning tests only
 pnpm --filter @vortex-browser/extension test   # one package
 pnpm --filter @vortex-browser/extension exec vitest run <file>   # one file
 ```
 
+- **Name a test `*.integration.test.ts` whenever it spawns a real process.** `pnpm test` excludes that pattern; `pnpm test:integration` runs it serially (`fileParallelism: false`, `maxWorkers: 1`). See `packages/{hub,mcp}/vitest.integration.config.ts`.
+- **Why the split:** `pnpm -r test` runs 8 packages in parallel and each vitest spawns one worker per core. Add a few tests that fork real hub/MCP processes and the machine is oversubscribed, which pushes timing-sensitive cases (short `killTimeoutMs`, sub-200ms performance thresholds) past their budgets. The symptom is distinctive — the failing file **moves between runs** and passes when run alone. If you see that, check what new process-spawning tests landed rather than chasing the test that happened to fail.
 - **TDD is expected** for features and bug fixes: write a failing test first, watch it fail for the right reason, then make it pass.
 - **Page-side func tests must be scope-detached.** `chrome.scripting.executeScript({func})` serializes the func via `toString()` and injects it into the page MAIN world, losing module scope. A test that calls the captured func directly in Node passes via the module closure even when the func references a module-level helper that would be `undefined` in the page. Reconstruct with `new Function('return (' + fn.toString() + ')')()` to faithfully reproduce injection. (See `tests/js-evaluate-host-object-serialize.test.ts`.)
 

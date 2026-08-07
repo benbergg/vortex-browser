@@ -18,7 +18,8 @@
     "typecheck": "tsc -p tsconfig.typecheck.json --noEmit",
     "dev": "tsc --watch",
     "test": "vitest run",
-    "clean": "rm -rf dist"
+    "clean": "rm -rf dist",
+    "test:integration": "vitest run --config vitest.integration.config.ts"
   },
   "dependencies": {
     "@vortex-browser/shared": "workspace:*",

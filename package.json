@@ -9,7 +9,8 @@
     "lint:errors": "node scripts/check-throw-discipline.mjs",
     "prebuild": "node scripts/check-throw-discipline.mjs",
     "ship:preflight": "node scripts/ship-preflight.mjs",
-    "dev:all": "node scripts/dev-all.mjs"
+    "dev:all": "node scripts/dev-all.mjs",
+    "test:integration": "pnpm -r --if-present test:integration"
   },
   "engines": {
     "node": ">=18"
