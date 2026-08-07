@@ -10,7 +10,8 @@ import { dirname, join } from "node:path";
 const here = dirname(fileURLToPath(import.meta.url));
 const sourceRoot = join(here, "..", "src");
 const testRoot = here;
-const forbiddenPort = [68, 56, 48, 48].join("");
+// 用 charCode 拼，避免本文件自身命中扫描；join 数字会拼成 "68564848" 而非端口号
+const forbiddenPort = String.fromCharCode(54, 56, 48, 48);
 
 describe("hub dynamic port source lock", () => {
   it("allows the default only in paths.ts", async () => {

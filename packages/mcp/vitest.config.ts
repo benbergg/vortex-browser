@@ -1,4 +1,4 @@
-import { defineConfig } from "vitest/config";
+import { defineConfig, configDefaults } from "vitest/config";
 
 /**
  * 默认 `test` 不跑 `*.integration.test.ts`。
@@ -8,6 +8,6 @@ import { defineConfig } from "vitest/config";
  */
 export default defineConfig({
   test: {
-    exclude: ["**/node_modules/**", "**/dist/**", "**/*.integration.test.ts"],
+    exclude: [...configDefaults.exclude, "**/*.integration.test.ts"],
   },
 });
