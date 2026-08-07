@@ -121,15 +121,17 @@ export function subscribe(
     const id = nextRequestId();
     const session = resolveSessionName(opts.session);
     const ws = new WebSocket(resolveWebSocketUrl(opts));
-    let settled = false;
+    let failed = false;
+    let responseResolved = false;
     let requestSent = false;
 
     let timeout: ReturnType<typeof setTimeout>;
 
     const fail = (error: Error): void => {
-      if (settled) return;
-      settled = true;
+      if (failed || responseResolved) return;
+      failed = true;
       clearTimeout(timeout);
+      ws.close();
       reject(error);
     };
 
@@ -138,6 +140,7 @@ export function subscribe(
     }, 30_000);
 
     ws.on("open", () => {
+      if (failed) return;
       try {
         ws.send(JSON.stringify({
           type: "hello",
@@ -152,6 +155,7 @@ export function subscribe(
     });
 
     ws.on("message", (data) => {
+      if (failed) return;
       let message: unknown;
       try {
         message = JSON.parse(data.toString());
@@ -184,7 +188,7 @@ export function subscribe(
       }
 
       if (requestSent && message.id === id) {
-        settled = true;
+        responseResolved = true;
         clearTimeout(timeout);
         resolve(message as unknown as VtxResponse);
       }

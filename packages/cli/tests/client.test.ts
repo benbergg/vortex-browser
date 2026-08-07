@@ -4,7 +4,7 @@
  */
 import { createServer, type IncomingMessage, type RequestListener, type Server } from "node:http";
 import { readFileSync } from "node:fs";
-import { WebSocketServer, type WebSocket } from "ws";
+import WebSocket, { WebSocketServer } from "ws";
 import { afterEach, describe, expect, it } from "vitest";
 import { VTX_WIRE_VERSION } from "@vortex-browser/shared";
 import { sendRequest, subscribe } from "../src/client.js";
@@ -127,6 +127,7 @@ describe("client transport boundaries", () => {
     const socketServer = new WebSocketServer({ host: "127.0.0.1", port: 0, path: "/ws" });
     let clientSocket: WebSocket | undefined;
     const frames: Array<Record<string, unknown>> = [];
+    const events: Array<Record<string, unknown>> = [];
 
     await new Promise<void>((resolve, reject) => {
       socketServer.once("listening", () => resolve());
@@ -146,7 +147,7 @@ describe("client transport boundaries", () => {
         baseUrl: `http://127.0.0.1:${address.port}`,
         session: "session-b",
         tabId: 9,
-        onEvent: () => {},
+        onEvent: (event) => events.push(event as unknown as Record<string, unknown>),
       });
 
       await waitFor(() => frames.length === 1);
@@ -184,8 +185,77 @@ describe("client transport boundaries", () => {
         action: "console.subscribe",
         result: { subscribed: true },
       });
+      clientSocket!.send(JSON.stringify({
+        type: "event",
+        event: "console.message",
+        data: { text: "after response" },
+        timestamp: Date.now(),
+      }));
+      await waitFor(() => events.length === 1);
+      expect(events[0]).toMatchObject({ event: "console.message", data: { text: "after response" } });
     } finally {
       clientSocket?.terminate();
+      await new Promise<void>((resolve, reject) => {
+        socketServer.close((error) => error ? reject(error) : resolve());
+      });
+    }
+  });
+
+  it("closes and ignores late frames after a subscription error", async () => {
+    const socketServer = new WebSocketServer({ host: "127.0.0.1", port: 0, path: "/ws" });
+    let serverSocket: WebSocket | undefined;
+    let helloReceived = false;
+    const requests: Array<Record<string, unknown>> = [];
+    const events: Array<Record<string, unknown>> = [];
+
+    await new Promise<void>((resolve, reject) => {
+      socketServer.once("listening", () => resolve());
+      socketServer.once("error", reject);
+    });
+    socketServer.on("connection", (socket) => {
+      serverSocket = socket;
+      socket.on("message", (payload) => {
+        const frame = JSON.parse(payload.toString()) as Record<string, unknown>;
+        if (frame.type === "hello") helloReceived = true;
+        if (frame.type === "request") requests.push(frame);
+      });
+    });
+
+    const address = socketServer.address();
+    if (!address || typeof address === "string") throw new Error("WebSocket server did not expose a TCP address");
+
+    try {
+      const responsePromise = subscribe("console.subscribe", {}, {
+        port: 0,
+        baseUrl: `http://127.0.0.1:${address.port}`,
+        session: "session-error",
+        onEvent: (event) => events.push(event as unknown as Record<string, unknown>),
+      });
+
+      await waitFor(() => helloReceived);
+      serverSocket!.send("not-json");
+      await expect(responsePromise).rejects.toThrow("Invalid WebSocket message");
+
+      if (serverSocket!.readyState === WebSocket.OPEN) {
+        serverSocket!.send(JSON.stringify({
+          type: "welcome",
+          wireVersion: VTX_WIRE_VERSION,
+          hubVersion: "late",
+        }));
+        serverSocket!.send(JSON.stringify({
+          type: "event",
+          event: "console.message",
+          data: { text: "late" },
+          timestamp: Date.now(),
+        }));
+      }
+      await new Promise((resolve) => setTimeout(resolve, 20));
+
+      expect(requests).toHaveLength(0);
+      expect(events).toHaveLength(0);
+      expect([WebSocket.CLOSING, WebSocket.CLOSED]).toContain(serverSocket!.readyState);
+    } finally {
+      serverSocket?.terminate();
       await new Promise<void>((resolve, reject) => {
         socketServer.close((error) => error ? reject(error) : resolve());
       });
