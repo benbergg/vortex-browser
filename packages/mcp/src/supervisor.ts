@@ -415,6 +415,14 @@ if (isMainEntry()) {
 
   // 手动触发信号(运维 + 应急)
   process.on("SIGUSR2", () => sup.triggerRestart("SIGUSR2"));
+  // 终止信号:必须显式带走 child。child 连上 hub 后持有活跃 WS handle,
+  // 光靠 stdin EOF 退不出去,supervisor 一死它就成孤儿,继续占着 hub 的 session。
+  for (const sig of ["SIGTERM", "SIGINT"] as const) {
+    process.on(sig, () => {
+      sup.stop();
+      process.exit(0);
+    });
+  }
   // Claude 关闭管道:干净退出
   process.stdout.on("error", (err: NodeJS.ErrnoException) => {
     if (err.code === "EPIPE") sup.stop();
