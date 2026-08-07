@@ -25,6 +25,7 @@ export interface SessionEntry {
   label: string;
   // 暂态字段：Step 3 引入 ws 依赖后再收窄为 WebSocket。
   ws: WebSocket | null;
+  sink?: (frame: object) => void;
   wireVersion: number;
   connectedAt: number;
   lastSeenAt: number;

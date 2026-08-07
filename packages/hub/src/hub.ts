@@ -53,7 +53,14 @@ export async function createHub(options: HubOptions = {}): Promise<HubHandle> {
     now,
     requestTimeoutMs: options.requestTimeoutMs,
     onWarn: options.onWarn,
-    sendToSession: (sessionId, frame) => wsHub?.sendToSession(sessionId, frame),
+    sendToSession: (sessionId, frame) => {
+      const session = sessions.get(sessionId);
+      if (session?.sink) {
+        session.sink(frame);
+        return;
+      }
+      wsHub?.sendToSession(sessionId, frame);
+    },
     sendToBrowser: (browserId, frame) => wsHub?.sendToBrowser(browserId, frame) ?? false,
   });
   const sendAgentCommand: HubHandle["sendAgentCommand"] = (browserId, command, reason) =>
