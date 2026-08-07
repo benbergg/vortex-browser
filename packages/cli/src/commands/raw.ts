@@ -1,6 +1,11 @@
+/**
+ * Author: qingwa
+ * Description: Registers the raw action command with HTTP and subscription transports.
+ */
 import type { Command } from "commander";
 import { sendRequest, subscribe } from "../client.js";
 import { printResponse, printEvent, exitWithError } from "../output.js";
+import { getGlobalOpts } from "./helpers.js";
 
 export function registerRawCommand(program: Command): void {
   program
@@ -9,11 +14,7 @@ export function registerRawCommand(program: Command): void {
     .option("--follow", "keep connection open for events")
     .allowUnknownOption(true)
     .action(async (action: string, opts: any, cmd: Command) => {
-      const root = cmd.parent!;
-      const port = root.opts().port as number;
-      const tab = root.opts().tab as number | undefined;
-      const pretty = root.opts().pretty as boolean | undefined;
-      const quiet = root.opts().quiet as boolean | undefined;
+      const { port, session, tab, pretty, quiet } = getGlobalOpts(cmd);
 
       const params: Record<string, unknown> = {};
 
@@ -39,6 +40,7 @@ export function registerRawCommand(program: Command): void {
         if (opts.follow) {
           const resp = await subscribe(action, params, {
             port,
+            session,
             tabId: tab,
             follow: true,
             onEvent: (event) => printEvent(event, { pretty, quiet }),
@@ -46,7 +48,7 @@ export function registerRawCommand(program: Command): void {
           printResponse(resp, { pretty, quiet });
           await new Promise(() => {});
         } else {
-          const resp = await sendRequest(action, params, { port, tabId: tab });
+          const resp = await sendRequest(action, params, { port, session, tabId: tab });
           printResponse(resp, { pretty, quiet });
         }
       } catch (err: any) {

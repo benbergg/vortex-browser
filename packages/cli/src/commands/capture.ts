@@ -1,3 +1,7 @@
+/**
+ * Author: qingwa
+ * Description: Registers screenshot and recording commands.
+ */
 import type { Command } from "commander";
 import { makeAction, getGlobalOpts } from "./helpers.js";
 import { sendRequest } from "../client.js";
@@ -13,14 +17,14 @@ export function registerCaptureCommands(program: Command): void {
     .option("--format <fmt>", "png or jpeg", "png")
     .option("--full-page", "capture full scrollable page (max 8000px)")
     .action(async (opts: any, cmd: Command) => {
-      const { port, tab } = getGlobalOpts(cmd);
+      const { port, session, tab } = getGlobalOpts(cmd);
       try {
         const params: Record<string, unknown> = { format: opts.format };
         if (opts.fullPage) params.fullPage = true;
         const resp = await sendRequest(
           "capture.screenshot",
           params,
-          { port, tabId: tab },
+          { port, session, tabId: tab },
         );
         if (opts.output && resp.result) {
           const result = resp.result as { dataUrl: string };
@@ -42,12 +46,12 @@ export function registerCaptureCommands(program: Command): void {
     .description("Screenshot an element")
     .option("--output <file>", "save to file")
     .action(async (selector: string, opts: any, cmd: Command) => {
-      const { port, tab, frameId } = getGlobalOpts(cmd);
+      const { port, session, tab, frameId } = getGlobalOpts(cmd);
       try {
         const resp = await sendRequest(
           "capture.element",
           frameId != null ? { selector, frameId } : { selector },
-          { port, tabId: tab },
+          { port, session, tabId: tab },
         );
         if (opts.output && resp.result) {
           const result = resp.result as { dataUrl: string };

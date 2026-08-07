@@ -1,3 +1,7 @@
+/**
+ * Author: qingwa
+ * Description: Registers file upload, download, and completion commands.
+ */
 import type { Command } from "commander";
 import { makeAction, makeSubscribeAction, getGlobalOpts } from "./helpers.js";
 import { sendRequest } from "../client.js";
@@ -14,7 +18,7 @@ export function registerFileCommands(program: Command): void {
     .option("--name <name>", "file name override")
     .option("--mime <type>", "MIME type")
     .action(async (selector: string, opts: any, cmd: Command) => {
-      const { port, tab, pretty, quiet } = getGlobalOpts(cmd);
+      const { port, session, tab, pretty, quiet } = getGlobalOpts(cmd);
       const fileContent = readFileSync(opts.file).toString("base64");
       const fileName = opts.name ?? basename(opts.file);
 
@@ -22,7 +26,7 @@ export function registerFileCommands(program: Command): void {
         const resp = await sendRequest("file.upload", {
           selector, fileName, fileContent,
           mimeType: opts.mime,
-        }, { port, tabId: tab });
+        }, { port, session, tabId: tab });
         printResponse(resp, { pretty, quiet });
       } catch (err: any) {
         exitWithError(err.message);
