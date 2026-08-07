@@ -77,7 +77,9 @@ export async function ensureCurrentTab(
     const active = usable.find((tab) => tab.active && browser.tabOwner.get(tab.id!) === undefined);
     const unowned = lastFocusedActive ?? active ?? usable.find((tab) => browser.tabOwner.get(tab.id!) === undefined);
     if (unowned?.id !== undefined) {
-      claimWithoutAdoption(session, browser, unowned.id);
+      if (!claimWithoutAdoption(session, browser, unowned.id)) {
+        throw new Error("Session browser binding changed");
+      }
       return unowned.id;
     }
 
@@ -97,7 +99,9 @@ export async function ensureCurrentTab(
         extras: { action: "tab.create" },
       });
     }
-    claimWithoutAdoption(session, browser, createdId);
+    if (!claimWithoutAdoption(session, browser, createdId)) {
+      throw new Error("Session browser binding changed");
+    }
     return createdId;
   })();
   session.claiming = claiming;
@@ -161,10 +165,12 @@ function tabIdFromResult(result: unknown): number | undefined {
   return undefined;
 }
 
-function claimWithoutAdoption(session: SessionEntry, browser: BrowserEntry, tabId: number): void {
+function claimWithoutAdoption(session: SessionEntry, browser: BrowserEntry, tabId: number): boolean {
+  if (session.browserId !== browser.browserId) return false;
   browser.tabOwner.set(tabId, session.sessionId);
   session.ownedTabs.add(tabId);
   session.currentTabId = tabId;
+  return true;
 }
 
 function hasOwnedCurrentTab(session: SessionEntry, browser: BrowserEntry): boolean {

@@ -304,6 +304,182 @@ describe("hub HTTP command routes", () => {
     expect(started.hub.sessions.get("offline-switch")?.ownedTabs).toEqual(new Set());
   });
 
+  it("rebinds a pinned session when its offline target browser reconnects", async () => {
+    started = await startTestHub({ requestTimeoutMs: 1_000 });
+    await addAgent(started, "browser-a");
+    const headersFor = (browserId: string) => ({
+      "content-type": "application/json",
+      "x-vortex-browser": browserId,
+      "x-vortex-session": "reconnect-target",
+    });
+
+    const createResponse = await fetch(`http://127.0.0.1:${started.port}/api/tab/create`, {
+      method: "POST",
+      headers: headersFor("browser-a"),
+      body: JSON.stringify({}),
+    });
+    expect(createResponse.status).toBe(200);
+
+    const offlineResponse = await fetch(`http://127.0.0.1:${started.port}/api/tab/list`, {
+      method: "POST",
+      headers: headersFor("browser-b"),
+      body: JSON.stringify({}),
+    });
+    expect(offlineResponse.status).toBe(503);
+
+    await addAgent(started, "browser-b");
+
+    expect(started.hub.sessions.get("reconnect-target")).toMatchObject({
+      browserId: "browser-b",
+      lastBrowserId: "browser-b",
+      pinned: true,
+    });
+    expect(started.hub.browsers.get("browser-a")?.sessions.has("reconnect-target")).toBe(false);
+    expect(started.hub.browsers.get("browser-b")?.sessions.has("reconnect-target")).toBe(true);
+  });
+
+  it("does not restore stale lost-browser ownership after a pinned rebind", async () => {
+    started = await startTestHub({ requestTimeoutMs: 1_000 });
+    await addAgent(started, "browser-a");
+    const browserB = await addAgent(started, "browser-b");
+    const headersFor = (browserId: string) => ({
+      "content-type": "application/json",
+      "x-vortex-browser": browserId,
+      "x-vortex-session": "lost-rebind",
+    });
+
+    const createResponse = await fetch(`http://127.0.0.1:${started.port}/api/tab/create`, {
+      method: "POST",
+      headers: headersFor("browser-b"),
+      body: JSON.stringify({}),
+    });
+    expect(createResponse.status).toBe(200);
+    await browserB.close();
+
+    const moveToA = await fetch(`http://127.0.0.1:${started.port}/api/tab/list`, {
+      method: "POST",
+      headers: headersFor("browser-a"),
+      body: JSON.stringify({}),
+    });
+    expect(moveToA.status).toBe(200);
+    const moveToOfflineB = await fetch(`http://127.0.0.1:${started.port}/api/tab/list`, {
+      method: "POST",
+      headers: headersFor("browser-b"),
+      body: JSON.stringify({}),
+    });
+    expect(moveToOfflineB.status).toBe(503);
+
+    await addAgent(started, "browser-b");
+
+    const session = started.hub.sessions.get("lost-rebind");
+    expect(started.hub.browsers.get("browser-a")?.sessions.has("lost-rebind")).toBe(false);
+    expect(started.hub.browsers.get("browser-b")?.sessions.has("lost-rebind")).toBe(true);
+    expect(started.hub.browsers.get("browser-b")?.tabOwner.has(2)).toBe(false);
+    expect(session).toMatchObject({ browserId: "browser-b", currentTabId: null });
+    expect(session?.ownedTabs).toEqual(new Set());
+  });
+
+  it("terminates pending requests for a session when it rebinds", async () => {
+    started = await startTestHub({ requestTimeoutMs: 2_000, virtualSessionRequestTimeoutMs: 2_000 });
+    let resolveOldRequest: (() => void) | undefined;
+    const browserA = await addAgent(started, {
+      browserId: "browser-a",
+      handle: (request) => new Promise<VtxResponse>((resolve) => {
+        resolveOldRequest = () => resolve({ action: request.action, id: request.id, result: { late: true } });
+      }),
+    });
+    await addAgent(started, "browser-b");
+    const headersFor = (browserId: string) => ({
+      "content-type": "application/json",
+      "x-vortex-browser": browserId,
+      "x-vortex-session": "pending-rebind",
+    });
+
+    const oldResponsePromise = fetch(`http://127.0.0.1:${started.port}/api/test/slow`, {
+      method: "POST",
+      headers: headersFor("browser-a"),
+      body: JSON.stringify({ tabId: 1 }),
+    });
+    await browserA.waitFor((message): message is { type: "request"; action: string } =>
+      typeof message === "object" && message !== null &&
+      (message as { type?: unknown }).type === "request" &&
+      (message as { action?: unknown }).action === "test.slow",
+    );
+
+    const rebindResponse = await fetch(`http://127.0.0.1:${started.port}/api/tab/list`, {
+      method: "POST",
+      headers: headersFor("browser-b"),
+      body: JSON.stringify({}),
+    });
+
+    expect(rebindResponse.status).toBe(200);
+    expect(started.hub.pending.countBySession("pending-rebind")).toBe(0);
+    expect((await oldResponsePromise).status).toBe(503);
+    resolveOldRequest?.();
+  });
+
+  it("does not let a delayed old claim forward a request after rebind", async () => {
+    started = await startTestHub({ requestTimeoutMs: 1_000, virtualSessionRequestTimeoutMs: 200 });
+    const internalRequests: VtxRequest[] = [];
+    let resolveInternal: (() => void) | undefined;
+    const browserA = await addAgent(started, {
+      browserId: "browser-a",
+      handle: (request) => {
+        if (request.action === "tab.list") {
+          internalRequests.push(request);
+          return new Promise<VtxResponse>((resolve) => {
+            resolveInternal = () => resolve({
+              action: request.action,
+              id: request.id,
+              result: [{ id: 1, url: "https://old.test", active: true }],
+            });
+          });
+        }
+        return { action: request.action, id: request.id, result: { accepted: true } };
+      },
+    });
+    await addAgent(started, "browser-b");
+    const headersFor = (browserId: string) => ({
+      "content-type": "application/json",
+      "x-vortex-browser": browserId,
+      "x-vortex-session": "claim-rebind",
+    });
+
+    const oldResponsePromise = fetch(`http://127.0.0.1:${started.port}/api/page/info`, {
+      method: "POST",
+      headers: headersFor("browser-a"),
+      body: JSON.stringify({}),
+    });
+    await browserA.waitFor((message): message is { type: "request"; action: string } =>
+      typeof message === "object" && message !== null &&
+      (message as { type?: unknown }).type === "request" &&
+      (message as { action?: unknown }).action === "tab.list",
+    );
+
+    const rebindResponse = await fetch(`http://127.0.0.1:${started.port}/api/tab/list`, {
+      method: "POST",
+      headers: headersFor("browser-b"),
+      body: JSON.stringify({}),
+    });
+    expect(rebindResponse.status).toBe(200);
+    await oldResponsePromise;
+    resolveInternal?.();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    expect(internalRequests).toHaveLength(1);
+    expect(browserA.messages.filter((message) =>
+      typeof message === "object" && message !== null &&
+      (message as { type?: unknown }).type === "request" &&
+      (message as { action?: unknown }).action === "page.info",
+    )).toEqual([]);
+    expect(started.hub.sessions.get("claim-rebind")).toMatchObject({
+      browserId: "browser-b",
+      currentTabId: null,
+    });
+    expect(started.hub.sessions.get("claim-rebind")?.ownedTabs).toEqual(new Set());
+    expect(started.hub.browsers.get("browser-a")?.tabOwner.has(1)).toBe(false);
+  });
+
   it("maps agent errors to the API status and body contract", async () => {
     started = await startTestHub({ requestTimeoutMs: 1_000 });
     const errors: Record<string, VtxResponse["error"]> = {

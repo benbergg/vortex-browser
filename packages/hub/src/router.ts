@@ -218,12 +218,15 @@ export class HubRouter {
       }
       if (!this.sessions.has(sessionId)) return;
       if (!this.browsers.get(browserId)?.ws) {
+        if (session.browserId !== null || session.lastBrowserId !== browserId) return;
         this.bufferOrFail(session, request);
         return;
       }
+      if (!this.isBoundToBrowser(session, browserId, browser)) return;
       this.failTabResolution(sessionId, browserId, request, error);
       return;
     }
+    if (!this.isBoundToBrowser(session, browserId, browser)) return;
     if (!this.acceptingRequests) {
       if (this.sessions.has(sessionId)) {
         this.sendResponse(sessionId, request, browserId, {
@@ -417,10 +420,18 @@ export class HubRouter {
   }
 
   rebindSession(session: SessionEntry, browserId: string, notify = false): string | null {
-    if (session.browserId === browserId && this.browsers.get(browserId)?.sessions.has(session.sessionId)) {
+    if (
+      session.browserId === browserId &&
+      session.lastBrowserId === browserId &&
+      this.browsers.get(browserId)?.sessions.has(session.sessionId)
+    ) {
       return browserId;
     }
-    this.clearSessionBinding(session);
+    const rebindError = this.error(VtxErrorCode.EXTENSION_NOT_CONNECTED, "Session browser binding changed");
+    this.pending.failSession(session.sessionId, rebindError);
+    this.failInternalForSession(session.sessionId, new Error(rebindError.message));
+    session.claiming = null;
+    this.clearSessionBinding(session, browserId);
     session.browserId = browserId;
     session.lastBrowserId = browserId;
     session.rebindUntil = 0;
@@ -485,10 +496,11 @@ export class HubRouter {
     }
   }
 
-  private clearSessionBinding(session: SessionEntry): void {
+  private clearSessionBinding(session: SessionEntry, targetBrowserId?: string): void {
     const browserIds = new Set<string>();
     if (session.browserId) browserIds.add(session.browserId);
     if (session.lastBrowserId) browserIds.add(session.lastBrowserId);
+    if (targetBrowserId) browserIds.add(targetBrowserId);
     for (const browserId of browserIds) {
       const browser = this.browsers.get(browserId);
       if (!browser) continue;
@@ -497,12 +509,29 @@ export class HubRouter {
         if (ownerSessionId === session.sessionId) browser.tabOwner.delete(tabId);
       }
     }
+    for (const browserId of browserIds) {
+      const lost = this.lostBrowsers.get(browserId);
+      if (!lost) continue;
+      lost.entry.sessions.delete(session.sessionId);
+      for (const [tabId, ownerSessionId] of lost.entry.tabOwner) {
+        if (ownerSessionId !== session.sessionId) continue;
+        lost.entry.tabOwner.delete(tabId);
+        lost.entry.opener.delete(tabId);
+      }
+    }
     session.ownedTabs.clear();
     session.currentTabId = null;
   }
 
   private assignWaitingSessions(browserId: string): void {
+    const browser = this.browsers.get(browserId);
+    if (!browser) return;
     for (const session of this.sessions.values()) {
+      if (session.pinned && session.browserId === browserId && !browser.sessions.has(session.sessionId)) {
+        this.rebindSession(session, browserId, false);
+        this.flushBuffer(session);
+        continue;
+      }
       if (session.browserId) continue;
       if (session.rebindUntil > this.now() && session.lastBrowserId !== browserId) continue;
       if (this.assignSession(session)) this.flushBuffer(session);
@@ -590,7 +619,12 @@ export class HubRouter {
     return typeof request.params?.tabId === "number" ? request.params.tabId : undefined;
   }
 
+  private isBoundToBrowser(session: SessionEntry, browserId: string, browser: BrowserEntry): boolean {
+    return session.browserId === browserId && this.browsers.get(browserId) === browser;
+  }
+
   private claimTab(session: SessionEntry, browser: BrowserEntry, tabId: number, makeCurrent: boolean): void {
+    if (session.browserId !== browser.browserId || this.browsers.get(browser.browserId) !== browser) return;
     const previousOwnerId = browser.tabOwner.get(tabId);
     if (previousOwnerId && previousOwnerId !== session.sessionId) {
       const previousOwner = this.sessions.get(previousOwnerId);
