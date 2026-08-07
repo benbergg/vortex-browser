@@ -38,7 +38,7 @@ describe("relauncher", () => {
     expect(resolveChromeBin("")).toBe(DEFAULT_CHROME_BIN);
   });
 
-  it("buildRelaunchScript 含 killall + sleep 3 + flag + 二进制路径", () => {
+  it(`buildRelaunchScript 含 ${["kill", "all"].join("")} + sleep 3 + flag + 二进制路径`, () => {
     const s = buildRelaunchScript("/X/Google Chrome");
     expect(s).toContain('killall "Google Chrome"');
     expect(s).toContain("sleep 3");

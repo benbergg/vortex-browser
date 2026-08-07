@@ -1,6 +1,7 @@
 import type { NmRequest } from "@vortex-browser/shared";
 import { VtxEventType } from "@vortex-browser/shared";
 import { NativeMessagingClient } from "./lib/native-messaging.js";
+import { sendNmHello } from "./lib/nm-hello.js";
 import { ActionRouter } from "./lib/router.js";
 import { DebuggerManager } from "./lib/debugger-manager.js";
 import { registerTabHandlers } from "./handlers/tab.js";
@@ -67,6 +68,11 @@ const nm = new NativeMessagingClient(
   },
   () => {
     console.warn("[vortex] NM disconnected, will reconnect on next alarm");
+  },
+  () => {
+    void sendNmHello(nm).catch((error: unknown) => {
+      console.error("[vortex] failed to send NmHello", error);
+    });
   },
 );
 

@@ -1,3 +1,7 @@
+/**
+ * Author: qingwa
+ * Description: Registers browser cookie and storage commands.
+ */
 import type { Command } from "commander";
 import { makeAction, getGlobalOpts } from "./helpers.js";
 import { sendRequest } from "../client.js";
@@ -69,12 +73,12 @@ export function registerStorageCommands(program: Command): void {
     .requiredOption("--domain <d>", "Domain (e.g. example.com)")
     .option("--output <file>", "Save to JSON file (default: print to stdout)")
     .action(async (opts: any, cmd: Command) => {
-      const { port, tab, pretty, quiet } = getGlobalOpts(cmd);
+      const { port, session, tab, pretty, quiet } = getGlobalOpts(cmd);
       try {
         const resp = await sendRequest(
           "storage.exportSession",
           { domain: opts.domain },
-          { port, tabId: tab },
+          { port, session, tabId: tab },
         );
         if (opts.output && resp.result) {
           writeFileSync(opts.output, JSON.stringify(resp.result, null, 2));
@@ -91,13 +95,13 @@ export function registerStorageCommands(program: Command): void {
     .description("Import session from a JSON file (written by exportSession)")
     .requiredOption("--input <file>", "Session JSON file")
     .action(async (opts: any, cmd: Command) => {
-      const { port, tab, pretty, quiet } = getGlobalOpts(cmd);
+      const { port, session, tab, pretty, quiet } = getGlobalOpts(cmd);
       try {
         const data = JSON.parse(readFileSync(opts.input, "utf8"));
         const resp = await sendRequest(
           "storage.importSession",
           { data },
-          { port, tabId: tab },
+          { port, session, tabId: tab },
         );
         printResponse(resp, { pretty, quiet });
       } catch (err: any) {

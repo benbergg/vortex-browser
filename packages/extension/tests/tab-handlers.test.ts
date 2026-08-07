@@ -23,7 +23,9 @@ describe("tab handlers", () => {
   let tabsUpdate: ReturnType<typeof vi.fn>;
   let tabsRemove: ReturnType<typeof vi.fn>;
   let tabsGet: ReturnType<typeof vi.fn>;
+  let tabsQuery: ReturnType<typeof vi.fn>;
   let windowsUpdate: ReturnType<typeof vi.fn>;
+  let windowsGetLastFocused: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
     router = new ActionRouter();
@@ -42,11 +44,13 @@ describe("tab handlers", () => {
       windowId: 1,
       status: "complete",
     });
+    tabsQuery = vi.fn().mockResolvedValue([]);
     windowsUpdate = vi.fn().mockResolvedValue({});
+    windowsGetLastFocused = vi.fn().mockResolvedValue({ id: 1 });
 
     vi.stubGlobal("chrome", {
       tabs: {
-        query: vi.fn().mockResolvedValue([]),
+        query: tabsQuery,
         create: vi.fn(),
         update: tabsUpdate,
         remove: tabsRemove,
@@ -54,6 +58,7 @@ describe("tab handlers", () => {
       },
       windows: {
         update: windowsUpdate,
+        getLastFocused: windowsGetLastFocused,
       },
     });
     registerTabHandlers(router);
@@ -61,6 +66,65 @@ describe("tab handlers", () => {
 
   afterEach(() => {
     vi.unstubAllGlobals();
+  });
+
+  describe("tab.list current-window annotation", () => {
+    it("marks tabs from the last-focused window and preserves existing fields", async () => {
+      const tabs = [
+        {
+          id: 11,
+          url: "https://background.test",
+          title: "Background",
+          active: true,
+          windowId: 1,
+          index: 3,
+          pinned: false,
+          status: "complete",
+        },
+        {
+          id: 12,
+          url: "https://focused.test",
+          title: "Focused",
+          active: true,
+          windowId: 2,
+          index: 4,
+          pinned: true,
+          status: "loading",
+        },
+      ];
+      tabsQuery.mockResolvedValueOnce(tabs);
+      windowsGetLastFocused.mockResolvedValueOnce({ id: 2 });
+
+      const resp = await router.dispatch(mkReq("tab.list"));
+
+      expect(resp.error).toBeUndefined();
+      expect(tabsQuery).toHaveBeenCalledWith({});
+      expect(windowsGetLastFocused).toHaveBeenCalledTimes(1);
+      expect(resp.result).toEqual([
+        { ...tabs[0], lastFocused: false },
+        { ...tabs[1], lastFocused: true },
+      ]);
+    });
+
+    it("still lists tabs when no window is focused", async () => {
+      const tabs = [{
+        id: 11,
+        url: "https://background.test",
+        title: "Background",
+        active: true,
+        windowId: 1,
+        index: 0,
+        pinned: false,
+        status: "complete",
+      }];
+      tabsQuery.mockResolvedValueOnce(tabs);
+      windowsGetLastFocused.mockRejectedValueOnce(new Error("No current window"));
+
+      const resp = await router.dispatch(mkReq("tab.list"));
+
+      expect(resp.error).toBeUndefined();
+      expect(resp.result).toEqual([{ ...tabs[0], lastFocused: false }]);
+    });
   });
 
   describe("tab.activate (F11 regression)", () => {

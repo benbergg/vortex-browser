@@ -1,8 +1,7 @@
 #!/usr/bin/env node
-import { appendFileSync } from "fs";
-import { Command } from "commander";
+import { join } from "path";
 import { startServer } from "../src/index.js";
-import { installNmHost, DEFAULT_EXTENSION_ID } from "../src/install-nm-host.js";
+import { installNmHost, parseInstallArgs } from "../src/install-nm-host.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // install 子命令：手动 argv 检测，不用 commander subcommand。
@@ -13,14 +12,22 @@ import { installNmHost, DEFAULT_EXTENSION_ID } from "../src/install-nm-host.js";
 if (process.argv[2] === "install") {
   // 不带 ID 时用 manifest 钉死 key 对应的默认扩展 ID(方案 B),无需用户复制粘贴。
   // 仅当加载的扩展 ID 不同(如商店分发改了 key)才需显式 `install <id>` 覆盖。
-  const extId = process.argv[3] || DEFAULT_EXTENSION_ID;
-  const usingDefault = !process.argv[3];
+  const { extensionId, usingDefault, allChannels } = parseInstallArgs(process.argv);
   try {
-    const r = installNmHost(extId);
+    const r = installNmHost(extensionId, { allChannels });
+    if (allChannels && r.installed.length === 0) {
+      console.error("install failed: no Chromium-based browser found");
+      process.exit(1);
+    }
     console.log(`✓ Native messaging host registered: ${r.hostName}`);
-    console.log(`  extension id: ${extId}${usingDefault ? " (default, pinned)" : ""}`);
-    console.log(`  manifest: ${r.manifestPath}`);
+    console.log(`  extension id: ${extensionId}${usingDefault ? " (default, pinned)" : ""}`);
+    for (const c of r.installed) {
+      console.log(`  ${c.label}: ${join(c.nmDir, `${r.hostName}.json`)}`);
+    }
     console.log(`  host script: ${r.nativeHostPath}`);
+    if (!allChannels) {
+      console.log(`\nOther browsers (Edge, Canary, Chromium): re-run with --all-channels`);
+    }
     console.log(`\nReload the Vortex extension in chrome://extensions to connect.`);
     process.exit(0);
   } catch (e: any) {
@@ -29,40 +36,9 @@ if (process.argv[2] === "install") {
   }
 }
 
-const LOG = "/tmp/vortex-server.log";
-const log = (msg: string) => appendFileSync(LOG, `${new Date().toISOString()} ${msg}\n`);
-
-log("=== vortex-server starting ===");
-log(`pid=${process.pid} argv=${process.argv.join(" ")}`);
-log(`stdin isTTY=${process.stdin.isTTY} stdout isTTY=${process.stdout.isTTY}`);
-
-process.on("uncaughtException", (err) => {
-  log(`UNCAUGHT: ${err.stack ?? err.message}`);
-});
-process.on("unhandledRejection", (err) => {
-  log(`UNHANDLED: ${err}`);
-});
-
-const program = new Command();
-program
-  .option("--port <port>", "local HTTP/WS port", String(process.env.VORTEX_PORT ?? "6800"))
-  // Chrome Native Messaging 启动时会追加未知参数（--parent-window 等）以及
-  // chrome-extension://<id>/ 等位置参数，全部放行
-  .allowUnknownOption(true)
-  .allowExcessArguments(true)
-  .parse(process.argv);
-
-const opts = program.opts();
-
 try {
-  const port = Number(opts.port) || 6800;
-
-  log(`startServer opts: port=${port}`);
-
-  startServer({ port });
-  log("startServer() returned");
+  startServer();
 } catch (err: any) {
-  log(`STARTUP ERROR: ${err.stack ?? err.message}`);
   console.error(`[vortex-server] startup error: ${err.message}`);
   process.exit(1);
 }

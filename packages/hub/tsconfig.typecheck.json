@@ -1,0 +1,13 @@
+{
+  // The default config reads shared's built declarations; this config reads shared source because this branch is not built.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@vortex-browser/shared": ["../shared/src/index.ts"]
+    },
+    "rootDir": "..",
+    "noEmit": true
+  },
+  "include": ["src"]
+}

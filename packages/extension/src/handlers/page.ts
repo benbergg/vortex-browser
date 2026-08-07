@@ -1,15 +1,8 @@
 import { PageActions, VtxErrorCode, vtxError } from "@vortex-browser/shared";
 import type { ActionRouter } from "../lib/router.js";
 import type { DebuggerManager } from "../lib/debugger-manager.js";
-import { buildExecuteTarget, ensureFrameAttached } from "../lib/tab-utils.js";
+import { buildExecuteTarget, ensureFrameAttached, getActiveTabId } from "../lib/tab-utils.js";
 import { resolveTargetOptional } from "../lib/resolve-target.js";
-
-async function getActiveTabId(tabId?: number): Promise<number> {
-  if (tabId) return tabId;
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (!tab?.id) throw vtxError(VtxErrorCode.TAB_NOT_FOUND, "No active tab found");
-  return tab.id;
-}
 
 // 探一次目标 tab 的 document.readyState（仅主 frame）。executeScript 异常时返回
 // 空串，调用方按"未就绪"处理。

@@ -1,29 +1,106 @@
 import type { VtxErrorPayload } from "./errors.js";
 import type { VtxEventLevel } from "./events.js";
 
-// ========== 客户端 <-> 中间件 ==========
+export const VTX_WIRE_VERSION = 2;
+export type VtxPeerRole = "mcp" | "cli" | "browser-agent";
 
-export interface VtxRequest {
-  action: string;
-  params?: Record<string, unknown>;
-  id: string;
-  tabId?: number;
+export interface VtxHello {
+  type: "hello";
+  wireVersion: number;
+  role: VtxPeerRole;
+  sessionId?: string;
+  browserId?: string;
+  label?: string;
+  peerVersion?: string;
+  extensionVersion?: string;
+  buildStamp?: string;
+  extDist?: string;
+  repoRoot?: string;
+  preferBrowserId?: string;
+  capabilities?: string[];
 }
 
-export interface VtxResponse {
-  action: string;
+export interface VtxWelcome {
+  type: "welcome";
+  wireVersion: number;
+  hubVersion: string;
+  sessionId?: string;
+  browserId?: string;
+  assignedBrowserId?: string | null;
+  assignedBrowserLabel?: string | null;
+  strictTab?: boolean;
+}
+
+export interface VtxNotice {
+  type: "notice";
+  notice:
+    | "browser-assigned"
+    | "browser-lost"
+    | "browser-restored"
+    | "session-replaced"
+    | "tab-adopted"
+    | "hub-shutdown";
+  browserId?: string | null;
+  browserLabel?: string | null;
+  tabId?: number;
+  reason?: string;
+}
+
+export interface VtxHeartbeat {
+  type: "heartbeat";
+  timestamp: number;
+  nmConnected?: boolean;
+  tabCount?: number;
+}
+
+export interface VtxAgentCommand {
+  type: "agent-command";
+  id: string;
+  command: "trusted-mode" | "relaunch-trusted" | "reload-extension" | "ext-dist-info";
+  reason?: string;
+}
+
+export interface VtxAgentResult {
+  type: "agent-result";
   id: string;
   result?: unknown;
   error?: VtxErrorPayload;
 }
 
+// ========== 客户端 <-> 中间件 ==========
+
+export interface VtxRequest {
+  type?: "request";
+  action: string;
+  params?: Record<string, unknown>;
+  id: string;
+  tabId?: number;
+  sessionId?: string;
+  browserId?: string;
+  tabIdBackfilled?: boolean;
+  strictTab?: boolean;
+}
+
+export interface VtxResponse {
+  type?: "response";
+  action: string;
+  id: string;
+  result?: unknown;
+  error?: VtxErrorPayload;
+  sessionId?: string;
+  browserId?: string;
+}
+
 export interface VtxEvent {
+  type?: "event";
   event: string;
   data: unknown;
   tabId?: number;
   frameId?: number;
   level?: VtxEventLevel;
   timestamp: number;
+  browserId?: string;
+  unowned?: boolean;
 }
 
 // ========== 中间件 <-> 扩展 (Native Messaging) ==========
@@ -34,6 +111,7 @@ export interface NmRequest {
   args: Record<string, unknown>;
   requestId: string;
   tabId?: number;
+  strictTab?: boolean;
 }
 
 export interface NmResponse {
@@ -52,6 +130,7 @@ export interface NmEvent {
   level?: VtxEventLevel;
 }
 
+/** @deprecated 死类型：全仓没有生产者或消费者，仅保留协议兼容声明。 */
 export interface NmResponseChunk {
   type: "tool_response_chunk";
   requestId: string;
@@ -66,6 +145,14 @@ export interface NmPing {
 
 export interface NmPong {
   type: "pong";
+}
+
+export interface NmHello {
+  type: "hello";
+  browserId: string;
+  extensionVersion: string;
+  buildStamp?: string;
+  label?: string;
 }
 
 /**
@@ -84,5 +171,10 @@ export interface NmControl {
 }
 
 export type NmMessageFromServer = NmRequest | NmPing | NmControl;
-export type NmMessageFromExtension = NmResponse | NmEvent | NmResponseChunk | NmPong;
+export type NmMessageFromExtension = NmResponse | NmEvent | NmResponseChunk | NmPong | NmHello;
 export type NmMessage = NmMessageFromServer | NmMessageFromExtension;
+
+export type VtxFrameFromClient = VtxHello | VtxRequest | VtxHeartbeat;
+export type VtxFrameToClient = VtxWelcome | VtxNotice | VtxResponse | VtxEvent;
+export type VtxFrameFromAgent = VtxHello | VtxHeartbeat | VtxResponse | VtxEvent | VtxAgentResult;
+export type VtxFrameToAgent = VtxWelcome | VtxNotice | VtxRequest | VtxAgentCommand;

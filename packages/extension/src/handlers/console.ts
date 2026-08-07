@@ -1,10 +1,11 @@
 // packages/extension/src/handlers/console.ts
 
-import { ConsoleActions, VtxErrorCode, vtxError, VtxEventType } from "@vortex-browser/shared";
+import { ConsoleActions, VtxEventType } from "@vortex-browser/shared";
 import type { ActionRouter } from "../lib/router.js";
 import type { DebuggerManager } from "../lib/debugger-manager.js";
 import type { NativeMessagingClient } from "../lib/native-messaging.js";
 import type { EventDispatcher } from "../events/dispatcher.js";
+import { getActiveTabId } from "../lib/tab-utils.js";
 
 interface ConsoleEntry {
   level: string; // "log" | "warn" | "error" | "info" | "debug"
@@ -21,13 +22,6 @@ const consoleLogs = new Map<number, ConsoleEntry[]>();
 const MAX_LOGS = 500;
 // 已订阅 console 的 tab
 const subscribedTabs = new Set<number>();
-
-async function getActiveTabId(tabId?: number): Promise<number> {
-  if (tabId) return tabId;
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (!tab?.id) throw vtxError(VtxErrorCode.TAB_NOT_FOUND, "No active tab found");
-  return tab.id;
-}
 
 function addLog(tabId: number, entry: ConsoleEntry): void {
   if (!consoleLogs.has(tabId)) {

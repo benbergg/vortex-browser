@@ -1,4 +1,9 @@
+/**
+ * Author: qingwa
+ * Description: Builds the Vortex CLI command tree and global options.
+ */
 import { Command } from "commander";
+import { resolveSessionName } from "./session.js";
 import { registerShortcuts } from "./commands/shortcuts.js";
 import { registerTabCommands } from "./commands/tab.js";
 import { registerPageCommands } from "./commands/page.js";
@@ -15,6 +20,8 @@ import { registerMouseCommands } from "./commands/mouse.js";
 import { registerFramesCommands } from "./commands/frames.js";
 import { registerRawCommand } from "./commands/raw.js";
 
+export { resolveSessionName } from "./session.js";
+
 export function createProgram(): Command {
   const program = new Command();
 
@@ -25,13 +32,18 @@ export function createProgram(): Command {
     .option("--tab <id>", "target tab ID", parseInt)
     .option("--frame-id <id>", "target frame ID (for iframes)", parseInt)
     .option("--port <port>", "server port", parseInt, 6800)
+    .option(
+      "--session <name>",
+      "session name (default: cli-$USER, or $VORTEX_SESSION_NAME)",
+      resolveSessionName(undefined, process.env),
+    )
     .option("--pretty", "pretty-print JSON output")
     .option("--quiet", "only output result, no wrapper");
 
-  // 高频快捷命令
+  // Register shortcut commands.
   registerShortcuts(program);
 
-  // 命名空间命令
+  // Register namespace commands.
   registerTabCommands(program);
   registerPageCommands(program);
   registerDomCommands(program);
@@ -46,7 +58,7 @@ export function createProgram(): Command {
   registerMouseCommands(program);
   registerFramesCommands(program);
 
-  // 通用 raw 命令
+  // Register the raw command.
   registerRawCommand(program);
 
   return program;

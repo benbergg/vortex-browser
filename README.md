@@ -161,7 +161,7 @@ See [`packages/mcp/README.md`](packages/mcp/README.md) for full tool documentati
 ```bash
 pnpm install
 pnpm -r build              # full build
-pnpm -r test               # all tests
+pnpm test                  # all unit tests (see also: pnpm test:integration)
 pnpm --filter <pkg> dev    # single package watch mode
 ```
 

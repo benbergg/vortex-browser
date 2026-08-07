@@ -34,6 +34,8 @@ export default defineConfig({
   },
   build: {
     outDir: "dist",
-    emptyOutDir: true,
+    // 清空会让 manifest.json 在 build 期间消失,Chrome 下次启动按路径加载
+    // unpacked 扩展时读不到就把它整条移除,且恢复文件也不会自己回来。
+    emptyOutDir: false,
   },
 });

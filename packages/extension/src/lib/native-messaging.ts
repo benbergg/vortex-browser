@@ -5,15 +5,22 @@ const KEEPALIVE_ALARM = "vortex-keepalive";
 
 type OnMessageCallback = (msg: NmMessageFromServer) => void;
 type OnDisconnectCallback = () => void;
+type OnConnectedCallback = () => void;
 
 export class NativeMessagingClient {
   private port: chrome.runtime.Port | null = null;
   private onMessage: OnMessageCallback;
   private onDisconnect: OnDisconnectCallback;
+  private onConnected: OnConnectedCallback;
 
-  constructor(onMessage: OnMessageCallback, onDisconnect: OnDisconnectCallback) {
+  constructor(
+    onMessage: OnMessageCallback,
+    onDisconnect: OnDisconnectCallback,
+    onConnected: OnConnectedCallback = () => {},
+  ) {
     this.onMessage = onMessage;
     this.onDisconnect = onDisconnect;
+    this.onConnected = onConnected;
 
     chrome.alarms.create(KEEPALIVE_ALARM, { periodInMinutes: 0.4 });
     chrome.alarms.onAlarm.addListener((alarm) => {
@@ -41,6 +48,7 @@ export class NativeMessagingClient {
         this.onDisconnect();
       });
       console.log("[vortex-nm] connected to", NM_HOST_NAME);
+      this.onConnected();
     } catch (err) {
       console.error("[vortex-nm] connect failed:", err);
       this.port = null;

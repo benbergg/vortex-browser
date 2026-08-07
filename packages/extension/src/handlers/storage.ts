@@ -2,13 +2,7 @@
 
 import { StorageActions, VtxErrorCode, vtxError } from "@vortex-browser/shared";
 import type { ActionRouter } from "../lib/router.js";
-
-async function getActiveTabId(tabId?: number): Promise<number> {
-  if (tabId) return tabId;
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (!tab?.id) throw vtxError(VtxErrorCode.TAB_NOT_FOUND, "No active tab found");
-  return tab.id;
-}
+import { getActiveTabId } from "../lib/tab-utils.js";
 
 /**
  * 从 tab URL 提取域名，用于 cookies API

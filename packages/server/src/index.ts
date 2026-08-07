@@ -1,20 +1,9 @@
-import { createServer } from "http";
-import { writeFileSync, readFileSync, unlinkSync, existsSync, watch, statSync } from "fs";
-import { execSync } from "child_process";
-import express from "express";
+import { watch, statSync } from "fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { NativeMessagingReader, writeNmMessage } from "./native-messaging.js";
-import { SessionManager } from "./session.js";
-import { MessageRouter } from "./message-router.js";
-import { createWsServer } from "./ws-server.js";
-import { createHttpRoutes } from "./http-routes.js";
 import { resolveExtensionDist } from "./ext-dist.js";
-
-const PIDFILE = "/tmp/vortex-server.pid";
-
-export interface StartServerOptions {
-  /** 本地 WS/HTTP 服务端口，默认 6800 */
-  port?: number;
-}
+import { HubLink } from "./hub-link.js";
 
 /**
  * Watcher 扩展 dist 变更并推送 reload-extension 控制消息（@since 0.4.0，O-3b）。
@@ -82,37 +71,16 @@ function installExtensionDistWatcher(): void {
   }
 }
 
-// 杀掉旧的 vortex-server 进程
-function killOldProcess(): void {
-  try {
-    if (existsSync(PIDFILE)) {
-      const oldPid = readFileSync(PIDFILE, "utf-8").trim();
-      if (oldPid) {
-        try {
-          execSync(`kill ${oldPid} 2>/dev/null`);
-          // 等待旧进程释放端口
-          execSync("sleep 0.5");
-        } catch {
-          // 旧进程已经不存在
-        }
-      }
-    }
-  } catch {
-    // ignore
-  }
-  writeFileSync(PIDFILE, String(process.pid));
-}
-
-export function startServer(opts: StartServerOptions | number = {}): void {
-  // 向后兼容：老调用方式 startServer(6800)
-  const options: StartServerOptions = typeof opts === "number" ? { port: opts } : opts;
-  const port = options.port ?? 6800;
-
-  killOldProcess();
+export function startServer(): void {
   installExtensionDistWatcher();
-
-  const sessions = new SessionManager();
-  const router = new MessageRouter(process.stdout, sessions);
+  const extensionDist = resolveExtensionDist();
+  const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../../..");
+  const hubLink = new HubLink({
+    stdout: process.stdout,
+    extensionDist,
+    repoRoot,
+  });
+  hubLink.start();
 
   // 防止 stdout EPIPE 崩溃
   process.stdout.on("error", (err: NodeJS.ErrnoException) => {
@@ -124,24 +92,18 @@ export function startServer(opts: StartServerOptions | number = {}): void {
     }
   });
 
-  const nmReader = new NativeMessagingReader((msg) => {
-    router.handleNmMessage(msg);
-  });
+  const nmReader = new NativeMessagingReader((msg) => hubLink.handleNmMessage(msg));
 
   process.stdin.on("data", (chunk: Buffer) => {
-    router.setNmConnected(true);
+    hubLink.setNativeMessagingConnected(true);
     nmReader.feed(chunk);
   });
 
   process.stdin.on("end", () => {
     console.error("[nm] stdin closed, extension disconnected");
-    router.setNmConnected(false);
+    hubLink.setNativeMessagingConnected(false);
+    hubLink.stop();
     clearInterval(heartbeatTimer);
-  });
-
-  // 退出时清理 pidfile
-  process.on("exit", () => {
-    try { unlinkSync(PIDFILE); } catch { /* ignore */ }
   });
 
   const heartbeatTimer = setInterval(() => {
@@ -149,28 +111,4 @@ export function startServer(opts: StartServerOptions | number = {}): void {
       writeNmMessage(process.stdout, { type: "ping" });
     }
   }, 10_000);
-
-  const app = express();
-  app.use(createHttpRoutes(router));
-
-  const httpServer = createServer(app);
-  createWsServer(httpServer, sessions, router);
-
-  httpServer.on("error", (err: NodeJS.ErrnoException) => {
-    if (err.code === "EADDRINUSE") {
-      console.error(`[vortex-server] port ${port} still in use, force killing`);
-      try {
-        execSync(`lsof -ti:${port} | xargs kill -9 2>/dev/null`);
-        setTimeout(() => httpServer.listen(port), 500);
-      } catch {
-        console.error(`[vortex-server] failed to free port ${port}`);
-      }
-    } else {
-      console.error("[vortex-server] server error:", err);
-    }
-  });
-
-  httpServer.listen(port, () => {
-    console.error(`[vortex-server] listening on port ${port}`);
-  });
 }

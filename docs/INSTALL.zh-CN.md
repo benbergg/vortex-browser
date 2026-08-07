@@ -82,12 +82,16 @@ vortex-server install
 
 > **ID 不同的构建？** 如果你加载的是 ID 不同的版本（例如 Chrome Web Store 版），请显式传入 ID：`vortex-server install <你的扩展ID>`
 
+> **要用 Edge / Canary / Chromium？** 清单目录按产品划分，浏览器之间不共享。执行 `vortex-server install --all-channels` 会向机器上所有已安装的 Chromium 系浏览器注册（Chrome 正式版/Beta/Dev/Canary/for Testing、Chromium、Edge 正式版/Beta/Dev/Canary）。只写已安装的浏览器，不会给没装的留空目录。
+
 此命令会将 Native Messaging 宿主清单（`com.vortexbrowser.host`）写入对应的系统路径：
 
 | 操作系统 | 路径 |
 |----------|------|
 | macOS | `~/Library/Application Support/Google/Chrome/NativeMessagingHosts/com.vortexbrowser.host.json` |
 | Linux | `~/.config/google-chrome/NativeMessagingHosts/com.vortexbrowser.host.json` |
+
+带 `--all-channels` 时，同一份清单会写进各产品自己的目录，例如 macOS 的 `~/Library/Application Support/Microsoft Edge/NativeMessagingHosts/`、Linux 的 `~/.config/microsoft-edge/NativeMessagingHosts/`。
 | Windows | `%LOCALAPPDATA%\Google\Chrome\User Data\NativeMessagingHosts\com.vortexbrowser.host.json` |
 
 命令执行完毕后，回到 `chrome://extensions/`，点击 Vortex 扩展的**重新加载**按钮。此后，Chrome 会在扩展激活时自动启动 `vortex-server`——你永远不需要手动运行它。

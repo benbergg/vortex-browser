@@ -1,0 +1,12 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "rootDir": "..",
+    "paths": {
+      "@vortex-browser/hub/paths": ["../hub/src/paths.ts"],
+      "@vortex-browser/hub/spawn": ["../hub/src/spawn.ts"],
+      "@vortex-browser/shared": ["../shared/src/index.ts"]
+    }
+  }
+}
