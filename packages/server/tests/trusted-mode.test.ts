@@ -1,5 +1,14 @@
-import { describe, it, expect } from "vitest";
-import { parseTrustedMode } from "../src/trusted-mode.js";
+import { beforeEach, describe, it, expect, vi } from "vitest";
+
+vi.mock("child_process", () => ({ execSync: vi.fn() }));
+
+import { execSync } from "child_process";
+import { _resetTrustedModeCache, detectTrustedMode, parseTrustedMode } from "../src/trusted-mode.js";
+
+beforeEach(() => {
+  _resetTrustedModeCache();
+  vi.clearAllMocks();
+});
 
 describe("parseTrustedMode", () => {
   it("带 flag 的 Chrome 行 → true", () => {
@@ -20,5 +29,15 @@ describe("parseTrustedMode", () => {
 
   it("空输出 → false", () => {
     expect(parseTrustedMode("")).toBe(false);
+  });
+
+  it("uses an injected ps probe without invoking the process probe", () => {
+    const probe = vi.fn(() =>
+      "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome --silent-debugger-extension-api",
+    );
+
+    expect(detectTrustedMode(1_000, probe)).toBe(true);
+    expect(probe).toHaveBeenCalledTimes(1);
+    expect(execSync).not.toHaveBeenCalled();
   });
 });

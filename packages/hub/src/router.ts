@@ -6,6 +6,8 @@ import {
   VtxErrorCode,
   VtxEventType,
   vtxError,
+  type VtxAgentCommand,
+  type VtxAgentResult,
   type VtxErrorPayload,
   type VtxEvent,
   type VtxFrameFromAgent,
@@ -29,6 +31,13 @@ interface InternalPending {
   browserId: string;
   sessionId: string;
   resolve: (response: VtxResponse) => void;
+  reject: (error: Error) => void;
+  timeout: ReturnType<typeof setTimeout>;
+}
+
+interface AgentCommandPending {
+  browserId: string;
+  resolve: (result: VtxAgentResult) => void;
   reject: (error: Error) => void;
   timeout: ReturnType<typeof setTimeout>;
 }
@@ -67,9 +76,11 @@ export class HubRouter {
   private readonly sendToBrowser: RouterOptions["sendToBrowser"];
   private readonly lostBrowsers = new Map<string, LostBrowser>();
   private readonly internalPending = new Map<string, InternalPending>();
+  private readonly agentCommandPending = new Map<string, AgentCommandPending>();
   private readonly inFlight = new Set<Promise<unknown>>();
   private requestCounter = 0;
   private internalRequestCounter = 0;
+  private agentCommandCounter = 0;
   private acceptingRequests = true;
   private shutdownPromise: Promise<void> | undefined;
 
@@ -99,6 +110,41 @@ export class HubRouter {
     void this.track(this.forwardRequest(sessionId, request));
   }
 
+  sendAgentCommand(
+    browserId: string,
+    command: VtxAgentCommand["command"],
+    reason?: string,
+  ): Promise<VtxAgentResult> {
+    if (!this.acceptingRequests) return Promise.reject(new Error("Hub is shutting down"));
+    if (!this.browsers.get(browserId)?.ws) {
+      return Promise.reject(new Error("Browser agent is unavailable"));
+    }
+    if (this.requestTimeoutMs <= 0) {
+      return Promise.reject(new Error(`Agent command ${command} timed out`));
+    }
+
+    const id = `agent-command-${++this.agentCommandCounter}`;
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        this.agentCommandPending.delete(id);
+        reject(new Error(`Agent command ${command} timed out`));
+      }, this.requestTimeoutMs);
+      this.agentCommandPending.set(id, { browserId, resolve, reject, timeout });
+      try {
+        this.sendToBrowser(browserId, {
+          type: "agent-command",
+          id,
+          command,
+          ...(reason !== undefined ? { reason } : {}),
+        } satisfies VtxAgentCommand);
+      } catch (error: unknown) {
+        this.agentCommandPending.delete(id);
+        clearTimeout(timeout);
+        reject(error instanceof Error ? error : new Error(String(error)));
+      }
+    });
+  }
+
   beginShutdown(): Promise<void> {
     if (this.shutdownPromise) return this.shutdownPromise;
     this.acceptingRequests = false;
@@ -110,6 +156,7 @@ export class HubRouter {
       }
     }
     this.failAllInternal(new InternalRequestTimeoutError("hub shutdown"));
+    this.failAllAgentCommands(new Error("Hub is shutting down"));
     this.shutdownPromise = this.waitForInFlight();
     return this.shutdownPromise;
   }
@@ -229,6 +276,14 @@ export class HubRouter {
   }
 
   handleAgentFrame(browserId: string, frame: VtxFrameFromAgent): void {
+    if (frame.type === "agent-result") {
+      const pending = this.agentCommandPending.get(frame.id);
+      if (!pending || pending.browserId !== browserId) return;
+      this.agentCommandPending.delete(frame.id);
+      clearTimeout(pending.timeout);
+      pending.resolve(frame);
+      return;
+    }
     if (frame.type === "response") {
       const internal = this.internalPending.get(frame.id);
       if (internal) {
@@ -310,6 +365,7 @@ export class HubRouter {
     };
     this.lostBrowsers.set(browserId, { entry: snapshot, expiresAt });
     this.failInternal(browserId, new Error("Browser agent disconnected"));
+    this.failAgentCommands(browserId, new Error("Browser agent disconnected"));
     for (const session of this.sessions.values()) {
       if (session.browserId !== browserId) continue;
       session.browserId = null;
@@ -603,6 +659,15 @@ export class HubRouter {
     }
   }
 
+  private failAgentCommands(browserId: string, error: Error): void {
+    for (const [id, pending] of this.agentCommandPending) {
+      if (pending.browserId !== browserId) continue;
+      this.agentCommandPending.delete(id);
+      clearTimeout(pending.timeout);
+      pending.reject(error);
+    }
+  }
+
   private failInternalForSession(sessionId: string, error: Error): void {
     for (const [id, pending] of this.internalPending) {
       if (pending.sessionId !== sessionId) continue;
@@ -615,6 +680,14 @@ export class HubRouter {
   private failAllInternal(error: Error): void {
     for (const [id, pending] of this.internalPending) {
       this.internalPending.delete(id);
+      clearTimeout(pending.timeout);
+      pending.reject(error);
+    }
+  }
+
+  private failAllAgentCommands(error: Error): void {
+    for (const [id, pending] of this.agentCommandPending) {
+      this.agentCommandPending.delete(id);
       clearTimeout(pending.timeout);
       pending.reject(error);
     }

@@ -240,7 +240,9 @@ export class WsHub {
       return;
     }
     if (peer.role === "browser-agent") {
-      if (frame.type === "response" || frame.type === "event") this.router.handleAgentFrame(peer.id, frame);
+      if (frame.type === "response" || frame.type === "event" || frame.type === "agent-result") {
+        this.router.handleAgentFrame(peer.id, frame);
+      }
       return;
     }
     if (frame.type === "request") this.router.handleRequest(peer.id, frame);

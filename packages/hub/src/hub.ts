@@ -4,7 +4,12 @@
  */
 import { createServer, type Server } from "node:http";
 import express from "express";
-import { VtxErrorCode, type VtxErrorPayload } from "@vortex-browser/shared";
+import {
+  VtxErrorCode,
+  type VtxAgentCommand,
+  type VtxAgentResult,
+  type VtxErrorPayload,
+} from "@vortex-browser/shared";
 import { BrowserRegistry, SessionRegistry } from "./registry.js";
 import { HubRouter } from "./router.js";
 import { createHttpRoutes } from "./http-routes.js";
@@ -25,6 +30,11 @@ export interface HubHandle {
   sessions: SessionRegistry;
   browsers: BrowserRegistry;
   pending: PendingTable;
+  sendAgentCommand(
+    browserId: string,
+    command: VtxAgentCommand["command"],
+    reason?: string,
+  ): Promise<VtxAgentResult>;
   close(): Promise<void>;
 }
 
@@ -75,7 +85,14 @@ export async function createHub(options: HubOptions = {}): Promise<HubHandle> {
   }));
   wsHub = new WsHub({ httpServer, sessions, browsers, router, now, hubVersion });
   const port = await listen(httpServer, options.port ?? 0);
-  return { port, sessions, browsers, pending: router.pending, close };
+  return {
+    port,
+    sessions,
+    browsers,
+    pending: router.pending,
+    sendAgentCommand: (browserId, command, reason) => router.sendAgentCommand(browserId, command, reason),
+    close,
+  };
 }
 
 function listen(server: Server, port: number): Promise<number> {

@@ -7,6 +7,9 @@ import { ensureHubRunning as ensureHubRunningDefault } from "@vortex-browser/hub
 import { resolveHubPort } from "@vortex-browser/hub/paths";
 import {
   VTX_WIRE_VERSION,
+  VtxErrorCode,
+  type VtxAgentCommand,
+  type VtxErrorPayload,
   type NmHello,
   type NmMessageFromExtension,
   type NmMessageFromServer,
@@ -18,6 +21,8 @@ import {
 import WebSocket from "ws";
 import { writeNmMessage } from "./native-messaging.js";
 import { readBuildStamp } from "./ext-dist.js";
+import { relaunchTrusted as relaunchTrustedDefault } from "./relauncher.js";
+import { detectTrustedMode as detectTrustedModeDefault, type TrustedModeProbe } from "./trusted-mode.js";
 
 export const RETRY_DELAYS_MS = [200, 400, 800, 1600, 3200] as const;
 const JITTER_RATIO = 0.2;
@@ -43,6 +48,10 @@ export interface HubLinkOptions {
   createSocket?: (url: string) => HubSocket;
   ensureHubRunning?: (options: { port: number; role: string }) => Promise<unknown>;
   random?: () => number;
+  detectTrustedMode?: () => boolean | Promise<boolean>;
+  trustedModeProbe?: TrustedModeProbe;
+  relaunchTrusted?: () => boolean | void | Promise<boolean | void>;
+  reloadExtension?: (reason?: string) => unknown | Promise<unknown>;
 }
 
 interface PendingRequest {
@@ -73,6 +82,9 @@ export class HubLink {
   private readonly createSocket: (url: string) => HubSocket;
   private readonly ensureHubRunning: (options: { port: number; role: string }) => Promise<unknown>;
   private readonly random: () => number;
+  private readonly detectTrustedMode: () => boolean | Promise<boolean>;
+  private readonly relaunchTrusted: () => boolean | void | Promise<boolean | void>;
+  private readonly reloadExtension: (reason?: string) => unknown | Promise<unknown>;
   private readonly pending = new Map<string, PendingRequest>();
   private socket: HubSocket | null = null;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -95,6 +107,20 @@ export class HubLink {
     this.createSocket = options.createSocket ?? ((url) => new WebSocket(url));
     this.ensureHubRunning = options.ensureHubRunning ?? ensureHubRunningDefault;
     this.random = options.random ?? Math.random;
+    this.detectTrustedMode = options.detectTrustedMode ?? (() =>
+      detectTrustedModeDefault(Date.now(), options.trustedModeProbe));
+    this.relaunchTrusted = options.relaunchTrusted ?? (() => {
+      relaunchTrustedDefault();
+      return true;
+    });
+    this.reloadExtension = options.reloadExtension ?? ((reason) => {
+      this.sendToExtension({
+        type: "control",
+        action: "reload-extension",
+        ...(reason !== undefined ? { reason } : {}),
+      });
+      return true;
+    });
   }
 
   start(): void {
@@ -223,9 +249,55 @@ export class HubLink {
     } catch {
       return;
     }
+    if (message.type === "agent-command" && typeof message.id === "string") {
+      void this.handleAgentCommand(message as unknown as VtxAgentCommand);
+      return;
+    }
     if (message.type === "request") {
       this.handleHubRequest(message as unknown as VtxRequest);
     }
+  }
+
+  private async handleAgentCommand(command: VtxAgentCommand): Promise<void> {
+    try {
+      let result: unknown;
+      switch (command.command) {
+        case "trusted-mode":
+          result = await this.detectTrustedMode();
+          break;
+        case "relaunch-trusted": {
+          const triggered = await this.relaunchTrusted();
+          result = triggered ?? true;
+          break;
+        }
+        case "reload-extension": {
+          const triggered = await this.reloadExtension(command.reason);
+          result = triggered ?? true;
+          break;
+        }
+        case "ext-dist-info":
+          result = {
+            extDist: this.extensionDist,
+            buildStamp: this.getBuildStamp(),
+            repoRoot: this.repoRoot,
+          };
+          break;
+        default:
+          throw new Error(`Unknown agent command: ${String(command.command)}`);
+      }
+      this.sendAgentResult({ type: "agent-result", id: command.id, result });
+    } catch (error: unknown) {
+      this.sendAgentResult({
+        type: "agent-result",
+        id: command.id,
+        error: toErrorPayload(error),
+      });
+    }
+  }
+
+  private sendAgentResult(result: { type: "agent-result"; id: string; result?: unknown; error?: VtxErrorPayload }): void {
+    if (!this.socket || this.socket.readyState !== SOCKET_OPEN) return;
+    this.socket.send(JSON.stringify(result));
   }
 
   private handleHubRequest(request: VtxRequest): void {
@@ -305,4 +377,19 @@ export class HubLink {
       this.dial();
     }, retryDelay(attempt, this.random));
   }
+}
+
+function toErrorPayload(error: unknown): VtxErrorPayload {
+  if (isRecord(error) && typeof error.code === "string" && typeof error.message === "string") {
+    return error as unknown as VtxErrorPayload;
+  }
+  return {
+    code: VtxErrorCode.INTERNAL_ERROR,
+    message: error instanceof Error ? error.message : String(error),
+    recoverable: false,
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
