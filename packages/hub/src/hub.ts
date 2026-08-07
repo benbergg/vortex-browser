@@ -69,10 +69,12 @@ export async function createHub(options: HubOptions = {}): Promise<HubHandle> {
     onWarn: options.onWarn,
     sendToSession: (sessionId, frame) => {
       const session = sessions.get(sessionId);
-      if (session?.sink) {
-        session.sink(frame);
+      const sink = session?.sink;
+      const ws = session?.ws;
+      if (sink) {
+        sink(frame);
       }
-      if (session?.ws || !session?.sink) wsHub?.sendToSession(sessionId, frame);
+      if (ws || !sink) wsHub?.sendToSession(sessionId, frame);
     },
     sendToBrowser: (browserId, frame) => wsHub?.sendToBrowser(browserId, frame) ?? false,
   });

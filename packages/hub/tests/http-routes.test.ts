@@ -384,6 +384,30 @@ describe("hub HTTP command routes", () => {
     expect(new Set(requests.map((request) => request.sessionId))).toEqual(new Set(["alice", "bob"]));
   });
 
+  it("does not clear another browser's opener when rebinding a session", async () => {
+    started = await startTestHub({ requestTimeoutMs: 1_000 });
+    await addAgent(started, "browser-cleanup-a");
+    await addAgent(started, "browser-cleanup-b");
+    const session = started.hub.getOrCreateVirtualSession("cleanup-rebind", {
+      preferBrowserId: "browser-cleanup-a",
+      pinned: true,
+    });
+    const firstBrowser = started.hub.browsers.get("browser-cleanup-a");
+    const secondBrowser = started.hub.browsers.get("browser-cleanup-b");
+    if (!firstBrowser || !secondBrowser) throw new Error("Test harness did not register cleanup browsers");
+    session.ownedTabs.add(7);
+    session.currentTabId = 7;
+    firstBrowser.tabOwner.set(7, session.sessionId);
+    secondBrowser.opener.set(7, { openerTabId: 7, at: Date.now() });
+
+    started.hub.getOrCreateVirtualSession("cleanup-rebind", {
+      preferBrowserId: "browser-cleanup-b",
+      pinned: true,
+    });
+
+    expect(secondBrowser.opener.has(7)).toBe(true);
+  });
+
   it("preserves the current tab for later requests in the same session", async () => {
     started = await startTestHub({ requestTimeoutMs: 1_000 });
     const requests: VtxRequest[] = [];

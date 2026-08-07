@@ -219,8 +219,11 @@ export class HubRouter {
       }
       if (!this.sessions.has(sessionId)) return;
       if (!this.browsers.get(browserId)?.ws) {
-        if (session.browserId !== null || session.lastBrowserId !== browserId) return;
-        this.bufferOrFail(session, request);
+        if (session.browserId === null && session.lastBrowserId === browserId) {
+          this.bufferOrFail(session, request);
+          return;
+        }
+        this.failBindingMismatch(sessionId, browserId, request);
         return;
       }
       if (!this.isBoundToBrowser(session, browserId, browser)) {
@@ -540,7 +543,10 @@ export class HubRouter {
       const browser = this.browsers.get(browserId);
       if (!browser) continue;
       browser.sessions.delete(session.sessionId);
-      const ownedTabIds = new Set(session.ownedTabs);
+      const ownedTabIds = new Set<number>();
+      if (browserId === session.browserId || browserId === session.lastBrowserId) {
+        for (const tabId of session.ownedTabs) ownedTabIds.add(tabId);
+      }
       for (const [tabId, ownerSessionId] of browser.tabOwner) {
         if (ownerSessionId !== session.sessionId) continue;
         ownedTabIds.add(tabId);
@@ -554,7 +560,10 @@ export class HubRouter {
       const lost = this.lostBrowsers.get(browserId);
       if (!lost) continue;
       lost.entry.sessions.delete(session.sessionId);
-      const ownedTabIds = new Set(session.ownedTabs);
+      const ownedTabIds = new Set<number>();
+      if (browserId === session.browserId || browserId === session.lastBrowserId) {
+        for (const tabId of session.ownedTabs) ownedTabIds.add(tabId);
+      }
       for (const [tabId, ownerSessionId] of lost.entry.tabOwner) {
         if (ownerSessionId !== session.sessionId) continue;
         ownedTabIds.add(tabId);

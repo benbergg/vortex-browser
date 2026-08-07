@@ -43,7 +43,10 @@ describe("virtual session transport", () => {
       responseResolve = resolve;
     });
     session!.ws = null;
-    session!.sink = (frame) => responseResolve?.(frame);
+    session!.sink = (frame) => {
+      responseResolve?.(frame);
+      session!.sink = undefined;
+    };
 
     client.ws.send(JSON.stringify({
       type: "request",
