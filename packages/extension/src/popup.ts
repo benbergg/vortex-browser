@@ -1,4 +1,6 @@
 /** popup 直连 host 本地 HTTP(默认 6800),查 trusted 状态 / 触发一键重启。 */
+import { getBrowserId } from "./lib/browser-id.js";
+
 const BASE = "http://127.0.0.1:6800";
 
 export interface TrustedStatus {
@@ -6,9 +8,14 @@ export interface TrustedStatus {
   trustedMode: boolean;
 }
 
+// 不带 browserId 时 hub 在多浏览器下返 400，popup 会把整个 host 误判为未连接
+async function withBrowserId(url: string): Promise<string> {
+  return `${url}?browserId=${encodeURIComponent(await getBrowserId())}`;
+}
+
 export async function fetchTrustedStatus(base: string = BASE): Promise<TrustedStatus> {
   try {
-    const r = await fetch(`${base}/trusted-mode`);
+    const r = await fetch(await withBrowserId(`${base}/trusted-mode`));
     if (!r.ok) return { connected: false, trustedMode: false };
     const j = (await r.json()) as { trustedMode?: boolean };
     return { connected: true, trustedMode: j.trustedMode === true };
@@ -19,7 +26,7 @@ export async function fetchTrustedStatus(base: string = BASE): Promise<TrustedSt
 
 export async function requestRelaunch(base: string = BASE): Promise<boolean> {
   try {
-    const r = await fetch(`${base}/relaunch-trusted`, { method: "POST" });
+    const r = await fetch(await withBrowserId(`${base}/relaunch-trusted`), { method: "POST" });
     return r.ok;
   } catch {
     return false;

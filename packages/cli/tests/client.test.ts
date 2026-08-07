@@ -201,6 +201,62 @@ describe("client transport boundaries", () => {
     }
   });
 
+  it("reports a post-response disconnect instead of streaming nothing forever", async () => {
+    const socketServer = new WebSocketServer({ host: "127.0.0.1", port: 0, path: "/ws" });
+    let clientSocket: WebSocket | undefined;
+    const frames: Array<Record<string, unknown>> = [];
+    const closures: string[] = [];
+
+    await new Promise<void>((resolve, reject) => {
+      socketServer.once("listening", () => resolve());
+      socketServer.once("error", reject);
+    });
+    socketServer.on("connection", (socket) => {
+      clientSocket = socket;
+      socket.on("message", (payload) => frames.push(JSON.parse(payload.toString())));
+    });
+
+    const address = socketServer.address();
+    if (!address || typeof address === "string") throw new Error("WebSocket server did not expose a TCP address");
+
+    try {
+      const responsePromise = subscribe("console.subscribe", {}, {
+        port: 0,
+        baseUrl: `http://127.0.0.1:${address.port}`,
+        session: "cli-lg",
+        onEvent: () => undefined,
+        onDisconnect: (reason) => closures.push(reason),
+      });
+
+      await waitFor(() => frames.length === 1);
+      clientSocket!.send(JSON.stringify({ type: "welcome", wireVersion: VTX_WIRE_VERSION, hubVersion: "test" }));
+      await waitFor(() => frames.length === 2);
+      clientSocket!.send(JSON.stringify({
+        type: "response",
+        action: "console.subscribe",
+        id: frames[1].id,
+        result: { subscribed: true },
+      }));
+      await responsePromise;
+
+      // hub 顶掉同名 session：先 notice 再 close，两者都不能被 CLI 吞掉
+      clientSocket!.send(JSON.stringify({
+        type: "notice",
+        notice: "session-replaced",
+        reason: "session cli-lg was taken over by a newer connection",
+      }));
+      clientSocket!.close(1000, "replaced by same-session reconnect");
+
+      await waitFor(() => closures.length === 1);
+      expect(closures[0]).toContain("session-replaced");
+    } finally {
+      clientSocket?.terminate();
+      await new Promise<void>((resolve, reject) => {
+        socketServer.close((error) => error ? reject(error) : resolve());
+      });
+    }
+  });
+
   it("closes and ignores late frames after a subscription error", async () => {
     const socketServer = new WebSocketServer({ host: "127.0.0.1", port: 0, path: "/ws" });
     let serverSocket: WebSocket | undefined;

@@ -526,6 +526,30 @@ describe("hub HTTP command routes", () => {
     });
   });
 
+  it("recovers a session pinned to a browser that never appears", async () => {
+    started = await startTestHub({ requestTimeoutMs: 1_000 });
+    await addAgent(started, "browser-real");
+    const url = `http://127.0.0.1:${started.port}/api/tab/list`;
+
+    const before = await fetch(url, { method: "POST", headers: { "x-vortex-session": "s1" } });
+    expect(before.status).toBe(200);
+
+    const typo = await fetch(url, {
+      method: "POST",
+      headers: { "x-vortex-session": "s1", "x-vortex-browser": "brwoser-real" },
+    });
+    expect(typo.status).toBe(503);
+    expect(started.hub.sessions.get("s1")).toMatchObject({ pinned: true });
+
+    // 一次写错的 browserId 不能永久锁死这个 session 名——不带头的请求即表示无偏好
+    const after = await fetch(url, { method: "POST", headers: { "x-vortex-session": "s1" } });
+    expect(after.status).toBe(200);
+    expect(started.hub.sessions.get("s1")).toMatchObject({
+      browserId: "browser-real",
+      pinned: false,
+    });
+  });
+
   it("rebinds an existing named session and clears ownership when its browser changes", async () => {
     started = await startTestHub({ requestTimeoutMs: 1_000 });
     await addAgent(started, "browser-a");
@@ -1194,6 +1218,50 @@ describe("hub HTTP command routes", () => {
     expect(commands).toEqual([]);
   });
 
+  it("returns the target dist stamp so the C1 mismatch check can fire", async () => {
+    started = await startTestHub({ requestTimeoutMs: 250 });
+    const commands: VtxAgentCommand[] = [];
+    const agent = await addAgent(started, "browser-a");
+    observeCommands(agent, commands);
+    replyToCommands(agent, (command) => command.command === "ext-dist-info"
+      ? { result: { extDist: "/worktree-a/extension/dist", buildStamp: "stamp-a", repoRoot: "/worktree-a" } }
+      : { result: true });
+
+    const response = await fetch(`http://127.0.0.1:${started.port}/dev/reload-extension`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({}),
+    });
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      ok: true,
+      targetStamp: "stamp-a",
+      extDist: "/worktree-a/extension/dist",
+    });
+    expect(commands.map((c) => c.command)).toContain("ext-dist-info");
+  });
+
+  it("still reloads when the agent cannot report its dist stamp", async () => {
+    started = await startTestHub({ requestTimeoutMs: 250 });
+    const commands: VtxAgentCommand[] = [];
+    const agent = await addAgent(started, "browser-a");
+    observeCommands(agent, commands);
+    replyToCommands(agent, (command) => command.command === "ext-dist-info"
+      ? { error: { code: VtxErrorCode.UNKNOWN_ACTION, message: "old agent" } }
+      : { result: true });
+
+    const response = await fetch(`http://127.0.0.1:${started.port}/dev/reload-extension`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({}),
+    });
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ ok: true, targetStamp: null });
+    expect(commands.map((c) => c.command)).toContain("reload-extension");
+  });
+
   it("parses JSON and reloads the requested browser only", async () => {
     started = await startTestHub({ requestTimeoutMs: 250 });
     const firstCommands: VtxAgentCommand[] = [];
@@ -1213,10 +1281,12 @@ describe("hub HTTP command routes", () => {
     expect(response.status).toBe(200);
     const body = await response.json();
 
-    expect(body).toEqual({ ok: true });
+    expect(body).toMatchObject({ ok: true });
     expect(firstCommands).toHaveLength(0);
-    expect(secondCommands).toHaveLength(1);
-    expect(secondCommands[0].command).toBe("reload-extension");
+    expect(secondCommands.map((command) => command.command)).toEqual([
+      "ext-dist-info",
+      "reload-extension",
+    ]);
   });
 
   it("reloads all browsers concurrently and preserves each result or error", async () => {

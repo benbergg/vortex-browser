@@ -8,12 +8,15 @@ import type { ActionRouter } from "../lib/router.js";
 export function registerTabHandlers(router: ActionRouter): void {
   router.registerAll({
     [TabActions.LIST]: async () => {
-      const tabs = await chrome.tabs.query({});
-      const lastFocusedWindow = await chrome.windows.getLastFocused();
+      // 无窗口时 getLastFocused 会拒绝；hub 靠 tab.list 解析当前 tab，整体失败会让该浏览器全线不可用
+      const [tabs, lastFocusedId] = await Promise.all([
+        chrome.tabs.query({}),
+        chrome.windows.getLastFocused().then((w) => w.id, () => undefined),
+      ]);
       return tabs.map((t) => ({
         id: t.id, url: t.url, title: t.title, active: t.active,
         windowId: t.windowId, index: t.index, pinned: t.pinned, status: t.status,
-        lastFocused: t.windowId === lastFocusedWindow.id,
+        lastFocused: lastFocusedId != null && t.windowId === lastFocusedId,
       }));
     },
 

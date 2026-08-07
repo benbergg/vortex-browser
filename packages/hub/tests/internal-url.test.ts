@@ -24,8 +24,19 @@ describe("internal tab URLs", () => {
     "chrome://downloads-manager/",
     "devtools://devtools/bundled/inspector.html",
     "chrome-devtools://devtools/bundled/inspector.html",
+    // Edge 各 channel 已由 install --all-channels 纳入，其内部页同样不可注入
+    "edge://newtab/",
+    "edge://settings/privacy",
+    "edge://extensions/",
   ])("rejects %s", (url) => {
     expect(isInternalUrl(url)).toBe(true);
+  });
+
+  it.each([
+    "https://example.test/edge://not-really",
+    "https://edge.example.test/",
+  ])("still accepts %s", (url) => {
+    expect(isInternalUrl(url)).toBe(false);
   });
 
   it("does not claim an internal active tab and creates a usable background tab", async () => {
@@ -42,5 +53,20 @@ describe("internal tab URLs", () => {
     expect(started.hub.browsers.get("browser-a")?.tabOwner.get(1)).toBeUndefined();
     expect(started.hub.sessions.get("session-a")?.currentTabId).toBe(2);
     expect(agent.tabs).toContainEqual(expect.objectContaining({ id: 2 }));
+  });
+
+  it("does not claim an Edge internal active tab", async () => {
+    const started = await startTestHub();
+    closeHub = started.close;
+    agent = await connectFakeAgent(started.port, {
+      browserId: "browser-edge",
+      tabs: [{ id: 1, url: "edge://newtab/", title: "New tab", active: true }],
+    });
+    client = await connectClient(started.port, { sessionId: "session-edge" });
+
+    await client.request({ action: "page.navigate", params: { url: "https://usable.test" }, id: "navigate-edge" });
+
+    expect(started.hub.browsers.get("browser-edge")?.tabOwner.get(1)).toBeUndefined();
+    expect(started.hub.sessions.get("session-edge")?.currentTabId).toBe(2);
   });
 });

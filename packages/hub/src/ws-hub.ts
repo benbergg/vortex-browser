@@ -9,6 +9,7 @@ import {
   classifyFromClient,
   VTX_WIRE_VERSION,
   type VtxHello,
+  type VtxNotice,
   type VtxWelcome,
 } from "@vortex-browser/shared";
 import { type BrowserEntry, BrowserRegistry, type SessionEntry, SessionRegistry } from "./registry.js";
@@ -140,6 +141,17 @@ export class WsHub {
     const sessionId = hello.sessionId ?? `${hello.role}-${this.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const existing = this.sessions.get(sessionId);
     if (existing?.ws && existing.ws !== ws) {
+      // 不先告知就关掉，--follow 的对端只看到静默断流，无从判断自己被顶了
+      const notice: VtxNotice = {
+        type: "notice",
+        notice: "session-replaced",
+        reason: `session ${sessionId} was taken over by a newer connection`,
+      };
+      try {
+        existing.ws.send(JSON.stringify(notice));
+      } catch {
+        // 对端已经不可写，close 仍要执行
+      }
       existing.ws.close(1000, "replaced by same-session reconnect");
     }
     const session: SessionEntry = existing ?? {

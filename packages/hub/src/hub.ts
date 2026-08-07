@@ -126,9 +126,9 @@ export async function createHub(options: HubOptions = {}): Promise<HubHandle> {
     browsers,
     sessions,
     sendAgentCommand,
-    getVirtualSession: (name, preferBrowserId) => getOrCreateVirtualSession(
+    getVirtualSession: (name, preferBrowserId, pinned = true) => getOrCreateVirtualSession(
       name,
-      preferBrowserId === undefined ? undefined : { preferBrowserId, pinned: true },
+      preferBrowserId === undefined ? { pinned } : { preferBrowserId, pinned },
     ),
     submitRequest: (sessionId, request: VtxRequest) => router.handleRequest(sessionId, request),
     hasPending: (sessionId) => router.hasPendingForSession(sessionId),

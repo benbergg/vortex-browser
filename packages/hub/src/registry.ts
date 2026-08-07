@@ -25,6 +25,8 @@ export interface SessionEntry {
   label: string;
   // 暂态字段：Step 3 引入 ws 依赖后再收窄为 WebSocket。
   ws: WebSocket | null;
+  // HTTP/CLI 建的会话：跨进程调用间存活，不随附着上来的 WS 一起销毁
+  virtual?: boolean;
   sink?: (frame: object) => void;
   wireVersion: number;
   connectedAt: number;

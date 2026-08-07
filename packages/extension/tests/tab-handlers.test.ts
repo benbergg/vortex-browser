@@ -105,6 +105,26 @@ describe("tab handlers", () => {
         { ...tabs[1], lastFocused: true },
       ]);
     });
+
+    it("still lists tabs when no window is focused", async () => {
+      const tabs = [{
+        id: 11,
+        url: "https://background.test",
+        title: "Background",
+        active: true,
+        windowId: 1,
+        index: 0,
+        pinned: false,
+        status: "complete",
+      }];
+      tabsQuery.mockResolvedValueOnce(tabs);
+      windowsGetLastFocused.mockRejectedValueOnce(new Error("No current window"));
+
+      const resp = await router.dispatch(mkReq("tab.list"));
+
+      expect(resp.error).toBeUndefined();
+      expect(resp.result).toEqual([{ ...tabs[0], lastFocused: false }]);
+    });
   });
 
   describe("tab.activate (F11 regression)", () => {

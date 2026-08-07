@@ -37,7 +37,7 @@ export interface HubRouteOptions {
   browsers?: BrowserRegistry;
   sessions?: SessionRegistry;
   sendAgentCommand: HubHandle["sendAgentCommand"];
-  getVirtualSession: (name: string, preferBrowserId?: string) => SessionEntry;
+  getVirtualSession: (name: string, preferBrowserId?: string, pinned?: boolean) => SessionEntry;
   submitRequest: (sessionId: string, request: VtxRequest) => void;
   hasPending: (sessionId: string) => boolean;
   onVirtualSessionRemoved?: (session: SessionEntry) => void;
@@ -108,7 +108,10 @@ export function createHttpRoutes(options: HubRouteOptions): Router {
       ? sessionHeader
       : `cli-${process.env.USER ?? "default"}`;
     const preferredBrowserId = req.get("x-vortex-browser") || undefined;
-    const session = options.getVirtualSession(sessionName, preferredBrowserId);
+    // 不带 browser 头 = 本次无偏好，须解除既有 pin，否则一个写错的 id 会永久锁死这个 session 名
+    const session = preferredBrowserId !== undefined
+      ? options.getVirtualSession(sessionName, preferredBrowserId)
+      : options.getVirtualSession(sessionName, undefined, false);
     const request: VtxRequest = {
       action: `${req.params.ns}.${req.params.method}`,
       params,
@@ -202,12 +205,14 @@ export function createHttpRoutes(options: HubRouteOptions): Router {
       return;
     }
     try {
+      // 先取 dist 信息：MCP 靠 targetStamp 做 C1 路径错配强校验，缺了这条检查恒为假
+      const dist = await readExtDistInfo(options, selection.browserId);
       const result = await options.sendAgentCommand(selection.browserId, "reload-extension");
       if (result.error) {
         sendAgentError(res, result);
         return;
       }
-      res.json({ ok: true });
+      res.json({ ok: true, triggered: true, targetStamp: dist.buildStamp, extDist: dist.extDist });
     } catch (error: unknown) {
       sendCaughtError(res, error);
     }
@@ -249,6 +254,25 @@ function selectBrowser(options: HubRouteOptions, requestedBrowserId?: string): B
     };
   }
   return { ok: true, browserId: browserIds[0] };
+}
+
+interface ExtDistInfo {
+  extDist: string | null;
+  buildStamp: string | null;
+}
+
+// 旧 agent 不认 ext-dist-info；拿不到就降级为 null，不能因此让重载整体失败
+async function readExtDistInfo(options: HubRouteOptions, browserId: string): Promise<ExtDistInfo> {
+  try {
+    const info = await options.sendAgentCommand(browserId, "ext-dist-info");
+    if (info.error || !isRecord(info.result)) return { extDist: null, buildStamp: null };
+    return {
+      extDist: typeof info.result.extDist === "string" ? info.result.extDist : null,
+      buildStamp: typeof info.result.buildStamp === "string" ? info.result.buildStamp : null,
+    };
+  } catch {
+    return { extDist: null, buildStamp: null };
+  }
 }
 
 function listBrowserIds(options: HubRouteOptions): string[] {

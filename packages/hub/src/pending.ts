@@ -108,7 +108,11 @@ export class PendingTable {
     const ids = [...(index.get(key) ?? [])];
     for (const id of ids) {
       const pending = this.take(id);
-      pending?.fail(error);
+      try {
+        pending?.fail(error);
+      } catch {
+        // 一个 sink 抛错不能让同分区其余请求滞留，与 failAll 保持一致
+      }
     }
   }
 

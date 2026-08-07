@@ -86,6 +86,7 @@ export class HubLink {
   private readonly ensureHubRunning: (options: { port: number; role: string }) => Promise<unknown>;
   private readonly random: () => number;
   private readonly detectTrustedMode: () => boolean | Promise<boolean>;
+  private forwardQueue: Promise<void> = Promise.resolve();
   private readonly relaunchTrusted: () => boolean | void | Promise<boolean | void>;
   private readonly reloadExtension: (reason?: string) => unknown | Promise<unknown>;
   private readonly pending = new Map<string, PendingRequest>();
@@ -322,20 +323,27 @@ export class HubLink {
 
   private handleHubRequest(request: VtxRequest): void {
     if (typeof request.id !== "string" || typeof request.action !== "string") return;
-    const nmRequest: NmRequest = {
-      type: "tool_request",
-      tool: request.action,
-      args: request.params ?? {},
-      requestId: request.id,
-      tabId: request.tabId,
-      strictTab: request.strictTab,
-    };
     this.pending.set(request.id, {
       action: request.action,
       sessionId: request.sessionId,
       browserId: request.browserId,
     });
-    this.sendToExtension(nmRequest);
+    // 探测可能是异步的，串成一条链保序，别让后发的请求越过 click
+    this.forwardQueue = this.forwardQueue.then(async () => {
+      const params = request.params ?? {};
+      // 仅 click 注入：扩展据此在 CDP trusted 与合成路径间二选一，其他 action 加了是污染
+      const args = request.action === "dom.click"
+        ? { ...params, trustedMode: await this.detectTrustedMode() }
+        : params;
+      this.sendToExtension({
+        type: "tool_request",
+        tool: request.action,
+        args,
+        requestId: request.id,
+        tabId: request.tabId,
+        strictTab: request.strictTab,
+      } as NmRequest);
+    }).catch(() => undefined);
   }
 
   private handleNmResponse(message: Extract<NmMessageFromExtension, { type: "tool_response" }>): void {

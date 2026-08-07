@@ -51,15 +51,19 @@ export function makeSubscribeAction(action: string, buildParams: (args: any, opt
     if (frameId != null && params.frameId == null) params.frameId = frameId;
 
     try {
+      let onDisconnected: (reason: string) => void;
+      const disconnected = new Promise<string>((resolve) => { onDisconnected = resolve; });
       const resp = await subscribe(action, params, {
         port,
         session,
         tabId: tab,
         follow: true,
         onEvent: (event: VtxEvent) => printEvent(event, { pretty, quiet }),
+        onDisconnect: (reason: string) => onDisconnected(reason),
       });
       printResponse(resp, { pretty, quiet });
-      await new Promise(() => {});
+      // 断流后必须退出：同名 session 被顶掉时干等只会表现为一条卡死的命令
+      exitWithError(await disconnected);
     } catch (err: any) {
       exitWithError(err.message);
     }

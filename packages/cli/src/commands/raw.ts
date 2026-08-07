@@ -38,15 +38,19 @@ export function registerRawCommand(program: Command): void {
 
       try {
         if (opts.follow) {
+          let onDisconnected: (reason: string) => void;
+          const disconnected = new Promise<string>((resolve) => { onDisconnected = resolve; });
           const resp = await subscribe(action, params, {
             port,
             session,
             tabId: tab,
             follow: true,
             onEvent: (event) => printEvent(event, { pretty, quiet }),
+            onDisconnect: (reason) => onDisconnected(reason),
           });
           printResponse(resp, { pretty, quiet });
-          await new Promise(() => {});
+          // 断流后必须退出：同名 session 被顶掉时干等只会表现为一条卡死的命令
+          exitWithError(await disconnected);
         } else {
           const resp = await sendRequest(action, params, { port, session, tabId: tab });
           printResponse(resp, { pretty, quiet });

@@ -17,6 +17,7 @@ export function getOrCreateVirtualSession(
   const existing = deps.sessions.get(name);
   if (existing) {
     existing.lastSeenAt = deps.now();
+    existing.virtual = true;
     return existing;
   }
 
@@ -26,6 +27,7 @@ export function getOrCreateVirtualSession(
     role: "cli",
     label: name,
     ws: null,
+    virtual: true,
     wireVersion: VTX_WIRE_VERSION,
     connectedAt: timestamp,
     lastSeenAt: timestamp,

@@ -115,7 +115,10 @@ export async function sendRequest(
 export function subscribe(
   action: string,
   params: Record<string, unknown>,
-  opts: ClientOptions & { onEvent: (event: VtxEvent) => void },
+  opts: ClientOptions & {
+    onEvent: (event: VtxEvent) => void;
+    onDisconnect?: (reason: string) => void;
+  },
 ): Promise<VtxResponse> {
   return new Promise((resolve, reject) => {
     const id = nextRequestId();
@@ -124,6 +127,7 @@ export function subscribe(
     let failed = false;
     let responseResolved = false;
     let requestSent = false;
+    let disconnectReason = "connection closed by vortex-server";
 
     let timeout: ReturnType<typeof setTimeout>;
 
@@ -182,6 +186,13 @@ export function subscribe(
         return;
       }
 
+      if (typeof message.notice === "string") {
+        disconnectReason = typeof message.reason === "string"
+          ? `${message.notice}: ${message.reason}`
+          : message.notice;
+        return;
+      }
+
       if (requestSent && typeof message.event === "string") {
         opts.onEvent(message as unknown as VtxEvent);
         return;
@@ -199,6 +210,11 @@ export function subscribe(
     });
 
     ws.on("close", () => {
+      // 响应已回过后 fail() 是空操作，--follow 会静默吊死；必须另有出口告知调用方
+      if (responseResolved) {
+        opts.onDisconnect?.(disconnectReason);
+        return;
+      }
       fail(new Error("Connection closed before response"));
     });
   });

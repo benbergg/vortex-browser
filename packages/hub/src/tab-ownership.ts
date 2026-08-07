@@ -22,16 +22,13 @@ export interface PreparedRequest {
   tabIdBackfilledByHub: boolean;
 }
 
+// 内容脚本注入不进这些方案；edge 系由 install --all-channels 纳入后同样会撞上
+const INTERNAL_SCHEMES = ["chrome", "chrome-untrusted", "chrome-devtools", "devtools", "edge"];
+
 export function isInternalUrl(url: unknown): boolean {
   if (typeof url !== "string") return false;
   const normalized = url.trim().toLowerCase();
-  return normalized.startsWith("chrome://") ||
-    normalized.startsWith("devtools://") ||
-    normalized.startsWith("chrome-devtools://") ||
-    normalized === "chrome://downloads" ||
-    normalized.startsWith("chrome://downloads/") ||
-    normalized === "chrome://downloads-manager" ||
-    normalized.startsWith("chrome://downloads-manager/");
+  return INTERNAL_SCHEMES.some((scheme) => normalized.startsWith(`${scheme}://`));
 }
 
 export async function ensureCurrentTab(

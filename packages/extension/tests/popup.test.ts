@@ -1,8 +1,45 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { fetchTrustedStatus, requestRelaunch, statusLabel } from "../src/popup.js";
 
+function stubBrowserId(browserId: string | null): void {
+  vi.stubGlobal("chrome", {
+    storage: {
+      local: {
+        get: vi.fn().mockResolvedValue(browserId === null ? {} : { vortexBrowserId: browserId }),
+        set: vi.fn().mockResolvedValue(undefined),
+      },
+    },
+  });
+}
+
 describe("popup 纯逻辑", () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    stubBrowserId("browser-self");
+  });
+
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("fetchTrustedStatus 带上自身 browserId,多浏览器下才不会被判无关", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: () => Promise.resolve({ trustedMode: true }) });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await fetchTrustedStatus("http://h");
+
+    expect(fetchMock).toHaveBeenCalledWith("http://h/trusted-mode?browserId=browser-self");
+  });
+
+  it("requestRelaunch 带上自身 browserId", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await requestRelaunch("http://h");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://h/relaunch-trusted?browserId=browser-self",
+      { method: "POST" },
+    );
+  });
 
   it("fetchTrustedStatus 成功 → connected+trustedMode", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: () => Promise.resolve({ trustedMode: true }) }));
@@ -23,7 +60,10 @@ describe("popup 纯逻辑", () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true });
     vi.stubGlobal("fetch", fetchMock);
     expect(await requestRelaunch("http://h")).toBe(true);
-    expect(fetchMock).toHaveBeenCalledWith("http://h/relaunch-trusted", { method: "POST" });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://h/relaunch-trusted?browserId=browser-self",
+      { method: "POST" },
+    );
   });
 
   it("requestRelaunch 抛错 → false", async () => {

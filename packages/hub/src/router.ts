@@ -412,6 +412,12 @@ export class HubRouter {
   unregisterSession(sessionId: string, ws: SessionEntry["ws"]): void {
     const session = this.sessions.get(sessionId);
     if (!session || session.ws !== ws) return;
+    // HTTP 建的会话只是被 --follow 借用了一条 socket，断开不该连 currentTab 一起带走
+    if (session.virtual) {
+      session.ws = null;
+      session.lastSeenAt = this.now();
+      return;
+    }
     this.failInternalForSession(sessionId, new Error("Session disconnected"));
     this.pending.failSession(sessionId, this.error(VtxErrorCode.EXTENSION_NOT_CONNECTED, "Session disconnected"));
     if (session.browserId) {
@@ -501,7 +507,8 @@ export class HubRouter {
   }
 
   private ensureBrowser(session: SessionEntry, request: VtxRequest): string | null {
-    if (session.browserId) return session.browserId;
+    // 只认还在册的绑定；指向已消失的 browserId 时必须放行到重新分配，否则该 session 永久 503
+    if (session.browserId && this.browsers.has(session.browserId)) return session.browserId;
     if (session.rebindUntil > this.now()) {
       this.bufferOrFail(session, request);
       return null;
@@ -888,6 +895,6 @@ export class HubRouter {
   }
 
   private error(code: VtxErrorCode, message: string): VtxErrorPayload {
-    return { code, message, recoverable: code !== VtxErrorCode.TIMEOUT };
+    return vtxError(code, message).toJSON();
   }
 }
