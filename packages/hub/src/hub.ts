@@ -9,6 +9,7 @@ import {
   type VtxAgentCommand,
   type VtxAgentResult,
   type VtxErrorPayload,
+  type VtxRequest,
 } from "@vortex-browser/shared";
 import { BrowserRegistry, SessionRegistry, type SessionEntry } from "./registry.js";
 import { HubRouter } from "./router.js";
@@ -21,6 +22,8 @@ export interface HubOptions {
   port?: number;
   now?: () => number;
   requestTimeoutMs?: number;
+  virtualSessionIdleMs?: number;
+  virtualSessionRequestTimeoutMs?: number;
   onWarn?: (message: string, details: object) => void;
   hubVersion?: string;
   shutdownTimeoutMs?: number;
@@ -116,6 +119,14 @@ export async function createHub(options: HubOptions = {}): Promise<HubHandle> {
     browsers,
     sessions,
     sendAgentCommand,
+    getVirtualSession: (name, preferBrowserId) => getOrCreateVirtualSession(
+      name,
+      preferBrowserId === undefined ? undefined : { preferBrowserId, pinned: true },
+    ),
+    submitRequest: (sessionId, request: VtxRequest) => router.handleRequest(sessionId, request),
+    hasPending: (sessionId) => router.pending.countBySession(sessionId) > 0,
+    virtualSessionIdleMs: options.virtualSessionIdleMs,
+    virtualSessionRequestTimeoutMs: options.virtualSessionRequestTimeoutMs,
   }));
   wsHub = new WsHub({ httpServer, sessions, browsers, router, now, hubVersion });
   const port = await listen(httpServer, options.port ?? 0);

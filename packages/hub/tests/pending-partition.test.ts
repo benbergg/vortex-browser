@@ -81,9 +81,12 @@ describe("pending partition", () => {
     }
 
     try {
+      expect(table.countBySession("session-first")).toBe(1);
+      expect(table.countBySession("missing")).toBe(0);
       expect(() => table.failAll(error)).not.toThrow();
       expect(attempted).toEqual(["first", "second", "third"]);
       expect(table.size).toBe(0);
+      expect(table.countBySession("session-first")).toBe(0);
       expect(table.indexSizes).toEqual({ byId: 0, bySession: 0, byBrowser: 0 });
     } finally {
       table.clear();

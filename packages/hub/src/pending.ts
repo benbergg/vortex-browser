@@ -83,6 +83,10 @@ export class PendingTable {
     return this.byId.size;
   }
 
+  countBySession(sessionId: string): number {
+    return this.bySession.get(sessionId)?.size ?? 0;
+  }
+
   get indexSizes(): { byId: number; bySession: number; byBrowser: number } {
     return {
       byId: this.byId.size,

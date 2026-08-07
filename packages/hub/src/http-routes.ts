@@ -3,9 +3,31 @@
  * Description: Minimal health and graceful shutdown HTTP routes for the hub.
  */
 import { Router, type Request, type Response } from "express";
-import { VtxErrorCode, type VtxErrorPayload, type VtxAgentResult } from "@vortex-browser/shared";
+import {
+  VtxErrorCode,
+  type VtxAgentResult,
+  type VtxErrorPayload,
+  type VtxRequest,
+  type VtxResponse,
+} from "@vortex-browser/shared";
 import type { HubHandle } from "./hub.js";
-import type { BrowserRegistry, SessionRegistry } from "./registry.js";
+import type { BrowserRegistry, SessionEntry, SessionRegistry } from "./registry.js";
+import { sweepIdleVirtualSessions } from "./virtual-session.js";
+
+const DEFAULT_VIRTUAL_SESSION_IDLE_MS = 10 * 60_000;
+const DEFAULT_VIRTUAL_SESSION_REQUEST_TIMEOUT_MS = 35_000;
+let httpRequestCounter = 0;
+
+interface HttpWaiter {
+  resolve: (response: VtxResponse) => void;
+  reject: (error: unknown) => void;
+  timeout: ReturnType<typeof setTimeout>;
+}
+
+interface HttpSessionWaiters {
+  pending: Map<string, HttpWaiter>;
+  sink: (frame: object) => void;
+}
 
 export interface HubRouteOptions {
   now: () => number;
@@ -15,10 +37,16 @@ export interface HubRouteOptions {
   browsers?: BrowserRegistry;
   sessions?: SessionRegistry;
   sendAgentCommand: HubHandle["sendAgentCommand"];
+  getVirtualSession: (name: string, preferBrowserId?: string) => SessionEntry;
+  submitRequest: (sessionId: string, request: VtxRequest) => void;
+  hasPending: (sessionId: string) => boolean;
+  virtualSessionIdleMs?: number;
+  virtualSessionRequestTimeoutMs?: number;
 }
 
 export function createHttpRoutes(options: HubRouteOptions): Router {
   const router = Router();
+  const waitersBySession = new WeakMap<SessionEntry, HttpSessionWaiters>();
   router.get("/health", (_req, res) => {
     const browsers = options.browsers
       ? [...options.browsers.values()]
@@ -52,6 +80,53 @@ export function createHttpRoutes(options: HubRouteOptions): Router {
       browsers,
       sessions,
     });
+  });
+  router.post("/api/:ns/:method", async (req, res) => {
+    if (options.sessions) {
+      sweepIdleVirtualSessions(
+        { sessions: options.sessions, now: options.now },
+        options.virtualSessionIdleMs ?? DEFAULT_VIRTUAL_SESSION_IDLE_MS,
+        options.hasPending,
+      );
+    }
+
+    const body = isRecord(req.body) ? req.body : {};
+    const hasBodyTabId = Object.prototype.hasOwnProperty.call(body, "tabId");
+    const rawTabId = hasBodyTabId ? body.tabId : req.get("x-vortex-tab");
+    const tabId = parseTabId(rawTabId);
+    if (tabId === null) {
+      sendError(res, 400, VtxErrorCode.INVALID_PARAMS, "tabId must be an integer");
+      return;
+    }
+
+    const params = { ...body };
+    delete params.tabId;
+    const sessionHeader = req.get("x-vortex-session");
+    const sessionName = sessionHeader && sessionHeader.length > 0
+      ? sessionHeader
+      : `cli-${process.env.USER ?? "default"}`;
+    const preferredBrowserId = req.get("x-vortex-browser") || undefined;
+    const session = options.getVirtualSession(sessionName, preferredBrowserId);
+    const request: VtxRequest = {
+      action: `${req.params.ns}.${req.params.method}`,
+      params,
+      id: `http-${++httpRequestCounter}`,
+      ...(tabId !== undefined ? { tabId } : {}),
+    };
+
+    try {
+      const response = await waitForHttpResponse(
+        options,
+        waitersBySession,
+        session,
+        request,
+        options.virtualSessionRequestTimeoutMs ?? DEFAULT_VIRTUAL_SESSION_REQUEST_TIMEOUT_MS,
+      );
+      sendHttpResponse(res, response);
+    } catch (error: unknown) {
+      const payload = toErrorPayload(error);
+      sendError(res, statusForError(payload.code), payload.code, payload.message, payload);
+    }
   });
   router.post("/hub/shutdown", (_req, res) => {
     res.json({ ok: true });
@@ -186,6 +261,98 @@ function queryBrowserId(req: Request): string | undefined {
   return typeof req.query.browserId === "string" && req.query.browserId.length > 0
     ? req.query.browserId
     : undefined;
+}
+
+function parseTabId(value: unknown): number | undefined | null {
+  if (value === undefined) return undefined;
+  if (typeof value === "number") return Number.isSafeInteger(value) ? value : null;
+  if (typeof value !== "string" || value.trim().length === 0) return null;
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) ? parsed : null;
+}
+
+function waitForHttpResponse(
+  options: HubRouteOptions,
+  waitersBySession: WeakMap<SessionEntry, HttpSessionWaiters>,
+  session: SessionEntry,
+  request: VtxRequest,
+  timeoutMs: number,
+): Promise<VtxResponse> {
+  const state = getHttpSessionWaiters(waitersBySession, session);
+  session.sink = state.sink;
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      const waiter = removeHttpWaiter(state, session, request.id);
+      waiter?.reject({
+        code: VtxErrorCode.TIMEOUT,
+        message: `Request ${request.action} timed out`,
+        recoverable: false,
+      } satisfies VtxErrorPayload);
+    }, Math.max(0, timeoutMs));
+    state.pending.set(request.id, { resolve, reject, timeout });
+    try {
+      options.submitRequest(session.sessionId, request);
+    } catch (error: unknown) {
+      const waiter = removeHttpWaiter(state, session, request.id);
+      waiter?.reject(error);
+    }
+  });
+}
+
+function getHttpSessionWaiters(
+  waitersBySession: WeakMap<SessionEntry, HttpSessionWaiters>,
+  session: SessionEntry,
+): HttpSessionWaiters {
+  const existing = waitersBySession.get(session);
+  if (existing) return existing;
+
+  const pending = new Map<string, HttpWaiter>();
+  let sink: (frame: object) => void;
+  sink = (frame) => {
+    if (!isRecord(frame) || frame.type !== "response" || typeof frame.id !== "string") return;
+    const waiter = pending.get(frame.id);
+    if (!waiter) return;
+    removeHttpWaiter({ pending, sink }, session, frame.id);
+    waiter.resolve(frame as unknown as VtxResponse);
+  };
+  const state = { pending, sink };
+  waitersBySession.set(session, state);
+  return state;
+}
+
+function removeHttpWaiter(
+  state: HttpSessionWaiters,
+  session: SessionEntry,
+  requestId: string,
+): HttpWaiter | undefined {
+  const waiter = state.pending.get(requestId);
+  if (!waiter) return undefined;
+  state.pending.delete(requestId);
+  clearTimeout(waiter.timeout);
+  if (state.pending.size === 0 && session.sink === state.sink) session.sink = undefined;
+  return waiter;
+}
+
+function sendHttpResponse(res: Response, response: VtxResponse): void {
+  if (response.error) {
+    sendError(
+      res,
+      statusForError(response.error.code),
+      response.error.code,
+      response.error.message,
+      response.error,
+    );
+    return;
+  }
+  res.status(200).json({ result: response.result });
+}
+
+function statusForError(code: VtxErrorPayload["code"]): number {
+  if (code === VtxErrorCode.INVALID_PARAMS) return 400;
+  if (code === VtxErrorCode.TAB_NOT_FOUND) return 404;
+  if (code === VtxErrorCode.EXTENSION_NOT_CONNECTED) return 503;
+  if (code === VtxErrorCode.TIMEOUT) return 504;
+  return 502;
 }
 
 function sendAgentError(res: Response, result: VtxAgentResult): void {
