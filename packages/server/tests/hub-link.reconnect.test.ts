@@ -7,6 +7,7 @@ import { HubLink } from "../src/hub-link.js";
 
 class FakeSocket {
   readyState = 0;
+  closeCalls = 0;
   readonly sent: string[] = [];
   private readonly listeners = new Map<string, Array<(...args: any[]) => void>>();
 
@@ -26,6 +27,7 @@ class FakeSocket {
   }
 
   close(): void {
+    this.closeCalls += 1;
     this.readyState = 3;
     this.emit("close");
   }
@@ -75,6 +77,41 @@ describe("HubLink reconnect", () => {
     expect(ensureHubRunning).toHaveBeenCalledWith({ port: 4321, role: "browser-agent" });
 
     link.stop();
+  });
+
+  it("stops without reconnecting when the hub announces shutdown", () => {
+    const sockets: FakeSocket[] = [];
+    const ensureHubRunning = vi.fn(async () => ({ status: "ok" }));
+    const link = new HubLink({
+      stdout: { write: vi.fn() } as unknown as NodeJS.WritableStream,
+      extensionDist: "/worktree/packages/extension/dist",
+      repoRoot: "/worktree",
+      ppid: 123,
+      resolvePort: () => 4321,
+      createSocket: () => {
+        const socket = new FakeSocket();
+        sockets.push(socket);
+        return socket;
+      },
+      ensureHubRunning,
+      random: () => 0.5,
+    });
+    link.handleNmMessage(hello());
+    link.start();
+
+    try {
+      expect(sockets).toHaveLength(1);
+
+      sockets[0].emit("message", JSON.stringify({ type: "notice", notice: "hub-shutdown" }));
+
+      expect(sockets[0].closeCalls).toBe(1);
+      expect(ensureHubRunning).not.toHaveBeenCalled();
+      vi.advanceTimersByTime(60_000);
+      expect(sockets).toHaveLength(1);
+      expect(ensureHubRunning).not.toHaveBeenCalled();
+    } finally {
+      link.stop();
+    }
   });
 
   it("reconnects with the real browserId when NmHello arrives after fallback", () => {

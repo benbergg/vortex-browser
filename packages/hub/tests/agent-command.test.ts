@@ -162,6 +162,77 @@ describe("hub agent commands", () => {
       vi.useRealTimers();
     }
   });
+
+  it("rejects immediately when the browser WebSocket is not open", async () => {
+    vi.useFakeTimers();
+    const browsers = new BrowserRegistry();
+    browsers.set({
+      browserId: "browser-not-open",
+      label: "Not open",
+      ws: { readyState: 0 } as never,
+      peerVersion: "test",
+      connectedAt: 0,
+      lastSeenAt: 0,
+      nmConnected: true,
+      sessions: new Set(),
+      tabOwner: new Map(),
+      opener: new Map(),
+    });
+    const router = new HubRouter({
+      sessions: new SessionRegistry(),
+      browsers,
+      requestTimeoutMs: 1_000,
+      sendToSession: () => {},
+      sendToBrowser: () => false,
+    });
+    const pending = router.sendAgentCommand("browser-not-open", "trusted-mode");
+    const result = pending.then(
+      () => ({ status: "resolved" as const }),
+      (error: unknown) => ({ status: "rejected" as const, error }),
+    );
+
+    try {
+      await Promise.resolve();
+      expect((router as unknown as { agentCommandPending: Map<string, unknown> }).agentCommandPending.size)
+        .toBe(0);
+      const settled = await result;
+      expect(settled.status).toBe("rejected");
+      if (settled.status === "rejected") {
+        expect(settled.error).toBeInstanceOf(Error);
+        expect((settled.error as Error).message).toBe("Browser agent is unavailable");
+      }
+    } finally {
+      await vi.runOnlyPendingTimersAsync();
+      vi.useRealTimers();
+    }
+  });
+
+  it("rejects an in-flight command immediately when the same browser reconnects", async () => {
+    const hub = await startTestHub({ requestTimeoutMs: 1_000 });
+    closeHub = hub.close;
+    const oldAgent = await connectFakeAgent(hub.port, { browserId: "browser-command" });
+    const pending = hub.hub.sendAgentCommand("browser-command", "trusted-mode");
+    await oldAgent.waitFor((message): message is VtxAgentCommand => isAgentCommand(message));
+    const result = pending.then(
+      () => ({ status: "resolved" as const }),
+      (error: unknown) => ({ status: "rejected" as const, error }),
+    );
+
+    agent = await connectFakeAgent(hub.port, { browserId: "browser-command" });
+    await oldAgent.closed;
+    const settled = await Promise.race([
+      result,
+      new Promise<{ status: "timeout" }>((resolve) => {
+        setTimeout(() => resolve({ status: "timeout" }), 100);
+      }),
+    ]);
+
+    expect(settled.status).toBe("rejected");
+    if (settled.status === "rejected") {
+      expect(settled.error).toBeInstanceOf(Error);
+      expect((settled.error as Error).message).toBe("Browser agent disconnected");
+    }
+  });
 });
 
 function replyToCommands(

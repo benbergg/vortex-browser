@@ -3,7 +3,9 @@
  * Description: Verifies pending failures stay partitioned by session.
  */
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { VtxErrorCode, type VtxRequest } from "@vortex-browser/shared";
 import { connectClient, connectFakeAgent, startTestHub, type FakeAgent, type TestClient } from "./helpers/harness.js";
+import { PendingTable } from "../src/pending.js";
 
 describe("pending partition", () => {
   let closeHub: (() => Promise<void>) | undefined;
@@ -52,5 +54,39 @@ describe("pending partition", () => {
     await agentB.close();
     const bResponses = await Promise.all(b);
     expect(bResponses.every((response) => response.error?.code === "EXTENSION_NOT_CONNECTED")).toBe(true);
+  });
+
+  it("continues failing every pending request when one failure callback throws", () => {
+    const table = new PendingTable();
+    const attempted: string[] = [];
+    const error = {
+      code: VtxErrorCode.EXTENSION_NOT_CONNECTED,
+      message: "Browser agent disconnected",
+      recoverable: false,
+    };
+
+    for (const id of ["first", "second", "third"]) {
+      table.add({
+        hubRequestId: id,
+        sessionId: `session-${id}`,
+        browserId: `browser-${id}`,
+        request: { action: "test.action", id } as VtxRequest,
+        timeout: setTimeout(() => {}, 10_000),
+        tabIdBackfilledByHub: false,
+        fail: () => {
+          attempted.push(id);
+          if (id === "first") throw new Error("synthetic send failure");
+        },
+      });
+    }
+
+    try {
+      expect(() => table.failAll(error)).not.toThrow();
+      expect(attempted).toEqual(["first", "second", "third"]);
+      expect(table.size).toBe(0);
+      expect(table.indexSizes).toEqual({ byId: 0, bySession: 0, byBrowser: 0 });
+    } finally {
+      table.clear();
+    }
   });
 });

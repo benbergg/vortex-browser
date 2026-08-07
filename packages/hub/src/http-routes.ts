@@ -2,7 +2,9 @@
  * Author: qingwa
  * Description: Minimal health and graceful shutdown HTTP routes for the hub.
  */
-import { Router } from "express";
+import { Router, type Request, type Response } from "express";
+import { VtxErrorCode, type VtxErrorPayload, type VtxAgentResult } from "@vortex-browser/shared";
+import type { HubHandle } from "./hub.js";
 import type { BrowserRegistry, SessionRegistry } from "./registry.js";
 
 export interface HubRouteOptions {
@@ -12,6 +14,7 @@ export interface HubRouteOptions {
   hubVersion?: string;
   browsers?: BrowserRegistry;
   sessions?: SessionRegistry;
+  sendAgentCommand: HubHandle["sendAgentCommand"];
 }
 
 export function createHttpRoutes(options: HubRouteOptions): Router {
@@ -54,5 +57,170 @@ export function createHttpRoutes(options: HubRouteOptions): Router {
     res.json({ ok: true });
     setImmediate(() => void options.shutdown());
   });
+  router.get("/trusted-mode", async (req, res) => {
+    const selection = selectBrowser(options, queryBrowserId(req));
+    if (!selection.ok) {
+      sendError(res, selection.status, selection.code, selection.message);
+      return;
+    }
+    try {
+      const result = await options.sendAgentCommand(selection.browserId, "trusted-mode");
+      if (result.error) {
+        sendAgentError(res, result);
+        return;
+      }
+      res.json({ trustedMode: result.result === true });
+    } catch (error: unknown) {
+      sendCaughtError(res, error);
+    }
+  });
+  router.post("/relaunch-trusted", async (_req, res) => {
+    if ((options.browsers?.size ?? 0) > 1) {
+      sendError(res, 409, VtxErrorCode.INVALID_PARAMS, "多浏览器下无法按 profile 重启，这是已知限制");
+      return;
+    }
+    const selection = selectBrowser(options);
+    if (!selection.ok) {
+      sendError(res, selection.status, selection.code, selection.message);
+      return;
+    }
+    try {
+      const result = await options.sendAgentCommand(selection.browserId, "relaunch-trusted");
+      if (result.error) {
+        sendAgentError(res, result);
+        return;
+      }
+      res.json({ ok: true });
+    } catch (error: unknown) {
+      sendCaughtError(res, error);
+    }
+  });
+  router.post("/dev/reload-extension", async (req, res) => {
+    const body = isRecord(req.body) ? req.body : {};
+    const requestedBrowserId = typeof body.browserId === "string" && body.browserId.length > 0
+      ? body.browserId
+      : undefined;
+    if (body.all === true) {
+      const browserIds = listBrowserIds(options);
+      if (browserIds.length === 0) {
+        sendError(res, 503, VtxErrorCode.EXTENSION_NOT_CONNECTED, "没有可用 browser");
+        return;
+      }
+      const results = await Promise.all(browserIds.map(async (browserId) => {
+        try {
+          const result = await options.sendAgentCommand(browserId, "reload-extension");
+          return result.error
+            ? { browserId, ok: false, error: result.error }
+            : { browserId, ok: true, result: result.result };
+        } catch (error: unknown) {
+          return { browserId, ok: false, error: toErrorPayload(error) };
+        }
+      }));
+      res.json({ ok: results.every((result) => result.ok), results });
+      return;
+    }
+    const selection = selectBrowser(options, requestedBrowserId);
+    if (!selection.ok) {
+      sendError(res, selection.status, selection.code, selection.message);
+      return;
+    }
+    try {
+      const result = await options.sendAgentCommand(selection.browserId, "reload-extension");
+      if (result.error) {
+        sendAgentError(res, result);
+        return;
+      }
+      res.json({ ok: true });
+    } catch (error: unknown) {
+      sendCaughtError(res, error);
+    }
+  });
   return router;
+}
+
+type BrowserSelection =
+  | { ok: true; browserId: string }
+  | { ok: false; status: number; code: VtxErrorPayload["code"]; message: string };
+
+function selectBrowser(options: HubRouteOptions, requestedBrowserId?: string): BrowserSelection {
+  const browserIds = listBrowserIds(options);
+  if (browserIds.length === 0) {
+    return {
+      ok: false,
+      status: 503,
+      code: VtxErrorCode.EXTENSION_NOT_CONNECTED,
+      message: "没有可用 browser",
+    };
+  }
+  if (requestedBrowserId !== undefined) {
+    if (!browserIds.includes(requestedBrowserId)) {
+      return {
+        ok: false,
+        status: 404,
+        code: VtxErrorCode.INVALID_PARAMS,
+        message: `未知 browserId: ${requestedBrowserId}`,
+      };
+    }
+    return { ok: true, browserId: requestedBrowserId };
+  }
+  if (browserIds.length > 1) {
+    return {
+      ok: false,
+      status: 400,
+      code: VtxErrorCode.INVALID_PARAMS,
+      message: `browserId 必填，可选 browserId: ${browserIds.join(", ")}`,
+    };
+  }
+  return { ok: true, browserId: browserIds[0] };
+}
+
+function listBrowserIds(options: HubRouteOptions): string[] {
+  return options.browsers
+    ? [...options.browsers.values()]
+      .map((browser) => browser.browserId)
+      .sort((a, b) => a.localeCompare(b))
+    : [];
+}
+
+function queryBrowserId(req: Request): string | undefined {
+  return typeof req.query.browserId === "string" && req.query.browserId.length > 0
+    ? req.query.browserId
+    : undefined;
+}
+
+function sendAgentError(res: Response, result: VtxAgentResult): void {
+  const error = result.error;
+  if (!error) return;
+  sendError(res, 502, error.code, error.message, error);
+}
+
+function sendCaughtError(res: Response, error: unknown): void {
+  const payload = toErrorPayload(error);
+  sendError(res, 502, payload.code, payload.message, payload);
+}
+
+function sendError(
+  res: Response,
+  status: number,
+  code: VtxErrorPayload["code"],
+  message: string,
+  payload?: VtxErrorPayload,
+): void {
+  const error = payload ?? { code, message, recoverable: false };
+  res.status(status).json({ message: error.message, error });
+}
+
+function toErrorPayload(error: unknown): VtxErrorPayload {
+  if (isRecord(error) && typeof error.code === "string" && typeof error.message === "string") {
+    return error as unknown as VtxErrorPayload;
+  }
+  return {
+    code: VtxErrorCode.INTERNAL_ERROR,
+    message: error instanceof Error ? error.message : String(error),
+    recoverable: false,
+  };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

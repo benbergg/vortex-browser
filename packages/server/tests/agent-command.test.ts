@@ -122,6 +122,24 @@ describe("HubLink agent commands", () => {
     });
   });
 
+  it("returns null for extension distribution info when no build stamp exists", async () => {
+    const socket = new FakeSocket();
+    link = createLink(socket);
+
+    emitCommand(socket, "command-info-without-stamp", "ext-dist-info");
+    await flush();
+
+    expect(lastFrame(socket)).toEqual({
+      type: "agent-result",
+      id: "command-info-without-stamp",
+      result: {
+        extDist: "/worktree/extension/dist",
+        buildStamp: null,
+        repoRoot: "/worktree",
+      },
+    });
+  });
+
   it("uses writeNmMessage framing for the default reload trigger", async () => {
     const socket = new FakeSocket();
     const stdout = new MemoryWritable();

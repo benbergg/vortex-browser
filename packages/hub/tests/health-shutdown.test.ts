@@ -2,7 +2,7 @@
  * Author: qingwa
  * Description: Verifies expanded health data and graceful hub shutdown.
  */
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { VtxResponse } from "@vortex-browser/shared";
 import {
   connectClient,
@@ -148,6 +148,16 @@ describe("hub health and shutdown", () => {
       started.hub.close(),
       started.hub.close(),
     ]);
+  });
+
+  it("runs the shutdown completion callback after an HTTP shutdown", async () => {
+    const onShutdownComplete = vi.fn();
+    started = await startTestHub({ onShutdownComplete });
+
+    await expect(postShutdown(started.port)).resolves.toEqual({ ok: true });
+    await waitForCondition(() => onShutdownComplete.mock.calls.length === 1);
+
+    expect(onShutdownComplete).toHaveBeenCalledTimes(1);
   });
 
   it("drains a response before closing the connected peers", async () => {

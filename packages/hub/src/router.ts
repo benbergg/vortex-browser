@@ -57,7 +57,7 @@ export interface RouterOptions {
   requestTimeoutMs?: number;
   onWarn?: (message: string, details: object) => void;
   sendToSession: (sessionId: string, frame: object) => void;
-  sendToBrowser: (browserId: string, frame: object) => void;
+  sendToBrowser: (browserId: string, frame: object) => boolean;
 }
 
 interface LostBrowser {
@@ -131,12 +131,17 @@ export class HubRouter {
       }, this.requestTimeoutMs);
       this.agentCommandPending.set(id, { browserId, resolve, reject, timeout });
       try {
-        this.sendToBrowser(browserId, {
+        const sent = this.sendToBrowser(browserId, {
           type: "agent-command",
           id,
           command,
           ...(reason !== undefined ? { reason } : {}),
         } satisfies VtxAgentCommand);
+        if (!sent) {
+          this.agentCommandPending.delete(id);
+          clearTimeout(timeout);
+          reject(new Error("Browser agent is unavailable"));
+        }
       } catch (error: unknown) {
         this.agentCommandPending.delete(id);
         clearTimeout(timeout);
@@ -349,6 +354,11 @@ export class HubRouter {
       }
     }
     this.assignWaitingSessions(entry.browserId);
+  }
+
+  failAgentCommandsOnReconnect(browserId: string, ws: BrowserEntry["ws"]): void {
+    if (this.browsers.get(browserId)?.ws !== ws) return;
+    this.failAgentCommands(browserId, new Error("Browser agent disconnected"));
   }
 
   unregisterBrowser(browserId: string, ws: BrowserEntry["ws"]): void {

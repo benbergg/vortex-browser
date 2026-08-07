@@ -46,7 +46,11 @@ export class PendingTable {
   failAll(error: VtxErrorPayload): void {
     for (const pending of [...this.byId.values()]) {
       const current = this.take(pending.hubRequestId);
-      current?.fail(error);
+      try {
+        current?.fail(error);
+      } catch {
+        // Continue failing remaining pending requests when one response send fails.
+      }
     }
   }
 

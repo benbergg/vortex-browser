@@ -56,9 +56,11 @@ export class WsHub {
     if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify(frame));
   }
 
-  sendToBrowser(browserId: string, frame: object): void {
+  sendToBrowser(browserId: string, frame: object): boolean {
     const ws = this.browsers.get(browserId)?.ws;
-    if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify(frame));
+    if (ws?.readyState !== WebSocket.OPEN) return false;
+    ws.send(JSON.stringify(frame));
+    return true;
   }
 
   async close(): Promise<void> {
@@ -184,7 +186,10 @@ export class WsHub {
   private acceptBrowser(ws: WebSocket, hello: VtxHello & { role: "browser-agent" }): Peer {
     const browserId = hello.browserId ?? `browser-${this.now()}`;
     const existing = this.browsers.get(browserId);
-    if (existing?.ws && existing.ws !== ws) existing.ws.close(1000, "replaced by browser reconnect");
+    if (existing?.ws && existing.ws !== ws) {
+      this.router.failAgentCommandsOnReconnect(browserId, existing.ws);
+      existing.ws.close(1000, "replaced by browser reconnect");
+    }
     const entry: BrowserEntry = existing ?? {
       browserId,
       label: hello.label ?? browserId,

@@ -8,6 +8,7 @@ import { resolveHubPort } from "@vortex-browser/hub/paths";
 import {
   VTX_WIRE_VERSION,
   VtxErrorCode,
+  vtxError,
   type VtxAgentCommand,
   type VtxErrorPayload,
   type NmHello,
@@ -60,6 +61,8 @@ interface PendingRequest {
   browserId?: string;
 }
 
+type StopIntent = "manual" | "hub-shutdown";
+
 export function retryDelay(attempt: number, random: () => number = Math.random): number {
   const base = RETRY_DELAYS_MS[Math.min(Math.max(attempt, 0), RETRY_DELAYS_MS.length - 1)];
   const jitter = (random() * 2 - 1) * JITTER_RATIO;
@@ -95,6 +98,7 @@ export class HubLink {
   private nativeConnected = false;
   private failures = 0;
   private running = false;
+  private stopIntent: StopIntent | null = null;
 
   constructor(options: HubLinkOptions) {
     this.stdout = options.stdout;
@@ -126,6 +130,7 @@ export class HubLink {
   start(): void {
     if (this.running) return;
     this.running = true;
+    this.stopIntent = null;
     this.heartbeatTimer = setInterval(() => this.sendHeartbeat(), HEARTBEAT_INTERVAL_MS);
     if (this.nativeHello) {
       this.dial();
@@ -134,8 +139,9 @@ export class HubLink {
     }
   }
 
-  stop(): void {
+  stop(intent: StopIntent = "manual"): void {
     this.running = false;
+    this.stopIntent = intent;
     if (this.reconnectTimer !== null) clearTimeout(this.reconnectTimer);
     if (this.nativeHelloTimer !== null) clearTimeout(this.nativeHelloTimer);
     if (this.heartbeatTimer !== null) clearInterval(this.heartbeatTimer);
@@ -249,6 +255,10 @@ export class HubLink {
     } catch {
       return;
     }
+    if (message.type === "notice" && message.notice === "hub-shutdown") {
+      this.stop("hub-shutdown");
+      return;
+    }
     if (message.type === "agent-command" && typeof message.id === "string") {
       void this.handleAgentCommand(message as unknown as VtxAgentCommand);
       return;
@@ -278,12 +288,12 @@ export class HubLink {
         case "ext-dist-info":
           result = {
             extDist: this.extensionDist,
-            buildStamp: this.getBuildStamp(),
+            buildStamp: this.getBuildStamp() ?? null,
             repoRoot: this.repoRoot,
           };
           break;
         default:
-          throw new Error(`Unknown agent command: ${String(command.command)}`);
+          throw vtxError(VtxErrorCode.UNKNOWN_ACTION, `Unknown agent command: ${String(command.command)}`);
       }
       this.sendAgentResult({ type: "agent-result", id: command.id, result });
     } catch (error: unknown) {
@@ -366,7 +376,7 @@ export class HubLink {
     if (this.socket !== socket) return;
     this.socket = null;
     this.pending.clear();
-    if (!this.running || this.reconnectTimer !== null) return;
+    if (!this.running || this.stopIntent !== null || this.reconnectTimer !== null) return;
     const attempt = this.failures++;
     const port = this.resolvePort();
     if (this.failures % RETRY_DELAYS_MS.length === 0) {

@@ -23,6 +23,7 @@ export interface HubOptions {
   onWarn?: (message: string, details: object) => void;
   hubVersion?: string;
   shutdownTimeoutMs?: number;
+  onShutdownComplete?: () => void;
 }
 
 export interface HubHandle {
@@ -53,9 +54,12 @@ export async function createHub(options: HubOptions = {}): Promise<HubHandle> {
     requestTimeoutMs: options.requestTimeoutMs,
     onWarn: options.onWarn,
     sendToSession: (sessionId, frame) => wsHub?.sendToSession(sessionId, frame),
-    sendToBrowser: (browserId, frame) => wsHub?.sendToBrowser(browserId, frame),
+    sendToBrowser: (browserId, frame) => wsHub?.sendToBrowser(browserId, frame) ?? false,
   });
+  const sendAgentCommand: HubHandle["sendAgentCommand"] = (browserId, command, reason) =>
+    router.sendAgentCommand(browserId, command, reason);
   const app = express();
+  app.use(express.json());
   const httpServer = createServer(app);
   const close = async (): Promise<void> => {
     if (closePromise) return closePromise;
@@ -72,6 +76,7 @@ export async function createHub(options: HubOptions = {}): Promise<HubHandle> {
       if (!drained) router.pending.failAll(shutdownTimeoutError());
       await wsHub?.close();
       await httpClosePromise;
+      options.onShutdownComplete?.();
     })();
     return closePromise;
   };
@@ -82,6 +87,7 @@ export async function createHub(options: HubOptions = {}): Promise<HubHandle> {
     hubVersion,
     browsers,
     sessions,
+    sendAgentCommand,
   }));
   wsHub = new WsHub({ httpServer, sessions, browsers, router, now, hubVersion });
   const port = await listen(httpServer, options.port ?? 0);
@@ -90,7 +96,7 @@ export async function createHub(options: HubOptions = {}): Promise<HubHandle> {
     sessions,
     browsers,
     pending: router.pending,
-    sendAgentCommand: (browserId, command, reason) => router.sendAgentCommand(browserId, command, reason),
+    sendAgentCommand,
     close,
   };
 }

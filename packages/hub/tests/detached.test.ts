@@ -4,11 +4,12 @@
  */
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { spawn, type ChildProcess } from "node:child_process";
-import { mkdtemp, rm } from "node:fs/promises";
+import { access, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 import { probeHub } from "../src/spawn.js";
+import { hubPidPath } from "../src/paths.js";
 
 describe("detached hub", () => {
   let runtime: string;
@@ -57,6 +58,7 @@ describe("detached hub", () => {
     expect(await probeHub(port)).not.toBeNull();
     await shutdownByPort(port);
     await waitForGone(port);
+    await waitForPidGone(port);
   }, 20_000);
 });
 
@@ -89,6 +91,19 @@ async function waitForGone(port: number): Promise<void> {
     await new Promise((resolve) => setTimeout(resolve, 25));
   }
   throw new Error("Hub did not close");
+}
+
+async function waitForPidGone(port: number): Promise<void> {
+  const pidFile = hubPidPath(port);
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    try {
+      await access(pidFile);
+    } catch {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  throw new Error("Hub pid file still exists");
 }
 
 function waitForExit(child: ChildProcess): Promise<void> {

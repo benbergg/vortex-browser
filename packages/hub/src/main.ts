@@ -12,7 +12,14 @@ export async function runHubProcess(port = resolveHubPort()): Promise<void> {
   mkdirSync(runtimeDir(), { recursive: true });
   let hub;
   try {
-    hub = await createHub({ port });
+    hub = await createHub({
+      port,
+      onShutdownComplete: () => {
+        removeQuietly(hubPidPath(port));
+        process.exitCode = 0;
+        process.exit(0);
+      },
+    });
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "EADDRINUSE") {
       removeQuietly(hubSpawnLockPath(port));
@@ -30,8 +37,6 @@ export async function runHubProcess(port = resolveHubPort()): Promise<void> {
     if (shuttingDown) return;
     shuttingDown = true;
     await hub.close();
-    removeQuietly(hubPidPath(port));
-    process.exitCode = 0;
   };
   process.once("SIGTERM", () => void shutdown());
   process.once("SIGINT", () => void shutdown());
