@@ -34,6 +34,10 @@ describe("NativeMessagingClient NmHello", () => {
       storage: { local: { get, set: vi.fn() } },
     };
     vi.stubGlobal("chrome", chromeMock);
+    vi.stubGlobal("navigator", {
+      userAgent: "Mozilla/5.0 Chrome/140.0.0.0 Safari/537.36 Edg/140.0.0.0",
+      userAgentData: { brands: [{ brand: "Microsoft Edge", version: "140" }] },
+    });
 
     const { NativeMessagingClient } = await import("../src/lib/native-messaging.js");
     const { sendNmHello } = await import("../src/lib/nm-hello.js");
@@ -56,6 +60,7 @@ describe("NativeMessagingClient NmHello", () => {
       expect.objectContaining({
         type: "hello",
         browserId: "browser-persisted",
+        label: "Microsoft Edge",
         extensionVersion: expect.any(String),
         buildStamp: expect.any(String),
       }),

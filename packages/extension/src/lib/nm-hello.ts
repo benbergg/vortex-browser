@@ -4,6 +4,7 @@
  */
 import type { NativeMessagingClient } from "./native-messaging.js";
 import { getBrowserId } from "./browser-id.js";
+import { detectBrowserLabel } from "./browser-label.js";
 
 declare const __EXTENSION_VERSION__: string | undefined;
 declare const __VORTEX_BUILD__: string | undefined;
@@ -21,7 +22,16 @@ export async function sendNmHello(
   client.send({
     type: "hello",
     browserId,
+    label: currentBrowserLabel(),
     extensionVersion: EXTENSION_VERSION,
     buildStamp: BUILD_STAMP,
   });
+}
+
+// brands 是同步属性（getHighEntropyValues 才是异步），SW 中可用
+function currentBrowserLabel(): string {
+  const data = (navigator as Navigator & {
+    userAgentData?: { brands?: readonly { brand: string; version?: string }[] };
+  }).userAgentData;
+  return detectBrowserLabel({ brands: data?.brands, userAgent: navigator.userAgent });
 }
