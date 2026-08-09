@@ -8,3 +8,4 @@ export * from "./commit-kinds.js";
 export * from "./dialog-policy.js";
 export * from "./click-effect.js";
 export * from "./effect-fingerprint.js";
+export * from "./browsers.js";
