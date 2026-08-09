@@ -36,7 +36,7 @@ function session(sessionId: string): SessionEntry {
     ownedTabs: new Set(),
     currentTabId: null,
     claiming: null,
-    pinned: false,
+    browserPref: null,
     strictTab: false,
   };
 }
@@ -107,7 +107,7 @@ describe("allocate", () => {
 
   it("uses an online pinned browser", () => {
     const s = session("s1");
-    s.pinned = true;
+    s.browserPref = "b2";
     s.browserId = "b2";
 
     expect(allocate(s, browserMap(browser("b1"), browser("b2")))).toBe("b2");
@@ -115,7 +115,7 @@ describe("allocate", () => {
 
   it("does not fall back when the pinned browser is offline", () => {
     const s = session("s1");
-    s.pinned = true;
+    s.browserPref = "missing";
     s.browserId = "missing";
 
     expect(allocate(s, browserMap(browser("b1")))).toBeNull();

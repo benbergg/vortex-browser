@@ -389,8 +389,7 @@ describe("hub HTTP command routes", () => {
     await addAgent(started, "browser-cleanup-a");
     await addAgent(started, "browser-cleanup-b");
     const session = started.hub.getOrCreateVirtualSession("cleanup-rebind", {
-      preferBrowserId: "browser-cleanup-a",
-      pinned: true,
+      browserPref: "browser-cleanup-a",
     });
     const firstBrowser = started.hub.browsers.get("browser-cleanup-a");
     const secondBrowser = started.hub.browsers.get("browser-cleanup-b");
@@ -401,8 +400,7 @@ describe("hub HTTP command routes", () => {
     secondBrowser.opener.set(7, { openerTabId: 7, at: Date.now() });
 
     started.hub.getOrCreateVirtualSession("cleanup-rebind", {
-      preferBrowserId: "browser-cleanup-b",
-      pinned: true,
+      browserPref: "browser-cleanup-b",
     });
 
     expect(secondBrowser.opener.has(7)).toBe(true);
@@ -522,7 +520,7 @@ describe("hub HTTP command routes", () => {
     expect(requestsB).toHaveLength(1);
     expect(started.hub.sessions.get("pinned")).toMatchObject({
       browserId: "browser-b",
-      pinned: true,
+      browserPref: "browser-b",
     });
   });
 
@@ -539,14 +537,14 @@ describe("hub HTTP command routes", () => {
       headers: { "x-vortex-session": "s1", "x-vortex-browser": "brwoser-real" },
     });
     expect(typo.status).toBe(503);
-    expect(started.hub.sessions.get("s1")).toMatchObject({ pinned: true });
+    expect(started.hub.sessions.get("s1")).toMatchObject({ browserPref: "brwoser-real" });
 
     // 一次写错的 browserId 不能永久锁死这个 session 名——不带头的请求即表示无偏好
     const after = await fetch(url, { method: "POST", headers: { "x-vortex-session": "s1" } });
     expect(after.status).toBe(200);
     expect(started.hub.sessions.get("s1")).toMatchObject({
       browserId: "browser-real",
-      pinned: false,
+      browserPref: null,
     });
   });
 
@@ -620,7 +618,7 @@ describe("hub HTTP command routes", () => {
       browserId: "browser-offline",
       lastBrowserId: "browser-offline",
       currentTabId: null,
-      pinned: true,
+      browserPref: "browser-offline",
     });
     expect(started.hub.sessions.get("offline-switch")?.ownedTabs).toEqual(new Set());
   });
@@ -653,7 +651,7 @@ describe("hub HTTP command routes", () => {
     expect(started.hub.sessions.get("reconnect-target")).toMatchObject({
       browserId: "browser-b",
       lastBrowserId: "browser-b",
-      pinned: true,
+      browserPref: "browser-b",
     });
     expect(started.hub.browsers.get("browser-a")?.sessions.has("reconnect-target")).toBe(false);
     expect(started.hub.browsers.get("browser-b")?.sessions.has("reconnect-target")).toBe(true);
@@ -812,8 +810,7 @@ describe("hub HTTP command routes", () => {
       ["create-binding-error", []],
     ] as const) {
       const session = started.hub.getOrCreateVirtualSession(name, {
-        preferBrowserId: "browser-a",
-        pinned: true,
+        browserPref: "browser-a",
       });
       const error = await ensureCurrentTab(
         session,
@@ -843,8 +840,7 @@ describe("hub HTTP command routes", () => {
     const browser = started.hub.browsers.get("browser-entry-identity");
     if (!browser) throw new Error("Test harness did not register browser-entry-identity");
     const session = started.hub.getOrCreateVirtualSession("entry-identity", {
-      preferBrowserId: "browser-entry-identity",
-      pinned: true,
+      browserPref: "browser-entry-identity",
     });
 
     const error = await ensureCurrentTab(
@@ -869,16 +865,14 @@ describe("hub HTTP command routes", () => {
     await addAgent(started, "browser-await-a");
     await addAgent(started, "browser-await-b");
     const session = started.hub.getOrCreateVirtualSession("await-binding", {
-      preferBrowserId: "browser-await-a",
-      pinned: true,
+      browserPref: "browser-await-a",
     });
     let resolveClaim: ((tabId: number) => void) | undefined;
     session.claiming = new Promise<number>((resolve) => {
       resolveClaim = resolve;
     }).then((tabId) => {
       started!.hub.getOrCreateVirtualSession("await-binding", {
-        preferBrowserId: "browser-await-b",
-        pinned: true,
+        browserPref: "browser-await-b",
       });
       return tabId;
     });

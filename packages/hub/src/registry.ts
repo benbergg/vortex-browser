@@ -39,7 +39,8 @@ export interface SessionEntry {
   ownedTabs: Set<number>;
   currentTabId: number | null;
   claiming: Promise<number> | null;
-  pinned: boolean;
+  /** 用户指定的浏览器偏好，存原始字符串以便浏览器晚到时仍能绑上 */
+  browserPref: string | null;
   strictTab: boolean;
 }
 
@@ -127,7 +128,7 @@ export function allocate(
   browsers: BrowserMapLike,
 ): string | null {
   // 显式 pin 且在线时不降级，避免静默跑错浏览器。
-  if (s.pinned) return s.browserId && browsers.has(s.browserId) ? s.browserId : null;
+  if (s.browserPref) return browsers.has(s.browserPref) ? s.browserPref : null;
   // 粘性绑定优先保持不动。
   if (s.browserId && browsers.has(s.browserId)) return s.browserId;
   // 原浏览器复归时优先恢复，保护 tab 状态。

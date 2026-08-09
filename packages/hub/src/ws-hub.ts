@@ -169,7 +169,7 @@ export class WsHub {
       ownedTabs: new Set(),
       currentTabId: null,
       claiming: null,
-      pinned: false,
+      browserPref: null,
       strictTab: process.env.VORTEX_STRICT_TAB === "1",
     };
     session.ws = ws;
@@ -178,8 +178,8 @@ export class WsHub {
     session.wireVersion = hello.wireVersion;
     session.connectedAt = this.now();
     session.lastSeenAt = this.now();
-    session.pinned = hello.preferBrowserId !== undefined;
-    if (hello.preferBrowserId) session.browserId = hello.preferBrowserId;
+    session.browserPref = hello.preferBrowserId ?? null;
+    if (session.browserPref) session.browserId = session.browserPref;
     this.sessions.set(session);
     const assignedBrowserId = session.rebindUntil > this.now() ? null : this.router.assignSession(session, false);
     const welcome: VtxWelcome = {

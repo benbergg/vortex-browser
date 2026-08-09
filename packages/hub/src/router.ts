@@ -588,7 +588,7 @@ export class HubRouter {
     const browser = this.browsers.get(browserId);
     if (!browser) return;
     for (const session of this.sessions.values()) {
-      if (session.pinned && session.browserId === browserId && !browser.sessions.has(session.sessionId)) {
+      if (session.browserPref !== null && session.browserId === browserId && !browser.sessions.has(session.sessionId)) {
         this.rebindSession(session, browserId, false);
         continue;
       }

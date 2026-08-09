@@ -38,7 +38,7 @@ export function getOrCreateVirtualSession(
     ownedTabs: new Set(),
     currentTabId: null,
     claiming: null,
-    pinned: false,
+    browserPref: null,
     strictTab: process.env.VORTEX_STRICT_TAB === "1",
   };
   deps.sessions.set(session);

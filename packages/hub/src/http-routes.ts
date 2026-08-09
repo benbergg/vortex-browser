@@ -37,7 +37,7 @@ export interface HubRouteOptions {
   browsers?: BrowserRegistry;
   sessions?: SessionRegistry;
   sendAgentCommand: HubHandle["sendAgentCommand"];
-  getVirtualSession: (name: string, preferBrowserId?: string, pinned?: boolean) => SessionEntry;
+  getVirtualSession: (name: string, browserPref?: string) => SessionEntry;
   submitRequest: (sessionId: string, request: VtxRequest) => void;
   hasPending: (sessionId: string) => boolean;
   onVirtualSessionRemoved?: (session: SessionEntry) => void;
@@ -107,11 +107,9 @@ export function createHttpRoutes(options: HubRouteOptions): Router {
     const sessionName = sessionHeader && sessionHeader.length > 0
       ? sessionHeader
       : `cli-${process.env.USER ?? "default"}`;
-    const preferredBrowserId = req.get("x-vortex-browser") || undefined;
-    // 不带 browser 头 = 本次无偏好，须解除既有 pin，否则一个写错的 id 会永久锁死这个 session 名
-    const session = preferredBrowserId !== undefined
-      ? options.getVirtualSession(sessionName, preferredBrowserId)
-      : options.getVirtualSession(sessionName, undefined, false);
+    const preferredBrowser = req.get("x-vortex-browser") || undefined;
+    // 不带 browser 头 = 本次无偏好，须解除既有偏好
+    const session = options.getVirtualSession(sessionName, preferredBrowser);
     const request: VtxRequest = {
       action: `${req.params.ns}.${req.params.method}`,
       params,

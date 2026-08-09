@@ -23,7 +23,7 @@ function session(): SessionEntry {
     ownedTabs: new Set(),
     currentTabId: null,
     claiming: null,
-    pinned: false,
+    browserPref: null,
     strictTab: false,
   };
 }

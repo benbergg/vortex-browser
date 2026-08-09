@@ -74,14 +74,13 @@ describe("virtual session transport", () => {
 
     try {
       const first = hub.getOrCreateVirtualSession("virtual-preferred", {
-        preferBrowserId: "browser-preferred",
-        pinned: true,
+        browserPref: "browser-preferred",
       });
       const reused = hub.getOrCreateVirtualSession("virtual-preferred");
 
       expect(reused).toBe(first);
       expect(first.browserId).toBe("browser-preferred");
-      expect(first.pinned).toBe(true);
+      expect(first.browserPref).toBe("browser-preferred");
       expect(assignSession).toHaveBeenCalledTimes(1);
       expect(assignSession).toHaveBeenCalledWith(first, false);
     } finally {
@@ -94,15 +93,14 @@ describe("virtual session transport", () => {
     closeHub = hub.close;
 
     const defaultPinned = hub.getOrCreateVirtualSession("virtual-default-pinned", {
-      preferBrowserId: "browser-preferred",
+      browserPref: "browser-preferred",
     });
     const explicitlyUnpinned = hub.getOrCreateVirtualSession("virtual-explicit-unpinned", {
-      preferBrowserId: "browser-preferred",
-      pinned: false,
+      browserPref: null,
     });
 
-    expect(defaultPinned.pinned).toBe(true);
-    expect(explicitlyUnpinned.pinned).toBe(false);
+    expect(defaultPinned.browserPref).toBe("browser-preferred");
+    expect(explicitlyUnpinned.browserPref).toBeNull();
   });
 });
 
@@ -162,7 +160,7 @@ describe("virtual session lifecycle", () => {
       rebindUntil: 0,
       currentTabId: null,
       claiming: null,
-      pinned: false,
+      browserPref: null,
       strictTab: process.env.VORTEX_STRICT_TAB === "1",
     });
     expect(session.buffer).toEqual([]);
