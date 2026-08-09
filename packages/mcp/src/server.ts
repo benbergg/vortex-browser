@@ -19,6 +19,7 @@ import { computeTransportTimeout } from "./lib/timeout.js";
 import { liftWaitForRefToTarget } from "./lib/wait-for-ref.js";
 import { applyFingerprint, shouldRecover, type FingerprintOpt } from "./lib/fingerprint-apply.js";
 import { lookupIdentity } from "./lib/observe-render.js";
+import { pickOtherBrowsers, type HealthBrowser } from "./lib/other-browsers.js";
 export { dispatchNewTool };
 
 // Read package.json via createRequire so the bundle works under both ts-node
@@ -769,6 +770,22 @@ export async function handleCallTool(
       };
     }
 
+    let resultForTool = resp.result;
+    if (toolDef.name === "vortex_tab_list") {
+      try {
+        const healthResponse = await fetch(`http://localhost:${PORT}/health`);
+        if (healthResponse.ok) {
+          const health = await healthResponse.json() as { browsers?: HealthBrowser[] };
+          const otherBrowsers = pickOtherBrowsers(health, resp.browserId);
+          if (otherBrowsers.length > 0) {
+            resultForTool = { tabs: resp.result, otherBrowsers };
+          }
+        }
+      } catch {
+        // health 是附加信息，失败时保留原 tab 数组
+      }
+    }
+
     // 图片返回（screenshot / element）
     if (toolDef.returnsImage && resp.result) {
       const result = resp.result as { dataUrl?: string; [k: string]: unknown };
@@ -868,7 +885,7 @@ export async function handleCallTool(
     // 字段)。改用 `JSON.stringify(resp.result, null, 2) ?? "undefined"`:利用
     // JSON.stringify(undefined) 返回 JS undefined(非字符串)的特性,精确把 undefined
     // 渲染成 "undefined"、null 渲染成 "null";falsy 值(0/false/"")不受影响。见已关闭 #35。
-    const resultText = JSON.stringify(resp.result, null, 2) ?? "undefined";
+    const resultText = JSON.stringify(resultForTool, null, 2) ?? "undefined";
     if (resultText.length > RESPONSE_SIZE_LIMIT) {
       const truncated = resultText.slice(0, RESPONSE_SIZE_LIMIT);
       return withEvents([{
