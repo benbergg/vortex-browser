@@ -236,7 +236,7 @@ describe("I15: tools/list budget + count + internalized grep", () => {
       "vortex_query.mode": "评测实测: sheet 只认语雀表格,模型误用于 DOM table",
       "vortex_extract.maxLength": "超长静默截断,不提示会让模型误以为读全了",
       "vortex_query.attr": "attr 支持 , / | 分隔多属性(daddd2b),不写会复发 R11 静默失败",
-      "vortex_debug_read.filter": "console/network 的子字段是 handler 真能力(D16)",
+      "vortex_debug_read.filter": "子字段是 handler 真能力(D16); 盲测复测实测模型把 pattern 嵌进 filter.network,故点明是平铺键",
       "vortex_act.options.fingerprint": "record/verify 契约必须文档化",
     };
 

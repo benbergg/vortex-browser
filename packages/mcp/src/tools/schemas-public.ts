@@ -255,7 +255,7 @@ export const PUBLIC_TOOLS: ToolDef[] = [
         // network: { pattern: '<substr>', statusMin, statusMax }
         filter: {
           type: "object",
-          description: "console:{level}; network:{pattern,statusMin/Max}",
+          description: "flat keys, do not nest by source: {level} for console; {pattern,statusMin,statusMax} for network",
         },
         tail: { type: "number" },
         ...tabFields,
