@@ -173,8 +173,8 @@ describe("TC-11: vortex_evaluate async 模式语义文档化（P0-11）", () => 
   });
 });
 
-describe("PR-A 整体回归：公开工具数从 15 → 20(T6 +vortex_drag; T7 +vortex_fill_form; +vortex_query)", () => {
-  it("公开工具总数 = 21(v2.1 PR-A +tab_list +history; T6 +vortex_drag; T7 +vortex_fill_form; +vortex_query; +vortex_mouse_click)", () => {
-    expect(getToolDefs().length).toBe(21);
+describe("PR-A 整体回归：公开工具数从 15 → 21（新增 vortex_browser）", () => {
+  it("公开工具总数 = 22（含 vortex_browser 浏览器选择）", () => {
+    expect(getToolDefs().length).toBe(22);
   });
 });

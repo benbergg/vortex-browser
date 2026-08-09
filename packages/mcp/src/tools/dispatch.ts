@@ -45,6 +45,12 @@ export function dispatchNewTool(
       const { direction, ...rest } = params;
       return { action: direction === "forward" ? "page.forward" : "page.back", params: rest };
     }
+    case "vortex_browser": {
+      const browser = typeof params.browser === "string" ? params.browser.trim() : "";
+      return browser
+        ? { action: "browser.select", params: { browser } }
+        : { action: "browser.list", params: {} };
+    }
     case "vortex_wait": {
       // target 若是普通 selector（非 @ref），透传为 selector 字段
       const { target, ...rest } = params;

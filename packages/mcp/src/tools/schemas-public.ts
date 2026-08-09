@@ -165,6 +165,17 @@ export const PUBLIC_TOOLS: ToolDef[] = [
     schema: { type: "object", properties: {}, required: [] },
   },
   {
+    // 无参=列出在线浏览器与当前绑定；带 browser=切到该浏览器
+    name: "vortex_browser",
+    action: "browser.list",
+    description: "List online browsers and current binding; pass browser (e.g. chrome/edge) to switch.",
+    schema: {
+      type: "object",
+      properties: { browser: { type: "string" } },
+      required: [],
+    },
+  },
+  {
     name: "vortex_screenshot",
     action: "capture.screenshot",
     description: "Screenshot page/element. jpeg+quality saves tokens. marks=overlay observe ref# on viewport (pixel→@ref).",

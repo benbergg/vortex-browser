@@ -24,7 +24,7 @@ function ensureMaps(): void {
 // caps opt-in 机制
 // ──────────────────────────────────────────────────────────────────────────────
 //
-// 默认 enabledCaps 为空 → getToolDefs/getToolDef 行为与现状完全一致（20 公开工具）。
+// 默认 enabledCaps 为空 → getToolDefs/getToolDef 行为与现状完全一致（22 公开工具）。
 // server.ts 启动时解析 `--caps=<csv>` 并调 setEnabledCaps；之后 internal 工具中
 // `cap ∈ enabledCaps` 的会被「提升」进 public 面（出现在 tools/list、可经
 // getToolDef 解析）。提升的工具不进 publicMap 本体（保持 PUBLIC_TOOLS 纯净），

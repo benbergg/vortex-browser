@@ -15,7 +15,7 @@ describe("getToolDefs", () => {
     expect(a).toEqual(b);
   });
 
-  it("returns 21 public tools (20 + vortex_mouse_click 坐标点击)", () => {
+  it("returns 22 public tools (21 + vortex_browser 浏览器选择)", () => {
     // v2.1 PR-A: 把 v0.5 内部化的 vortex_tab_list + vortex_history
     // promote 回 public（spec 12-Projects/0000-vortex优化/v2.1-实施方案.md §2 §3）。
     // 后端 handler 早就 ready,只是 schemas-public.ts 没复制 schema 块。
@@ -25,6 +25,7 @@ describe("getToolDefs", () => {
     const names = getToolDefs().map((d) => d.name);
     expect(names.sort()).toEqual([
       "vortex_act",
+      "vortex_browser",
       "vortex_debug_read",
       "vortex_drag",
       "vortex_evaluate",
@@ -103,13 +104,13 @@ describe("getToolDefs", () => {
     expect(navigate?.returnsImage).toBeUndefined();
   });
 
-  it("has exactly 21 public tools (20 + vortex_mouse_click 坐标点击)", () => {
+  it("has exactly 22 public tools (21 + vortex_browser 浏览器选择)", () => {
     // v2.1 PR-A 工作量 ≤ 0.3 人天:schemas-public.ts 复制 2 个 schema 块 +
     // 2 段 description 改写,后端零代码改动。
     // 工具横向优化 T7: 新增 vortex_fill_form(fields[] 批量填表, 部分成功语义)。
     // 工具横向优化: 新增 vortex_query(零 LLM 探测, text grep + css find)。
     // feat/coord-click: promote vortex_mouse_click(mouse.click handler 早已实现)。
-    expect(getToolDefs().length).toBe(21);
+    expect(getToolDefs().length).toBe(22);
   });
 });
 
