@@ -21,7 +21,8 @@ import {
   type SessionEntry,
   SessionRegistry,
 } from "./registry.js";
-import { noBrowserMessage } from "./browser-match.js";
+import { matchBrowser, noBrowserMessage } from "./browser-match.js";
+import { BROWSER_CONTROL_ACTIONS, listBrowsers } from "./browser-control.js";
 import { PendingTable, type HubPending } from "./pending.js";
 import { prepareRequestWithState } from "./tab-ownership.js";
 
@@ -108,7 +109,45 @@ export class HubRouter {
       }
       return;
     }
+    if (BROWSER_CONTROL_ACTIONS.has(request.action)) {
+      this.handleBrowserControl(sessionId, request);
+      return;
+    }
     void this.track(this.forwardRequest(sessionId, request));
+  }
+
+  private handleBrowserControl(sessionId: string, request: VtxRequest): void {
+    const session = this.sessions.get(sessionId);
+    if (!session) return;
+    if (request.action === "browser.list") {
+      this.sendResponse(sessionId, request, session.browserId ?? "", {
+        result: listBrowsers(this.browsers, session),
+      });
+      return;
+    }
+    const pref = String((request.params as { browser?: unknown } | undefined)?.browser ?? "").trim();
+    if (!pref) {
+      this.sendResponse(sessionId, request, session.browserId ?? "", {
+        error: this.error(VtxErrorCode.INVALID_PARAMS, "browser is required"),
+      });
+      return;
+    }
+    session.browserPref = pref;
+    const matched = matchBrowser(pref, this.browsers);
+    if (!matched) {
+      this.clearSessionBinding(session);
+      session.browserId = null;
+      session.lastBrowserId = null;
+      session.rebindUntil = 0;
+      this.sendResponse(sessionId, request, "", {
+        error: this.error(VtxErrorCode.EXTENSION_NOT_CONNECTED, noBrowserMessage(pref, this.browsers)),
+      });
+      return;
+    }
+    this.rebindSession(session, matched.browserId);
+    this.sendResponse(sessionId, request, matched.browserId, {
+      result: { current: matched.label, switched: true, online: matched.nmConnected },
+    });
   }
 
   sendAgentCommand(
