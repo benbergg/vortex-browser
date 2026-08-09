@@ -8,15 +8,14 @@
 
 设计文档原假设：扩展没有 `chrome.runtime.onStartup`，靠 `chrome.alarms` 的 24 秒 keepalive 唤醒，"拉起后可能等半分钟才连上 hub"。
 
-实测（Edge，完全退出后 `open -a` 到 `/health` 出现该 label）：
+实测（完全退出后 `open -a` 到 `/health` 出现该 label）：
 
 ```
-第 1 次  5.58s
-第 2 次  4.67s
-第 3 次  3.96s
+Edge     5.58s / 4.67s / 3.96s
+Chrome   4.35s / 3.60s / 3.57s
 ```
 
-**稳定在 4–6 秒**，30 秒超时预算有 5–7 倍余量。原假设过于悲观，无需为此加长超时或改唤醒机制。
+**两个浏览器都稳定在 4–6 秒**，30 秒超时预算有 5–7 倍余量。原假设过于悲观，无需为此加长超时或改唤醒机制。
 
 ## 2. 端到端自动拉起（核心验收）
 
@@ -97,4 +96,8 @@ VORTEX_BROWSER=edge 启动  → tab_list 落在 Microsoft Edge
 - 4 个 unpacked 扩展记录指向已删除目录（`.worktrees/v0.6-pr1`、`.worktrees/v0.6-pr5`、`.openclaw/browser/chrome-extension`、`Downloads/…/chrome-mcp-server-0`）
 - 扩展 ID `jkbbajlkdidpelfb` 与 `fbonhjdohmkcejfg` **指向同一个 `packages/extension/dist`**。该目录 manifest 带固定 `key`，真实 ID 恒为 `fbonhj…`，因此加载 `jkbbajlkdidpelfb` 必然 ID 不匹配而失败，同目录的正版记录被牵连清除。
 
-这些失效记录在 `chrome://extensions` 里不显示（加载失败即不列出），无法从 UI 移除。冷启动延迟因此改用 Edge 测量（Edge profile 无 ID 冲突，vortex 记录完好）。
+这些失效记录在 `chrome://extensions` 里不显示（加载失败即不列出），无法从 UI 移除。
+
+**已修复并证实**：Chrome 完全退出后，从 `Secure Preferences` 删掉 5 条 `location=4` 的用户 unpacked 记录（4 条指向已删目录 + 1 条 ID 冲突）**及其 `protection.macs` 对应项**，重启后扩展恢复自动加载，连续 3 次冷启动 4.35 / 3.60 / 3.57 秒，条目数稳定不被 Chrome 重置。
+
+那个旧 ID 是 manifest 加固定 `key` 之前留下的历史残留 —— 加 key 让多 worktree 共享同一扩展 ID，代价是老记录变成永久对不上的僵尸，且会连累同目录的正版记录。
