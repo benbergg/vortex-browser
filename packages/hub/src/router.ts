@@ -21,6 +21,7 @@ import {
   type SessionEntry,
   SessionRegistry,
 } from "./registry.js";
+import { noBrowserMessage } from "./browser-match.js";
 import { PendingTable, type HubPending } from "./pending.js";
 import { prepareRequestWithState } from "./tab-ownership.js";
 
@@ -516,7 +517,10 @@ export class HubRouter {
     const browserId = this.assignSession(session);
     if (browserId) return browserId;
     this.sendResponse(session.sessionId, request, "", {
-      error: this.error(VtxErrorCode.EXTENSION_NOT_CONNECTED, "No browser agent is available"),
+      error: this.error(
+        VtxErrorCode.EXTENSION_NOT_CONNECTED,
+        noBrowserMessage(session.browserPref, this.browsers),
+      ),
     });
     return null;
   }
@@ -610,7 +614,10 @@ export class HubRouter {
       return;
     }
     this.sendResponse(session.sessionId, request, session.browserId ?? "", {
-      error: this.error(VtxErrorCode.EXTENSION_NOT_CONNECTED, "No browser agent is available"),
+      error: this.error(
+        VtxErrorCode.EXTENSION_NOT_CONNECTED,
+        noBrowserMessage(session.browserPref, this.browsers),
+      ),
     });
   }
 

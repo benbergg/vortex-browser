@@ -117,7 +117,7 @@ export const DEFAULT_ERROR_META: Record<VtxErrorCode, VtxErrorMeta> = {
     recoverable: false,
   },
   EXTENSION_NOT_CONNECTED: {
-    hint: "Vortex extension is not connected. Ensure Chrome is open with the extension enabled at chrome://extensions, then call vortex_observe to re-check connectivity.",
+    hint: "Vortex extension is not connected. Ensure the target browser (Chrome / Edge / …) is open with the vortex extension enabled, then call vortex_observe to re-check connectivity. Set VORTEX_BROWSER to pin a specific browser.",
     recoverable: false,
   },
   INVALID_PARAMS: {

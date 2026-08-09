@@ -375,7 +375,7 @@ export async function handleCallTool(
             reloaded: false,
             error: body.error?.code ?? "RELOAD_TRIGGER_FAILED",
             message: body.error?.message ?? `reload trigger failed (HTTP ${r.status})`,
-            hint: "扩展未连(SW 可能睡眠或未加载)。先调一次任意 vortex 工具唤醒 SW,或确认扩展已在 Chrome 加载。",
+            hint: "扩展未连(SW 可能睡眠或未加载)。先调一次任意 vortex 工具唤醒 SW,或确认扩展已在目标浏览器（Chrome / Edge 等）加载。",
           }, null, 2) }],
         };
       }

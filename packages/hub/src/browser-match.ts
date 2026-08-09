@@ -28,3 +28,15 @@ export function matchBrowser(pref: string, browsers: BrowserMapLike): BrowserEnt
   if (candidates.length === 0) return null;
   return [...candidates].sort(compareBrowsers)[0];
 }
+
+export function noBrowserMessage(pref: string | null, browsers: BrowserMapLike): string {
+  // 无偏好时能走到这里就说明没有可用浏览器
+  if (!pref) return "No browser is connected to the hub";
+  const online = [...new Set(
+    [...browsers.values()].filter((browser) => browser.nmConnected).map((browser) => browser.label),
+  )].sort();
+  const tail = online.length > 0
+    ? `online: ${online.join(", ")}`
+    : "no browser is connected to the hub";
+  return `No browser matching "${pref}"; ${tail}`;
+}

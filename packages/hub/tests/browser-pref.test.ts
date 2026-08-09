@@ -68,5 +68,7 @@ describe("浏览器偏好", () => {
     expect((await call("chrome")).status).toBe(200);
     const missed = await call("edge");
     expect(missed.status).toBe(503);
+    expect((await missed.json() as { error: { message: string } }).error.message)
+      .toBe('No browser matching "edge"; online: Google Chrome');
   });
 });
