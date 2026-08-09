@@ -52,9 +52,21 @@ POST /dev/reload-extension {"browserId":"edge"} →
 
 重载后两个浏览器均在册。`vortex_dev_reload` 走的就是这条路由，多浏览器下不再要求人肉贴 UUID。
 
-## 未在真机覆盖的两项
+## 6. MCP 的 VORTEX_BROWSER env
 
-- **MCP 的 `VORTEX_BROWSER` env 路径**：需要在 MCP 配置里加 env 并重启客户端。本轮用 `x-vortex-browser` 头验证了同一条 `matchBrowser` 与 hub 分配链路；env → hello 帧这一段由 `packages/mcp/tests/client-hello-handshake.test.ts` 的真 WS harness 覆盖。
+直接用真实 MCP client（`packages/mcp/dist/src/client.js` 的 `sendRequest`）发真 hello 帧，经真 hub 打到真浏览器：
+
+```
+VORTEX_BROWSER=chrome → Google Chrome
+VORTEX_BROWSER=edge   → Microsoft Edge
+VORTEX_BROWSER=safari → EXTENSION_NOT_CONNECTED
+                        No browser matching "safari"; online: Google Chrome, Microsoft Edge
+```
+
+对照：不设该 env 的 MCP 会话（本次是 Claude Code 自己的 vortex MCP）被自动分配到了 Microsoft Edge —— 正是本次改造要解决的原始场景（浏览网站在 Chrome，MCP 落在 Edge）。
+
+## 未在真机覆盖的一项
+
 - **偏好指向的浏览器晚于客户端上线**：真机需要反复开关浏览器，本轮未做；由 `packages/hub/tests/browser-pref.test.ts` 的「目标浏览器晚于客户端上线时自动绑上」覆盖。
 
 ## 代码层验证（同日）
