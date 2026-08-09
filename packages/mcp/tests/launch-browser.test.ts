@@ -16,7 +16,8 @@ describe("chooseBrowser", () => {
 });
 
 describe("ensureBrowserRunning", () => {
-  const base = {
+  // state 每次新建：冷却是模块级共享的，用例之间不能互相污染
+  const base = () => ({
     installed: ["Google Chrome"],
     platform: "darwin",
     spawn: vi.fn(),
@@ -24,7 +25,8 @@ describe("ensureBrowserRunning", () => {
     sleep: async () => {},
     now: (() => { let t = 0; return () => (t += 1000); })(),
     timeoutMs: 30_000,
-  };
+    state: { cooldownUntil: 0 },
+  });
 
   it("零浏览器时拉起一次并轮询到就绪", async () => {
     const probe = vi.fn()
@@ -33,7 +35,7 @@ describe("ensureBrowserRunning", () => {
       .mockResolvedValueOnce({ browsers: [{ label: "Google Chrome" }] });
     const spawn = vi.fn();
 
-    const result = await ensureBrowserRunning({ ...base, probe, spawn });
+    const result = await ensureBrowserRunning({ ...base(), probe, spawn });
 
     expect(result).toBe("ready");
     expect(spawn).toHaveBeenCalledTimes(1);
@@ -44,7 +46,7 @@ describe("ensureBrowserRunning", () => {
     const probe = vi.fn().mockResolvedValue({ browsers: [{ label: "Google Chrome" }] });
     const spawn = vi.fn();
 
-    expect(await ensureBrowserRunning({ ...base, probe, spawn })).toBe("ready");
+    expect(await ensureBrowserRunning({ ...base(), probe, spawn })).toBe("ready");
     expect(spawn).not.toHaveBeenCalled();
   });
 
@@ -54,7 +56,7 @@ describe("ensureBrowserRunning", () => {
       .mockResolvedValueOnce({ browsers: [{ label: "Google Chrome" }] });
     const spawn = vi.fn();
 
-    const result = await ensureBrowserRunning({ ...base, probe, spawn, acquireLock: () => false });
+    const result = await ensureBrowserRunning({ ...base(), probe, spawn, acquireLock: () => false });
 
     expect(result).toBe("ready");
     expect(spawn).not.toHaveBeenCalled();
@@ -62,22 +64,22 @@ describe("ensureBrowserRunning", () => {
 
   it("超时返回 launched-timeout", async () => {
     const probe = vi.fn().mockResolvedValue({ browsers: [] });
-    const result = await ensureBrowserRunning({ ...base, probe, spawn: vi.fn(), timeoutMs: 3000 });
+    const result = await ensureBrowserRunning({ ...base(), probe, spawn: vi.fn(), timeoutMs: 3000 });
     expect(result).toBe("launched-timeout");
   });
 
   it("非 darwin 或无可拉起浏览器时返回 unsupported", async () => {
     const probe = vi.fn().mockResolvedValue({ browsers: [] });
-    expect(await ensureBrowserRunning({ ...base, probe, platform: "linux" })).toBe("unsupported");
-    expect(await ensureBrowserRunning({ ...base, probe, platform: "win32" })).toBe("unsupported");
-    expect(await ensureBrowserRunning({ ...base, probe, installed: [] })).toBe("unsupported");
+    expect(await ensureBrowserRunning({ ...base(), probe, platform: "linux" })).toBe("unsupported");
+    expect(await ensureBrowserRunning({ ...base(), probe, platform: "win32" })).toBe("unsupported");
+    expect(await ensureBrowserRunning({ ...base(), probe, installed: [] })).toBe("unsupported");
   });
 
   it("open 失败时返回 unsupported，不空等到超时", async () => {
     const probe = vi.fn().mockResolvedValue({ browsers: [] });
     const spawn = vi.fn(() => { throw new Error("spawn open ENOENT"); });
 
-    expect(await ensureBrowserRunning({ ...base, probe, spawn })).toBe("unsupported");
+    expect(await ensureBrowserRunning({ ...base(), probe, spawn })).toBe("unsupported");
   });
 
   // 抢到锁期间别人可能已经拉起来了，二次探测到就绪就不再 spawn
@@ -87,10 +89,74 @@ describe("ensureBrowserRunning", () => {
       .mockResolvedValueOnce({ browsers: [{ label: "Google Chrome" }] });
     const spawn = vi.fn();
 
-    const result = await ensureBrowserRunning({ ...base, probe, spawn, acquireLock: () => true });
+    const result = await ensureBrowserRunning({ ...base(), probe, spawn, acquireLock: () => true });
 
     expect(result).toBe("ready");
     expect(spawn).not.toHaveBeenCalled();
+  });
+});
+
+describe("拉起超时后的冷却", () => {
+  // 时钟只由 sleep 推进，既能让轮询终止又能精确控制冷却判定
+  const clock = (start = 0) => {
+    let t = start;
+    return {
+      now: () => t,
+      sleep: async (ms: number) => { t += ms; },
+      advance: (ms: number) => { t += ms; },
+    };
+  };
+  const cooling = () => ({
+    installed: ["Google Chrome"],
+    platform: "darwin",
+    acquireLock: () => true,
+    timeoutMs: 30_000,
+    cooldownMs: 60_000,
+  });
+
+  it("超时后冷却期内不再 spawn、不再等满超时", async () => {
+    const state = { cooldownUntil: 0 };
+    const c = clock();
+    const probe = vi.fn().mockResolvedValue({ browsers: [] });
+    const spawn = vi.fn();
+    const opts = { ...cooling(), probe, spawn, now: c.now, sleep: c.sleep, state };
+
+    expect(await ensureBrowserRunning(opts)).toBe("launched-timeout");
+    expect(spawn).toHaveBeenCalledTimes(1);
+
+    c.advance(5_000);
+    const callsBefore = probe.mock.calls.length;
+
+    expect(await ensureBrowserRunning(opts)).toBe("launched-timeout");
+    expect(spawn).toHaveBeenCalledTimes(1);
+    // 冷却期内只探一次就返回，不再走 30 秒轮询
+    expect(probe.mock.calls.length - callsBefore).toBe(1);
+  });
+
+  it("冷却期内浏览器连上就立刻恢复并清冷却", async () => {
+    const state = { cooldownUntil: 999_999 };
+    const c = clock();
+    const probe = vi.fn().mockResolvedValue({ browsers: [{ label: "Google Chrome" }] });
+    const spawn = vi.fn();
+
+    const result = await ensureBrowserRunning({
+      ...cooling(), probe, spawn, now: c.now, sleep: c.sleep, state,
+    });
+
+    expect(result).toBe("ready");
+    expect(state.cooldownUntil).toBe(0);
+    expect(spawn).not.toHaveBeenCalled();
+  });
+
+  it("冷却过期后重新尝试拉起", async () => {
+    const state = { cooldownUntil: 10_000 };
+    const c = clock(10_001);
+    const probe = vi.fn().mockResolvedValue({ browsers: [] });
+    const spawn = vi.fn();
+
+    await ensureBrowserRunning({ ...cooling(), probe, spawn, now: c.now, sleep: c.sleep, state });
+
+    expect(spawn).toHaveBeenCalledTimes(1);
   });
 });
 

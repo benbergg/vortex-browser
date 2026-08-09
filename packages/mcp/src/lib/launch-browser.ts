@@ -24,6 +24,13 @@ interface LaunchLock {
 type AcquireLock = () => LaunchLock | true | false;
 type SpawnBrowser = (cmd: string, args: string[]) => void | Promise<void>;
 
+/** 拉起超时后的冷却状态，跨调用复用，避免每次工具调用都白等一轮 */
+export interface LaunchState {
+  cooldownUntil: number;
+}
+
+const sharedLaunchState: LaunchState = { cooldownUntil: 0 };
+
 export interface EnsureBrowserOptions {
   pref?: string;
   lastUsed?: string;
@@ -35,6 +42,8 @@ export interface EnsureBrowserOptions {
   sleep?: (milliseconds: number) => Promise<void>;
   now?: () => number;
   timeoutMs?: number;
+  cooldownMs?: number;
+  state?: LaunchState;
 }
 
 export function chooseBrowser(opts: {
@@ -73,31 +82,38 @@ export async function ensureBrowserRunning(
   const sleep = options.sleep ?? ((milliseconds) => new Promise<void>((resolve) => setTimeout(resolve, milliseconds)));
   const now = options.now ?? Date.now;
   const timeoutMs = options.timeoutMs ?? 30_000;
+  const state = options.state ?? sharedLaunchState;
   const first = await probe();
-  if (hasBrowsers(first)) return "ready";
+  if (hasBrowsers(first)) {
+    state.cooldownUntil = 0;
+    return "ready";
+  }
+  // 上一轮拉起后扩展始终没连上，冷却期内直接回报，别再堵满超时
+  if (now() < state.cooldownUntil) return "launched-timeout";
 
   const target = chooseBrowser(options);
   const command = target ? launchCommand(target, options.platform) : null;
   if (!command) return "unsupported";
 
+  const settle = (ready: boolean): "ready" | "launched-timeout" => {
+    state.cooldownUntil = ready ? 0 : now() + (options.cooldownMs ?? 60_000);
+    return ready ? "ready" : "launched-timeout";
+  };
+
   const lock = acquireLock();
   if (!lock) {
-    return await waitForBrowser(probe, sleep, now, now() + timeoutMs)
-      ? "ready"
-      : "launched-timeout";
+    return settle(await waitForBrowser(probe, sleep, now, now() + timeoutMs));
   }
 
   const release = typeof lock === "object" ? () => lock.release() : () => {};
   try {
-    if (hasBrowsers(await probe())) return "ready";
+    if (hasBrowsers(await probe())) return settle(true);
     try {
       await spawn(command.cmd, command.args);
     } catch {
       return "unsupported";
     }
-    return await waitForBrowser(probe, sleep, now, now() + timeoutMs)
-      ? "ready"
-      : "launched-timeout";
+    return settle(await waitForBrowser(probe, sleep, now, now() + timeoutMs));
   } finally {
     release();
   }
