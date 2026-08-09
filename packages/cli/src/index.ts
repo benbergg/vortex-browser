@@ -4,6 +4,7 @@
  */
 import { Command } from "commander";
 import { resolveSessionName } from "./session.js";
+import { readNearestVersion } from "./version.js";
 import { registerShortcuts } from "./commands/shortcuts.js";
 import { registerTabCommands } from "./commands/tab.js";
 import { registerPageCommands } from "./commands/page.js";
@@ -22,13 +23,15 @@ import { registerRawCommand } from "./commands/raw.js";
 
 export { resolveSessionName } from "./session.js";
 
+export const CLI_VERSION = readNearestVersion(import.meta.url);
+
 export function createProgram(): Command {
   const program = new Command();
 
   program
     .name("vortex")
     .description("Browser automation CLI — control Chrome from the terminal")
-    .version("0.1.0")
+    .version(CLI_VERSION)
     .option("--tab <id>", "target tab ID", parseInt)
     .option("--frame-id <id>", "target frame ID (for iframes)", parseInt)
     .option("--port <port>", "server port", parseInt, 6800)

@@ -31,7 +31,7 @@ export { dispatchNewTool };
 // errors and fall back to a sentinel rather than refusing to load the
 // module (handleCallTool is unit-tested through this path).
 const require_ = createRequire(import.meta.url);
-let MCP_VERSION = "0.0.0-test";
+export let MCP_VERSION = "0.0.0-test";
 try {
   MCP_VERSION = (require_("../../package.json") as { version: string }).version;
 } catch {
@@ -186,10 +186,9 @@ function installAutoRestart(): void {
   }
 }
 
-const server = new Server(
-  { name: "vortex", version: "0.1.0" },
-  { capabilities: { tools: {} } },
-);
+export const SERVER_INFO = { name: "vortex", version: MCP_VERSION };
+
+const server = new Server(SERVER_INFO, { capabilities: { tools: {} } });
 
 server.setRequestHandler(ListToolsRequestSchema, async () => {
   const defs = getToolDefs();
