@@ -4,6 +4,18 @@
 
 ---
 
+## [2.0.1] - 2026-08-09
+
+### Fixed
+
+- **`vortex --version` 与 MCP `serverInfo.version` 报告 `0.1.0`**(`packages/cli/src/index.ts:31`、`packages/mcp/src/server.ts:190`)。两处版本号从项目早期就是硬编码字面量,从未随发布更新,MCP 客户端与 `--version` 看到的版本与实际安装版本完全脱节。现在都从 package.json 运行时读取:mcp 复用已有的 `MCP_VERSION`(此前只用于扩展版本漂移提示),cli 新增 `readNearestVersion()` 向上查找最近的 package.json —— 源码在 `src/`、产物在 `dist/src/`,距包根层级不同,固定相对路径必有一种布局落空。
+
+### Changed
+
+- `@vortex-browser/extension` 标记为 `private`,防止误发到 npm(浏览器扩展需构建后手动加载,不通过 npm 分发)。
+
+---
+
 ## [2.0.0] - 2026-08-09
 
 ### ⚠️ Breaking Changes
