@@ -4,7 +4,7 @@
 
 ---
 
-## [Unreleased]
+## [2.0.0] - 2026-08-09
 
 ### ⚠️ Breaking Changes
 
@@ -15,7 +15,40 @@
   - `vortex_fill_form({ fields: [{ kind: X }] })` → `vortex_fill_form({ fields: [{ widget: X }] })`
   - `vortex_wait_idle({ kind: X })` → `vortex_wait_idle({ until: X })`
 
+### ✨ Added
+
+- **新增 `vortex_query`:零 LLM 消耗的页面探针,8 种 mode**(`packages/mcp/src/tools/schemas-public.ts`;handler 与 page-side 探针分散在 `packages/extension/src/page-side/`)。此前要拿页面的结构化事实只能 `vortex_evaluate` 写 JS 或 `vortex_extract` 拿文本再让模型解析,既费 token 又不可靠。现在:
+  - `text` 按文本 grep 定位、`css` 找元素并可读多属性(`attr` 支持 `,` / `|` 分隔)
+  - `component` 读 Vue/React 组件实例状态与表格行数据(el-table 的 `store.states.data`、antd 的 fiber record)
+  - `geometry` 读 bbox / 视口 / 遮挡 / 裁剪,`style` 读配色与 WCAG 对比度
+  - `sheet` 把语雀 Lake Sheet 与钉钉 canvas 表格转成 md/csv/json(canvas 电子表格在 DOM 里没有文本,此前完全读不到),并输出工作簿清单让模型自己切 sheet
+  - `chart` 把 echarts 的 series/axis/legend 读回结构化数据,`flow` 把流程图转成 mermaid
+- **新增 `vortex_mouse_click`:按坐标点击**(`packages/mcp/src/tools/schemas-public.ts`)。走 CDP 派发,用于 canvas、地图这类没有可及 ref 的场景;`coordSpace=frame` 时按 `frameId` 换算到视口坐标。
+- **`vortex_observe` 主动报告感知盲区,并给出 readback 指路**(`packages/mcp/src/lib/observe-render.ts`、`packages/extension/src/page-side/`)。a11y 树读不到的内容此前是**静默缺失**,模型会以为页面就这些东西。现在盲区在行内标注并汇总成顶部 `# blindspots:` 行,且直接指出该用什么读回:
+  - `[blindspot=canvas chart=echarts readback=query:chart]` / `readback=query:component` / `readback=screenshot`(按 zrender、Chart.js、G2 等框架信号分类)
+  - `[blindspot=shadow]`、虚拟长列表的 `virtual(总数/已渲染)`、无 alt 的内容图
+  - 空壳 SPA / 渲染失败的 frame 级 `blank-shell` 信号
+- **`vortex_observe` 模态作用域:弹层打开时裁掉背景**(`packages/extension/src/page-side/`、`observe-render.ts`)。检测 `aria-modal` 弹层后只保留其子树,背景元素在 `filter=all` 下标 `[behind-modal]`,并输出 `# modal:` meta 行说明裁掉了多少个。此前模态打开时整页元素混在一起,模型经常点到被遮挡的背景控件。
+- **`vortex_observe` 召回改用 ARIA taxonomy 单一真相源**(`packages/extension/src/page-side/`)。原先靠枚举选择器决定收哪些元素,漏掉大量隐式角色;改为 `[role]` + 原生语义标签的 taxonomy 门,并补齐 HTML-AAM 的隐式角色映射(nav/fieldset/landmark 等)。渲染按 ARIA category 派发(structure/landmark/live),**截断也按 category 优先级** —— 先丢上下文容器,后丢可操作控件,避免长页面把按钮截没了。
+- **`vortex_screenshot` 新增 `marks`:把 observe 的 ref 编号叠到截图上**(`packages/mcp/src/tools/schemas-public.ts`)。图上数字即 `@ref`,让模型能从像素位置反查到可操作元素(Set-of-Mark)。仅视口截图可用,`snapshotId` 指定用哪次 observe 的编号。
+- **多浏览器可指定:会话能绑定到指定浏览器**(`packages/extension/src/lib/browser-label.ts`、`packages/hub/src/browser-match.ts`、`packages/mcp/src/client.ts`)。此前 hub 里的浏览器只有随机 UUID,既看不出是哪个浏览器,也无法指定。现在扩展上报可读浏览器名(从 `navigator.userAgentData.brands` 过滤占位品牌,回退解析 UA),hub 用单一 `matchBrowser`(id 精确 → label 相等 → label 子串)解析偏好,`VORTEX_BROWSER` 环境变量可把一个 MCP 会话钉在指定浏览器上,CLI 的 `x-vortex-browser` 头与 `/trusted-mode`、`/dev/reload-extension` 同样支持按名指定。**匹配不到时报错并列出在线浏览器,不静默回退到别的浏览器**。
+
+
+- **模型可在对话中自选浏览器,零浏览器时自动拉起**(新增 `packages/hub/src/browser-control.ts`、`packages/mcp/src/lib/{launch-browser,other-browsers}.ts`;`packages/shared/src/browsers.ts` 承接原 `install-nm-host.ts` 的 channel 清单)。此前只能靠 `VORTEX_BROWSER` 环境变量写死,模型既看不到有哪些浏览器,也无法在运行时切换。现在:
+  - 新增 `vortex_browser` 工具 —— 无参列出在线浏览器与当前绑定,传 `browser`(如 `chrome`/`edge`)切换。切换由 hub 在 `handleRequest` 里拦截,复用既有 `rebindSession` 的完整语义(失败在飞 pending、清 claiming、换 tab ownership、flush buffer),**不发任何帧给扩展**,实测 2–3ms。匹配不到时报错并列出在线浏览器,**不静默降级**。
+  - `vortex_tab_list` 在存在其他在线浏览器时附 `otherBrowsers`,单浏览器场景保持原裸数组形状不变(不加噪声)。
+  - 零浏览器时任意工具调用会先拉起浏览器,hub 不在也一并拉起。真机实测:hub 与浏览器都不在 → 一次 `vortex_tab_list` → **4.2 秒**返回真实结果。
+  - service worker 冷启动实测 **4–6 秒**(Edge 5.58/4.67/3.96s,Chrome 4.35/3.60/3.57s),推翻了设计阶段"靠 `chrome.alarms` 24 秒 keepalive、可能等半分钟"的假设,30 秒超时预算有 5–7 倍余量。验收记录见 `reports/_dogfood/multi-browser-v3-spike.md`。
+
+- **给易填错的工具参数补 `description`,提升模型的工具可发现性**(`packages/mcp/src/tools/schemas-public.ts`)。原规则是"顶层 property 一律不带 description(节字节)",实测 113 个参数只有 2 个有说明。工具选择评测显示:在公开站点任务上模型 **4/4 改用 playwright**,而强制 vortex-only 复跑这 4 个任务**全部完成** —— 是可发现性问题,不是能力缺口;典型代价是 `vortex_screenshot` 因 `target` 无说明用了 8 次调用,playwright 只用 3 次。本次给 7 处判据为"模型会填错或不知道能填什么"的参数补说明(`target` 族、`act.value`、`fill.value`、`wait_for.value`、`query.mode`、`extract.maxLength`、`debug_read.filter`),`tabId`/`force` 这类自解释的不动。改后复测:同批公开站点任务 **0/4 转向**,`screenshot` 降到 6 次调用且直接传 CSS selector。tools/list 8738 → 9709 B(cap 9800)。原不变式改为白名单制,新增 description 仍须登记理由。评测记录见 `reports/_eval/`。
+
 ### 🐛 Fixed
+
+- **自动拉起改按 app bundle 判断浏览器是否已装**(`packages/mcp/src/lib/launch-browser.ts`)。原判据是 `profileDir` 与 NM manifest 同时存在,但 `installNmHost` 的 `mkdirSync(nmDir, { recursive: true })`(`install-nm-host.ts:112`)会连带把 `profileDir` 建出来,双判据退化成单判据。本机实测 10 个 channel 全被判为已装,而 `/Applications` 下只有 Chrome 与 Edge。后果是只装 Edge 但跑过一次默认安装的机器会选中没装的 Chrome,`open -a` 失败后报 `unsupported` 而不去用 Edge。现在查 `/Applications/<label>.app` 或 `~/Applications/<label>.app`,与 `launchCommand` 的 `open -a "<label>"` 是同一个目标。
+
+- **拉起超时后加冷却,不再每次调用都空等 30 秒**(`packages/mcp/src/lib/launch-browser.ts`)。浏览器装了但扩展没加载时(新装机常见状态),每次工具调用都会重新拉起并轮询满 30 秒 —— 真机实测同一进程内连续三次累计 **90 秒**。现在超时后进入 60 秒冷却,期间探测到浏览器仍立即恢复;实测降到 30s + 7ms + 4ms。
+
+- **浏览器预检移出 `handleCallTool`,单元测试不再依赖本机是否开着浏览器**(`packages/mcp/src/server.ts`)。`handleCallTool` 是导出给单测的入口(其注释写明生产走 SDK request handler),把预检放进去会让 8 个既有用例在没开浏览器时超时 —— 此前全量通过是因为跑测试时恰好开着浏览器。改挂到 SDK 请求入口,生产路径不变。
 
 - **popup 在多浏览器下不再误报「未连接 vortex server」**(`packages/extension/src/popup.ts`、`packages/extension/tests/popup.test.ts`)。hub 的 `/trusted-mode` 经 `selectBrowser`,注册了一个以上 browser-agent 时返 400「browserId 必填」,而 popup 不带任何 `browserId` 且把非 ok 一律映射为 `{connected:false}` —— **接入第二个 profile 后两个浏览器的 popup 全部显示未连接、一键重启永久禁用**,恰好是本次改造的头号特性把自己打穿。popup 改为从 `chrome.storage.local` 取自身 `browserId` 并作为查询参数带上(`/trusted-mode` 与 `/relaunch-trusted` 均带)。
 
@@ -28,6 +61,8 @@
 - **同名 session 被顶替时对端不再静默挂死**(`packages/hub/src/ws-hub.ts`、`packages/cli/src/client.ts`、`commands/{raw,helpers}.ts`;新增 `packages/hub/tests/session-replaced.test.ts`)。两条 `--follow` 都默认 `cli-$USER`,后者接入即关闭前者,而 CLI 在响应已返回后 `fail()` 变空操作、随后阻塞在 `await new Promise(() => {})`:**没有报错、没有退出码、事件流悄悄断掉**。协议早已声明的 `session-replaced` 通知从未被发送,现补发,CLI 侧新增 `onDisconnect` 并据此退出。
 
 - **`tab.list` 不再因无聚焦窗口而让整个浏览器不可用**(`packages/extension/src/handlers/tab.ts`)。新增的 `chrome.windows.getLastFocused()` 在关掉全部 Chrome 窗口(进程仍在)时拒绝,而 hub 靠 `tab.list` 解析每个 session 的当前 tab,于是该浏览器上所有 session 的下一次 navigate 都返回 `TAB_NOT_FOUND`;改动前返回 `[]` 会自愈开新 tab。现在探测失败即降级为无聚焦窗口。
+
+- **`tab.create` 补上同一状态的漏网:无窗口时回退到新建窗口**(`packages/extension/src/handlers/tab.ts`;新增 `packages/extension/tests/tab-create-no-window.test.ts`)。上一条只修了 `tab.list`,`chrome.tabs.create` 在无窗口时抛 `No current window` 一直没处理 —— macOS 上关掉全部窗口后 app 仍在运行、扩展照常连着 hub,该浏览器却开不出标签页。现在回退到 `chrome.windows.create`,**回退前先查一次窗口数**,避免把非法 URL 之类的真错误一起吞掉。真机验证:Edge 处于 `tabs: []` 状态时 `vortex_tab_create` 成功并被 `tab_list` 确认。
 
 - **`isInternalUrl` 识别 `edge://`,不再认领 Edge 内部页**(`packages/hub/src/tab-ownership.ts`)。本次新为 Edge 各 channel 注册了 NM host,但内部页判定只认 `chrome://`/`devtools://`,Edge 上聚焦 `edge://newtab` 会被 `ensureCurrentTab` 认领并因 `hasOwnedCurrentTab` 为真而终身卡在上面。
 
@@ -675,7 +710,7 @@ git checkout v0.5.x
 
 ---
 
-## [Unreleased] (towards 0.4.0)
+## [0.4.0] - 未发布(无 tag,内容随 0.5.0 一并发出)
 
 ### Added
 
