@@ -205,12 +205,41 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
   inflight++;
   try {
-    return await handleCallTool(request);
+    const blocked = await precheckBrowser(request.params.name);
+    return blocked ?? await handleCallTool(request);
   } finally {
     inflight--;
     maybeExitAfterDrain();
   }
 });
+
+/**
+ * 调用前确保有浏览器可用，没有就尝试拉起。
+ *
+ * 只挂在 SDK 入口，不进 handleCallTool —— 后者是单元测试的入口，
+ * 放进去会让测试依赖本机是否真的开着浏览器。
+ */
+async function precheckBrowser(
+  toolName: string,
+): Promise<{ content: ContentItem[]; isError?: boolean } | null> {
+  // vortex_browser 本身要能在零浏览器时应答，不能被预检挡住
+  if (toolName === "vortex_browser" || !getToolDef(toolName)) return null;
+  try {
+    if (await ensureBrowserForCall() !== "launched-timeout") return null;
+    return {
+      isError: true,
+      content: [{
+        type: "text" as const,
+        text: JSON.stringify({
+          error: "BROWSER_LAUNCHING",
+          message: "Browser was launched but its extension has not connected yet; retry in a few seconds.",
+        }, null, 2),
+      }],
+    };
+  } catch (error) {
+    return { isError: true, content: [{ type: "text" as const, text: formatError(error) }] };
+  }
+}
 
 async function ensureBrowserForCall(): Promise<"ready" | "launched-timeout" | "unsupported"> {
   await ensureHubRunning({ port: PORT, role: "mcp" });
@@ -240,29 +269,6 @@ export async function handleCallTool(
   }
 
   const params = (args ?? {}) as Record<string, unknown>;
-
-  if (toolDef.name !== "vortex_browser") {
-    try {
-      const outcome = await ensureBrowserForCall();
-      if (outcome === "launched-timeout") {
-        return {
-          isError: true,
-          content: [{
-            type: "text" as const,
-            text: JSON.stringify({
-              error: "BROWSER_LAUNCHING",
-              message: "Browser was launched but its extension has not connected yet; retry in a few seconds.",
-            }, null, 2),
-          }],
-        };
-      }
-    } catch (error) {
-      return {
-        isError: true,
-        content: [{ type: "text" as const, text: formatError(error) }],
-      };
-    }
-  }
 
   // 特殊 tool: vortex_events（合并原三个 __mcp_events_*__ 分支）
   if (toolDef.name === "vortex_events") {
