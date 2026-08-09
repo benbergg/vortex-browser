@@ -1,5 +1,6 @@
 import type { VtxRequest } from "@vortex-browser/shared";
 import type { WebSocket } from "ws";
+import { compareBrowsers } from "./browser-match.js";
 
 export interface BrowserEntry {
   browserId: string;
@@ -134,11 +135,6 @@ export function allocate(
 
   const cands = [...browsers.values()].filter((b) => b.nmConnected);
   if (cands.length === 0) return null;
-  cands.sort(
-    (a, b) =>
-      a.sessions.size - b.sessions.size ||
-      a.connectedAt - b.connectedAt ||
-      (a.browserId < b.browserId ? -1 : 1),
-  );
+  cands.sort(compareBrowsers);
   return cands[0].browserId;
 }
