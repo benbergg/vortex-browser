@@ -1,6 +1,7 @@
 {
   "name": "@vortex-browser/extension",
   "version": "2.0.0",
+  "private": true,
   "type": "module",
   "scripts": {
     "build": "vite build && node scripts/build-page-side.mjs",
