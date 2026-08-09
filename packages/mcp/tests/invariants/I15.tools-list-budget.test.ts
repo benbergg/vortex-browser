@@ -100,6 +100,15 @@
 // vortex_browser: 8600 → 8900 B。新增浏览器清单/运行时切换工具，让模型
 // 在对话中查看在线浏览器并选择绑定目标。新增工具后 payload 实测 8738B,
 // 按实测 +~80B 余量取整到百位，沿用"加能力调 cap 不压字符"惯例。
+//
+// 参数可发现性: 8900 → 9800 B。2026-08-09 工具选择评测显示,113 个参数只有
+// 2 个有 description,模型在公开站点任务上 4/4 改用 playwright——而 vortex-only
+// 复跑这 4 个任务全部完成,说明是可发现性而非能力问题。典型代价: vortex_screenshot
+// 因 target 无说明用了 8 次调用,playwright 只用 3 次。本次给 6 处"模型会填错或
+// 不知道能填什么"的参数补描述(target/act.value/fill.value/wait_for.value/
+// query.mode/extract.maxLength),实测 9661B,cap 取 9800 留 139B 余量。
+// 这是"为可读性提预算",与历次"加能力调 cap"性质不同,故单列。
+// 详见 reports/_eval/tool-choice-2026-08-09.md。
 
 import { describe, it, expect, afterEach } from "vitest";
 import { COMMIT_KINDS } from "@vortex-browser/shared";
@@ -111,7 +120,7 @@ describe("I15: tools/list budget + count + internalized grep", () => {
     defs.map(d => ({ name: d.name, description: d.description, inputSchema: d.schema })),
   );
 
-  it("tools/list 字节 ≤ 8900 B (vortex_browser, 实测 8738 留 162B buffer)", () => {
+  it("tools/list 字节 ≤ 9800 B (参数可发现性, 实测 9661 留 139B buffer)", () => {
     // V2 P0 修复 D16: filter 子字段 description 是必要的文档化豁免
     // (handler 已实现 console.ts:160 level / network.ts:305-321 pattern+statusMin/Max),
     // 移除豁免会触发 V2 D16 真发现复发 (LLM 不知可用子字段)。
@@ -128,7 +137,7 @@ describe("I15: tools/list budget + count + internalized grep", () => {
     // (handler mouse.click 早已实现,含 frame→viewport 换算,此前只暴露坐标版 mouse.drag;
     // canvas/地图/无 ref 场景刚需,补齐"坐标 click"能力缺口)。schema 块 +~366B,payload
     // 实测 8378B,cap +400 至 8500 留 ~122B 余量。沿用"加能力调 cap 不压字符"惯例。
-    expect(toolsListPayload.length).toBeLessThanOrEqual(8900);
+    expect(toolsListPayload.length).toBeLessThanOrEqual(9800);
   });
 
   it("公开工具数量 = 22（21 + vortex_browser 浏览器选择）", () => {
@@ -206,47 +215,50 @@ describe("I15: tools/list budget + count + internalized grep", () => {
     }
   });
 
-  it("inputSchema 中 properties 字段不带 description（节字节）", () => {
-    // I15 §0.2.1: 顶层 property 不带 description (节字节)。
-    // V2 P0 修复 D16 豁免: vortex_debug_read.filter 是 handler 已实现的子字段
-    // (console.ts:160 level / network.ts:305-321 pattern+statusMin/Max), 必须
-    // 文档化让 LLM 知道可用。filter.description 是单点豁免 (1 个 description
-    // 共 ~150 字符, 远低于 94 B buffer 损耗)。
-    const FILTER_DOC_OVERHEAD: Record<string, number> = {
-      "vortex_debug_read": 200, // filter.description 字节豁免
+  it("参数 description 必须在精选白名单内（防滥写）", () => {
+    // 原规则是"顶层 property 一律不带 description（节字节）"。2026-08-09 工具选择
+    // 评测推翻了这个优先级: 113 个参数只有 2 个有说明,模型在公开站点任务上 4/4
+    // 改用 playwright,而 vortex-only 复跑全部完成——是可发现性而非能力问题。
+    //
+    // 现在改为白名单制: 允许 description,但每一条都要在下面登记并写明理由,
+    // 新增必须显式加入。总字节仍由上面的 cap 断言兜底。判据是"模型会填错或
+    // 不知道能填什么",tabId/frameId/force 这类自解释参数一律不写。
+    const DOCUMENTED: Record<string, string> = {
+      "vortex_act.target": "@ref 语法此前只写在源码注释里,模型看不到",
+      "vortex_extract.target": "同上,且要说明 null=整页",
+      "vortex_screenshot.target": "评测实测: 不知能传 CSS,多花一倍调用(8 次 vs playwright 3 次)",
+      "vortex_file_upload.target": "同 target 族",
+      "vortex_fill.target": "同 target 族",
+      "vortex_fill_form.fields[].target": "同 target 族",
+      "vortex_act.value": "各 action 的值形状不同,click 不传/scroll 传对象",
+      "vortex_fill.value": "评测实测: daterange 需 {start,end},只能靠报错反推",
+      "vortex_wait_for.value": "评测实测: mode=info 时填什么完全无从得知",
+      "vortex_query.mode": "评测实测: sheet 只认语雀表格,模型误用于 DOM table",
+      "vortex_extract.maxLength": "超长静默截断,不提示会让模型误以为读全了",
+      "vortex_query.attr": "attr 支持 , / | 分隔多属性(daddd2b),不写会复发 R11 静默失败",
+      "vortex_debug_read.filter": "console/network 的子字段是 handler 真能力(D16)",
+      "vortex_act.options.fingerprint": "record/verify 契约必须文档化",
     };
-    function checkNoPropertyDescription(schema: any, path = "", toolName = ""): void {
+
+    const found: string[] = [];
+    function walk(schema: any, path: string, tool: string): void {
       if (!schema || typeof schema !== "object") return;
       if (schema.properties && typeof schema.properties === "object") {
         for (const [k, v] of Object.entries(schema.properties)) {
           if (v && typeof v === "object" && "description" in (v as object)) {
-            // V2 P0 修复 D16 豁免: 仅 vortex_debug_read.filter 允许 description
-            if (toolName === "vortex_debug_read" && k === "filter" &&
-                FILTER_DOC_OVERHEAD["vortex_debug_read"] > 0) {
-              // 豁免通过 (FILTER_DOC_OVERHEAD 标记)
-            } else if (toolName === "vortex_act" && k === "fingerprint") {
-              // 可验证重放豁免: vortex_act.options.fingerprint 的 record/verify 契约
-              // 必须文档化让 LLM 知道 record→fingerprint / verify→drift / autoRecover
-              // (handler 真公开能力,server.ts applyFingerprint/shouldRecover)。沿
-              // filter 单点豁免先例,1 段 description 字节远低于 82B buffer 损耗。
-            } else if (toolName === "vortex_query" && k === "attr") {
-              // query attr 多属性豁免(daddd2b): attr 支持 , / | 分隔多属性是 handler
-              // 已实现的真能力(normalizeCssAttrParam)。不文档化则复发 R11 禅道 dogfood
-              // 实测的静默失败——attr="class|title" 被当单个畸形属性名 getAttribute 掉,
-              // 静默返回空 attrs,agent 误判 attr 参数失效。同 filter 的豁免判据。
-            } else {
-              throw new Error(`${path}.properties.${k} has description (forbidden by §0.2.1)`);
-            }
+            found.push(`${tool}${path}.${k}`);
           }
-          checkNoPropertyDescription(v, `${path}.properties.${k}`, toolName);
+          walk(v, `${path}.${k}`, tool);
         }
       }
-      if (schema.items) checkNoPropertyDescription(schema.items, `${path}.items`, toolName);
-      if (schema.oneOf) for (const o of schema.oneOf) checkNoPropertyDescription(o, `${path}.oneOf`, toolName);
+      if (schema.items) walk(schema.items, `${path}[]`, tool);
+      if (schema.oneOf) for (const o of schema.oneOf) walk(o, path, tool);
     }
-    for (const d of defs) {
-      expect(() => checkNoPropertyDescription(d.schema, "", d.name)).not.toThrow();
-    }
+    for (const d of defs) walk(d.schema, "", d.name);
+
+    expect(found.filter((k) => !(k in DOCUMENTED))).toEqual([]);
+    // 白名单不许留废条目,否则会慢慢失去"精选"的意义
+    expect(Object.keys(DOCUMENTED).filter((k) => !found.includes(k))).toEqual([]);
   });
 });
 

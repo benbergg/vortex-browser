@@ -1,9 +1,13 @@
 // L4 public tool registry (v2.1: 17 tools)。
 // spec: vortex重构-L4-spec.md §0.2.1 (compact schema rules)
 //
-// Compression rules (enforced by I15 ≤ 5200 B v2.1):
+// Compression rules (enforced by I15):
 // - description: imperative, ≤ 60 chars
-// - properties: NO description field
+// - properties: description 仅给"模型会填错或不知道能填什么"的参数
+//   (2026-08-09 工具选择评测修订: 原规则是一律不写。实测 113 个参数只有 2 个
+//    有说明,模型在公开站点任务上 4/4 改用 playwright——尽管 vortex 全能做到。
+//    典型代价: screenshot 因 target 无说明多花一倍调用。详见
+//    reports/_eval/tool-choice-2026-08-09.md。tabId/frameId 等自解释参数仍不写。)
 // - shared inline $defs not possible across tools (MCP serializes each)
 //   so Target / TabRef structures are duplicated per tool
 // - no `default` fields (handler defaults instead)
@@ -35,8 +39,14 @@ const tabFields = {
 // target: ref string only in v0.6 (`@e3` / `@f1e2` legacy + `@<hash>:eN`
 // hashed form in v0.8.x). null variant lets extract/screenshot target the
 // whole page; act/wait_for require a concrete element.
-const TargetRequired = { type: "string" as const };
-const TargetOptional = { oneOf: [{ type: "string" as const }, { type: "null" as const }] };
+const TargetRequired = {
+  type: "string" as const,
+  description: "@ref from vortex_observe, or a CSS selector",
+};
+const TargetOptional = {
+  oneOf: [{ type: "string" as const }, { type: "null" as const }],
+  description: "@ref from vortex_observe, or a CSS selector; null/omit = whole page",
+};
 
 export const PUBLIC_TOOLS: ToolDef[] = [
   {
@@ -51,11 +61,11 @@ export const PUBLIC_TOOLS: ToolDef[] = [
       properties: {
         target: TargetRequired,
         action: { enum: ["click", "fill", "type", "select", "scroll", "hover"] },
-        value: {},
+        value: { description: "click/hover: omit; fill/type/select: string; scroll: {container?,position}" },
         useRealMouse: { type: "boolean" },
         options: {
           type: "object",
-          // I15 invariant: properties 内无 description。onDialog 含义见工具级 description。
+          // onDialog 含义见工具级 description
           properties: {
             timeout: { type: "number" },
             force: { type: "boolean" },
@@ -108,11 +118,11 @@ export const PUBLIC_TOOLS: ToolDef[] = [
         target: TargetOptional,
         depth: { type: "number" },
         include: { type: "array", items: { enum: ["text", "value", "attrs"] } },
-        maxLength: { type: "number", default: 10240 },
+        maxLength: { type: "number", default: 10240, description: "default 10240; longer text is cut with a [VORTEX_TRUNCATED] marker" },
         scroll: { type: "boolean" },
         // REQ-NNN N0060 京东评测: include alt text from <img alt> elements
         // (京东自营 / 淘宝天猫角标). default true (向后兼容: false 时行为与
-        // 原 innerText 一致). I15 invariant: properties 无 description.
+        // 原 innerText 一致).
         includeAlt: { type: "boolean" },
         ...tabFields,
       },
@@ -204,7 +214,7 @@ export const PUBLIC_TOOLS: ToolDef[] = [
       type: "object",
       properties: {
         mode: { enum: ["element", "idle", "info", "custom"] },
-        value: {},
+        value: { description: "element: CSS selector; custom: JS expression; idle: net|xhr|dom; info: omit" },
         timeout: { type: "number" },
         ...tabFields,
       },
@@ -408,7 +418,7 @@ export const PUBLIC_TOOLS: ToolDef[] = [
       type: "object",
       properties: {
         target: TargetRequired,
-        value: {},
+        value: { description: "plain input: string; daterange/datetimerange: {start,end}; cascader: path array" },
         widget: { enum: [...COMMIT_KINDS] },
         force: { type: "boolean" },
         ...tabFields,
@@ -424,7 +434,7 @@ export const PUBLIC_TOOLS: ToolDef[] = [
     schema: {
       type: "object",
       properties: {
-        mode: { enum: ["text", "css", "component", "geometry", "style", "sheet", "flow", "chart"] },
+        mode: { enum: ["text", "css", "component", "geometry", "style", "sheet", "flow", "chart"] , description: "component reads Vue/React instance state; sheet only reads Yuque Lake Sheet, NOT DOM tables (use extract for those)"},
         pattern: { type: "string" },
         isRegex: { type: "boolean" },
         caseSensitive: { type: "boolean" },

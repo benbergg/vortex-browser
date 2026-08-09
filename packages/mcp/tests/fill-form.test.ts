@@ -69,21 +69,6 @@ describe("vortex_fill_form: dispatch 路由", () => {
   });
 });
 
-describe("vortex_fill_form: schema 属性不带 description（I15 §0.2.1）", () => {
-  it("inputSchema properties 字段不带 description", () => {
-    const def = getToolDef("vortex_fill_form");
-    function checkNoPropertyDescription(schema: any, path = ""): void {
-      if (!schema || typeof schema !== "object") return;
-      if (schema.properties && typeof schema.properties === "object") {
-        for (const [k, v] of Object.entries(schema.properties)) {
-          if (v && typeof v === "object" && "description" in (v as object)) {
-            throw new Error(`${path}.properties.${k} has description (forbidden by §0.2.1)`);
-          }
-          checkNoPropertyDescription(v, `${path}.properties.${k}`);
-        }
-      }
-      if (schema.items) checkNoPropertyDescription(schema.items, `${path}.items`);
-    }
-    expect(() => checkNoPropertyDescription(def!.schema, "")).not.toThrow();
-  });
-});
+// 参数 description 的约束已统一到 I15.tools-list-budget.test.ts 的白名单断言,
+// 那里遍历全部公开工具(含 vortex_fill_form.fields[].target)。此处原有的同名副本
+// 已删除,避免两处判据漂移——2026-08-09 放开 target 说明时正是它先报的假警。
