@@ -541,7 +541,8 @@ export class HubRouter {
     }
   }
 
-  private clearSessionBinding(session: SessionEntry, targetBrowserId?: string): void {
+  // 清理会话绑定及其 tab ownership
+  clearSessionBinding(session: SessionEntry, targetBrowserId?: string): void {
     const browserIds = new Set<string>();
     if (session.browserId) browserIds.add(session.browserId);
     if (session.lastBrowserId) browserIds.add(session.lastBrowserId);

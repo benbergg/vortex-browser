@@ -147,4 +147,20 @@ describe("allocate", () => {
   it("SW 休眠不触发误分配：全新 session 走规则 4 时跳过 NM 断开浏览器", () => {
     expect(allocate(session("new"), sleepingBrowserMap)).toBe("available");
   });
+
+  it("binds a preferred browser by label once it connects", () => {
+    const s = session("late");
+    s.browserPref = "edge";
+    expect(allocate(s, browserMap())).toBeNull();
+
+    const edge = browser("uuid-edge");
+    edge.label = "Microsoft Edge";
+    expect(allocate(s, browserMap(edge))).toBe("uuid-edge");
+  });
+
+  it("never falls back to another browser while a preference is set", () => {
+    const s = session("pinned");
+    s.browserPref = "edge";
+    expect(allocate(s, browserMap(browser("uuid-chrome")))).toBeNull();
+  });
 });

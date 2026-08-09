@@ -615,8 +615,8 @@ describe("hub HTTP command routes", () => {
     expect(started.hub.browsers.get("browser-a")?.tabOwner.has(2)).toBe(false);
     expect(started.hub.browsers.get("browser-offline")).toBeUndefined();
     expect(started.hub.sessions.get("offline-switch")).toMatchObject({
-      browserId: "browser-offline",
-      lastBrowserId: "browser-offline",
+      browserId: null,
+      lastBrowserId: "browser-a",
       currentTabId: null,
       browserPref: "browser-offline",
     });

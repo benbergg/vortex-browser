@@ -17,6 +17,8 @@ export interface VtxHello {
   extDist?: string;
   repoRoot?: string;
   preferBrowserId?: string;
+  /** 浏览器偏好，可填 browserId 或可读的浏览器名（如 chrome / edge） */
+  preferBrowser?: string;
   capabilities?: string[];
 }
 

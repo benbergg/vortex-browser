@@ -12,6 +12,7 @@ import {
   type VtxRequest,
 } from "@vortex-browser/shared";
 import { BrowserRegistry, SessionRegistry, type SessionEntry } from "./registry.js";
+import { matchBrowser } from "./browser-match.js";
 import { HubRouter } from "./router.js";
 import { createHttpRoutes } from "./http-routes.js";
 import { WsHub } from "./ws-hub.js";
@@ -83,10 +84,15 @@ export async function createHub(options: HubOptions = {}): Promise<HubHandle> {
     if (options.sink !== undefined) session.sink = options.sink;
     if (options.browserPref !== undefined) {
       session.browserPref = options.browserPref;
-      if (options.browserPref && existing && session.browserId !== options.browserPref) {
-        router.rebindSession(session, options.browserPref);
+      const preferred = options.browserPref ? matchBrowser(options.browserPref, browsers) : null;
+      if (preferred && existing && session.browserId !== preferred.browserId) {
+        router.rebindSession(session, preferred.browserId);
+      } else if (preferred) {
+        session.browserId = preferred.browserId;
       } else if (options.browserPref) {
-        session.browserId = options.browserPref;
+        // 偏好匹配不到就必须解绑，否则会继续沿用旧浏览器
+        router.clearSessionBinding(session);
+        session.browserId = null;
       }
     }
     if (!existing) router.assignSession(session, false);

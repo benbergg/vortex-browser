@@ -1,6 +1,6 @@
 import type { VtxRequest } from "@vortex-browser/shared";
 import type { WebSocket } from "ws";
-import { compareBrowsers } from "./browser-match.js";
+import { compareBrowsers, matchBrowser } from "./browser-match.js";
 
 export interface BrowserEntry {
   browserId: string;
@@ -127,8 +127,8 @@ export function allocate(
   s: SessionEntry,
   browsers: BrowserMapLike,
 ): string | null {
-  // 显式 pin 且在线时不降级，避免静默跑错浏览器。
-  if (s.browserPref) return browsers.has(s.browserPref) ? s.browserPref : null;
+  // 有偏好就每次现算，不降级到别的浏览器，避免静默跑错
+  if (s.browserPref) return matchBrowser(s.browserPref, browsers)?.browserId ?? null;
   // 粘性绑定优先保持不动。
   if (s.browserId && browsers.has(s.browserId)) return s.browserId;
   // 原浏览器复归时优先恢复，保护 tab 状态。

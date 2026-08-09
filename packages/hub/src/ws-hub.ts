@@ -13,6 +13,7 @@ import {
   type VtxWelcome,
 } from "@vortex-browser/shared";
 import { type BrowserEntry, BrowserRegistry, type SessionEntry, SessionRegistry } from "./registry.js";
+import { matchBrowser } from "./browser-match.js";
 import { HubRouter } from "./router.js";
 
 const HEARTBEAT_INTERVAL_MS = 15_000;
@@ -178,8 +179,12 @@ export class WsHub {
     session.wireVersion = hello.wireVersion;
     session.connectedAt = this.now();
     session.lastSeenAt = this.now();
-    session.browserPref = hello.preferBrowserId ?? null;
-    if (session.browserPref) session.browserId = session.browserPref;
+    // 存原始字符串，浏览器晚于 MCP 上线时仍能在重分配里绑上
+    session.browserPref = hello.preferBrowser ?? hello.preferBrowserId ?? null;
+    if (session.browserPref) {
+      const preferred = matchBrowser(session.browserPref, this.browsers);
+      session.browserId = preferred?.browserId ?? null;
+    }
     this.sessions.set(session);
     const assignedBrowserId = session.rebindUntil > this.now() ? null : this.router.assignSession(session, false);
     const welcome: VtxWelcome = {

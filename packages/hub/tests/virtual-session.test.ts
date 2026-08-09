@@ -79,7 +79,7 @@ describe("virtual session transport", () => {
       const reused = hub.getOrCreateVirtualSession("virtual-preferred");
 
       expect(reused).toBe(first);
-      expect(first.browserId).toBe("browser-preferred");
+      expect(first.browserId).toBeNull();
       expect(first.browserPref).toBe("browser-preferred");
       expect(assignSession).toHaveBeenCalledTimes(1);
       expect(assignSession).toHaveBeenCalledWith(first, false);
