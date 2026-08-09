@@ -1389,6 +1389,49 @@ describe("hub HTTP command routes", () => {
 
     expect(body.message).toContain("没有可用 browser");
   });
+
+  it("trusted-mode 接受浏览器名", async () => {
+    started = await startTestHub();
+    const agent = await addAgent(started, {
+      browserId: "uuid-edge",
+      hello: { label: "Microsoft Edge" },
+    });
+    replyToCommands(agent, () => ({ result: { trusted: true } }));
+
+    const response = await fetch(`http://127.0.0.1:${started.port}/trusted-mode?browserId=edge`);
+
+    expect(response.status).toBe(200);
+  });
+
+  it("多浏览器未指定时列出 label 而非 uuid", async () => {
+    started = await startTestHub();
+    await addAgent(started, { browserId: "uuid-chrome", hello: { label: "Google Chrome" } });
+    await addAgent(started, { browserId: "uuid-edge", hello: { label: "Microsoft Edge" } });
+
+    const response = await fetch(`http://127.0.0.1:${started.port}/trusted-mode`);
+    const body = await response.json() as { error: { message: string } };
+
+    expect(response.status).toBe(400);
+    expect(body.error.message).toContain("Microsoft Edge");
+    expect(body.error.message).not.toContain("uuid-edge");
+  });
+
+  it("dev/reload-extension 的 body browserId 接受浏览器名", async () => {
+    started = await startTestHub();
+    const agent = await addAgent(started, {
+      browserId: "uuid-edge",
+      hello: { label: "Microsoft Edge" },
+    });
+    replyToCommands(agent, () => ({ result: { reloaded: true } }));
+
+    const response = await fetch(`http://127.0.0.1:${started.port}/dev/reload-extension`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ browserId: "edge" }),
+    });
+
+    expect(response.status).toBe(200);
+  });
 });
 
 type StartedHub = Awaited<ReturnType<typeof startTestHub>>;

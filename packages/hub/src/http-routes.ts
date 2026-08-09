@@ -12,6 +12,7 @@ import {
 } from "@vortex-browser/shared";
 import type { HubHandle } from "./hub.js";
 import type { BrowserRegistry, SessionEntry, SessionRegistry } from "./registry.js";
+import { matchBrowser } from "./browser-match.js";
 import { sweepIdleVirtualSessions } from "./virtual-session.js";
 
 const DEFAULT_VIRTUAL_SESSION_IDLE_MS = 10 * 60_000;
@@ -223,8 +224,9 @@ type BrowserSelection =
   | { ok: false; status: number; code: VtxErrorPayload["code"]; message: string };
 
 function selectBrowser(options: HubRouteOptions, requestedBrowserId?: string): BrowserSelection {
-  const browserIds = listBrowserIds(options);
-  if (browserIds.length === 0) {
+  const browsers = options.browsers;
+  const entries = browsers ? [...browsers.values()] : [];
+  if (entries.length === 0) {
     return {
       ok: false,
       status: 503,
@@ -233,25 +235,27 @@ function selectBrowser(options: HubRouteOptions, requestedBrowserId?: string): B
     };
   }
   if (requestedBrowserId !== undefined) {
-    if (!browserIds.includes(requestedBrowserId)) {
+    const matched = browsers ? matchBrowser(requestedBrowserId, browsers) : null;
+    if (!matched) {
       return {
         ok: false,
         status: 404,
         code: VtxErrorCode.INVALID_PARAMS,
-        message: `未知 browserId: ${requestedBrowserId}`,
+        message: `未知 browser: ${requestedBrowserId}`,
       };
     }
-    return { ok: true, browserId: requestedBrowserId };
+    return { ok: true, browserId: matched.browserId };
   }
-  if (browserIds.length > 1) {
+  if (entries.length > 1) {
+    const labels = [...new Set(entries.map((browser) => browser.label))].sort();
     return {
       ok: false,
       status: 400,
       code: VtxErrorCode.INVALID_PARAMS,
-      message: `browserId 必填，可选 browserId: ${browserIds.join(", ")}`,
+      message: `browserId 必填，可选: ${labels.join(", ")}`,
     };
   }
-  return { ok: true, browserId: browserIds[0] };
+  return { ok: true, browserId: entries[0].browserId };
 }
 
 interface ExtDistInfo {
