@@ -21,11 +21,19 @@ export function registerTabHandlers(router: ActionRouter): void {
     },
 
     [TabActions.CREATE]: async (args) => {
-      const tab = await chrome.tabs.create({
-        url: args.url as string | undefined,
-        active: (args.active as boolean) ?? true,
-      });
-      return { id: tab.id, url: tab.url, title: tab.title };
+      const url = args.url as string | undefined;
+      const active = (args.active as boolean) ?? true;
+      try {
+        const tab = await chrome.tabs.create({ url, active });
+        return { id: tab.id, url: tab.url, title: tab.title };
+      } catch (err) {
+        // macOS 关掉全部窗口后 app 仍在跑、扩展照常连着 hub，此时 tabs.create 抛
+        // No current window。查一次窗口数再回退，避免吞掉非法 URL 之类的真错误
+        if ((await chrome.windows.getAll()).length > 0) throw err;
+        const win = await chrome.windows.create({ url, focused: active });
+        const tab = win?.tabs?.[0];
+        return { id: tab?.id, url: tab?.url, title: tab?.title };
+      }
     },
 
     [TabActions.CLOSE]: async (args, tabId) => {
