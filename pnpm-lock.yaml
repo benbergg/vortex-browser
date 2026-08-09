@@ -88,6 +88,9 @@ importers:
       '@modelcontextprotocol/sdk':
         specifier: ^1.27.0
         version: 1.29.0(zod@4.3.6)
+      '@vortex-browser/hub':
+        specifier: workspace:*
+        version: link:../hub
       '@vortex-browser/shared':
         specifier: workspace:*
         version: link:../shared

@@ -17,6 +17,7 @@
     "test:integration": "vitest run --config vitest.integration.config.ts"
   },
   "dependencies": {
+    "@vortex-browser/hub": "workspace:*",
     "@vortex-browser/shared": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.27.0",
     "ws": "^8.18.0"

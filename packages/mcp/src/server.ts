@@ -4,8 +4,10 @@ import { createHash } from "node:crypto";
 import { createRequire } from "node:module";
 import { watch, type FSWatcher } from "node:fs";
 import { dirname } from "node:path";
+import { homedir, platform as osPlatform } from "node:os";
 import { fileURLToPath } from "node:url";
 import { realpathSync } from "node:fs";
+import { ensureHubRunning } from "@vortex-browser/hub/spawn";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import {
@@ -20,6 +22,7 @@ import { liftWaitForRefToTarget } from "./lib/wait-for-ref.js";
 import { applyFingerprint, shouldRecover, type FingerprintOpt } from "./lib/fingerprint-apply.js";
 import { lookupIdentity } from "./lib/observe-render.js";
 import { pickOtherBrowsers, type HealthBrowser } from "./lib/other-browsers.js";
+import { ensureBrowserRunning, installedBrowsers } from "./lib/launch-browser.js";
 export { dispatchNewTool };
 
 // Read package.json via createRequire so the bundle works under both ts-node
@@ -114,6 +117,8 @@ const RESPONSE_SIZE_LIMIT = (() => {
   return Number.isFinite(n) && n > 0 ? Math.floor(n) : 100_000;
 })();
 
+let lastUsedBrowser: string | null = null;
+
 /**
  * 自重启机制（@since 0.4.0）：
  *
@@ -207,6 +212,16 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   }
 });
 
+async function ensureBrowserForCall(): Promise<"ready" | "launched-timeout" | "unsupported"> {
+  await ensureHubRunning({ port: PORT, role: "mcp" });
+  return ensureBrowserRunning({
+    pref: process.env.VORTEX_BROWSER?.trim(),
+    lastUsed: lastUsedBrowser ?? undefined,
+    installed: installedBrowsers(homedir(), osPlatform()),
+    platform: osPlatform(),
+  });
+}
+
 // Exported for unit tests so the vortex_observe special path (and the
 // activeSnapshotId follow-on) can be exercised without standing up the MCP
 // transport. Production callers still go through the SDK request handler
@@ -225,6 +240,29 @@ export async function handleCallTool(
   }
 
   const params = (args ?? {}) as Record<string, unknown>;
+
+  if (toolDef.name !== "vortex_browser") {
+    try {
+      const outcome = await ensureBrowserForCall();
+      if (outcome === "launched-timeout") {
+        return {
+          isError: true,
+          content: [{
+            type: "text" as const,
+            text: JSON.stringify({
+              error: "BROWSER_LAUNCHING",
+              message: "Browser was launched but its extension has not connected yet; retry in a few seconds.",
+            }, null, 2),
+          }],
+        };
+      }
+    } catch (error) {
+      return {
+        isError: true,
+        content: [{ type: "text" as const, text: formatError(error) }],
+      };
+    }
+  }
 
   // 特殊 tool: vortex_events（合并原三个 __mcp_events_*__ 分支）
   if (toolDef.name === "vortex_events") {
@@ -768,6 +806,11 @@ export async function handleCallTool(
           text: `Error [${code}]: ${resp.error.message}${hintText}`,
         }],
       };
+    }
+
+    if (toolDef.name === "vortex_browser" && typeof params.browser === "string" && params.browser.trim()) {
+      const result = resp.result as { current?: unknown } | undefined;
+      if (typeof result?.current === "string") lastUsedBrowser = result.current;
     }
 
     let resultForTool = resp.result;
