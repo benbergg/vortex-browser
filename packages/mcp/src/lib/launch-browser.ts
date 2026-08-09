@@ -11,11 +11,7 @@ import {
 import { spawn as nodeSpawn, type ChildProcess } from "node:child_process";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
-import {
-  browserChannels,
-  launchCommand,
-  NM_HOST_FILENAME,
-} from "@vortex-browser/shared";
+import { browserChannels, launchCommand } from "@vortex-browser/shared";
 
 export interface BrowserHealth {
   browsers?: Array<{ label?: string; [key: string]: unknown }>;
@@ -60,9 +56,11 @@ export function installedBrowsers(
   platform: string,
   exists: (path: string) => boolean = (path) => existsSync(path),
 ): string[] {
+  // 判据只能是 app bundle：NM 安装的 mkdir -p 会连带建出空 profileDir
+  if (platform !== "darwin") return [];
   return browserChannels(home, platform)
     .filter((channel) =>
-      exists(channel.profileDir) && exists(join(channel.nmDir, NM_HOST_FILENAME)))
+      exists(`/Applications/${channel.label}.app`) || exists(join(home, "Applications", `${channel.label}.app`)))
     .map((channel) => channel.label);
 }
 

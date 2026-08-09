@@ -95,12 +95,23 @@ describe("ensureBrowserRunning", () => {
 });
 
 describe("installedBrowsers", () => {
-  it("要求 profileDir 与 NM manifest 同时存在", () => {
-    // 只有 manifest 没有 profileDir = 跑过默认安装但没装该浏览器，必须排除
-    // 必须精确匹配：Beta/Dev/Canary/for Testing 的路径同样含 "Google/Chrome"
-    const stable = "/Users/x/Library/Application Support/Google/Chrome";
-    const exists = (p: string) => p === stable || p === `${stable}/NativeMessagingHosts/${NM_HOST_FILENAME}`;
-    expect(installedBrowsers("/Users/x", "darwin", exists)).toEqual(["Google Chrome"]);
-    expect(installedBrowsers("/Users/x", "darwin", (p) => p.endsWith(".json"))).toEqual([]);
+  it("按 app bundle 判断，与 open -a 的目标一致", () => {
+    const exists = (p: string) => p === "/Applications/Microsoft Edge.app";
+    expect(installedBrowsers("/Users/x", "darwin", exists)).toEqual(["Microsoft Edge"]);
+  });
+
+  it("认用户目录下的 app bundle", () => {
+    const exists = (p: string) => p === "/Users/x/Applications/Chromium.app";
+    expect(installedBrowsers("/Users/x", "darwin", exists)).toEqual(["Chromium"]);
+  });
+
+  // NM 安装 mkdir -p nmDir 会连带建出 profileDir，故这两个路径不能作判据
+  it("不把 NM 安装留下的空 profileDir 当作已装", () => {
+    const exists = (p: string) => p.includes("Library/Application Support") || p.endsWith(NM_HOST_FILENAME);
+    expect(installedBrowsers("/Users/x", "darwin", exists)).toEqual([]);
+  });
+
+  it("非 darwin 返回空，拉起本就不支持", () => {
+    expect(installedBrowsers("/home/x", "linux", () => true)).toEqual([]);
   });
 });
