@@ -27,6 +27,18 @@ function isTransient(err: unknown): boolean {
   return TRANSIENT_PATTERNS.some((p) => msg.includes(p));
 }
 
+export function buildHello(sessionId: string): Record<string, unknown> {
+  const pref = process.env.VORTEX_BROWSER?.trim();
+  return {
+    type: "hello",
+    wireVersion: VTX_WIRE_VERSION,
+    role: "mcp",
+    sessionId,
+    label: sessionId,
+    ...(pref ? { preferBrowser: pref } : {}),
+  };
+}
+
 class VortexClient {
   private ws: WebSocket | null = null;
   private connecting: Promise<void> | null = null;
@@ -64,15 +76,7 @@ class VortexClient {
 
       ws.on("open", () => {
         clearTimeout(connectTimeout);
-        ws.send(
-          JSON.stringify({
-            type: "hello",
-            wireVersion: VTX_WIRE_VERSION,
-            role: "mcp",
-            sessionId: this.sessionId,
-            label: this.sessionId,
-          }),
-        );
+        ws.send(JSON.stringify(buildHello(this.sessionId)));
         welcomeTimer = setTimeout(ready, WELCOME_TIMEOUT_MS);
       });
 

@@ -57,6 +57,7 @@ async function loadClient() {
 afterEach(async () => {
   await harness?.close();
   harness = null;
+  vi.unstubAllEnvs();
 });
 
 describe("MCP client ↔ hub 握手", () => {
@@ -118,4 +119,24 @@ describe("MCP client ↔ hub 握手", () => {
     expect(res.success).toBe(true);
     expect(harness.frames[0].type).toBe("hello");
   }, 20000);
+
+  it("hello 带上 VORTEX_BROWSER 指定的 preferBrowser", async () => {
+    vi.stubEnv("VORTEX_BROWSER", "edge");
+    vi.resetModules();
+    harness = await startFakeHub();
+    const { sendRequest } = await import("../src/client.js");
+    await sendRequest("tab.list", {}, harness.port);
+
+    expect(harness.frames[0]).toMatchObject({ type: "hello", preferBrowser: "edge" });
+  });
+
+  it("VORTEX_BROWSER 为空白时不带 preferBrowser", async () => {
+    vi.stubEnv("VORTEX_BROWSER", "   ");
+    vi.resetModules();
+    harness = await startFakeHub();
+    const { sendRequest } = await import("../src/client.js");
+    await sendRequest("tab.list", {}, harness.port);
+
+    expect(harness.frames[0]).not.toHaveProperty("preferBrowser");
+  });
 });
