@@ -7,6 +7,8 @@
 import { VtxErrorCode, vtxError } from "@vortex-browser/shared";
 import { buildExecuteTarget } from "../lib/tab-utils.js";
 import { loadPageSideModule } from "../adapter/page-side-loader.js";
+import { raceTimeout, TIMED_OUT } from "../lib/race-timeout.js";
+import type { NameCandidate } from "./candidate-suggest.js";
 
 // 模块级单调计数器：保证进程内 heal token 绝不碰撞。
 // performance.now() 被浏览器 Spectre clamp 到毫秒级，同一毫秒两次 heal 若仅靠时间戳会产生
@@ -146,4 +148,54 @@ export async function tryHealSelector(
     `选择器失效且 descriptor {name:"${descriptor.name}"} 无命中，元素可能已移除；请重新 vortex_observe`,
     { extras: { descriptor } },
   );
+}
+
+// 采集上限:页面侧先去重再截断,避免超大页把上万个 [tabindex] 全序列化回 host。
+const CANDIDATE_SCAN_LIMIT = 1500;
+const CANDIDATE_RETURN_LIMIT = 200;
+// 本函数只跑在**已经失败**的路径上,超时必须让位给原始错误,绝不能反过来吞掉它。
+const CANDIDATE_COLLECT_TIMEOUT_MS = 2000;
+
+/**
+ * 采集页面可交互元素的可及名(host 侧排序,见 candidate-suggest)。
+ * best-effort:任何异常/超时都返回 []，调用方据此退回"无相近名字"的文案。
+ */
+export async function collectNameCandidates(
+  tabId: number,
+  frameId: number | undefined,
+): Promise<NameCandidate[]> {
+  try {
+    await loadPageSideModule(tabId, frameId, "dom-resolve");
+    const exec = chrome.scripting.executeScript({
+      target: buildExecuteTarget(tabId, frameId),
+      world: "MAIN",
+      func: (inlineBody: string, scanLimit: number, retLimit: number) => {
+        const qad = (window as any).__vortexDomResolve?.queryAllDeep;
+        if (!qad) return [];
+        const els = (qad("a,button,input,select,textarea,[role],[onclick],[tabindex]") as Element[])
+          .slice(0, scanLimit);
+        // eslint-disable-next-line no-new-func
+        const namesOf = new Function("el", `${inlineBody}; return __names(el);`) as (el: Element) => string[];
+        const seen = new Set<string>();
+        const out: Array<{ name: string; tag: string }> = [];
+        for (const el of els) {
+          const name = (namesOf(el)[0] ?? "").slice(0, 120);
+          if (!name) continue;
+          const tag = el.tagName.toLowerCase();
+          const key = `${tag} ${name}`;
+          if (seen.has(key)) continue;
+          seen.add(key);
+          out.push({ name, tag });
+          if (out.length >= retLimit) break;
+        }
+        return out;
+      },
+      args: [__healInlineBody, CANDIDATE_SCAN_LIMIT, CANDIDATE_RETURN_LIMIT],
+    });
+    const results = await raceTimeout(exec, CANDIDATE_COLLECT_TIMEOUT_MS);
+    if (results === TIMED_OUT) return [];
+    return (results?.[0]?.result as NameCandidate[] | undefined) ?? [];
+  } catch {
+    return [];
+  }
 }

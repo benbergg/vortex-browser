@@ -27,11 +27,20 @@ describe("healAwareGate", () => {
     expect(gate).toHaveBeenCalledTimes(2);
   });
 
-  it("无 descriptor → 不自愈，原样抛", async () => {
+  // 2026-08-11 变更：无 descriptor 的零命中不再原样抛 TIMEOUT。日志实测这类 target
+  // 27/29 是自然语言，而 TIMEOUT 的 hint 建议"调大 timeout"，同 target 重试成功 0 次
+  // ——把 agent 引向死路。改抛带候选的 NOT_ATTACHED。
+  it("无 descriptor → 不自愈，改抛带候选的 NOT_ATTACHED", async () => {
     gate.mockRejectedValueOnce(vtxError(VtxErrorCode.TIMEOUT, "Actionability timeout", { extras: { lastReason: "NOT_ATTACHED" } }));
-    await expect(healAwareGate(1, 0, "#old", { timeout: undefined }, undefined, undefined))
-      .rejects.toMatchObject({ code: "TIMEOUT" });
+    await expect(healAwareGate(1, 0, "查询按钮", { timeout: undefined }, undefined, undefined))
+      .rejects.toMatchObject({ code: "NOT_ATTACHED" });
     expect(tryHeal).not.toHaveBeenCalled();
+  });
+
+  it("无 descriptor 但失败原因非零命中（OBSCURED）→ 保留原错误，不误报成选择器问题", async () => {
+    gate.mockRejectedValueOnce(vtxError(VtxErrorCode.TIMEOUT, "Actionability timeout", { extras: { lastReason: "OBSCURED" } }));
+    await expect(healAwareGate(1, 0, ".btn", { timeout: undefined }, undefined, undefined))
+      .rejects.toMatchObject({ code: "TIMEOUT" });
   });
 
   it("非 stale 错误 → 不自愈，原样抛", async () => {

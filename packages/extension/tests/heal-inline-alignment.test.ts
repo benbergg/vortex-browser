@@ -126,3 +126,40 @@ describe("内联 heal 匹配体 ↔ heal-resolve 真源对齐", () => {
     expect(inlineMatch([select], desc).kind).toBe(matchByDescriptor([select], desc).kind);
   });
 });
+
+// collectNameCandidates 的页面侧只取 __names(el)[0]，与 __inlineMatch 走的是同一内联体
+// 但入口函数不同。单独复刻其注入形态：executeScript 的 func 丢模块作用域，若内联体里
+// __names 依赖了未被一并注入的符号，线上会 ReferenceError 而单测照绿。
+describe("候选采集注入体（__names 单独入口）", () => {
+  const namesOf = new Function("el", `${__healInlineBody}; return __names(el);`) as (
+    el: Element,
+  ) => string[];
+
+  beforeEach(() => {
+    const dom = new JSDOM("<!DOCTYPE html><html><body></body></html>");
+    (globalThis as any).document = dom.window.document;
+    (globalThis as any).Element = dom.window.Element;
+  });
+
+  function mk(html: string): Element {
+    const d = document.createElement("div");
+    d.innerHTML = html;
+    return d.firstElementChild!;
+  }
+
+  it("只注入 __names 也能独立求值（不依赖 __inlineMatch 被调用）", () => {
+    expect(namesOf(mk(`<button>查询</button>`))).toContain("查询");
+  });
+
+  it("aria-label 优先于 textContent，取 [0] 得到主名", () => {
+    expect(namesOf(mk(`<button aria-label="关闭对话框">×</button>`))[0]).toBe("关闭对话框");
+  });
+
+  it("无名元素返回空数组，采集侧据此跳过", () => {
+    expect(namesOf(mk(`<div></div>`))).toEqual([]);
+  });
+
+  it("空白折叠：渲染文本里的换行/多空格不进入名字", () => {
+    expect(namesOf(mk(`<button>  保存\n  配置 </button>`))[0]).toBe("保存 配置");
+  });
+});

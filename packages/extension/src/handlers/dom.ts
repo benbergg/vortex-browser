@@ -20,7 +20,13 @@ import {
 } from "../patterns/index.js";
 import { waitActionable } from "../action/auto-wait.js";
 import { waitActionableAutoForce } from "../action/wait-actionable-auto-force.js";
-import { isHealableSelectorFailure, tryHealSelector } from "../action/heal.js";
+import {
+  collectNameCandidates,
+  isHealableSelectorFailure,
+  isStaleNotAttached,
+  tryHealSelector,
+} from "../action/heal.js";
+import { buildNoMatchMessage, rankCandidates } from "../action/candidate-suggest.js";
 
 /**
  * 判断元素是否为"瞬态覆盖层"(react-virtuoso 动画层 / popper 浮层 / 滚动视口
@@ -111,7 +117,32 @@ export async function healAwareGate(
       await waitActionableAutoForce(tabId, frameId, healed, options, force);
       return { selector: healed, healed: true };
     }
+    // 调用方传的是裸 target(无 descriptor 可自愈)且零命中:日志实测这类 target
+    // 27/29 是自然语言,被当 CSS 空转到 TIMEOUT,而 TIMEOUT 的 hint 建议"调大
+    // timeout"——同 target 重试成功 0 次,是死路。改为附上相近的可及名,让一次
+    // 往返就能恢复。
+    if (!descriptor && isStaleNotAttached(err)) {
+      throw await buildNoMatchError(tabId, frameId, selector, err);
+    }
     throw err;
+  }
+}
+
+/** 零命中错误 → 带候选的 NOT_ATTACHED。采集失败时退回无候选文案,绝不吞掉原错误。 */
+async function buildNoMatchError(
+  tabId: number,
+  frameId: number | undefined,
+  selector: string,
+  original: unknown,
+): Promise<unknown> {
+  try {
+    const ranked = rankCandidates(await collectNameCandidates(tabId, frameId), selector, 5);
+    return vtxError(VtxErrorCode.NOT_ATTACHED, buildNoMatchMessage(selector, ranked), {
+      tabId,
+      extras: { target: selector, candidates: ranked.map((c) => ({ name: c.name, tag: c.tag })) },
+    });
+  } catch {
+    return original;
   }
 }
 
