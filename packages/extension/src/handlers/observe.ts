@@ -3,6 +3,7 @@ import type { ActionRouter } from "../lib/router.js";
 import type { DebuggerManager } from "../lib/debugger-manager.js";
 import { getActiveTabId, buildExecuteTarget, ensureFrameAttached } from "../lib/tab-utils.js";
 import { getIframeOffset } from "../lib/iframe-offset.js";
+import { raceTimeout, TIMED_OUT } from "../lib/race-timeout.js";
 import {
   gcSnapshots,
   newSnapshotId,
@@ -3791,6 +3792,117 @@ const INTERACTIVE_SELECTORS = [
   }
 }
 
+/**
+ * 跨 frame **扫描阶段**总预算。
+ *
+ * 传输层默认 30s,但扫描之后还有 AX overlay / 全局 index 组装 / marker 清理,真实重站
+ * 上这些要好几秒且不受此预算约束——2026-08-11 live(gamma.app,1 个 srcdoc iframe)
+ * 实测:预算 25s 时扫描刚好吃满,叠加后续阶段仍越过 30s,调用方照旧见 "no response" 丑错。
+ *
+ * 取舍:20s 意味着日志中 20-28s 才成功的那 ~5% 重站调用会转为降级(带部分结果 +
+ * `# degraded` 说明),换掉的是零结果且提示误导的传输超时。按「优雅降级优先」定 20s。
+ */
+const SCAN_TOTAL_BUDGET_MS = 20_000;
+/**
+ * 单 frame 下限。低于此值宁可不设界——重站单 frame 扫描实测 13% 超过 8s(最慢 28s
+ * 仍成功),固定小上限会把正常调用误判成降级。
+ */
+const FRAME_SCAN_MIN_TIMEOUT_MS = 8_000;
+/**
+ * AX 覆盖层上限。跑在扫描预算之外,失败可优雅回退纯启发式(role/name 退化但不缺元素),
+ * 故宁可掐断也不让它顶穿 30s 传输超时。
+ */
+const AX_OVERLAY_TIMEOUT_MS = 6_000;
+/** listener discovery 上限。失败即整页 [listener] 信号丢失,必须上报而非静默吞掉。 */
+const LISTENER_DISCOVERY_TIMEOUT_MS = 8_000;
+
+/**
+ * 单 frame 超时 = 剩余预算按剩余 frame 数均摊,但不低于下限。
+ * 单 frame 场景即等于整个剩余预算(不误伤慢站);多 frame 场景保证一个卡死的 frame
+ * 不会吃光预算导致其余 frame 全被跳过。
+ */
+export function frameScanTimeout(remainingBudgetMs: number, remainingFrames: number): number {
+  const share = remainingBudgetMs / Math.max(1, remainingFrames);
+  return Math.min(remainingBudgetMs, Math.max(FRAME_SCAN_MIN_TIMEOUT_MS, share));
+}
+
+interface ScanEntry {
+  frameId: number;
+  url: string;
+  parentFrameId: number;
+  offset: { x: number; y: number };
+  page: FramePageResult | null;
+}
+
+/** 跨两轮扫描(主循环 + auto-fallback)共享的预算与降级归因。 */
+interface ScanBudget {
+  startedAt: number;
+  timedOutFrames: number[];
+  budgetSkippedFrames: number[];
+}
+
+/**
+ * 按预算扫描一批 frame:单 frame 超时则跳过并记录,总预算耗尽则不再尝试剩余 frame。
+ * 无论降级与否都返回等长的 ScanEntry(page=null 表示未扫到),由调用方汇总。
+ */
+async function scanFramesWithBudget(
+  tabId: number,
+  targets: Array<{ frameId: number; url: string; parentFrameId: number }>,
+  budget: ScanBudget,
+  scanArgs: {
+    maxElements: number;
+    viewport: "visible" | "full";
+    includeText: boolean;
+    includeAX: boolean;
+    filterMode: "interactive" | "all";
+  },
+): Promise<ScanEntry[]> {
+  const out: ScanEntry[] = [];
+  for (let i = 0; i < targets.length; i++) {
+    const f = targets[i];
+    const base = { frameId: f.frameId, url: f.url, parentFrameId: f.parentFrameId };
+    const remaining = SCAN_TOTAL_BUDGET_MS - (Date.now() - budget.startedAt);
+    if (remaining <= 0) {
+      budget.budgetSkippedFrames.push(f.frameId);
+      out.push({ ...base, offset: { x: 0, y: 0 }, page: null });
+      continue;
+    }
+    const perFrame = frameScanTimeout(remaining, targets.length - i);
+    const offsetR = await raceTimeout(getIframeOffset(tabId, f.frameId), perFrame);
+    const offset = offsetR === TIMED_OUT ? { x: 0, y: 0 } : offsetR;
+    // offset 与 scan 串行,必须重算剩余——否则单个 frame 最坏吃掉 2×perFrame,
+    // 整体远超总预算(单测抓不到:stub 的 offset 恒秒回)
+    const afterOffset = SCAN_TOTAL_BUDGET_MS - (Date.now() - budget.startedAt);
+    if (afterOffset <= 0) {
+      budget.timedOutFrames.push(f.frameId);
+      out.push({ ...base, offset, page: null });
+      continue;
+    }
+    const pageR = await raceTimeout(
+      scanOneFrame(
+        tabId,
+        f.frameId,
+        scanArgs.maxElements,
+        scanArgs.viewport,
+        scanArgs.includeText,
+        scanArgs.includeAX,
+        scanArgs.filterMode,
+      ),
+      Math.min(perFrame, afterOffset),
+    );
+    if (pageR === TIMED_OUT) {
+      budget.timedOutFrames.push(f.frameId);
+      out.push({ ...base, offset, page: null });
+      continue;
+    }
+    if (pageR === null) {
+      console.warn(`[vortex.observe] scanOneFrame null fid=${f.frameId} url=${f.url}`);
+    }
+    out.push({ ...base, offset, page: pageR });
+  }
+  return out;
+}
+
 export function registerObserveHandlers(router: ActionRouter, debuggerMgr: DebuggerManager): void {
   // debuggerMgr 用于 AX overlay pass + JS listener 信号（T3）
   router.registerAll({
@@ -3837,44 +3949,37 @@ export function registerObserveHandlers(router: ActionRouter, debuggerMgr: Debug
       }
 
       // 跨 frame：每个 frame 独立扫描；offset 用 getIframeOffset 算一次
-      const scans: Array<{
-        frameId: number;
-        url: string;
-        parentFrameId: number;
-        offset: { x: number; y: number };
-        page: FramePageResult | null;
-      }> = [];
+      const scans: ScanEntry[] = [];
+      const scanBudget: ScanBudget = {
+        startedAt: Date.now(),
+        timedOutFrames: [],
+        budgetSkippedFrames: [],
+      };
       // T3 discovery(pre-scan):CDP getEventListeners 给主 frame 内纯 addEventListener
       // 点击元素打 data-vtx-listener,随后 scanOneFrame 把它当入池信号 → DISCOVER 漏网
       // vanilla/jQuery div(无 cursor:pointer/role/框架 prop)。召回零回退:失败标 0 个,
       // scan 退回现有启发式。属性在 scan 后随 data-vtx-ax 一并清理。
+      let listenerDiscoveryTimedOut = false;
+      let axOverlayTimedOut = false;
       try {
-        await markListenerElements(debuggerMgr, tid);
+        // 同样加界:CDP 侧卡住不该吃掉整个扫描预算。超时=整页 [listener] 丢失,须上报。
+        const marked = await raceTimeout(
+          markListenerElements(debuggerMgr, tid),
+          LISTENER_DISCOVERY_TIMEOUT_MS,
+        );
+        if (marked === TIMED_OUT) listenerDiscoveryTimedOut = true;
       } catch {
         /* markListenerElements 内置兜底,理论不抛;防御性吞掉不阻断 observe */
       }
-      for (const f of frameTargets) {
-        const offset = await getIframeOffset(tid, f.frameId);
-        const page = await scanOneFrame(
-          tid,
-          f.frameId,
+      scans.push(
+        ...(await scanFramesWithBudget(tid, frameTargets, scanBudget, {
           maxElements,
           viewport,
           includeText,
           includeAX,
           filterMode,
-        );
-        if (page === null) {
-          console.warn(`[vortex.observe] scanOneFrame null fid=${f.frameId} url=${f.url}`);
-        }
-        scans.push({
-          frameId: f.frameId,
-          url: f.url,
-          parentFrameId: f.parentFrameId,
-          offset,
-          page,
-        });
-      }
+        })),
+      );
 
       // Auto-fallback for shell+iframe sites (Zentao/JIRA Cloud/phpMyAdmin):
       // when caller didn't pin `frames` and main frame returns near-empty
@@ -3928,30 +4033,16 @@ export function registerObserveHandlers(router: ActionRouter, debuggerMgr: Debug
               }));
             if (newTargets.length > 0) {
               autoFallback = true;
-              for (const f of newTargets) {
-                const offset = await getIframeOffset(tid, f.frameId);
-                const page = await scanOneFrame(
-                  tid,
-                  f.frameId,
+              // 与主循环共享同一预算:fallback 是第二轮扫描,不该另起炉灶再吃 25s
+              scans.push(
+                ...(await scanFramesWithBudget(tid, newTargets, scanBudget, {
                   maxElements,
                   viewport,
                   includeText,
                   includeAX,
                   filterMode,
-                );
-                if (page === null) {
-                  console.warn(
-                    `[vortex.observe] auto-fallback scanOneFrame null fid=${f.frameId} url=${f.url}`,
-                  );
-                }
-                scans.push({
-                  frameId: f.frameId,
-                  url: f.url,
-                  parentFrameId: f.parentFrameId,
-                  offset,
-                  page,
-                });
-              }
+                })),
+              );
             }
           }
         }
@@ -3963,20 +4054,29 @@ export function registerObserveHandlers(router: ActionRouter, debuggerMgr: Debug
         const mainScan = scans.find((s) => s.frameId === 0);
         if (mainScan?.page && mainScan.page.elements.length > 0) {
           try {
-            const { byBackend, byNodeId } = await captureAXNodeMap(debuggerMgr, tid, 0);
-            const doc = (await debuggerMgr.sendCommand(tid, "DOM.getDocument", {
-              depth: -1,
-              pierce: true,
-            })) as { root?: unknown };
-            if (doc?.root) {
-              const indexToBackend = buildIndexToBackend(doc.root as never);
-              applyOverlay(
-                mainScan.page.elements as unknown as OverlayableElement[],
-                indexToBackend,
-                byBackend,
-                byNodeId,
-              );
-            }
+            // CDP 冷附加 / 巨型 DOM 下 getFullAXTree + DOM.getDocument(depth=-1,pierce)
+            // 可能极慢甚至不返回,而它跑在扫描预算之外 —— 无界会直接顶穿 30s 传输超时。
+            const axDone = await raceTimeout(
+              (async () => {
+                const { byBackend, byNodeId } = await captureAXNodeMap(debuggerMgr, tid, 0);
+                const doc = (await debuggerMgr.sendCommand(tid, "DOM.getDocument", {
+                  depth: -1,
+                  pierce: true,
+                })) as { root?: unknown };
+                if (doc?.root) {
+                  const indexToBackend = buildIndexToBackend(doc.root as never);
+                  applyOverlay(
+                    mainScan.page!.elements as unknown as OverlayableElement[],
+                    indexToBackend,
+                    byBackend,
+                    byNodeId,
+                  );
+                }
+                return true;
+              })(),
+              AX_OVERLAY_TIMEOUT_MS,
+            );
+            if (axDone === TIMED_OUT) axOverlayTimedOut = true;
           } catch (err) {
             console.warn(
               `[vortex.observe] AX overlay skipped fid=0: ${err instanceof Error ? err.message : String(err)}`,
@@ -3991,16 +4091,22 @@ export function registerObserveHandlers(router: ActionRouter, debuggerMgr: Debug
       // marker 清理(无条件):data-vtx-ax(scan stamping)+ data-vtx-listener
       // + data-vtx-dropzone(pre-scan discovery)。无条件打,故清理也须无条件,防标记残留。清理失败不致命。
       try {
-        await chrome.scripting.executeScript({
-          target: { tabId: tid, allFrames: true },
-          func: () => {
-            for (const el of document.querySelectorAll("[data-vtx-ax]")) el.removeAttribute("data-vtx-ax");
-            for (const el of document.querySelectorAll("[data-vtx-listener]"))
-              el.removeAttribute("data-vtx-listener");
-            for (const el of document.querySelectorAll("[data-vtx-dropzone]"))
-              el.removeAttribute("data-vtx-dropzone");
-          },
-        });
+        // 同样加界:坏 tab 态下这个"不致命"的清理会永不 settle,挂死整次 observe
+        await raceTimeout(
+          chrome.scripting.executeScript({
+            target: { tabId: tid, allFrames: true },
+            func: () => {
+              for (const el of document.querySelectorAll("[data-vtx-ax]")) el.removeAttribute("data-vtx-ax");
+              for (const el of document.querySelectorAll("[data-vtx-listener]"))
+                el.removeAttribute("data-vtx-listener");
+              for (const el of document.querySelectorAll("[data-vtx-dropzone]"))
+                el.removeAttribute("data-vtx-dropzone");
+            },
+          }),
+          // 清理也算进总预算,否则最坏 25s 扫描 + 8s 清理会突破 30s 传输超时。
+          // 预算耗尽时仍留 2s 尽力一试(标记残留会污染下轮 scan)。
+          Math.max(2_000, SCAN_TOTAL_BUDGET_MS - (Date.now() - scanBudget.startedAt)),
+        );
       } catch {
         /* 标记仅 observe 内部用,下轮 scan 覆盖 */
       }
@@ -4279,6 +4385,34 @@ offScreenActionable: e.offScreenActionable,
       // fall back to empty / zeros so the renderer can still emit a
       // header without misrepresenting which origin we're on.
       const mainScan = scans.find((s) => s.frameId === 0);
+
+      // 降级归因:仅在扫描真被截断时出现,正常路径 meta 保持字节不变
+      const degraded =
+        scanBudget.timedOutFrames.length > 0 ||
+        scanBudget.budgetSkippedFrames.length > 0 ||
+        listenerDiscoveryTimedOut ||
+        axOverlayTimedOut
+          ? {
+              ...(scanBudget.timedOutFrames.length > 0
+                ? { timedOutFrames: scanBudget.timedOutFrames }
+                : {}),
+              ...(scanBudget.budgetSkippedFrames.length > 0
+                ? { budgetSkippedFrames: scanBudget.budgetSkippedFrames }
+                : {}),
+              // 这两项不减少元素数量,但静默降低召回/语义质量,不上报即 silent degradation
+              ...(listenerDiscoveryTimedOut ? { listenerDiscovery: "timeout" as const } : {}),
+              ...(axOverlayTimedOut ? { axOverlay: "timeout" as const } : {}),
+            }
+          : undefined;
+      // 有货就交货并标明缺口,没货就诚实报错——空结果 + success 是纯粹的 silent success
+      if (degraded && elementsOut.length === 0) {
+        throw vtxError(
+          VtxErrorCode.TIMEOUT,
+          `observe scan degraded and yielded 0 elements (timed out frames: [${scanBudget.timedOutFrames.join(", ")}], skipped by budget: [${scanBudget.budgetSkippedFrames.join(", ")}]); page may be too heavy or the tab is in a bad state. Retry with frames='main' to narrow scope, or vortex_wait_for(mode='idle') first.`,
+          { tabId: tid, extras: { timedOutFrames: scanBudget.timedOutFrames, budgetSkippedFrames: scanBudget.budgetSkippedFrames } },
+        );
+      }
+
       return {
         snapshotId,
         version: 2,
@@ -4300,6 +4434,7 @@ offScreenActionable: e.offScreenActionable,
           frameCount: framesOut.length,
           scannedFrames: framesOut.filter((f) => f.scanned).length,
           ...(autoFallback ? { autoFallback: true as const } : {}),
+          ...(degraded ? { degraded } : {}),
         },
       };
     },

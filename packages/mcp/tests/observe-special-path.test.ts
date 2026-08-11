@@ -99,6 +99,30 @@ describe("vortex_observe special path (Bug C regression)", () => {
     expect((params as Record<string, unknown>).frames).toBe("all-permitted");
   });
 
+  // 链路锁:extension 的 meta.degraded 必须一路活到 compact 文本。special path 若在
+  // reshape 时漏传 meta,渲染层的 buildDegradedNote 拿不到数据 —— 单测各自绿、整条
+  // 特性静默失效(与 Bug F transit-path 同构)。
+  it("meta.degraded 透传到 compact 输出(scan-budget transit-path lock)", async () => {
+    const { sendRequest } = await import("../src/client.js");
+    vi.mocked(sendRequest).mockResolvedValue({
+      result: {
+        snapshotId: "snap_degraded_1",
+        url: "https://example.com",
+        elements: [{ index: 0, tag: "button", role: "button", name: "OK", frameId: 0 }],
+        meta: { degraded: { timedOutFrames: [190] } },
+      },
+    } as any);
+
+    const { handleCallTool } = await import("../src/server.js");
+    const res = await handleCallTool({
+      params: { name: "vortex_observe", arguments: { scope: "viewport" } },
+    });
+
+    const text = (res.content as Array<{ text: string }>)[0].text;
+    expect(text).toContain("# degraded:");
+    expect(text).toContain("190");
+  });
+
   it("subsequent vortex_act with @eN ref reuses the activeSnapshotId set by observe (no STALE_SNAPSHOT)", async () => {
     const { sendRequest } = await import("../src/client.js");
     // observe → returns snapshotId

@@ -117,6 +117,38 @@ export interface CompactObserve {
    * @since T4-diff
    */
   prevSnapshotId?: string;
+  /**
+   * 扫描降级归因。仅当 observe 因单 frame 卡死或总预算耗尽而未扫全时出现。
+   * @since scan-budget
+   */
+  meta?: {
+    degraded?: {
+      timedOutFrames?: number[];
+      budgetSkippedFrames?: number[];
+      listenerDiscovery?: "timeout";
+      axOverlay?: "timeout";
+    };
+  };
+}
+
+/**
+ * 降级 meta 行:告诉 agent 缺了哪些 frame、为什么、怎么补救。
+ * 不标明缺口的部分结果 = silent success,故这行是乙方案的承重部分。
+ */
+function buildDegradedNote(data: CompactObserve): string | null {
+  const d = data.meta?.degraded;
+  if (!d) return null;
+  const parts: string[] = [];
+  if (d.timedOutFrames?.length) parts.push(`frames [${d.timedOutFrames.join(", ")}] timed out`);
+  if (d.budgetSkippedFrames?.length)
+    parts.push(`frames [${d.budgetSkippedFrames.join(", ")}] skipped (scan budget exhausted)`);
+  // 元素数量不变但质量下降的两类,必须单独说清影响,否则看起来"结果齐全"
+  if (d.listenerDiscovery === "timeout")
+    parts.push("listener discovery timed out (plain div/jQuery click targets may be missing)");
+  if (d.axOverlay === "timeout")
+    parts.push("AX overlay timed out (role/name fell back to heuristics)");
+  if (parts.length === 0) return null;
+  return `# degraded: ${parts.join("; ")} — results are partial. Retry with frames='main' to narrow scope, or vortex_wait_for(mode='idle') first.`;
 }
 
 // =========================================================
@@ -512,6 +544,9 @@ export function renderObserveCompact(
   // sub-frame。后者之前沉默 → 多 frame 场景下 LLM 看不到子 frame 存在就会
   // 下结论 "frame walker 漏掉了"（见 testc 评价分析 dogfood 误诊）。
   const scanNotes: string[] = [];
+  // 置于 scanNotes 首位:紧跟其后的 "# frame N not scanned" 正由它解释
+  const degradedNote = buildDegradedNote(data);
+  if (degradedNote) scanNotes.push(degradedNote);
   for (const f of data.frames ?? []) {
     if (!f.scanned) {
       scanNotes.push(`# frame ${f.frameId} not scanned (url=${f.url})`);
@@ -672,6 +707,9 @@ export function renderObserveTree(
 
   // frame 提示行：与 renderObserveCompact 完全一致（未扫 / 0 元素子 frame / offset）。
   const scanNotes: string[] = [];
+  // 置于 scanNotes 首位:紧跟其后的 "# frame N not scanned" 正由它解释
+  const degradedNote = buildDegradedNote(data);
+  if (degradedNote) scanNotes.push(degradedNote);
   for (const f of data.frames ?? []) {
     if (!f.scanned) {
       scanNotes.push(`# frame ${f.frameId} not scanned (url=${f.url})`);
