@@ -1,6 +1,7 @@
 // packages/extension/src/lib/debugger-manager.ts
 
 import { VtxErrorCode, vtxError } from "@vortex-browser/shared";
+import { assertEnableable } from "./cdp-domains.js";
 
 type CdpEventCallback = (tabId: number, method: string, params: unknown) => void;
 
@@ -114,6 +115,8 @@ export class DebuggerManager {
    * 如果已经 attach + enable 过，直接返回。
    */
   async enableDomain(tabId: number, domain: string): Promise<void> {
+    // 没有 enable 的域当场拒绝,而不是发出去等真机 -32601
+    assertEnableable(domain);
     // 确保已 attach
     if (!this.attachedTabs.has(tabId)) {
       await this.rawAttach(tabId);

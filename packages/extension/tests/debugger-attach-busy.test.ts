@@ -11,24 +11,12 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { type VtxError, VtxErrorCode } from "@vortex-browser/shared";
+import { createFakeChromeDebugger } from "./helpers/fake-debugger.js";
 
 const BUSY = "Another debugger is already attached to the tab with id: 123.";
 
-function mkChrome(attachError?: Error) {
-  return {
-    debugger: {
-      attach: attachError ? vi.fn().mockRejectedValue(attachError) : vi.fn().mockResolvedValue(undefined),
-      sendCommand: vi.fn().mockResolvedValue(undefined),
-      detach: vi.fn().mockResolvedValue(undefined),
-      onEvent: { addListener: vi.fn() },
-      onDetach: { addListener: vi.fn() },
-    },
-    tabs: { onRemoved: { addListener: vi.fn() } },
-  };
-}
-
 async function mgrWith(attachError?: Error) {
-  vi.stubGlobal("chrome", mkChrome(attachError));
+  vi.stubGlobal("chrome", createFakeChromeDebugger({ attachError }));
   const { DebuggerManager } = await import("../src/lib/debugger-manager.js");
   return new DebuggerManager();
 }
