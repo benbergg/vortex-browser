@@ -601,13 +601,74 @@ const TW_UTILITY_KEYWORDS = new Set<string>([
 ]);
 const TW_UTILITY_PREFIX_RE =
   /^-?(?:m|p)[trblxyse]?-\d|^(?:w|h|size|min-w|max-w|min-h|max-h|gap|space-x|space-y|inset|top|bottom|left|right|order|basis|col-span|row-span|grid-cols|grid-rows|text|bg|border|ring|rounded|shadow|opacity|z|leading|tracking|translate|scale|rotate|skew|origin|font|placeholder|caret|accent|outline|animate|select|resize|appearance|duration|delay|ease|justify|items|self|place|flex|will-change|cursor|transition|content|decoration|snap|overscroll|whitespace|break|columns|aspect|object|pointer-events|touch|hyphens|word|fill|stroke)-/;
+// 关键字带值后缀:`shrink-0` / `rounded-none` / `grow-[2]`。关键字集只收了裸词,
+// 实测 `shrink-0` ×28 泄漏成按钮名(2026-08-11 使用日志)。只在关键字后才算,
+// 否则 `step-0` / `badge-none` 这类语义类会被误杀。
+const TW_VALUE_SUFFIX_RE = /^(.+?)-(?:\d+(?:\.\d+)?|none|full|auto|px|\[[^\]]*\])$/;
 export function isTailwindUtilityClass(token: string): boolean {
   const t = token.toLowerCase();
   // 变体类含冒号分隔符(hover:opacity-75 / md:flex / dark:bg-gray-800 / group-hover:…)——
   // 整体非语义。冒号在 CSS class 标识符里仅 Tailwind/UnoCSS 变体使用(BEM/语义类不含)。
   if (t.includes(":")) return true;
   if (TW_UTILITY_KEYWORDS.has(t)) return true;
-  return TW_UTILITY_PREFIX_RE.test(t);
+  if (TW_UTILITY_PREFIX_RE.test(t)) return true;
+  const m = TW_VALUE_SUFFIX_RE.exec(t);
+  return m != null && TW_UTILITY_KEYWORDS.has(m[1]);
+}
+
+/**
+ * 角色同义词:名字里的这些词说的就是 role 本身。
+ * 键是归一化 role,值是「名字末段命中即视为重述」的词。
+ */
+const ROLE_SYNONYMS: Record<string, readonly string[]> = {
+  button: ["button", "btn"],
+  link: ["link", "anchor"],
+  group: ["group"],
+  radiogroup: ["radiogroup", "group"],
+  paragraph: ["paragraph", "text", "txt"],
+  list: ["list"],
+  listitem: ["listitem", "item"],
+  checkbox: ["checkbox"],
+  radio: ["radio"],
+  textbox: ["textbox", "input", "field"],
+  image: ["image", "img"],
+  heading: ["heading", "title"],
+};
+
+/**
+ * 名字是否只是 CSS 类噪声 —— 要么把 role 又说了一遍，要么带随渲染变化的生成 id。
+ *
+ * 这两类都比无名更糟：零信息、必然重名、还顶掉真名字的位置；生成 id 更是按名定位
+ * 必然失效。纯图标按钮的语义类名(icon-search / closeIcon / chevron-down)不在此列，
+ * 它们是那些元素唯一的名字来源。
+ *
+ * Why export：inject func 内联同语义副本(注入体不能 import)，改一处须同步另一处。
+ * @param name 已生成的可及名
+ * @param role 该元素最终对外的 role
+ */
+export function isNoisyClassName(name: string, role: string): boolean {
+  const t = name.trim().toLowerCase();
+  // 含空格 = 真实文案,不是类名;非 ASCII 同理(类名不会是中文)
+  if (!t || /\s/.test(t) || /[^\x20-\x7e]/.test(t)) return false;
+  const segs = t.split(/[-_]|(?<=[a-z])(?=[0-9])/).filter(Boolean);
+  // 生成 id:词段 + ≥3 位数字段(common_251604984266 / item-4821)。**必须有非数字段**
+  // ——裸数字串是内容不是类名,班牛商品表的 商品ID/SKUID 就长这样,当成生成 id
+  // 会把整列真值抹掉(2026-08-11 生产数据回放实测 ~200 条)。
+  if (segs.some((s) => !/^\d+$/.test(s)) && segs.some((s) => /^\d{3,}$/.test(s))) return true;
+  const r = role.trim().toLowerCase();
+  if (t === r) return true;
+  const syn = ROLE_SYNONYMS[r];
+  return syn != null && syn.includes(segs[segs.length - 1] ?? "");
+}
+
+/**
+ * 是否该把这个名字置空。在 isNoisyClassName 之上加一道**内容优先**的闸:
+ * 名字若出现在元素可见文本里,它就是内容而非类名,再像类名也不能动。
+ * @param visibleText 元素的可见文本
+ */
+export function shouldDropClassName(name: string, role: string, visibleText: string): boolean {
+  if (!isNoisyClassName(name, role)) return false;
+  return !visibleText.includes(name.trim());
 }
 
 /**
@@ -1284,8 +1345,11 @@ const INTERACTIVE_SELECTORS = [
         // CSS Modules `_closeIcon_1ygkr_39` → `closeIcon` 仍正常保留（不在 denylist）。
         // 共用于：(1) cursor:pointer fallback gate (2) getAccessibleName 末尾兜底。
         const ICON_CLASS_DENY_PREFIXES = ["el-", "ant-", "anticon", "van-", "mantine-"];
+        // 否决一个 token 会**级联**到下一个 class token —— 实测 `shrink-0 box` 被否后
+        // 名字落到 `box`。纯结构词整词命中才否决,`imt-fb-btn-content` 一类不受影响。
         const ICON_CLASS_DENY_NAMES = new Set([
           "icon", "iconfont", "btn", "button", "wrapper", "container",
+          "box", "inner", "outer", "content", "body", "root", "item",
         ]);
         // isTailwindUtilityClass 内联副本(真源见导出函数,可单测;注入体不能 import,
         // 改一处须同步,源码锁守护)。Tailwind/原子 CSS 工具类(mb-4/p-0/block/size-12/
@@ -1299,12 +1363,46 @@ const INTERACTIVE_SELECTORS = [
         ]);
         const TW_UTILITY_PREFIX_RE =
           /^-?(?:m|p)[trblxyse]?-\d|^(?:w|h|size|min-w|max-w|min-h|max-h|gap|space-x|space-y|inset|top|bottom|left|right|order|basis|col-span|row-span|grid-cols|grid-rows|text|bg|border|ring|rounded|shadow|opacity|z|leading|tracking|translate|scale|rotate|skew|origin|font|placeholder|caret|accent|outline|animate|select|resize|appearance|duration|delay|ease|justify|items|self|place|flex|will-change|cursor|transition|content|decoration|snap|overscroll|whitespace|break|columns|aspect|object|pointer-events|touch|hyphens|word|fill|stroke)-/;
+        // 关键字带值后缀 shrink-0 / rounded-none(实测泄漏成按钮名),只在关键字后才算
+        const TW_VALUE_SUFFIX_RE = /^(.+?)-(?:\d+(?:\.\d+)?|none|full|auto|px|\[[^\]]*\])$/;
         const isTailwindUtilityClass = (token: string): boolean => {
           const t = token.toLowerCase();
           if (t.includes(":")) return true; // 变体类 hover:/md:/dark: 等
           if (TW_UTILITY_KEYWORDS.has(t)) return true;
-          return TW_UTILITY_PREFIX_RE.test(t);
+          if (TW_UTILITY_PREFIX_RE.test(t)) return true;
+          const vm = TW_VALUE_SUFFIX_RE.exec(t);
+          return vm != null && TW_UTILITY_KEYWORDS.has(vm[1]);
         };
+        // isNoisyClassName 内联副本(真源见导出函数,可单测;改一处须同步)。
+        // 名字只重述 role 或含生成 id → 零信息且必然重名,置空好过留着。
+        const ROLE_SYNONYMS: Record<string, string[]> = {
+          button: ["button", "btn"],
+          link: ["link", "anchor"],
+          group: ["group"],
+          radiogroup: ["radiogroup", "group"],
+          paragraph: ["paragraph", "text", "txt"],
+          list: ["list"],
+          listitem: ["listitem", "item"],
+          checkbox: ["checkbox"],
+          radio: ["radio"],
+          textbox: ["textbox", "input", "field"],
+          image: ["image", "img"],
+          heading: ["heading", "title"],
+        };
+        const isNoisyClassName = (name: string, role: string): boolean => {
+          const t = name.trim().toLowerCase();
+          if (!t || /\s/.test(t) || /[^\x20-\x7e]/.test(t)) return false;
+          const segs = t.split(/[-_]|(?<=[a-z])(?=[0-9])/).filter(Boolean);
+          // 须有非数字段:裸数字串是内容(商品ID/SKUID),不是生成类名
+          if (segs.some((s) => !/^\d+$/.test(s)) && segs.some((s) => /^\d{3,}$/.test(s))) return true;
+          const r = role.trim().toLowerCase();
+          if (t === r) return true;
+          const syn = ROLE_SYNONYMS[r];
+          return syn != null && syn.indexOf(segs[segs.length - 1] ?? "") >= 0;
+        };
+        // 内容优先闸:名字出现在可见文本里就是内容,再像类名也不能动
+        const shouldDropClassName = (name: string, role: string, visibleText: string): boolean =>
+          isNoisyClassName(name, role) && visibleText.indexOf(name.trim()) < 0;
         function iconNameFromClass(el: Element): string {
           const inner = el.querySelector("svg, img") as Element | null;
           if (!inner) return "";
@@ -3474,7 +3572,9 @@ const INTERACTIVE_SELECTORS = [
             index: elements.length,
             tag: htmlEl.tagName.toLowerCase(),
             role,
-            name,
+            // 类名噪声在**入池之后**才置空:放到 getAccessibleName 里会让这些元素被
+            // require-name 门丢掉,召回下降。这里只去名字不去元素,ref 仍可定位。
+            name: shouldDropClassName(name, role, visibleTextContent(htmlEl)) ? "" : name,
             bbox: {
               x: Math.round(rect.left),
               y: Math.round(rect.top),
