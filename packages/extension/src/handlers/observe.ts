@@ -431,6 +431,32 @@ export function isFocusContainerOnly(el: Element): boolean {
  * Why export:供 `observe-compound-control.test.ts` jsdom 直测真源;inject func 内联同语义
  * 副本(closure 注入无法 import),改一处须同步另一处,源码锁守护。
  */
+/**
+ * 非原生 ARIA combobox 的「当前值」兜底:显示文本即当前选中项。
+ *
+ * ARIA 规定 combobox 的可及名来自 label/aria-label,当前值来自显示内容——组件库
+ * (Element Plus el-select 等)普遍不给 aria-label,于是这类下拉在 observe 里既无名
+ * 也无值。主 frame 靠 AX 覆盖层补上 value,但覆盖层只跑 frameId 0(见下方 applyOverlay
+ * 调用处),iframe 内的 combobox 因此完全不透明 —— 真实日志里 iframe 内 46 个 combobox
+ * 无一带 value,91% 名值皆无(2026-08-11,live A/B 已复现)。
+ *
+ * 纯决策:文本由调用方传入(提取用 visibleTextContent,排除隐藏子树)。
+ * Why export:供 `observe-aria-combobox-value.test.ts` 直测真源;inject func 内联同语义
+ * 副本(closure 注入无法 import),改一处须同步另一处,源码锁守护。
+ */
+export function ariaComboboxValue(
+  role: string,
+  tagName: string,
+  visibleText: string,
+): string | undefined {
+  if (role !== "combobox") return undefined;
+  const tag = tagName.toUpperCase();
+  // 原生控件有更准的真值来源(selectedOptions / IDL value),不接管
+  if (tag === "SELECT" || tag === "INPUT" || tag === "TEXTAREA") return undefined;
+  const txt = visibleText.replace(/\s+/g, " ").trim();
+  return txt ? txt.slice(0, 80) : undefined;
+}
+
 export const SINGLE_CONTROL_ROLES = new Set<string>([
   "button",
   "link",
@@ -2119,6 +2145,17 @@ const INTERACTIVE_SELECTORS = [
         const TEXT_INPUT_TYPES = new Set([
           "text", "email", "search", "tel", "url", "",
         ]);
+        // 内联副本:模块级 ariaComboboxValue 的同语义复刻(closure 注入无法 import)。
+        // 语义与理由见模块级真源的 Javadoc,源码锁守护两处同步。
+        function __ariaComboboxValue(
+          role: string, tagName: string, visibleText: string,
+        ): string | undefined {
+          if (role !== "combobox") return undefined;
+          const t = tagName.toUpperCase();
+          if (t === "SELECT" || t === "INPUT" || t === "TEXTAREA") return undefined;
+          const txt = visibleText.replace(/\s+/g, " ").trim();
+          return txt ? txt.slice(0, 80) : undefined;
+        }
         function getValueInfo(el: HTMLElement, role: string): string | undefined {
           const tag = el.tagName.toLowerCase();
           // AI: 原生 <select> 的当前选中项文本。select 名常无 label(saucedemo 排序
@@ -2152,6 +2189,11 @@ const INTERACTIVE_SELECTORS = [
             (tag === "input" && (inputType === "range" || inputType === "number")) ||
             tag === "progress" ||
             tag === "meter";
+          // 非原生 ARIA combobox:显示文本即当前值。必须在 VALUE_ROLES 门之前——
+          // combobox 不在该集合里,落到门上就直接 undefined。模块级真源
+          // ariaComboboxValue 同语义(源码锁守护)。
+          const __cbValue = __ariaComboboxValue(role, tag, visibleTextContent(el));
+          if (__cbValue !== undefined) return __cbValue;
           if (!VALUE_ROLES.has(role) && !isNativeValue) return undefined;
           // N0002 B006: 同时返回 min/max 给 elements.valueMin / elements.valueMax,
           // 即便 valuetext 命中也输出 min/max(原逻辑只输出 valuetext 字符串, agent 丢范围)。
