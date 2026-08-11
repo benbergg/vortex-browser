@@ -1,5 +1,7 @@
 // packages/extension/src/lib/debugger-manager.ts
 
+import { VtxErrorCode, vtxError } from "@vortex-browser/shared";
+
 type CdpEventCallback = (tabId: number, method: string, params: unknown) => void;
 
 interface AttachedTab {
@@ -69,12 +71,32 @@ export class DebuggerManager {
   }
 
   /**
+   * chrome.debugger.attach 的唯一入口，负责把裸 Error 分类成 CDP_NOT_ATTACHED。
+   * 不分类的话会冒到 router 兜底被归成 JS_EXECUTION_ERROR，提示"检查你注入的 JS"，
+   * 而真因往往是这个标签页开着 DevTools。
+   */
+  private async rawAttach(tabId: number): Promise<void> {
+    try {
+      await chrome.debugger.attach({ tabId }, "1.3");
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      // 被占用是可恢复的：关掉 DevTools 就能重试，与缺权限/chrome:// 那类不同
+      const busy = /already attached/i.test(message);
+      throw vtxError(VtxErrorCode.CDP_NOT_ATTACHED, message, { tabId }, busy ? {
+        hint: "Another debugger owns this tab — usually DevTools is open on it, or another extension attached first. " +
+          "Close DevTools on that tab (or act on a different tab) and retry.",
+        recoverable: true,
+      } : undefined);
+    }
+  }
+
+  /**
    * 确保 tab 已 attach debugger（不启用任何 domain）。
    * 适用于 Input 等无需 enable 命令的 domain。
    */
   async attach(tabId: number): Promise<void> {
     if (!this.attachedTabs.has(tabId)) {
-      await chrome.debugger.attach({ tabId }, "1.3");
+      await this.rawAttach(tabId);
       this.attachedTabs.set(tabId, { domains: new Set() });
       // SPIKE(2026-06-09 京东后台 click 5s):让后台标签的渲染器/输入处理不被
       // Chrome 节流。Playwright 用启动参数,vortex 连用户现有 Chrome 只能运行时
@@ -94,7 +116,7 @@ export class DebuggerManager {
   async enableDomain(tabId: number, domain: string): Promise<void> {
     // 确保已 attach
     if (!this.attachedTabs.has(tabId)) {
-      await chrome.debugger.attach({ tabId }, "1.3");
+      await this.rawAttach(tabId);
       this.attachedTabs.set(tabId, { domains: new Set() });
     }
 
