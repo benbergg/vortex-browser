@@ -1,6 +1,7 @@
 // packages/extension/src/handlers/network.ts
 
-import { NetworkActions, VtxErrorCode, vtxError, VtxEventType } from "@vortex-browser/shared";
+import { NetworkActions, VtxErrorCode, vtxError, VtxEventType, withDiagnosis } from "@vortex-browser/shared";
+import { diagnoseEmptyNetwork } from "../lib/empty-diagnosis.js";
 import type { ActionRouter } from "../lib/router.js";
 import type { DebuggerManager } from "../lib/debugger-manager.js";
 import type { NativeMessagingClient } from "../lib/native-messaging.js";
@@ -334,6 +335,9 @@ export function registerNetworkHandlers(
       const tid = await getActiveTabId(
         (args.tabId as number | undefined) ?? tabId,
       );
+      // 懒 attach:首次读之前完成的请求只剩 Resource Timing 摘要。空结果时要说清
+      // 是"还没开始录"还是"哪一级过滤削光的",否则调用方只能瞎调 pattern(基线实录)。
+      const justSubscribed = !subscribedTabs.has(tid);
       await ensureSubscribed(debuggerMgr, tid);
       const includeResources = args.includeResources as boolean | undefined;
       const pattern = (args.pattern ?? args.url) as string | undefined;
@@ -346,10 +350,13 @@ export function registerNetworkHandlers(
       const seenUrls = new Set([...apis, ...cdpResources].map((a) => a.url));
       const rtFresh = rt.filter((e) => !seenUrls.has(e.url));
       let merged: NetworkEntry[] = [...apis, ...cdpResources, ...rtFresh];
+      const buffered = merged.length;
       // 默认只留 API 类(XHR/Fetch),滤掉静态资源噪声;includeResources 时全保留。
       if (!includeResources) merged = merged.filter((e) => API_TYPES.has(e.type ?? ""));
+      const afterTypeFilter = merged.length;
       // pattern 过滤(debug_read 必带 pattern;缺省则不滤)。
       if (pattern) merged = merged.filter((e) => e.url.includes(pattern));
+      const afterPattern = merged.length;
       // status 范围过滤:debug_read filter.statusMin/statusMax 文档化(schema network:
       // {pattern,statusMin/Max}),但此前 getLogs 漏读 → 求「仅失败请求」却混入 200
       // (silent-false 结果,2026-06-20 白盒+DAST)。status 缺失的条目(RT 摘要无 status)
@@ -358,6 +365,7 @@ export function registerNetworkHandlers(
       const statusMax = args.statusMax as number | undefined;
       if (statusMin != null) merged = merged.filter((e) => e.status != null && e.status >= statusMin);
       if (statusMax != null) merged = merged.filter((e) => e.status != null && e.status <= statusMax);
+      const afterStatus = merged.length;
       merged.sort((a, b) => a.startTime - b.startTime);
       // tail(dispatch 写成 limit):取末 N 条 = 最近 N 个请求。文档化(顶层 tail)但
       // 此前 getLogs 漏读 → tail=N 求最近 N 却返回全部(silent no-op)。
@@ -365,7 +373,15 @@ export function registerNetworkHandlers(
       if (limit != null && limit >= 0 && merged.length > limit) {
         merged = merged.slice(merged.length - limit);
       }
-      return merged;
+      return withDiagnosis(
+        merged,
+        merged.length === 0
+          ? diagnoseEmptyNetwork({
+              justSubscribed, buffered, afterTypeFilter, afterPattern, afterStatus,
+              includeResources: includeResources === true, pattern, statusMin, statusMax, limit,
+            })
+          : null,
+      );
     },
 
     [NetworkActions.GET_ERRORS]: async (args, tabId) => {

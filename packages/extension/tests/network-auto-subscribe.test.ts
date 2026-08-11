@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import type { NmRequest } from "@vortex-browser/shared";
+import { splitDiagnosis, type NmRequest } from "@vortex-browser/shared";
 import { ActionRouter } from "../src/lib/router.js";
 // network.ts 有模块级 state（subscribedTabs/tabConfigs），跨测试要用 vi.resetModules 后动态 import
 let registerNetworkHandlers: typeof import("../src/handlers/network.js")["registerNetworkHandlers"];
@@ -69,7 +69,8 @@ describe("network auto-subscribe (@since 0.4.0)", () => {
   it("GET_LOGS first call enables Network domain on the tab", async () => {
     const resp = await router.dispatch(mkReq("network.getLogs", {}, 42));
     expect(resp.error).toBeUndefined();
-    expect(resp.result).toEqual([]); // no requests yet
+    // 空结果带自陈信封(说明捕获才刚开始),载荷本身仍是 []
+    expect(splitDiagnosis(resp.result).value).toEqual([]); // no requests yet
     expect(enableDomain).toHaveBeenCalledTimes(1);
     expect(enableDomain).toHaveBeenCalledWith(42, "Network");
   });

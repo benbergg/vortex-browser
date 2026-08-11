@@ -1,6 +1,7 @@
 // packages/extension/src/handlers/console.ts
 
-import { ConsoleActions, VtxEventType } from "@vortex-browser/shared";
+import { ConsoleActions, VtxEventType, withDiagnosis } from "@vortex-browser/shared";
+import { diagnoseEmptyConsole } from "../lib/empty-diagnosis.js";
 import type { ActionRouter } from "../lib/router.js";
 import type { DebuggerManager } from "../lib/debugger-manager.js";
 import type { NativeMessagingClient } from "../lib/native-messaging.js";
@@ -150,8 +151,12 @@ export function registerConsoleHandlers(
       const tid = await getActiveTabId(
         (args.tabId as number | undefined) ?? tabId,
       );
+      // 懒订阅意味着首次读**当场**才开始录:此前的日志根本没进缓冲区。
+      // 调用方看到 [] 会以为"没有错误",实际是"还没开始看"(基线 48.5% 空返回)。
+      const justSubscribed = !subscribedTabs.has(tid);
       await ensureSubscribed(tid);
       const level = args.level as string | undefined;
+      const buffered = (consoleLogs.get(tid) ?? []).length;
       let logs = consoleLogs.get(tid) ?? [];
       // 'all' 是文档化的「全部级别」哨兵(dispatch.ts:214,vortex_debug_read
       // filter.level='error'|'warn'|'all')。没有 entry 的 level 字面为 'all',
@@ -167,7 +172,10 @@ export function registerConsoleHandlers(
       if (limit != null && limit >= 0 && logs.length > limit) {
         logs = logs.slice(logs.length - limit);
       }
-      return logs;
+      return withDiagnosis(
+        logs,
+        logs.length === 0 ? diagnoseEmptyConsole({ justSubscribed, buffered, level, limit }) : null,
+      );
     },
 
     [ConsoleActions.GET_ERRORS]: async (args, tabId) => {

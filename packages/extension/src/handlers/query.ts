@@ -3,9 +3,13 @@
 // 移植自 browser-use service.py 的 _SEARCH_PAGE_JS_BODY 和 _FIND_ELEMENTS_JS_BODY,
 // 按 vortex 风格重写:TypeScript + chrome.scripting.executeScript 注入。
 
-import { QueryActions, VtxErrorCode, vtxError } from "@vortex-browser/shared";
+import { QueryActions, VtxErrorCode, vtxError, withDiagnosis } from "@vortex-browser/shared";
 import type { ActionRouter } from "../lib/router.js";
 import { getActiveTabId, buildExecuteTarget, ensureFrameAttached } from "../lib/tab-utils.js";
+import { diagnoseEmptyQueryText, diagnoseEmptyQueryCss } from "../lib/empty-diagnosis.js";
+
+type TextScan = { chars: number; nodes: number; shadowRoots: number; iframes: number };
+type CssScan = { elements: number; shadowRoots: number; iframes: number };
 
 // ──────────────────────────────────────────────────────────────────────────────
 // page-side JS 常量
@@ -26,7 +30,7 @@ export const textSearchFunc = (
   caseSensitive: boolean,
   contextChars: number,
   maxResults: number,
-): { matches: Array<{ match_text: string; context: string; element_path: string; char_position: number }>; total: number; has_more: boolean } | { error: string; matches: never[]; total: number } => {
+): { matches: Array<{ match_text: string; context: string; element_path: string; char_position: number }>; total: number; has_more: boolean; scanned: { chars: number; nodes: number; shadowRoots: number; iframes: number } } | { error: string; matches: never[]; total: number } => {
   try {
     // 获取 DOM 中所有**可见**文本节点(遍历 body 下 text node,连接成一段大字符串)。
     // 裸 SHOW_TEXT 会把 <script>/<style>/<noscript>/<template> 的源码文本与 display:none
@@ -46,6 +50,8 @@ export const textSearchFunc = (
     // (同 querySelectorAllDeep 的 light-先/shadow-后);grep 上下文与 element_path
     // 按 nodeOffsets 解析,不依赖严格文档序。
     const SHADOW_WALK_MAX_DEPTH = 8;
+    // 零命中时调用方需要知道"搜了多大范围"才能判断该换 pattern 还是换 frame。
+    let shadowRootsSeen = 0;
     const collectRoot = (root: Document | ShadowRoot | Element, depth: number): void => {
       const walker = document.createTreeWalker(root as Node, NodeFilter.SHOW_TEXT, {
         acceptNode(n: Node): number {
@@ -68,10 +74,21 @@ export const textSearchFunc = (
       if (depth >= SHADOW_WALK_MAX_DEPTH) return;
       for (const host of (root as Document | ShadowRoot).querySelectorAll("*")) {
         const sr = (host as HTMLElement).shadowRoot;
-        if (sr) collectRoot(sr, depth + 1);
+        if (sr) {
+          shadowRootsSeen++;
+          collectRoot(sr, depth + 1);
+        }
       }
     };
     collectRoot(document.body, 0);
+    // executeScript 不带 frameIds 时只跑顶层 frame(allFrames 默认 false),
+    // 同页 iframe 的文本静默不在搜索范围内 —— 这是零命中最常见的隐形原因。
+    const scanned = {
+      chars: fullText.length,
+      nodes: nodeOffsets.length,
+      shadowRoots: shadowRootsSeen,
+      iframes: document.querySelectorAll("iframe,frame").length,
+    };
 
     let re: RegExp;
     try {
@@ -132,7 +149,7 @@ export const textSearchFunc = (
       if (match[0].length === 0) re.lastIndex++;
     }
 
-    return { matches, total: totalFound, has_more: totalFound > maxResults };
+    return { matches, total: totalFound, has_more: totalFound > maxResults, scanned };
   } catch (e) {
     return { error: "text search error: " + (e instanceof Error ? e.message : String(e)), matches: [], total: 0 };
   }
@@ -152,6 +169,7 @@ export const cssQueryFunc = (
   elements: Array<{ index: number; tag: string; text?: string; attrs?: Record<string, string>; children_count: number }>;
   total: number;
   showing: number;
+  scanned: { elements: number; shadowRoots: number; iframes: number };
 } | { error: string; elements: never[]; total: number } => {
   try {
     // 穿 open shadow 深度遍历,与 observe 的 querySelectorAllDeep 同语义(98b61e5):
@@ -160,12 +178,20 @@ export const cssQueryFunc = (
     // null 天然不穿,与 observe 一致。⚠ 内联副本(注入 page-side 丢模块作用域),
     // 逻辑须与 observe.ts querySelectorAllDeep 保持一致,改一处须同步。
     const SHADOW_WALK_MAX_DEPTH = 8;
+    // 零命中时自报扫描规模,顺带数下没被搜到的同页 iframe(executeScript 只跑顶层 frame)。
+    let scannedElements = 0;
+    let shadowRootsSeen = 0;
     const queryAllDeep = (sel: string, root: Document | ShadowRoot, depth: number): Element[] => {
       const acc: Element[] = Array.from(root.querySelectorAll(sel));
       if (depth >= SHADOW_WALK_MAX_DEPTH) return acc;
-      for (const host of root.querySelectorAll("*")) {
+      const all = root.querySelectorAll("*");
+      scannedElements += all.length;
+      for (const host of all) {
         const sr = (host as HTMLElement).shadowRoot;
-        if (sr) acc.push(...queryAllDeep(sel, sr, depth + 1));
+        if (sr) {
+          shadowRootsSeen++;
+          acc.push(...queryAllDeep(sel, sr, depth + 1));
+        }
       }
       return acc;
     };
@@ -175,6 +201,11 @@ export const cssQueryFunc = (
     } catch (e) {
       return { error: "Invalid CSS selector: " + (e instanceof Error ? e.message : String(e)), elements: [], total: 0 };
     }
+    const scanned = {
+      elements: scannedElements,
+      shadowRoots: shadowRootsSeen,
+      iframes: document.querySelectorAll("iframe,frame").length,
+    };
 
     const total = elements.length;
     const limit = Math.min(total, maxResults);
@@ -230,7 +261,7 @@ export const cssQueryFunc = (
       results.push(item);
     }
 
-    return { elements: results, total, showing: limit };
+    return { elements: results, total, showing: limit, scanned };
   } catch (e) {
     return { error: "css query error: " + (e instanceof Error ? e.message : String(e)), elements: [], total: 0 };
   }
@@ -1299,7 +1330,7 @@ export function registerQueryHandlers(router: ActionRouter): void {
         });
 
         const res = results[0]?.result as
-          | { matches: unknown[]; total: number; has_more: boolean }
+          | { matches: unknown[]; total: number; has_more: boolean; scanned?: TextScan }
           | { error: string; matches: never[]; total: number }
           | undefined;
 
@@ -1309,7 +1340,14 @@ export function registerQueryHandlers(router: ActionRouter): void {
         if ("error" in res && res.error) {
           throw vtxError(VtxErrorCode.JS_EXECUTION_ERROR, `query.queryPage text error: ${res.error}`);
         }
-        return res;
+        // scanned 只服务于零命中自陈,不进载荷 —— 有命中时形状与从前逐字节一致。
+        const { scanned, ...payload } = res;
+        return withDiagnosis(
+          payload,
+          res.total === 0 && scanned
+            ? diagnoseEmptyQueryText({ ...scanned, pattern, isRegex, frameScoped: frameId != null })
+            : null,
+        );
       } else if (mode === "css") {
         // css query 模式
         const attributes: string[] | null = normalizeCssAttrParam(args.attr as string | string[] | undefined);
@@ -1324,7 +1362,7 @@ export function registerQueryHandlers(router: ActionRouter): void {
         });
 
         const res = results[0]?.result as
-          | { elements: unknown[]; total: number; showing: number }
+          | { elements: unknown[]; total: number; showing: number; scanned?: CssScan }
           | { error: string; elements: never[]; total: number }
           | undefined;
 
@@ -1334,7 +1372,13 @@ export function registerQueryHandlers(router: ActionRouter): void {
         if ("error" in res && res.error) {
           throw vtxError(VtxErrorCode.JS_EXECUTION_ERROR, `query.queryPage css error: ${res.error}`);
         }
-        return res;
+        const { scanned, ...payload } = res;
+        return withDiagnosis(
+          payload,
+          res.total === 0 && scanned
+            ? diagnoseEmptyQueryCss({ ...scanned, selector: pattern, frameScoped: frameId != null })
+            : null,
+        );
       } else if (mode === "geometry") {
         // geometry 模式:注入 geometryProbeFunc 取 bbox/视口/遮挡/裁剪 + 两元素关系。
         // pattern = CSS 选择器(命中多元素;命中前两个产 pair 关系)。

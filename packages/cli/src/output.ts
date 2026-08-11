@@ -1,3 +1,5 @@
+import { splitDiagnosis } from "@vortex-browser/shared";
+
 export interface OutputOptions {
   pretty?: boolean;
   quiet?: boolean;
@@ -10,9 +12,19 @@ export interface OutputOptions {
  * 默认: 一行 NDJSON
  */
 export function printResponse(data: unknown, opts: OutputOptions): void {
-  const output = opts.quiet && typeof data === "object" && data !== null
-    ? (data as any).result ?? (data as any).error ?? data
-    : data;
+  // 空结果自陈拆到 stderr:stdout 要能直接喂 jq,混进信封会让下游拿到对象而非数组。
+  let payload = data;
+  if (typeof data === "object" && data !== null && "result" in (data as object)) {
+    const { value, diagnosis } = splitDiagnosis((data as any).result);
+    if (diagnosis) {
+      console.error(`[vortex-diagnosis] ${diagnosis}`);
+      payload = { ...(data as object), result: value };
+    }
+  }
+
+  const output = opts.quiet && typeof payload === "object" && payload !== null
+    ? (payload as any).result ?? (payload as any).error ?? payload
+    : payload;
 
   if (opts.pretty) {
     console.log(JSON.stringify(output, null, 2));

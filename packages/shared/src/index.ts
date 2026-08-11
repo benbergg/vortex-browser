@@ -10,3 +10,4 @@ export * from "./click-effect.js";
 export * from "./effect-fingerprint.js";
 export * from "./browsers.js";
 export * from "./timeout.js";
+export * from "./diagnosis.js";

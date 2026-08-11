@@ -19,7 +19,7 @@
  *   检查 error?.message 而非 error?.code
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import type { NmRequest } from "@vortex-browser/shared";
+import { splitDiagnosis, type NmRequest } from "@vortex-browser/shared";
 import { ActionRouter } from "../src/lib/router.js";
 
 let registerNetworkHandlers: typeof import("../src/handlers/network.js")["registerNetworkHandlers"];
@@ -212,9 +212,11 @@ describe("network.getRequestDetail (source=request) — 单请求 status+body", 
     const resp = await router.dispatch(
       mkReq("network.getLogs", { pattern: "/api/" }, 42),
     );
-    // 无错误，返回空数组（无 CDP 事件触发）
+    // 无错误，返回空数组（无 CDP 事件触发）；空结果外面裹一层自陈信封
     expect(resp.error).toBeUndefined();
-    expect(Array.isArray(resp.result)).toBe(true);
+    const { value, diagnosis } = splitDiagnosis(resp.result);
+    expect(Array.isArray(value)).toBe(true);
+    expect(diagnosis).toBeTruthy();
   });
 
   it("⑥ body 不超 maxLength 时 truncated:false", async () => {

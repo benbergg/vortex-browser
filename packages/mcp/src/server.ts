@@ -17,7 +17,7 @@ import {
 import { sendRequest } from "./client.js";
 import { getToolDefs, getToolDef, setEnabledCaps } from "./tools/registry.js";
 import { dispatchNewTool } from "./tools/dispatch.js";
-import { timeoutLadder } from "@vortex-browser/shared";
+import { timeoutLadder, splitDiagnosis } from "@vortex-browser/shared";
 import { liftWaitForRefToTarget } from "./lib/wait-for-ref.js";
 import { applyFingerprint, shouldRecover, type FingerprintOpt } from "./lib/fingerprint-apply.js";
 import { lookupIdentity } from "./lib/observe-render.js";
@@ -843,7 +843,9 @@ export async function handleCallTool(
       if (typeof result?.current === "string") lastUsedBrowser = result.current;
     }
 
-    let resultForTool = resp.result;
+    // 空/降级结果的自陈信道:handler 只在结果为空时挂,拆出来单独成块,载荷保持原形。
+    const { value: rawResult, diagnosis } = splitDiagnosis(resp.result);
+    let resultForTool = rawResult;
     if (toolDef.name === "vortex_tab_list") {
       try {
         const healthResponse = await fetch(`http://localhost:${PORT}/health`);
@@ -959,15 +961,20 @@ export async function handleCallTool(
     // JSON.stringify(undefined) 返回 JS undefined(非字符串)的特性,精确把 undefined
     // 渲染成 "undefined"、null 渲染成 "null";falsy 值(0/false/"")不受影响。见已关闭 #35。
     const resultText = JSON.stringify(resultForTool, null, 2) ?? "undefined";
+    // 自陈跟在载荷之后独立成块:载荷保持可 JSON.parse,截断也先截载荷不吃掉自陈。
+    // 前置换行:客户端拼接相邻文本块时不加分隔符,否则会贴成 `}[vortex-diagnosis]`。
+    const diagBlock = diagnosis
+      ? [{ type: "text" as const, text: `\n[vortex-diagnosis] ${diagnosis}` }]
+      : [];
     if (resultText.length > RESPONSE_SIZE_LIMIT) {
       const truncated = resultText.slice(0, RESPONSE_SIZE_LIMIT);
       return withEvents([{
         type: "text" as const,
         text: truncated + `\n\n[TRUNCATED: response was ${resultText.length} bytes, showing first ${RESPONSE_SIZE_LIMIT}. Use filter/pagination parameters for smaller responses.]`,
-      }]);
+      }, ...diagBlock]);
     }
 
-    return withEvents([{ type: "text" as const, text: resultText }]);
+    return withEvents([{ type: "text" as const, text: resultText }, ...diagBlock]);
   } catch (err: any) {
     if (err instanceof VtxError) {
       return {
