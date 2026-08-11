@@ -395,18 +395,28 @@ export async function handleCallTool(
     const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
     // 1. 记录重载前的 buildStamp(扩展未连则留空,触发步骤会给出明确错误)
+    //    顺带取当前绑定的 browserId:多浏览器在线时 hub 无法自行选择(见步骤 2)
     let fromStamp: string | undefined;
+    let boundBrowserId: string | undefined;
     try {
       const before = await sendRequest("diagnostics.version", {}, PORT, undefined, 5000);
       fromStamp = (before.result as { buildStamp?: string } | undefined)?.buildStamp;
+      boundBrowserId = before.browserId;
     } catch {
       /* SW 可能此刻未连,继续尝试触发 */
     }
 
     // 2. 触发 server 推送 reload-extension 控制消息
+    //    必须显式带 browserId:Chrome+Edge 同时在线时 hub 会以 "browserId 必填" 拒绝,
+    //    而本工具 schema 无该参数 → 调用方无路可走(2026-08-11 live 实测)。语义上也该
+    //    重载「当前绑定的那个浏览器」,而非要求调用方指定。
     let targetStamp: string | null = null;
     try {
-      const r = await fetch(`http://localhost:${PORT}/dev/reload-extension`, { method: "POST" });
+      const r = await fetch(`http://localhost:${PORT}/dev/reload-extension`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(boundBrowserId ? { browserId: boundBrowserId } : {}),
+      });
       const body = (await r.json()) as {
         ok?: boolean;
         targetStamp?: string | null;
@@ -430,6 +440,21 @@ export async function handleCallTool(
         isError: true,
         content: [{ type: "text" as const,
           text: `vortex-server unreachable at localhost:${PORT} (cannot trigger reload).\n${msg}` }],
+      };
+    }
+
+    // 2.5 扩展已经就是这份 dist:stamp 不可能变,轮询必然空转到超时并报假失败
+    //     (2026-08-11 live:白等 15s 后 RELOAD_TIMEOUT + 误导性 C1 路径错配提示)
+    if (targetStamp && fromStamp && targetStamp === fromStamp) {
+      return {
+        content: [{ type: "text" as const, text: JSON.stringify({
+          reloaded: false,
+          alreadyCurrent: true,
+          fromStamp,
+          targetStamp,
+          waitedMs: Date.now() - startedAt,
+          note: "Extension already runs this exact build; nothing to reload.",
+        }, null, 2) }],
       };
     }
 
