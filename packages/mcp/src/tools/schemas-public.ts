@@ -28,7 +28,7 @@
 // 3. vortex_storage description (P1-14) — 文档化"omit key = list all"
 // 4. vortex_evaluate description (P0-11) — 文档化"async=true 时 code 是 fn body"
 
-import { COMMIT_KINDS } from "@vortex-browser/shared";
+import { COMMIT_KINDS, MAX_INNER_TIMEOUT_MS } from "@vortex-browser/shared";
 import type { ToolDef } from "./schemas.js";
 
 const tabFields = {
@@ -344,7 +344,8 @@ export const PUBLIC_TOOLS: ToolDef[] = [
       properties: {
         code: { type: "string" },
         async: { type: "boolean" },
-        timeout: { type: "number", default: 5000 },  // BUG-003: ms, max 60000
+        // 上限只写在注释里时,调用方看不到,实测有传 120000 被 extension 打回的
+        timeout: { type: "number", default: 5000, maximum: MAX_INNER_TIMEOUT_MS },
         ...tabFields,
       },
       required: ["code"],

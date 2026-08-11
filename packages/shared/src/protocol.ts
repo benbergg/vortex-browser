@@ -81,6 +81,8 @@ export interface VtxRequest {
   browserId?: string;
   tabIdBackfilled?: boolean;
   strictTab?: boolean;
+  /** hub pending 的 deadline(ms)。缺省时 hub 用自身默认，见 timeout.ts 的阶梯 */
+  timeoutMs?: number;
 }
 
 export interface VtxResponse {

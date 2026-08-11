@@ -1,6 +1,6 @@
 import WebSocket from "ws";
 import type { VtxEvent, VtxRequest, VtxResponse } from "@vortex-browser/shared";
-import { VtxEventType, VTX_WIRE_VERSION } from "@vortex-browser/shared";
+import { transportTimeoutFor, VtxEventType, VTX_WIRE_VERSION } from "@vortex-browser/shared";
 import { eventStore } from "./lib/event-store.js";
 import { currentSessionId } from "./lib/session-id.js";
 
@@ -150,15 +150,18 @@ class VortexClient {
     action: string,
     params: Record<string, unknown>,
     tabId: number | undefined,
-    timeoutMs: number,
+    hubTimeoutMs: number,
   ): Promise<VtxResponse> {
     await this.ensureConnected();
     const id = `mcp-${++this.requestCounter}-${Date.now()}`;
+    // 传输超时比 hub 多一档，让 hub 的 TIMEOUT（带 action 与 hint）先到达调用方，
+    // 而不是双方同 deadline 竞 race 后返回本地的 "no response"。
+    const transportMs = transportTimeoutFor(hubTimeoutMs);
     return new Promise<VtxResponse>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);
-        reject(new Error(`Timeout: no response for ${action} after ${timeoutMs}ms`));
-      }, timeoutMs);
+        reject(new Error(`Timeout: no response for ${action} after ${transportMs}ms`));
+      }, transportMs);
 
       this.pending.set(id, { resolve, reject, timer });
 
@@ -168,6 +171,7 @@ class VortexClient {
         params,
         id,
         sessionId: this.sessionId,
+        timeoutMs: hubTimeoutMs,
         ...(tabId != null ? { tabId } : {}),
       };
       this.ws!.send(JSON.stringify(req));
@@ -176,18 +180,19 @@ class VortexClient {
 
   /**
    * 发送请求（含瞬态错误自动重试 1 次）。
+   * @param hubTimeoutMs hub pending 的 deadline；本地传输超时由此再加一档推出
    */
   async request(
     action: string,
     params: Record<string, unknown>,
     tabId?: number,
-    timeoutMs = 30000,
+    hubTimeoutMs = 30000,
     maxRetries = 1,
   ): Promise<VtxResponse> {
     let lastErr: unknown;
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       try {
-        return await this.requestOnce(action, params, tabId, timeoutMs);
+        return await this.requestOnce(action, params, tabId, hubTimeoutMs);
       } catch (err) {
         lastErr = err;
         if (attempt === maxRetries || !isTransient(err)) throw err;
@@ -210,8 +215,8 @@ export function sendRequest(
   params: Record<string, unknown>,
   port: number,
   tabId?: number,
-  timeoutMs?: number,
+  hubTimeoutMs?: number,
 ): Promise<VtxResponse> {
   if (!singleton) singleton = new VortexClient(port);
-  return singleton.request(action, params, tabId, timeoutMs);
+  return singleton.request(action, params, tabId, hubTimeoutMs);
 }

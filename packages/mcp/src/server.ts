@@ -17,7 +17,7 @@ import {
 import { sendRequest } from "./client.js";
 import { getToolDefs, getToolDef, setEnabledCaps } from "./tools/registry.js";
 import { dispatchNewTool } from "./tools/dispatch.js";
-import { computeTransportTimeout } from "./lib/timeout.js";
+import { timeoutLadder } from "@vortex-browser/shared";
 import { liftWaitForRefToTarget } from "./lib/wait-for-ref.js";
 import { applyFingerprint, shouldRecover, type FingerprintOpt } from "./lib/fingerprint-apply.js";
 import { lookupIdentity } from "./lib/observe-render.js";
@@ -518,11 +518,14 @@ export async function handleCallTool(
   if (isObserveTool) {
     const detail = (params.detail as "compact" | "full") ?? "compact";
     const { scope, filter, tabId, timeout, ...rest } = params;
-    const effectiveTimeout = (timeout as number) ?? DEFAULT_TIMEOUT;
+    // 专用路径曾把 timeout 摘走却没塞回 next，handler 拿不到内层预算，且传输与内层
+    // 同 deadline 竞 race。与通用路径共用同一阶梯。
+    const ladder = timeoutLadder(timeout as number | undefined, DEFAULT_TIMEOUT);
     // v0.6 schema 暴露 scope/filter 而非 v0.5 的 viewport/filter；在此 reshape，
     // 与 dispatch.ts case "vortex_observe" 保持等价（special path 会先 return，
     // 不会再落到 dispatchNewTool）。
     const next: Record<string, unknown> = { ...rest, format: detail };
+    if (ladder.inner !== undefined) next.timeout = ladder.inner;
     if (scope === "full") next.viewport = "full";
     else if (scope === "viewport") next.viewport = "visible";
     if (filter !== undefined) next.filter = filter;
@@ -533,7 +536,7 @@ export async function handleCallTool(
       next,
       PORT,
       tabId as number | undefined,
-      effectiveTimeout,
+      ladder.hub,
     );
     if (resp.error) {
       return {
@@ -785,13 +788,10 @@ export async function handleCallTool(
 
   try {
     const { tabId, returnMode, timeout, ...rest } = params;
-    // WAIT-TIMEOUT-MARGIN(族 O):调用方 timeout 既要作 handler 内层 poll 预算,又决定
-    // 外层传输超时。原先只设传输(= caller),内层被 destructure 摘走拿不到 → handler 用
-    // 自身 default,且传输与内层同 deadline 竞race。修复:(1) 把 timeout 塞回 rest 让
-    // dispatchNewTool 透传给 handler 作内层预算;(2) 传输 = 内层 + buffer 留 margin,
-    // 确保 handler 干净结果(condition-not-met)先于传输 "no response" 到达调用方。
-    if (timeout !== undefined) rest.timeout = timeout;
-    const effectiveTimeout = computeTransportTimeout(timeout as number | undefined, DEFAULT_TIMEOUT);
+    // 调用方 timeout 是内层预算,塞回 rest 才能经 dispatchNewTool 到 handler；
+    // hub 与传输各再加一档 margin,见 shared/timeout.ts 的阶梯(族 O)。
+    const ladder = timeoutLadder(timeout as number | undefined, DEFAULT_TIMEOUT);
+    if (ladder.inner !== undefined) rest.timeout = ladder.inner;
 
     // dispatch 映射：新工具名 → 正确 action + 参数 reshape
     const mapped = dispatchNewTool(toolDef.name, rest);
@@ -803,7 +803,7 @@ export async function handleCallTool(
       mappedParams,
       PORT,
       tabId as number | undefined,
-      effectiveTimeout,
+      ladder.hub,
     );
 
     // Action 执行错误

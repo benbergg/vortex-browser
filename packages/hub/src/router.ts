@@ -3,6 +3,7 @@
  * Description: Routes hub requests, pending failures, browser recovery, and events.
  */
 import {
+  clampHubTimeout,
   VtxErrorCode,
   VtxEventType,
   vtxError,
@@ -210,7 +211,11 @@ export class HubRouter {
     sessionId: string,
     request: VtxRequest,
     retryCount = 0,
-    deadline = this.now() + this.requestTimeoutMs,
+    // 调用方的预算随请求上线（VtxRequest.timeoutMs）。写死 requestTimeoutMs 会让
+    // 设了 45s 的调用在 30s 被砍，且报的是 hub 的错而非 handler 说得清的原因。
+    // 调用方的预算随请求上线（VtxRequest.timeoutMs）。写死 requestTimeoutMs 会让
+    // 设了 45s 的调用在 30s 被砍，且报的是 hub 的错而非 handler 说得清的原因。
+    deadline = this.now() + clampHubTimeout(request.timeoutMs, this.requestTimeoutMs),
   ): Promise<void> {
     const session = this.sessions.get(sessionId);
     if (!session) return;

@@ -1,4 +1,4 @@
-import { JsActions, VtxError, VtxErrorCode, vtxError } from "@vortex-browser/shared";
+import { JsActions, MAX_INNER_TIMEOUT_MS, VtxError, VtxErrorCode, vtxError } from "@vortex-browser/shared";
 import type { ActionRouter } from "../lib/router.js";
 import type { DebuggerManager } from "../lib/debugger-manager.js";
 import { getActiveTabId, buildExecuteTarget, ensureFrameAttached } from "../lib/tab-utils.js";
@@ -281,9 +281,9 @@ export function registerJsHandlers(
       if (!code) throw vtxError(VtxErrorCode.INVALID_PARAMS, "Missing required param: code");
       // BUG-003: validate timeout param
       const timeout = (args.timeout as number | undefined) ?? 5000;
-      if (!Number.isInteger(timeout) || timeout < 1 || timeout > 60000) {
+      if (!Number.isInteger(timeout) || timeout < 1 || timeout > MAX_INNER_TIMEOUT_MS) {
         throw vtxError(VtxErrorCode.INVALID_PARAMS,
-          `timeout must be an integer in [1, 60000]; got ${timeout}`);
+          `timeout must be an integer in [1, ${MAX_INNER_TIMEOUT_MS}]; got ${timeout}`);
       }
       const tid = await getActiveTabId((args.tabId as number | undefined) ?? tabId);
       const frameId = args.frameId as number | undefined;
@@ -435,9 +435,9 @@ export function registerJsHandlers(
       if (!code) throw vtxError(VtxErrorCode.INVALID_PARAMS, "Missing required param: code");
       // BUG-003: validate timeout param
       const timeout = (args.timeout as number | undefined) ?? 5000;
-      if (!Number.isInteger(timeout) || timeout < 1 || timeout > 60000) {
+      if (!Number.isInteger(timeout) || timeout < 1 || timeout > MAX_INNER_TIMEOUT_MS) {
         throw vtxError(VtxErrorCode.INVALID_PARAMS,
-          `timeout must be an integer in [1, 60000]; got ${timeout}`);
+          `timeout must be an integer in [1, ${MAX_INNER_TIMEOUT_MS}]; got ${timeout}`);
       }
       const tid = await getActiveTabId((args.tabId as number | undefined) ?? tabId);
       const frameId = args.frameId as number | undefined;
