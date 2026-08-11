@@ -109,6 +109,12 @@
 // query.mode/extract.maxLength),实测 9661B,cap 取 9800 留 139B 余量。
 // 这是"为可读性提预算",与历次"加能力调 cap"性质不同,故单列。
 // 详见 reports/_eval/tool-choice-2026-08-09.md。
+//
+// vortex_resize: 9800 → 10200 B。2026-08-11 日志分析(4269 次真实调用)显示,
+// playwright 占 24.1%,而"vortex 完全无对应能力"的调用只有 32 次——其中 21 次
+// 是 browser_resize。这是唯一一条实证的硬能力缺口:响应式验收一旦要改视口就必须
+// 留在 playwright,用过 resize 的 6 个会话贡献了全部 playwright 调用的 86.4%。
+// 新增工具后实测 10109B,沿用"加能力调 cap 不压字符"惯例取整到 10200,留 91B 余量。
 
 import { describe, it, expect, afterEach } from "vitest";
 import { COMMIT_KINDS } from "@vortex-browser/shared";
@@ -120,7 +126,7 @@ describe("I15: tools/list budget + count + internalized grep", () => {
     defs.map(d => ({ name: d.name, description: d.description, inputSchema: d.schema })),
   );
 
-  it("tools/list 字节 ≤ 9800 B (参数可发现性, 实测 9661 留 139B buffer)", () => {
+  it("tools/list 字节 ≤ 10200 B (vortex_resize, 实测 10109 留 91B buffer)", () => {
     // V2 P0 修复 D16: filter 子字段 description 是必要的文档化豁免
     // (handler 已实现 console.ts:160 level / network.ts:305-321 pattern+statusMin/Max),
     // 移除豁免会触发 V2 D16 真发现复发 (LLM 不知可用子字段)。
@@ -137,14 +143,14 @@ describe("I15: tools/list budget + count + internalized grep", () => {
     // (handler mouse.click 早已实现,含 frame→viewport 换算,此前只暴露坐标版 mouse.drag;
     // canvas/地图/无 ref 场景刚需,补齐"坐标 click"能力缺口)。schema 块 +~366B,payload
     // 实测 8378B,cap +400 至 8500 留 ~122B 余量。沿用"加能力调 cap 不压字符"惯例。
-    expect(toolsListPayload.length).toBeLessThanOrEqual(9800);
+    expect(toolsListPayload.length).toBeLessThanOrEqual(10200);
   });
 
-  it("公开工具数量 = 22（21 + vortex_browser 浏览器选择）", () => {
-    expect(defs.length).toBe(22);
+  it("公开工具数量 = 23（22 + vortex_resize 视口模拟）", () => {
+    expect(defs.length).toBe(23);
   });
 
-  it("22 个公开工具名匹配 spec L4 §1.1+§1.2 + 工具横向优化 T6+T7+vortex_query+vortex_mouse_click+vortex_browser", () => {
+  it("23 个公开工具名匹配 spec L4 §1.1+§1.2 + 工具横向优化 T6+T7+vortex_query+vortex_mouse_click+vortex_browser", () => {
     const names = defs.map(d => d.name).sort();
     expect(names).toEqual([
       "vortex_act",
@@ -163,6 +169,7 @@ describe("I15: tools/list budget + count + internalized grep", () => {
       "vortex_observe",
       "vortex_press",
       "vortex_query",
+      "vortex_resize",
       "vortex_screenshot",
       "vortex_storage",
       "vortex_tab_close",
@@ -335,22 +342,22 @@ describe("Bug F regression: vortex_observe surface must expose frames", () => {
   });
 });
 
-// caps opt-in：默认面 verify 不进 tools/list；--caps=testing 时提升进公开面（22）。
+// caps opt-in：默认面 verify 不进 tools/list；--caps=testing 时提升进公开面（24）。
 // 守住「cap 工具默认零回归 + opt-in 后可见」双向不变量。
 describe("I15-caps: vortex_verify 仅在 --caps=testing 时进 tools/list", () => {
   afterEach(() => setEnabledCaps([]));
 
-  it("默认面仍 22，不含 vortex_verify", () => {
+  it("默认面仍 23，不含 vortex_verify", () => {
     setEnabledCaps([]);
     const defs = getToolDefs();
-    expect(defs.length).toBe(22);
+    expect(defs.length).toBe(23);
     expect(defs.map((d) => d.name)).not.toContain("vortex_verify");
   });
 
-  it("--caps=testing 时公开面 = 23 且含 vortex_verify", () => {
+  it("--caps=testing 时公开面 = 24 且含 vortex_verify", () => {
     setEnabledCaps(["testing"]);
     const names = getToolDefs().map((d) => d.name);
-    expect(getToolDefs().length).toBe(23);
+    expect(getToolDefs().length).toBe(24);
     expect(names).toContain("vortex_verify");
   });
 });

@@ -207,6 +207,22 @@ export const PUBLIC_TOOLS: ToolDef[] = [
     returnsImage: true,
   },
   {
+    name: "vortex_resize",
+    action: "page.setViewport",
+    description: "Emulate viewport size for responsive checks (DevTools device mode; real window untouched). reset=true restores.",
+    schema: {
+      type: "object",
+      properties: {
+        width: { type: "number" },
+        height: { type: "number" },
+        deviceScaleFactor: { type: "number" },
+        mobile: { type: "boolean" },
+        reset: { type: "boolean" },
+        ...tabFields,
+      },
+    },
+  },
+  {
     name: "vortex_wait_for",
     action: "L4.wait_for",
     description: "Wait. mode=element|CSS, custom|JS, idle=net/xhr/dom, info.",

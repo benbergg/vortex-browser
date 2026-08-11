@@ -17,14 +17,14 @@ import { getAllToolDefs } from "../src/tools/schemas.js";
 
 describe("registry caps opt-in 机制", () => {
   afterEach(() => {
-    // 每个用例后清空模块级 caps 状态，避免污染其它测试文件（默认面 = 22）。
+    // 每个用例后清空模块级 caps 状态，避免污染其它测试文件（默认面 = 23）。
     setEnabledCaps([]);
   });
 
   it("默认（无 caps）：getToolDefs 返回 22 个公开工具，且不含任何 cap 标记工具", () => {
     setEnabledCaps([]);
     const defs = getToolDefs();
-    expect(defs.length).toBe(22);
+    expect(defs.length).toBe(23);
     expect(defs.every((d) => d.cap === undefined)).toBe(true);
   });
 
@@ -34,7 +34,7 @@ describe("registry caps opt-in 机制", () => {
     if (capped.length === 0) {
       // 当前 schemas 无 cap 工具：setEnabledCaps 必须是安全 no-op。
       setEnabledCaps(["testing"]);
-      expect(getToolDefs().length).toBe(22);
+      expect(getToolDefs().length).toBe(23);
       return;
     }
     const cap = capped[0].cap!;
@@ -44,8 +44,8 @@ describe("registry caps opt-in 机制", () => {
     for (const n of expectedNames) {
       expect(names).toContain(n);
     }
-    // 公开面 = 22 + 被提升的工具数
-    expect(getToolDefs().length).toBe(22 + expectedNames.length);
+    // 公开面 = 23 + 被提升的工具数
+    expect(getToolDefs().length).toBe(23 + expectedNames.length);
   });
 
   it("启用 cap 后 getToolDef 可按名解析被提升的工具", () => {
@@ -69,7 +69,7 @@ describe("registry caps opt-in 机制", () => {
   it("未知 cap 被忽略，不影响默认面（仍 22）", () => {
     setEnabledCaps(["nonexistent-cap-xyz"]);
     const defs = getToolDefs();
-    expect(defs.length).toBe(22);
+    expect(defs.length).toBe(23);
   });
 
   it("setEnabledCaps([]) 可回到默认面（幂等清空）", () => {
@@ -78,6 +78,6 @@ describe("registry caps opt-in 机制", () => {
     setEnabledCaps([capped[0].cap!]);
     expect(getToolDefs().length).toBeGreaterThan(22);
     setEnabledCaps([]);
-    expect(getToolDefs().length).toBe(22);
+    expect(getToolDefs().length).toBe(23);
   });
 });

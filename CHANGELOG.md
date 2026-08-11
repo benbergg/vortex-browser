@@ -4,6 +4,20 @@
 
 ---
 
+## [Unreleased]
+
+### Added
+
+- **`vortex_resize`:视口模拟**(`packages/extension/src/handlers/viewport.ts`、`packages/mcp/src/tools/schemas-public.ts`)。走 CDP `Emulation.setDeviceMetricsOverride`(= DevTools 设备模式),**不动用户的真实窗口** —— vortex 接管的是用户日常 Chrome,`chrome.windows.update` 会把用户正在用的窗口拽走。参数 `width`/`height` 必填,`deviceScaleFactor`(0=跟随系统)、`mobile`、`reset` 可选。**Why**:2026-08-11 对 4269 次真实调用的日志分析显示,vortex 与 playwright 同时可用时 playwright 占 24.1%,而"vortex 完全无对应能力"的调用只有 32 次 —— 其中 21 次是 `browser_resize`。这是唯一一条实证的硬能力缺口:响应式验收一旦需要改视口就必须留在 playwright,用过 resize 的 6 个会话贡献了全部 playwright 调用的 86.4%。
+
+### Fixed
+
+- **`deviceScaleFactor=2` 的截图一直失败**(`packages/extension/src/handlers/capture.ts:54`)。高 DPR 截图走 `enableDomain(tabId, "Emulation")`,而 CDP 的 Emulation 域**没有 `enable` 命令**,真机报 `{"code":-32601,"message":"'Emulation.enable' wasn't found"}`。改为 `debuggerMgr.attach()`(该方法本就成功发着 `Emulation.setFocusEmulationEnabled`,反证 Emulation 命令无需 enable)。**Why 一直没被发现**:单测里的假 DebuggerManager 把任意 `${domain}.enable` 一律 resolve,危险路径在 mock 下变安全 —— 假 fake 现已补 `attach`,并新增按真机行为 reject 未知命令的测试。
+- **截图会抹掉常驻视口**(同上)。高 DPR 截图收尾无条件 `clearDeviceMetricsOverride`,把 `vortex_resize` 设的视口一并清掉。新增纯函数 `deviceMetricsPlan` 作为两者唯一合并判据:有常驻视口时收尾改为「恢复」而非「清除」,且 DPR 以截图为准、视口保住。
+- **视口被模拟时截图返回真实窗口尺寸**(同上)。`chrome.tabs.captureVisibleTab` 快路径截的是**真实窗口**可见区,与模拟视口无关 —— 视口设成 375px 时会静默返回一张 1432px 宽的图,无任何报错。`canUseNativeCapture` 新增 override 守卫,有模拟视口时回退 CDP。
+
+---
+
 ## [2.0.1] - 2026-08-09
 
 ### Fixed

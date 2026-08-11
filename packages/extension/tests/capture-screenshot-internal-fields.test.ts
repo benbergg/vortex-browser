@@ -32,6 +32,10 @@ describe("capture screenshot internal-only fields (P0-6)", () => {
     });
     debuggerMgr = {
       enableDomain: vi.fn().mockResolvedValue(undefined),
+      // Emulation 域没有 enable 命令(真机 -32601),故走 attach。
+      // 旧 fake 缺 attach 且把任何 `.enable` 都 resolve 掉,正是
+      // deviceScaleFactor=2 一直坏着却假绿的原因(2026-08-11 live 实证)。
+      attach: vi.fn().mockResolvedValue(undefined),
       sendCommand: vi.fn((_tab, method, params) => {
         cdpCalls.push({ method, params });
         if (method === "Page.captureScreenshot") return Promise.resolve({ data: "BASE64" });

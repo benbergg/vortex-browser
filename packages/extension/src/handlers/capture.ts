@@ -9,6 +9,7 @@ import { resolveTarget } from "../lib/resolve-target.js";
 import { loadPageSideModule } from "../adapter/page-side-loader.js";
 import { getSnapshotEntry, getLatestSnapshotForTab } from "../lib/snapshot-store.js";
 import { drawMarksOnImage, type MarkRect } from "../lib/mark-overlay.js";
+import { deviceMetricsPlan, getViewportOverride } from "./viewport.js";
 
 // GIF 录制状态
 interface GifSession {
@@ -27,6 +28,27 @@ interface CaptureResult {
   dataUrl: string;
   /** fullPage 内容超过 MAX_FULLPAGE_HEIGHT 被裁断时填充，告知调用方下半部分丢失 */
   truncation?: { contentHeight: number; capturedHeight: number };
+}
+
+/**
+ * 能否走 chrome.tabs.captureVisibleTab 快路径。
+ * captureVisibleTab 截的是**真实窗口**可见区,与 Emulation 模拟的视口无关——
+ * 视口被 vortex_resize 改过时必须回退 CDP,否则静默返回真实窗口尺寸的图。
+ */
+export function canUseNativeCapture(o: {
+  fullPage?: boolean;
+  clip?: unknown;
+  frameId?: number;
+  deviceScaleFactor?: number;
+  hasViewportOverride: boolean;
+}): boolean {
+  return (
+    !o.fullPage &&
+    !o.clip &&
+    (o.frameId == null || o.frameId === 0) &&
+    (o.deviceScaleFactor == null || o.deviceScaleFactor === 1) &&
+    !o.hasViewportOverride
+  );
 }
 
 /**
@@ -49,15 +71,12 @@ async function captureTab(
 
   await debuggerMgr.enableDomain(tabId, "Page");
 
-  const needsDprOverride = deviceScaleFactor != null && deviceScaleFactor !== 1;
-  if (needsDprOverride) {
-    await debuggerMgr.enableDomain(tabId, "Emulation");
-    await debuggerMgr.sendCommand(tabId, "Emulation.setDeviceMetricsOverride", {
-      deviceScaleFactor,
-      width: 0,
-      height: 0,
-      mobile: false,
-    });
+  // 常驻视口(vortex_resize)与截图临时高 DPR 必须合并下发,否则收尾会把视口抹掉
+  const plan = deviceMetricsPlan(getViewportOverride(tabId), deviceScaleFactor);
+  if (plan.setup) {
+    // Emulation 域没有 enable 命令,enableDomain 会真机报 -32601;attach 即可
+    await debuggerMgr.attach(tabId);
+    await debuggerMgr.sendCommand(tabId, "Emulation.setDeviceMetricsOverride", plan.setup);
   }
 
   let truncation: CaptureResult["truncation"];
@@ -87,9 +106,11 @@ async function captureTab(
     const result = await debuggerMgr.sendCommand(tabId, "Page.captureScreenshot", params) as { data: string };
     return { dataUrl: `data:image/${format};base64,${result.data}`, truncation };
   } finally {
-    if (needsDprOverride) {
-      // 设计文档 §3.5 + 决策 6: reset 失败让异常向上抛,bench sweep 应 abort
+    // 设计文档 §3.5 + 决策 6: reset 失败让异常向上抛,bench sweep 应 abort
+    if (plan.teardown === "clear") {
       await debuggerMgr.sendCommand(tabId, "Emulation.clearDeviceMetricsOverride", {});
+    } else if (plan.teardown) {
+      await debuggerMgr.sendCommand(tabId, "Emulation.setDeviceMetricsOverride", plan.teardown);
     }
   }
 }
@@ -241,11 +262,13 @@ export function registerCaptureHandlers(
       // DPR 等价:被替换的旧 CDP 默认路径(无 clip → 无 `clip.scale:1`)本就按物理
       // device-pixel 出图(scale:1 仅 fullPage/clip 分支强制),captureVisibleTab 同样
       // 按物理 DPR 出图——故 Retina(DPR=2)上两路径均 2x,默认 viewport 截图无尺寸差。
-      const wantsNative =
-        !fullPage &&
-        !clip &&
-        (frameId == null || frameId === 0) &&
-        (deviceScaleFactor == null || deviceScaleFactor === 1);
+      const wantsNative = canUseNativeCapture({
+        fullPage,
+        clip,
+        frameId,
+        deviceScaleFactor,
+        hasViewportOverride: getViewportOverride(tid) != null,
+      });
       if (wantsNative) {
         try {
           const tab = await chrome.tabs.get(tid);

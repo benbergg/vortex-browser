@@ -20,6 +20,8 @@ export const PageActions = {
   WAIT_FOR_NETWORK_IDLE: "page.waitForNetworkIdle",
   /** XHR/Fetch 专用 idle 等待。语义上是 WAIT_FOR_NETWORK_IDLE + requestTypes=["XHR","Fetch"]。@since 0.4.0 */
   WAIT_FOR_XHR_IDLE: "page.waitForXhrIdle",
+  /** CDP Emulation 设备模拟改视口。不动用户真实窗口——vortex 接管的是日常 Chrome。@since 2.1.0 */
+  SET_VIEWPORT: "page.setViewport",
   /** 等待 caller 传入的 JS 表达式返回 truthy。给 idle/element 无法表达的就绪信号
    *  （如 Alpine `document.body._x_dataStack`、Vue `app.config.globalProperties.$ready`、
    *  自定义 window flag）。@since 0.8.x */
