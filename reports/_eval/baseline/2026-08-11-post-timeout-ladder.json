@@ -1,0 +1,312 @@
+{
+  "schema": 1,
+  "window": {
+    "from": "2026-07-13T09:19:13.698Z",
+    "to": "2026-08-11T08:25:37.528Z",
+    "activeDays": 24,
+    "requestedDays": 30,
+    "transcriptFiles": 1264,
+    "sessions": 44,
+    "projects": 22
+  },
+  "totals": {
+    "calls": 3297,
+    "errors": 219,
+    "errorRate": 0.0664,
+    "emptySuccess": 71,
+    "emptyRate": 0.0215
+  },
+  "skew": {
+    "top1SessionShare": 0.1747,
+    "top5SessionShare": 0.5123
+  },
+  "routes": {
+    "vortex": 3297,
+    "playwright": 1262,
+    "vortexShare": 0.7232
+  },
+  "ratios": {
+    "observeToEvaluate": 0.093
+  },
+  "perTool": [
+    {
+      "tool": "evaluate",
+      "calls": 1569,
+      "errors": 76,
+      "errorRate": 0.0484,
+      "emptySuccess": 33,
+      "emptyRate": 0.021
+    },
+    {
+      "tool": "act",
+      "calls": 343,
+      "errors": 73,
+      "errorRate": 0.2128,
+      "emptySuccess": 0,
+      "emptyRate": 0
+    },
+    {
+      "tool": "screenshot",
+      "calls": 289,
+      "errors": 7,
+      "errorRate": 0.0242,
+      "emptySuccess": 0,
+      "emptyRate": 0
+    },
+    {
+      "tool": "navigate",
+      "calls": 218,
+      "errors": 9,
+      "errorRate": 0.0413,
+      "emptySuccess": 0,
+      "emptyRate": 0
+    },
+    {
+      "tool": "extract",
+      "calls": 152,
+      "errors": 14,
+      "errorRate": 0.0921,
+      "emptySuccess": 1,
+      "emptyRate": 0.0066
+    },
+    {
+      "tool": "observe",
+      "calls": 146,
+      "errors": 8,
+      "errorRate": 0.0548,
+      "emptySuccess": 0,
+      "emptyRate": 0
+    },
+    {
+      "tool": "tab_list",
+      "calls": 113,
+      "errors": 3,
+      "errorRate": 0.0265,
+      "emptySuccess": 0,
+      "emptyRate": 0
+    },
+    {
+      "tool": "press",
+      "calls": 90,
+      "errors": 2,
+      "errorRate": 0.0222,
+      "emptySuccess": 0,
+      "emptyRate": 0
+    },
+    {
+      "tool": "mouse_click",
+      "calls": 85,
+      "errors": 0,
+      "errorRate": 0,
+      "emptySuccess": 0,
+      "emptyRate": 0
+    },
+    {
+      "tool": "query",
+      "calls": 72,
+      "errors": 3,
+      "errorRate": 0.0417,
+      "emptySuccess": 21,
+      "emptyRate": 0.2917
+    },
+    {
+      "tool": "tab_create",
+      "calls": 46,
+      "errors": 0,
+      "errorRate": 0,
+      "emptySuccess": 0,
+      "emptyRate": 0
+    },
+    {
+      "tool": "wait_for",
+      "calls": 43,
+      "errors": 13,
+      "errorRate": 0.3023,
+      "emptySuccess": 0,
+      "emptyRate": 0
+    },
+    {
+      "tool": "debug_read",
+      "calls": 33,
+      "errors": 3,
+      "errorRate": 0.0909,
+      "emptySuccess": 16,
+      "emptyRate": 0.4848
+    },
+    {
+      "tool": "tab_close",
+      "calls": 27,
+      "errors": 1,
+      "errorRate": 0.037,
+      "emptySuccess": 0,
+      "emptyRate": 0
+    },
+    {
+      "tool": "fill_form",
+      "calls": 16,
+      "errors": 0,
+      "errorRate": 0,
+      "emptySuccess": 0,
+      "emptyRate": 0
+    },
+    {
+      "tool": "fill",
+      "calls": 13,
+      "errors": 3,
+      "errorRate": 0.2308,
+      "emptySuccess": 0,
+      "emptyRate": 0
+    },
+    {
+      "tool": "file_upload",
+      "calls": 13,
+      "errors": 0,
+      "errorRate": 0,
+      "emptySuccess": 0,
+      "emptyRate": 0
+    },
+    {
+      "tool": "dev_reload",
+      "calls": 11,
+      "errors": 3,
+      "errorRate": 0.2727,
+      "emptySuccess": 0,
+      "emptyRate": 0
+    },
+    {
+      "tool": "browser",
+      "calls": 9,
+      "errors": 0,
+      "errorRate": 0,
+      "emptySuccess": 0,
+      "emptyRate": 0
+    },
+    {
+      "tool": "storage",
+      "calls": 4,
+      "errors": 0,
+      "errorRate": 0,
+      "emptySuccess": 0,
+      "emptyRate": 0
+    },
+    {
+      "tool": "resize",
+      "calls": 4,
+      "errors": 0,
+      "errorRate": 0,
+      "emptySuccess": 0,
+      "emptyRate": 0
+    },
+    {
+      "tool": "mouse_drag",
+      "calls": 1,
+      "errors": 1,
+      "errorRate": 1,
+      "emptySuccess": 0,
+      "emptyRate": 0
+    }
+  ],
+  "topErrors": [
+    {
+      "sig": "act | Error [TIMEOUT]: Actionability timeout after Nms; last reason: NOT_ATTACHED Hint: Action timed out. Increase the timeout argument, or call vortex_wait_for with ",
+      "count": 40
+    },
+    {
+      "sig": "evaluate | Error [TIMEOUT]: js.evaluateAsync timed out after Nms (page-side func may still be running; set shorter timeout, simplify code, or use vortex_navigate to clear ",
+      "count": 18
+    },
+    {
+      "sig": "evaluate | Error [TIMEOUT]: js.evaluate timed out after Nms (page-side func may still be running; set shorter timeout, simplify code, or use vortex_navigate to clear the t",
+      "count": 7
+    },
+    {
+      "sig": "observe | MCP error -N: Timeout: no response for observe.snapshot after Nms",
+      "count": 6
+    },
+    {
+      "sig": "evaluate | Error [INVALID_PARAMS]: timeout must be an integer in [N, N]; got N Hint: Invalid parameters. Check the tool schema for required fields and value constraints, t",
+      "count": 5
+    },
+    {
+      "sig": "extract | Error [JS_EXECUTION_ERROR]: page-side module \"dom-resolve\" injection timed out after Nms (target tab likely in a bad SW/navigation state); cache evicted, retrya",
+      "count": 4
+    },
+    {
+      "sig": "evaluate | Error [IFRAME_NOT_READY]: Frame N is not attached to tab N (likely detached after navigation or reload) Hint: Call vortex_observe to refresh frame list; frameId",
+      "count": 4
+    },
+    {
+      "sig": "evaluate | Error [TIMEOUT]: Request js.evaluateAsync timed out after Nms Hint: Action timed out. Increase the timeout argument, or call vortex_wait_for with mode='idle' to",
+      "count": 4
+    },
+    {
+      "sig": "wait_for | Error [TIMEOUT]: Request page.waitForExpression timed out after Nms Hint: Action timed out. Increase the timeout argument, or call vortex_wait_for with mode='id",
+      "count": 4
+    },
+    {
+      "sig": "act | Error [TIMEOUT]: Actionability timeout after Nms; last reason: OBSCURED Hint: Action timed out. Increase the timeout argument, or call vortex_wait_for with mode",
+      "count": 4
+    },
+    {
+      "sig": "screenshot | Error [JS_EXECUTION_ERROR]: Another debugger is already attached to the tab with id: N. Hint: Injected JavaScript threw an error. Inspect the error message in c",
+      "count": 4
+    },
+    {
+      "sig": "evaluate | Error [INVALID_PARAMS]: Missing required param: code Hint: Invalid parameters. Check the tool schema for required fields and value constraints, then retry with ",
+      "count": 3
+    },
+    {
+      "sig": "act | Error [INVALID_PARAMS]: Missing required param: provide `selector` or `index` + `snapshotId` Hint: Invalid parameters. Check the tool schema for required fields",
+      "count": 3
+    },
+    {
+      "sig": "extract | Error [ELEMENT_NOT_FOUND]: Element not found: #mainContent Hint: Element not found. Verify the selector or call vortex_observe to list interactive elements with",
+      "count": 3
+    },
+    {
+      "sig": "debug_read | Error [INTERNAL_ERROR]: Request not found: rt:<url> Hint: The requestId was not found in the network log. Use vortex_debug_read(source=network) to list requests",
+      "count": 3
+    },
+    {
+      "sig": "evaluate | Error [JS_EXECUTION_ERROR]: Failed to execute 'getComputedStyle' on 'Window': parameter N is not of type 'Element'. Hint: Injected JavaScript threw an error. In",
+      "count": 3
+    },
+    {
+      "sig": "evaluate | Error [TIMEOUT]: Request js.evaluateAsync timed out Hint: Action timed out. Increase the timeout argument, or call vortex_wait_for with mode='idle' to let the p",
+      "count": 3
+    },
+    {
+      "sig": "evaluate | Error [JS_EXECUTION_ERROR]: Frame with ID N is showing error page Hint: Injected JavaScript threw an error. Inspect the error message in context.extras and adju",
+      "count": 2
+    },
+    {
+      "sig": "fill | Error [STALE_SNAPSHOT]: Ref bound to snapshot from tab N, but current tab is N (tab changed since observe; re-call vortex_observe) Hint: Page has changed since ",
+      "count": 2
+    },
+    {
+      "sig": "evaluate | Error [JS_EXECUTION_ERROR]: await is only valid in async functions and the top level bodies of modules Hint: Injected JavaScript threw an error. Inspect the err",
+      "count": 2
+    },
+    {
+      "sig": "evaluate | Error [JS_EXECUTION_ERROR]: Cannot read properties of undefined (reading 'columns') Hint: Injected JavaScript threw an error. Inspect the error message in conte",
+      "count": 2
+    },
+    {
+      "sig": "evaluate | Error [JS_EXECUTION_ERROR]: Cannot read properties of undefined (reading 'slice') Hint: Injected JavaScript threw an error. Inspect the error message in context",
+      "count": 2
+    },
+    {
+      "sig": "extract | Error [IFRAME_NOT_READY]: Frame N is not attached to tab N (likely detached after navigation or reload) Hint: Call vortex_observe to refresh frame list; frameId",
+      "count": 2
+    },
+    {
+      "sig": "query | Error [JS_EXECUTION_ERROR]: query.queryPage sheet error: no lake-sheet on page (未找到语雀数据表；若确在表格页请等待加载，或用 vortex_screenshot) Hint: Injected JavaScript threw an er",
+      "count": 2
+    },
+    {
+      "sig": "navigate | vortex-server is not running at localhost:N. To start: cd /path/to/vortex && pnpm --filter @vortex-browser/server start Once it's running, retry your last tool ",
+      "count": 2
+    }
+  ],
+  "label": "post-timeout-ladder"
+}
