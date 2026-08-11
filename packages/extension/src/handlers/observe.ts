@@ -156,7 +156,9 @@ interface ScannedElement {
   /** Framework UI state derived from class / aria. @since 0.4.0 (O-8) */
   state?: { checked?: boolean | "mixed"; selected?: boolean; active?: boolean; disabled?: boolean; expanded?: boolean; required?: boolean; current?: boolean; invalid?: boolean; sort?: "ascending" | "descending" | "none"; haspopup?: string; readonly?: boolean };
   /** 值域控件(slider/spinbutton/progressbar/meter 及原生 range/number/progress)的当前值,如 "30" 或 "30/100"。@since dogfood 2026-06-02 */
+  /** 同快照内 role+name 重名时,能把本元素与同组区分开的祖先文本。@since dup-context */
   valueNow?: string;
+  dupContext?: string;
   /** 值域控件最小值/最大值。@since N0002 B006 — agent 看到 slider "0" 不知范围, 加 min/max 字段。 */
   valueMin?: string;
   valueMax?: string;
@@ -431,6 +433,83 @@ export function isFocusContainerOnly(el: Element): boolean {
  * Why export:供 `observe-compound-control.test.ts` jsdom 直测真源;inject func 内联同语义
  * 副本(closure 注入无法 import),改一处须同步另一处,源码锁守护。
  */
+/** 区分上下文的长度上限。日志行「13:22:01 ERROR order not found: SO-001」= 38 字,
+ * 表格行「SO-20260811-001 苏菲官方旗舰店」= 24 字,60 足够且把最坏情况
+ * (39 成员的重名组)的增量压在 ~2.3KB。 */
+export const DUP_CTX_MAX_LEN = 60;
+
+/** 祖先上下文文本的原始长度上限(挑中后还会按 DUP_CTX_MAX_LEN 再截)。 */
+export const DUP_ANCESTOR_TEXT_MAX = 200;
+
+/**
+ * 取祖先的「身份文本」:剔除交互后代(它们的名字属于控件不属于行),并在元素边界补空格。
+ *
+ * 补空格是 live 实测出来的:直接 textContent 会把 `<td>SO-001</td><td>苏菲</td>` 拼成
+ * "SO-001苏菲",日志行拼成 "13:22:01ERRORorder not found" —— agent 要拿这段去对用户的
+ * 自然语言描述,粘连显著影响匹配(2026-08-11)。
+ *
+ * Why export:供 `observe-duplicate-context.test.ts` jsdom 直测真源;inject func 内联同语义
+ * 副本,改一处须同步另一处,源码锁守护。
+ */
+export function ancestorContextText(anc: Element): string {
+  let out = "";
+  try {
+    const clone = anc.cloneNode(true) as Element;
+    for (const c of Array.from(
+      clone.querySelectorAll("a[href],button,input,select,textarea,[role=button]"),
+    )) c.remove();
+    const parts: string[] = [];
+    const walk = (n: Node): void => {
+      const kids = n.childNodes;
+      for (let i = 0; i < kids.length; i++) {
+        const c = kids[i];
+        if (c.nodeType === 3) parts.push(c.nodeValue ?? "");
+        else if (c.nodeType === 1) { parts.push(" "); walk(c); parts.push(" "); }
+      }
+    };
+    walk(clone);
+    out = parts.join("").replace(/\s+/g, " ").trim().slice(0, DUP_ANCESTOR_TEXT_MAX);
+  } catch { out = ""; }
+  return out;
+}
+
+/**
+ * 从祖先文本链里挑一段能把本元素与同组重名成员区分开的上下文。
+ *
+ * 为什么不发序号:ref 已经唯一寻址了,序号不多给任何信息;agent 缺的是「该点哪一个」
+ * 的**语义**。日志实测 731 个重名元素中 90.6% 沿父链找不到区分信息,因为能区分它们的
+ * 行内容是非交互文本、被 filter=interactive 滤掉了(log.bytenew.com 三个
+ * `button "复制此行"` 平铺顶层即典型)。
+ *
+ * @param mineChain  本元素由近及远的祖先文本(调用方逐跳提取)
+ * @param otherChains 同组其他成员的同构文本链
+ * @param ownName    本元素自身的名字,从上下文里剔除(否则「详情」这类只会回显自己)
+ * @returns 首个「本组唯一且剔名后非空」的祖先文本;都不行返回 undefined(宁缺勿误导)
+ *
+ * Why export:供 `observe-duplicate-context.test.ts` 直测真源;inject func 内联同语义
+ * 副本(closure 注入无法 import),改一处须同步另一处,源码锁守护。
+ */
+export function pickDistinguishingContext(
+  mineChain: string[],
+  otherChains: string[][],
+  ownName: string,
+): string | undefined {
+  if (otherChains.length === 0) return undefined;
+  const norm = (s: string): string => (s ?? "").replace(/\s+/g, " ").trim();
+  const strip = (s: string): string =>
+    ownName ? norm(norm(s).split(norm(ownName)).join(" ")) : norm(s);
+  for (let hop = 0; hop < mineChain.length; hop++) {
+    const mine = norm(mineChain[hop] ?? "");
+    if (!mine) continue;
+    // 同跳有任一成员文本相同 → 该跳区分不了
+    if (otherChains.some((c) => norm(c[hop] ?? "") === mine)) continue;
+    const ctx = strip(mine);
+    if (!ctx) continue; // 剔掉自身名字后没剩下信息,再往上找
+    return ctx.slice(0, DUP_CTX_MAX_LEN);
+  }
+  return undefined;
+}
+
 /**
  * 非原生 ARIA combobox 的「当前值」兜底:显示文本即当前选中项。
  *
@@ -3061,6 +3140,8 @@ const INTERACTIVE_SELECTORS = [
           state?: { checked?: boolean; selected?: boolean; active?: boolean; disabled?: boolean; expanded?: boolean; required?: boolean; current?: boolean; invalid?: boolean; sort?: "ascending" | "descending" | "none"; haspopup?: string; level?: number };
           /** 值域控件当前值,如 "30" 或 "30/100"(getValueInfo 严格限定值域控件)。 */
           valueNow?: string;
+          /** 同快照内 role+name 重名时的区分性祖先文本。@since dup-context */
+          dupContext?: string;
           /** 最近的已收集祖先的 frame-local index；根节点 undefined。@since a11y-tree */
           parentIndex?: number;
           /** role=link 的 href，供 compact 树渲染 /url。@since a11y-tree */
@@ -3502,6 +3583,93 @@ const INTERACTIVE_SELECTORS = [
                 cur.parentElement ||
                 (cur.getRootNode() && cur.getRootNode().host) ||
                 null;
+            }
+          }
+        }
+
+        // 重名消歧:同快照内 role+name 完全相同的元素,补一段能把它与同组其他成员
+        // 区分开的祖先文本(渲染成 ctx=)。ref 本来就唯一,缺的是「该点哪一个」的语义
+        // —— 日志实测 18.4% 元素重名且 90.6% 沿父链找不到区分信息,因为行内容是
+        // 非交互文本、被 filter=interactive 滤掉(2026-08-11)。
+        // 内联副本:模块级 pickDistinguishingContext 的同语义复刻,源码锁守护。
+        {
+          const __DUP_HOPS = 4;
+          const __CTX_MAX = 60;
+          function __pickDistinguishingContext(
+            mineChain: string[], otherChains: string[][], ownName: string,
+          ): string | undefined {
+            if (otherChains.length === 0) return undefined;
+            const nz = (s: string): string => (s ?? "").replace(/\s+/g, " ").trim();
+            const strip = (s: string): string =>
+              ownName ? nz(nz(s).split(nz(ownName)).join(" ")) : nz(s);
+            for (let hop = 0; hop < mineChain.length; hop++) {
+              const mine = nz(mineChain[hop] ?? "");
+              if (!mine) continue;
+              if (otherChains.some((c) => nz(c[hop] ?? "") === mine)) continue;
+              const ctx = strip(mine);
+              if (!ctx) continue;
+              return ctx.slice(0, __CTX_MAX);
+            }
+            return undefined;
+          }
+          // 祖先文本:克隆后移除交互后代,避免同行兄弟按钮名混进上下文。
+          // 克隆有成本,故只对重名成员算,且缓存同一祖先的结果。
+          const __ancCache = new Map<Element, string>();
+          const __ancText = (anc: Element): string => {
+            const hit = __ancCache.get(anc);
+            if (hit !== undefined) return hit;
+            // 内联副本:模块级 ancestorContextText 同语义(源码锁守护)。元素边界补空格,
+            // 否则 <td>A</td><td>B</td> 会拼成 "AB"(live 实测)。
+            let out = "";
+            try {
+              const clone = anc.cloneNode(true) as Element;
+              for (const c of Array.from(
+                clone.querySelectorAll("a[href],button,input,select,textarea,[role=button]"),
+              )) c.remove();
+              const parts: string[] = [];
+              const walk = (n: Node): void => {
+                const kids = n.childNodes;
+                for (let i = 0; i < kids.length; i++) {
+                  const c = kids[i];
+                  if (c.nodeType === 3) parts.push(c.nodeValue ?? "");
+                  else if (c.nodeType === 1) { parts.push(" "); walk(c); parts.push(" "); }
+                }
+              };
+              walk(clone);
+              out = parts.join("").replace(/\s+/g, " ").trim().slice(0, 200);
+            } catch { out = ""; }
+            __ancCache.set(anc, out);
+            return out;
+          };
+          const __chainOf = (el: Element): string[] => {
+            const chain: string[] = [];
+            let cur = el.parentElement
+              || ((el.getRootNode() as ShadowRoot | Document) as ShadowRoot).host
+              || null;
+            while (cur && chain.length < __DUP_HOPS) {
+              chain.push(__ancText(cur));
+              cur = cur.parentElement
+                || ((cur.getRootNode() as ShadowRoot | Document) as ShadowRoot).host
+                || null;
+            }
+            return chain;
+          };
+          const __groups = new Map<string, number[]>();
+          for (let i = 0; i < elements.length; i++) {
+            const nm = (elements[i].name ?? "").replace(/\s+/g, " ").trim();
+            if (!nm) continue;
+            const k = `${elements[i].role} ${nm}`;
+            const g = __groups.get(k);
+            if (g) g.push(i); else __groups.set(k, [i]);
+          }
+          for (const idxs of __groups.values()) {
+            if (idxs.length < 2) continue;
+            const chains = idxs.map((i) => __chainOf(collectedEls[i]));
+            for (let a = 0; a < idxs.length; a++) {
+              const ctx = __pickDistinguishingContext(
+                chains[a], chains.filter((_, b) => b !== a), elements[idxs[a]].name ?? "",
+              );
+              if (ctx) elements[idxs[a]].dupContext = ctx;
             }
           }
         }
@@ -4170,6 +4338,8 @@ export function registerObserveHandlers(router: ActionRouter, debuggerMgr: Debug
         state?: { checked?: boolean | "mixed"; selected?: boolean; active?: boolean; disabled?: boolean; expanded?: boolean; required?: boolean; current?: boolean; invalid?: boolean; sort?: "ascending" | "descending" | "none"; haspopup?: string; readonly?: boolean };
         /** 值域控件当前值,如 "30" 或 "30/100"(getValueInfo 严格限定值域控件)。 */
         valueNow?: string;
+        /** 同快照内 role+name 重名时的区分性祖先文本。@since dup-context */
+        dupContext?: string;
         /** BUG-010 N0060 京东评测: onClick 桩 / cursor:pointer 命中 (compact 也透传) */
         reactClickable?: true;
         clickHint?: string;
@@ -4288,6 +4458,7 @@ export function registerObserveHandlers(router: ActionRouter, debuggerMgr: Debug
               name: e.name,
               ...(e.state ? { state: e.state } : {}),
               ...(e.valueNow !== undefined ? { valueNow: e.valueNow } : {}),
+              ...(e.dupContext !== undefined ? { dupContext: e.dupContext } : {}),
               // 缺陷② (2026-06-07 v4 淘宝评测): compact 模式也透传
               // offScreenActionable 标记, agent 用 compact 也能识别离屏可交互。
               offScreenActionable: e.offScreenActionable,
@@ -4344,6 +4515,7 @@ offScreenActionable: e.offScreenActionable,
                attrs: e.attrs,
                ...(e.state ? { state: e.state } : {}),
                ...(e.valueNow !== undefined ? { valueNow: e.valueNow } : {}),
+              ...(e.dupContext !== undefined ? { dupContext: e.dupContext } : {}),
                // N0002 B006: slider/progressbar valuemin/max 独立透传(R7 page-side 路径设)。
                ...(e.valueMin !== undefined ? { valueMin: e.valueMin } : {}),
                ...(e.valueMax !== undefined ? { valueMax: e.valueMax } : {}),

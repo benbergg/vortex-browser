@@ -78,3 +78,28 @@ describe("observe 降级 meta 行", () => {
     expect(out).not.toContain("degraded");
   });
 });
+
+// 重名消歧的对外可见性:extension 侧算出 dupContext,渲染层若不输出,agent 仍然
+// 只看到两个一模一样的 button —— 缺口必须落在 compact/tree 文本里,因为 LLM 读的是文本。
+describe("重名区分上下文 ctx=", () => {
+  const dup = [
+    { index: 0, tag: "button", role: "button", name: "详情", frameId: 0, dupContext: "SO-001 苏菲官方旗舰店" },
+    { index: 1, tag: "button", role: "button", name: "详情", frameId: 0, dupContext: "SO-002 洁婷专卖店" },
+  ];
+
+  it("tree: 渲染 ctx= 且两行内容不同", () => {
+    const out = renderObserveTree(obs(dup), null);
+    expect(out).toContain('ctx="SO-001 苏菲官方旗舰店"');
+    expect(out).toContain('ctx="SO-002 洁婷专卖店"');
+  });
+
+  it("compact: 同样渲染 ctx=", () => {
+    const out = renderObserveCompact(obs(dup), null);
+    expect(out).toContain('ctx="SO-002 洁婷专卖店"');
+  });
+
+  it("无 dupContext 的元素不出现 ctx=(正常路径字节不变)", () => {
+    const out = renderObserveTree(obs(oneEl), null);
+    expect(out).not.toContain("ctx=");
+  });
+});

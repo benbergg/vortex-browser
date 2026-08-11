@@ -45,6 +45,8 @@ export interface CompactElement {
   errorMessage?: string;
   /** aria-describedby 关联描述文本。@since ax-overlay */
   description?: string;
+  /** 同快照内 role+name 重名时的区分性祖先文本,渲染成 ctx=。@since dup-context */
+  dupContext?: string;
   /** 复合控件元数据(combobox/listbox/date-input/file-input/range-input 等)。@since ax-overlay */
   compound?: {
     role: string;
@@ -514,6 +516,8 @@ export function renderObserveCompact(
     const valueMaxSeg = el.valueMax !== undefined ? ` [valuemax=${el.valueMax}]` : "";
     // N0002 B010/B016: 键盘快捷键段。
     const keyshortcutsSeg = el.keyshortcuts ? ` [keyshortcuts=${el.keyshortcuts}]` : "";
+    // 重名消歧:同 role+name 的兄弟元素靠 ctx 区分「该点哪一个」(ref 只解决寻址不解决语义)。
+    const dupCtxSeg = el.dupContext ? ` ctx=${JSON.stringify(el.dupContext.slice(0, 60))}` : "";
     // T4-viewport: 视口外元素追加 [offscreen] 标记，提示 LLM 需要先滚动。
     // inViewport===false（明确屏外）才打标记；undefined（旧快照）保持兼容不打。
     const offscreenSeg = el.inViewport === false ? " [offscreen]" : "";
@@ -531,7 +535,7 @@ export function renderObserveCompact(
     const newPrefix = isNew ? "* " : "";
 
     lines.push(
-      `${newPrefix}${refOf(el, snapshotHash)} [${el.role}]${name}${lm}${lv}${stateFlags(el.state)}${comp}${valueSeg}${valueMinSeg}${valueMaxSeg}${keyshortcutsSeg}${offscreenSeg}${blindspotTag(el.blindspot)}${el.behindModal ? " [behind-modal]" : ""}${bboxSeg}`,
+      `${newPrefix}${refOf(el, snapshotHash)} [${el.role}]${name}${lm}${lv}${stateFlags(el.state)}${comp}${valueSeg}${valueMinSeg}${valueMaxSeg}${keyshortcutsSeg}${dupCtxSeg}${offscreenSeg}${blindspotTag(el.blindspot)}${el.behindModal ? " [behind-modal]" : ""}${bboxSeg}`,
     );
   }
 
@@ -687,13 +691,15 @@ export function renderObserveTree(
       ? ` controls=${e.controls.map((c) => c.index !== undefined ? refOf({ ...e, index: c.index }, snapshotHash) : `#${c.id}`).join(",")}`
       : "";
     const desc = e.description ? ` desc=${JSON.stringify(e.description.slice(0, 60))}` : "";
+    // 重名消歧:同 role+name 的兄弟元素靠 ctx 区分「该点哪一个」(ref 只解决寻址不解决语义)。
+    const dupCtx = e.dupContext ? ` ctx=${JSON.stringify(e.dupContext.slice(0, 60))}` : "";
     // T4-viewport: 视口外元素追加 [offscreen] 标记（inViewport===false 明确屏外才打）。
     const offscreenSeg = e.inViewport === false ? " [offscreen]" : "";
     // T4-diff: 新增元素（上次快照无此身份键）在行首打 * 前缀。
     const isNew = prevKeys !== null && !prevKeys.has(buildElementKey(e));
     const newPrefix = isNew ? "* " : "";
     lines.push(
-      `${indent}${newPrefix}- ${e.role}${name}${ref}${lm}${lv}${stateFlags(e.state)}${weak}${cursor}${listener}${dropzone}${draggable}${valueSeg}${valueMinSeg}${valueMaxSeg}${keyshortcutsSeg}${comp}${err}${ctrl}${desc}${offscreenSeg}${blindspotTag(e.blindspot)}${e.behindModal ? " [behind-modal]" : ""}${bboxSeg}${hasChildren ? ":" : ""}`,
+      `${indent}${newPrefix}- ${e.role}${name}${ref}${lm}${lv}${stateFlags(e.state)}${weak}${cursor}${listener}${dropzone}${draggable}${valueSeg}${valueMinSeg}${valueMaxSeg}${keyshortcutsSeg}${comp}${err}${ctrl}${desc}${dupCtx}${offscreenSeg}${blindspotTag(e.blindspot)}${e.behindModal ? " [behind-modal]" : ""}${bboxSeg}${hasChildren ? ":" : ""}`,
     );
     if (hasUrl) lines.push(`${indent}  - /url: ${e.href}`);
     for (const k of kids) emit(k, depth + 1);
