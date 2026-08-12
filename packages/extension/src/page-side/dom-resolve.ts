@@ -7,6 +7,7 @@ import {
   queryAllDeep,
   deepElementFromPoint,
   isEnabledElement,
+  composedContains,
 } from "./shadow-walk.js";
 
 (function () {
@@ -48,6 +49,12 @@ import {
     // cdp.ts useRealMouse 探测旧版只判 .disabled 漏 aria-disabled,与门不一致(探测放行→门拦,
     // 或 div[role=textbox] aria-disabled 探测漏判)。收敛到单一真源保证探测==门(#26/#29)。
     isEnabled: (el: Element): boolean => isEnabledElement(el),
+    // 穿 shadow 边界的 contains。cdp.ts(useRealMouse)/dom.ts(synthetic)的 ELEMENT_OCCLUDED
+    // 遮挡检查用 el.contains(topEl) 判 hit 是否属 target,但 deepElementFromPoint 会钻进
+    // target 自身 shadow root 返回内部元素(sl-option 等自带 shadow + slotted label 的
+    // web-component 叶子控件),light-DOM Node.contains 不穿 shadow → 误判遮挡。改用此函数。
+    composedContains: (ancestor: Element, node: Element | null): boolean =>
+      composedContains(ancestor, node),
   };
 })();
 export {};

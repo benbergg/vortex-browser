@@ -69,6 +69,25 @@ export function isEnabledElement(el: Element): boolean {
   }
 }
 
+// 穿 shadow 边界的 contains（composed/flat 树包含判定）。Node.contains() 不跨 shadow，
+// 故当 hit-test 命中 target 自身 shadow root 内的元素（如 sl-option / sl-menu-item 等
+// web-component 叶子控件把 label 经 <slot> 渲染在自身 shadow 内）时，ancestor.contains(node)
+// 恒 false → actionability 误判 OBSCURED。此函数从 node 沿 composed 树上溯（穿 shadow host）
+// 逐级用 light-DOM contains 比对，覆盖「node 在 ancestor 自身或更深 shadow 子树内」的情形。
+export function composedContains(ancestor: Element, node: Element | null): boolean {
+  let n: Element | null = node;
+  let depth = 0;
+  while (n && depth < MAX_SHADOW_DEPTH) {
+    if (n === ancestor || ancestor.contains(n)) return true;
+    // getRootNode() 返回 Document 或 ShadowRoot；仅 ShadowRoot 有 .host（duck-type
+    // 判别,避免引用可能未暴露的 ShadowRoot 全局,与代码库其余 shadow 处理一致）。
+    const root = n.getRootNode() as { host?: Element };
+    n = root && root.host ? root.host : null;
+    depth++;
+  }
+  return false;
+}
+
 // document.elementFromPoint 对 shadow-internal 元素返回其 shadow host（composed 树顶,
 // 重定向到 shadow 边界）。逐级下钻 open shadow root 的 elementFromPoint 得到真实命中元素,
 // 使遮挡检查对 shadow 内元素成立（否则 host.contains(el) 不穿 shadow → 误判遮挡）。

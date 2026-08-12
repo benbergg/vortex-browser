@@ -83,6 +83,22 @@ describe("dom-resolve page-side module", () => {
     expect(result).toBe(btn);
   });
 
+  it("挂载 composedContains 且穿 shadow（hit 落 target 自身 shadow 内 → true，供 cdp/dom 遮挡检查）", async () => {
+    vi.resetModules();
+    await import("../src/page-side/dom-resolve.js");
+    const ns = (window as any).__vortexDomResolve;
+    expect(typeof ns.composedContains).toBe("function");
+
+    const host = document.getElementById("host")!;
+    const sr = host.attachShadow({ mode: "open" });
+    const inner = document.createElement("slot");
+    sr.appendChild(inner);
+    // 前提:Node.contains 不穿 shadow（cdp.ts/dom.ts 旧逻辑误判 ELEMENT_OCCLUDED 的根因）
+    expect(host.contains(inner)).toBe(false);
+    // composedContains 穿 shadow host 上溯 → true
+    expect(ns.composedContains(host, inner)).toBe(true);
+  });
+
   it("queryAllDeep shadow 兜底：light-DOM 零命中时穿 shadow，多命中仍返回全部（length=2）", async () => {
     vi.resetModules();
     await import("../src/page-side/dom-resolve.js");

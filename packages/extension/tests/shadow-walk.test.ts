@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { JSDOM } from "jsdom";
-import { queryDeep, queryAllDeep, deepElementFromPoint } from "../src/page-side/shadow-walk.js";
+import { queryDeep, queryAllDeep, deepElementFromPoint, composedContains } from "../src/page-side/shadow-walk.js";
 
 function setup(html: string): Document {
   const dom = new JSDOM(html);
@@ -135,5 +135,63 @@ describe("shadow-walk queryDeep", () => {
     btn2.className = "x";
     sr2.appendChild(btn2);
     expect(queryAllDeep("button.x", doc as unknown as Document).length).toBe(3);
+  });
+});
+
+describe("shadow-walk composedContains", () => {
+  it("light-DOM 后代:与 Node.contains 一致", () => {
+    const doc = setup('<div id="a"><span id="b"><i id="c"></i></span></div>');
+    const a = doc.getElementById("a")!;
+    expect(composedContains(a, doc.getElementById("c"))).toBe(true);
+  });
+
+  it("元素自身视为包含", () => {
+    const doc = setup('<div id="a"></div>');
+    const a = doc.getElementById("a")!;
+    expect(composedContains(a, a)).toBe(true);
+  });
+
+  it("hit 落在 target 自身 shadow root 内 → true（Node.contains 不穿 shadow 的反例）", () => {
+    const doc = setup('<div id="host"></div>');
+    const host = doc.getElementById("host")!;
+    const sr = host.attachShadow({ mode: "open" });
+    const inner = doc.createElement("slot");
+    sr.appendChild(inner);
+    // Node.contains 不穿 shadow（前提）
+    expect(host.contains(inner)).toBe(false);
+    // composedContains 穿 shadow host 上溯 → true
+    expect(composedContains(host, inner)).toBe(true);
+  });
+
+  it("hit 在 target 更深层嵌套 shadow 内 → true", () => {
+    const doc = setup('<div id="host"></div>');
+    const host = doc.getElementById("host")!;
+    const sr1 = host.attachShadow({ mode: "open" });
+    const mid = doc.createElement("div");
+    sr1.appendChild(mid);
+    const sr2 = mid.attachShadow({ mode: "open" });
+    const leaf = doc.createElement("span");
+    sr2.appendChild(leaf);
+    expect(composedContains(host, leaf)).toBe(true);
+  });
+
+  it("无关元素 → false", () => {
+    const doc = setup('<div id="a"></div><div id="b"></div>');
+    expect(composedContains(doc.getElementById("a")!, doc.getElementById("b"))).toBe(false);
+  });
+
+  it("外层 shadow host 不被内层 shadow 的元素包含（方向性）", () => {
+    const doc = setup('<div id="host"></div>');
+    const host = doc.getElementById("host")!;
+    const sr = host.attachShadow({ mode: "open" });
+    const inner = doc.createElement("span");
+    sr.appendChild(inner);
+    // inner 不包含 host（上溯起点是 inner，host 在其外层 light DOM）
+    expect(composedContains(inner, host)).toBe(false);
+  });
+
+  it("node 为 null → false", () => {
+    const doc = setup('<div id="a"></div>');
+    expect(composedContains(doc.getElementById("a")!, null)).toBe(false);
   });
 });

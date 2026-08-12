@@ -103,6 +103,41 @@ describe("actionability open-shadow deep resolution (Tier 2)", () => {
     ).resolves.toMatchObject({ ok: true });
   });
 
+  it("target 自带 shadow root,hit-test 落在 target 自身 shadow 内（slotted 叶子控件如 sl-option）→ 可操作非 OBSCURED", async () => {
+    vi.resetModules();
+    // 真实场景：Shoelace sl-option / sl-menu-item 等 web-component 叶子控件自带 shadow root，
+    // 其 label/内容经 <slot> 渲染在自身 shadow 内。点击其中点时：
+    //   document.elementFromPoint → 命中 target 本身（composed 树元素）
+    //   target.shadowRoot.elementFromPoint → 命中 target 自身 shadow 内的 slot
+    // deepElementFromPoint 下钻得 hit=slot，而 el.contains(hit) 不穿 shadow → 误判 OBSCURED。
+    const dom = setupActionabilityEnv({
+      html: '<div id="opt"></div>',
+      elementFromPoint: () => (globalThis as any).__optHost ?? null,
+    });
+    const opt = dom.window.document.getElementById("opt")!;
+    const sr = opt.attachShadow({ mode: "open" });
+    const labelSlot = dom.window.document.createElement("slot");
+    sr.appendChild(labelSlot);
+    (globalThis as any).__optHost = opt;
+    // target 自身 shadow 的 elementFromPoint 返回内部 slot（deepEFP 下钻一层命中）
+    Object.defineProperty(sr, "elementFromPoint", {
+      value: () => labelSlot,
+      configurable: true,
+    });
+    opt.getBoundingClientRect = () =>
+      ({ x: 10, y: 10, width: 40, height: 20, top: 10, left: 10, right: 50, bottom: 30 } as DOMRect);
+    labelSlot.getBoundingClientRect = () =>
+      ({ x: 10, y: 10, width: 40, height: 20, top: 10, left: 10, right: 50, bottom: 30 } as DOMRect);
+
+    await import("../src/page-side/actionability.js");
+    const { waitActionable } = await import("../src/action/auto-wait.js");
+
+    await expect(
+      waitActionable(1, undefined, "#opt", { timeout: 2000 }),
+    ).resolves.toMatchObject({ ok: true });
+    (globalThis as any).__optHost = undefined;
+  });
+
   it("真实缺失元素（无 light 无 shadow）仍 NOT_ATTACHED → TIMEOUT", async () => {
     vi.resetModules();
     const dom = setupActionabilityEnv({ html: "<div id='x'></div>" });
