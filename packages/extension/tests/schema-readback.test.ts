@@ -5,7 +5,14 @@
 
 import { describe, it, expect } from "vitest";
 import { JSDOM } from "jsdom";
-import { parseJsonLd, parseMicrodata, parseOpenGraph } from "../src/page-side/schema-readback.js";
+import {
+  parseJsonLd,
+  parseMicrodata,
+  parseOpenGraph,
+  readPageSchema,
+  serializeSchema,
+  SCHEMA_MAX_VALUE_CHARS,
+} from "../src/page-side/schema-readback.js";
 
 /**
  * query mode=schema 真源单测。jsdom 构造真实 document，真实执行解析器，不 mock 内部。
@@ -17,6 +24,10 @@ function docOf(html: string): Document {
 
 function bodyOf(html: string): Document {
   return new JSDOM(`<!doctype html><html><head></head><body>${html}</body></html>`).window.document;
+}
+
+function fullDoc(head: string, body: string): Document {
+  return new JSDOM(`<!doctype html><html><head>${head}</head><body>${body}</body></html>`).window.document;
 }
 
 const ld = (json: string) => `<script type="application/ld+json">${json}</script>`;
@@ -211,5 +222,83 @@ describe("parseOpenGraph", () => {
   it("只有 twitter:/其他 meta：不产实体", () => {
     const doc = docOf(`<meta name="twitter:card" content="summary"><meta name="description" content="d">`);
     expect(parseOpenGraph(doc)).toEqual({ entities: [], metas: 0 });
+  });
+});
+
+describe("readPageSchema", () => {
+  it("三源合并：顺序 jsonld → microdata → og，scanned 如实计数", () => {
+    const doc = fullDoc(
+      ld(`{"@type":"WebPage","name":"W"}`) + `<meta property="og:title" content="T">`,
+      `<div itemscope itemtype="Product"><span itemprop="name">P</span></div>`,
+    );
+    const r = readPageSchema(doc, null, 20);
+    expect(r.entities.map((e) => e.source)).toEqual(["jsonld:0", "microdata:0", "og"]);
+    expect(r.total).toBe(3);
+    expect(r.truncated).toBe(false);
+    expect(r.scanned).toEqual({ ldScripts: 1, ldParseErrors: 0, itemscopes: 1, itemrefsSkipped: 0, ogMetas: 1, iframes: 0 });
+  });
+
+  it("iframes 计数在 page-side 一并采集（SW 侧看不到页面 DOM，事后补不回来）", () => {
+    const doc = fullDoc("", `<iframe src="a.html"></iframe><iframe src="b.html"></iframe>`);
+    expect(readPageSchema(doc, null, 20).scanned.iframes).toBe(2);
+  });
+
+  it("typeFilter 大小写不敏感、按后缀匹配完整 IRI", () => {
+    const doc = fullDoc(
+      ld(`[{"@type":"https://schema.org/Product","name":"A"},{"@type":"BreadcrumbList","name":"B"}]`),
+      "",
+    );
+    expect(readPageSchema(doc, "product", 20).entities.map((e) => e.props.name)).toEqual(["A"]);
+  });
+
+  it("typeFilter='*' 等同不过滤", () => {
+    const doc = fullDoc(ld(`[{"@type":"A","name":"1"},{"@type":"B","name":"2"}]`), "");
+    expect(readPageSchema(doc, "*", 20).total).toBe(2);
+  });
+
+  it("超 maxEntities 截断：entities 被裁，total 报裁前总数，truncated=true", () => {
+    const doc = fullDoc(ld(`[{"@type":"A"},{"@type":"A"},{"@type":"A"}]`), "");
+    const r = readPageSchema(doc, null, 2);
+    expect(r.entities).toHaveLength(2);
+    expect(r.total).toBe(3);
+    expect(r.truncated).toBe(true);
+  });
+
+  it("超长字符串值被截断并加省略标记", () => {
+    const long = "x".repeat(SCHEMA_MAX_VALUE_CHARS + 50);
+    const doc = fullDoc(ld(`{"@type":"A","description":${JSON.stringify(long)}}`), "");
+    const v = readPageSchema(doc, null, 20).entities[0].props.description as string;
+    expect(v.length).toBe(SCHEMA_MAX_VALUE_CHARS + 1);
+    expect(v.endsWith("…")).toBe(true);
+  });
+
+  it("过滤后为空但页面确有数据：total=0 而 scanned 非零", () => {
+    const doc = fullDoc(ld(`{"@type":"A","name":"n"}`), "");
+    const r = readPageSchema(doc, "NoSuchType", 20);
+    expect(r.total).toBe(0);
+    expect(r.scanned.ldScripts).toBe(1);
+  });
+});
+
+describe("serializeSchema", () => {
+  it("json 格式返回可解析的完整载荷", () => {
+    const doc = fullDoc(ld(`{"@type":"A","name":"n"}`), "");
+    const parsed = JSON.parse(serializeSchema(readPageSchema(doc, null, 20), "json"));
+    expect(parsed.entities[0].untrusted).toBe(true);
+    expect(parsed.total).toBe(1);
+  });
+
+  it("summary 格式含来源与 untrusted 提示", () => {
+    const doc = fullDoc(ld(`{"@type":"Product","name":"P"}`), "");
+    const text = serializeSchema(readPageSchema(doc, null, 20), "summary");
+    expect(text).toContain("检测到 1 个实体");
+    expect(text).toContain("Product");
+    expect(text).toContain("jsonld:0");
+    expect(text).toContain("页面作者声明");
+  });
+
+  it("summary 在截断时标出被裁数量", () => {
+    const doc = fullDoc(ld(`[{"@type":"A"},{"@type":"A"},{"@type":"A"}]`), "");
+    expect(serializeSchema(readPageSchema(doc, null, 2), "summary")).toContain("已截断");
   });
 });

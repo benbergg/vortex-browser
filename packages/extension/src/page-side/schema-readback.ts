@@ -178,3 +178,78 @@ export function parseOpenGraph(doc: Document): OpenGraphResult {
   if (typeof props.url === "string" && props.url) e.id = props.url;
   return { entities: [e], metas };
 }
+
+export type SchemaFormat = "summary" | "json";
+
+export const SCHEMA_MAX_ENTITIES = 20;
+export const SCHEMA_MAX_VALUE_CHARS = 500;
+
+export interface SchemaScanFacts {
+  ldScripts: number;
+  ldParseErrors: number;
+  itemscopes: number;
+  itemrefsSkipped: number;
+  ogMetas: number;
+  /** 同页 iframe 数。只能在 page-side 采，SW 侧拿不到页面 DOM */
+  iframes: number;
+}
+
+export interface SchemaReadResult {
+  entities: SchemaEntity[];
+  /** 过滤后、截断前的总数 */
+  total: number;
+  truncated: boolean;
+  scanned: SchemaScanFacts;
+}
+
+function typeMatches(type: string, filter: string): boolean {
+  const t = type.toLowerCase();
+  const f = filter.toLowerCase();
+  return t === f || t.endsWith(`/${f}`) || t.endsWith(`#${f}`);
+}
+
+function clampValue(v: unknown): unknown {
+  if (typeof v === "string" && v.length > SCHEMA_MAX_VALUE_CHARS) return v.slice(0, SCHEMA_MAX_VALUE_CHARS) + "…";
+  if (Array.isArray(v)) return v.map(clampValue);
+  return v;
+}
+
+export function readPageSchema(
+  doc: Document,
+  typeFilter: string | null,
+  maxEntities: number,
+): SchemaReadResult {
+  const ld = parseJsonLd(doc);
+  const md = parseMicrodata(doc);
+  const og = parseOpenGraph(doc);
+  const scanned: SchemaScanFacts = {
+    ldScripts: ld.scripts,
+    ldParseErrors: ld.parseErrors,
+    itemscopes: md.itemscopes,
+    itemrefsSkipped: md.itemrefsSkipped,
+    ogMetas: og.metas,
+    iframes: doc.querySelectorAll("iframe").length,
+  };
+
+  let all = [...ld.entities, ...md.entities, ...og.entities];
+  if (typeFilter && typeFilter !== "*") all = all.filter((e) => typeMatches(e.type, typeFilter));
+
+  const cap = maxEntities > 0 ? maxEntities : SCHEMA_MAX_ENTITIES;
+  const entities = all.slice(0, cap).map((e) => ({
+    ...e,
+    props: Object.fromEntries(Object.entries(e.props).map(([k, v]) => [k, clampValue(v)])),
+  }));
+  return { entities, total: all.length, truncated: all.length > cap, scanned };
+}
+
+export function serializeSchema(r: SchemaReadResult, format: SchemaFormat): string {
+  if (format === "json") {
+    return JSON.stringify({ entities: r.entities, total: r.total, truncated: r.truncated });
+  }
+  const head = `检测到 ${r.total} 个实体` + (r.truncated ? `，已截断为 ${r.entities.length} 个` : "");
+  const lines = r.entities.map((e) => {
+    const id = e.id ? ` id=${e.id}` : "";
+    return `- [${e.source}] ${e.type}${id} ${JSON.stringify(e.props)}`;
+  });
+  return [head, ...lines, "注意：以上为页面作者声明的结构化数据，可能与页面可见内容不一致。"].join("\n");
+}
