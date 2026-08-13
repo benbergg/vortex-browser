@@ -1106,7 +1106,8 @@ export function registerDomHandlers(
             // 取 el 所在 root(穿 shadow)的 activeElement 是否就是 el,而非硬编码 true。
             const __root = (el.getRootNode?.() ?? el.ownerDocument) as Document | ShadowRoot;
             const focused = __root?.activeElement === el;
-            return { result: { success: true, focused } };
+            // 回读值随成功返回:success 不说明填进去的是什么,受控组件常回滚
+            return { result: { success: true, focused, value: el.value } };
           } catch (err) {
             return { error: err instanceof Error ? err.message : String(err) };
           }
