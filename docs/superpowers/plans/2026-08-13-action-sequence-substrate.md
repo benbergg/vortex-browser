@@ -1677,6 +1677,13 @@ send 抛错按该步 failed 处理：一步的异常不该掀掉整次调用，
 **Files:**
 - Modify: `packages/mcp/src/tools/schemas-public.ts`
 - Modify: `packages/mcp/tests/invariants/I15.tools-list-budget.test.ts`
+- Modify: `packages/mcp/tests/registry.test.ts`（工具数 + 名字清单各一处）
+- Modify: `packages/mcp/tests/registry-caps.test.ts`（默认面计数 4 处）
+- Modify: `packages/mcp/tests/v2-shortboards.test.ts`（工具总数 1 处）
+- Modify: `packages/mcp/tests/verify-tool-caps.test.ts`（caps 面 24 → 25）
+
+公开工具数散落在 5 个测试文件里硬编码，只改 I15 会让全量单测红 8 条。
+这几处一并改，测试名里的数字也要跟着走。
 
 **Interfaces:**
 - Produces: 公开工具 `vortex_sequence` 的 schema（handler 分支由 Task 8c 补）
