@@ -451,7 +451,12 @@ export const PUBLIC_TOOLS: ToolDef[] = [
     schema: {
       type: "object",
       properties: {
-        mode: { enum: ["text", "css", "component", "geometry", "style", "sheet", "flow", "chart"] , description: "component reads Vue/React instance state; sheet only reads Yuque Lake Sheet, NOT DOM tables (use extract for those)"},
+        mode: {
+          enum: ["text", "css", "component", "geometry", "style", "sheet", "flow", "chart", "schema"],
+          description:
+            "component reads Vue/React instance state; sheet only reads Yuque Lake Sheet, NOT DOM tables (use extract for those); " +
+            "schema=author-declared JSON-LD/Microdata/OGP (pattern=@type or '*'), may differ from visible content",
+        },
         pattern: { type: "string" },
         isRegex: { type: "boolean" },
         caseSensitive: { type: "boolean" },

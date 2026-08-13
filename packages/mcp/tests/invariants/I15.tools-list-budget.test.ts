@@ -115,6 +115,12 @@
 // 是 browser_resize。这是唯一一条实证的硬能力缺口:响应式验收一旦要改视口就必须
 // 留在 playwright,用过 resize 的 6 个会话贡献了全部 playwright 调用的 86.4%。
 // 新增工具后实测 10109B,沿用"加能力调 cap 不压字符"惯例取整到 10200,留 91B 余量。
+// vortex_query mode=schema: 10200 → 10300 B。vortex_query mode 枚举新增 schema
+// (读页面作者声明的 JSON-LD/Microdata/OGP → 带 source/untrusted 的实体列表),
+// mode.description 同步追加一句说明。schema 是页面作者声明而非浏览器计算语义,
+// 必须在 description 里点明"may differ from visible content",否则模型会把它
+// 当页面事实。payload 实测 10236B, cap 取 10300 留 64B 余量。
+// 沿用"加能力调 cap 不压字符"惯例。
 
 import { describe, it, expect, afterEach } from "vitest";
 import { COMMIT_KINDS } from "@vortex-browser/shared";
@@ -126,7 +132,7 @@ describe("I15: tools/list budget + count + internalized grep", () => {
     defs.map(d => ({ name: d.name, description: d.description, inputSchema: d.schema })),
   );
 
-  it("tools/list 字节 ≤ 10200 B (vortex_resize, 实测 10109 留 91B buffer)", () => {
+  it("tools/list 字节 ≤ 10300 B (query mode=schema, 实测 10236 留 64B buffer)", () => {
     // V2 P0 修复 D16: filter 子字段 description 是必要的文档化豁免
     // (handler 已实现 console.ts:160 level / network.ts:305-321 pattern+statusMin/Max),
     // 移除豁免会触发 V2 D16 真发现复发 (LLM 不知可用子字段)。
@@ -143,7 +149,7 @@ describe("I15: tools/list budget + count + internalized grep", () => {
     // (handler mouse.click 早已实现,含 frame→viewport 换算,此前只暴露坐标版 mouse.drag;
     // canvas/地图/无 ref 场景刚需,补齐"坐标 click"能力缺口)。schema 块 +~366B,payload
     // 实测 8378B,cap +400 至 8500 留 ~122B 余量。沿用"加能力调 cap 不压字符"惯例。
-    expect(toolsListPayload.length).toBeLessThanOrEqual(10200);
+    expect(toolsListPayload.length).toBeLessThanOrEqual(10300);
   });
 
   it("公开工具数量 = 23（22 + vortex_resize 视口模拟）", () => {
