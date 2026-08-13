@@ -86,3 +86,44 @@ export function summarizeTrace(traces: StepTrace[]): {
     notExecuted: count("not_executed"),
   };
 }
+
+export interface SequenceStepInput { action: string; target: string; value?: unknown }
+
+export interface SequenceOutcome {
+  ok: boolean;
+  error?: string;
+  result?: Record<string, unknown>;
+  fp?: FingerprintOut;
+}
+
+export interface SequenceReport {
+  summary: ReturnType<typeof summarizeTrace>;
+  steps: StepTrace[];
+}
+
+/** 循环本身不做 I/O,由 send 注入,这样测试驱动的是真代码而非复刻的骨架。 */
+export async function runSequence(
+  steps: SequenceStepInput[],
+  onFailure: OnFailure,
+  send: (step: SequenceStepInput, index: number) => Promise<SequenceOutcome>,
+): Promise<SequenceReport> {
+  const traces: StepTrace[] = steps.map((s, i) => ({
+    index: i, action: s.action, target: s.target, state: "not_executed" as const,
+  }));
+  for (let i = 0; i < steps.length; i++) {
+    let out: SequenceOutcome;
+    try {
+      out = await send(steps[i], i);
+    } catch (err) {
+      // send 抛错等同该步未执行,可安全重试;不能让一步的异常掀掉整次调用
+      out = { ok: false, error: err instanceof Error ? err.message : String(err) };
+    }
+    const effect = out.ok && out.result
+      ? verifyStepEffect(steps[i].action, steps[i].value, out.result)
+      : undefined;
+    const c = classifyStep({ ok: out.ok, error: out.error, fp: out.fp ?? {}, effect });
+    traces[i] = { ...traces[i], state: c.state, drift: c.drift, effect: c.effect, error: out.error };
+    if (!shouldContinue(c.state, onFailure)) break;
+  }
+  return { summary: summarizeTrace(traces), steps: traces };
+}
