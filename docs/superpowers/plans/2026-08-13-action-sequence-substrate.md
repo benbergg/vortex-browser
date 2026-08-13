@@ -1969,7 +1969,17 @@ for(const c of r.cases) if(/sequence-substrate|fingerprint-actions/.test(c.case)
   console.log(c.case, "callCount=", c.callCount);'
 ```
 
-把这两个数字写进 Step 5 的 commit message。判据 3 的成立依据是 case 内 `summary.total === 2` 而 `vortex_sequence` 只被调了一次——**若 `callCount` 明显高于预期（绿路径 1 次 observe + 2 次 sequence = 3），说明序列分支内部在偷偷多发请求，回头查 Task 8c 的 target 翻译是否重复调用。**
+把这两个数字写进 Step 6 的 commit message。
+
+`sequence-substrate` 预期 `callCount=6`：`run-case.ts:131-140` 每个 case 开头固定发 3 次
+（`navigate about:blank` → `navigate 目标` → `wait_for idle`），case 自身 3 次
+（1 observe + 2 sequence）。**这条对所有用例都成立**（`a-nav-click` 源码 4 次→基线 7，
+`dialog-handling` 11→14），比对时别忘了那 3 次前置。
+
+判据 3 的成立依据是 case 内 `summary.total === 2` 而 `vortex_sequence` 只被调一次：
+等价的单动作写法要 4 次 act，callCount 会是 8。省下 2 次往返。
+
+**若显著高于 6，才说明序列分支内部在多发请求，回头查 Task 8c 的 target 翻译是否重复调用。**
 
 - [ ] **Step 5: 刷新 baseline**
 
