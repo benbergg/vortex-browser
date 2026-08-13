@@ -74,6 +74,7 @@ export function extractSignals(
   if (action === "scroll") {
     const top = result.scrollTop, left = result.scrollLeft;
     if (typeof top !== "number" || typeof left !== "number") return undefined;
+    // 滚的不是目标本身(上溯到祖先/滚了 window)时位置与身份不同源,宁可不发
     if (result.scrolledSelf !== true) return undefined;
     return { kind: "scroll", scrollAfter: { top, left } };
   }

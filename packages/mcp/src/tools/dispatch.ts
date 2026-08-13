@@ -170,6 +170,8 @@ export function dispatchNewTool(
         const v = scrollValue as Record<string, unknown>;
         if ("container" in v || "position" in v || "x" in v || "y" in v) {
           delete next.target;
+          // 有 position 且调用方没指名 container 时保留目标,让 dom.scroll 拿它当
+          // 滚动容器;否则滚的是 window,而指纹仍按目标建身份 → 张冠李戴。
           const keepTarget = "position" in v && !("container" in v);
           if (!keepTarget) {
             delete next.selector;

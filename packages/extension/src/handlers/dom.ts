@@ -1414,6 +1414,7 @@ export function registerDomHandlers(
 
             // 确定滚动容器
             let scrollTarget: Element | Window = window;
+            // 指纹靠它判断身份与位置是否同源,滚了祖先就不能挂目标的身份
             let scrolledSelf = false;
             if (cont) {
               const containerEl = document.querySelector(cont);
