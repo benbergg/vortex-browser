@@ -21,6 +21,7 @@ import { timeoutLadder, splitDiagnosis } from "@vortex-browser/shared";
 import { liftWaitForRefToTarget } from "./lib/wait-for-ref.js";
 import { applyFingerprint, extractSignals, shouldRecover, type FingerprintOpt } from "./lib/fingerprint-apply.js";
 import { runSequence, type SequenceStepInput, type OnFailure } from "./lib/sequence-run.js";
+import { formatDispatchError } from "./lib/dispatch-error.js";
 import { lookupIdentity } from "./lib/observe-render.js";
 import { pickOtherBrowsers, type HealthBrowser } from "./lib/other-browsers.js";
 import { ensureBrowserRunning, installedBrowsers } from "./lib/launch-browser.js";
@@ -59,7 +60,7 @@ import {
   fullPageTruncationWarning,
 } from "./lib/image-utils.js";
 import { eventStore } from "./lib/event-store.js";
-import { VtxError, DEFAULT_ERROR_META, type VtxEventLevel, type VtxErrorCode } from "@vortex-browser/shared";
+import { VtxError, type VtxEventLevel } from "@vortex-browser/shared";
 
 type ContentItem =
   | { type: "text"; text: string }
@@ -749,7 +750,7 @@ export async function handleCallTool(
       const d = dispatchNewTool("vortex_act", actParams);
       if (!d) return { ok: false, error: "Error [INVALID_PARAMS]: unsupported action" };
       const resp = await sendRequest(d.action, d.params, PORT, tabId, DEFAULT_TIMEOUT);
-      if (resp.error) return { ok: false, error: `[${resp.error.code}]: ${resp.error.message}` };
+      if (resp.error) return { ok: false, error: formatDispatchError(resp.error) };
       return { ok: true, result: (resp.result ?? {}) as Record<string, unknown> };
     });
 
@@ -872,32 +873,11 @@ export async function handleCallTool(
 
     // Action 执行错误
     if (resp.error) {
-      const code = resp.error.code;
-      // 远端 RPC error 经 toJSON 已带 hint（remote vtxError 自动注入），但
-      // 早期 handler / page-side throw 的 sentinel 字符串没有 hint。这里
-      // 三层兜底：remote hint > DEFAULT_ERROR_META > STALE_SNAPSHOT 中文兜底。
-      // 同时对 Actionability TIMEOUT 携带 lastReason=NOT_ATTACHED 的场景额外
-      // 拼接 NOT_ATTACHED hint —— surface code 是 TIMEOUT 但根因是 ref detach
-      // （P0-3, 2026-05-21 用户报告）。
-      let hintText = "";
-      if (resp.error.hint) {
-        hintText = `\nHint: ${resp.error.hint}`;
-      } else if (code === "STALE_SNAPSHOT") {
-        hintText = "\nHint: DOM 已变更，ref 失效。请重新调用 vortex_observe 获取新 snapshot。";
-      } else {
-        const meta = DEFAULT_ERROR_META[code as VtxErrorCode];
-        if (meta?.hint) hintText = `\nHint: ${meta.hint}`;
-      }
-      const lastReason = (resp.error.context?.extras as { lastReason?: string } | undefined)?.lastReason;
-      if (code === "TIMEOUT" && lastReason === "NOT_ATTACHED") {
-        const notAttachedHint = DEFAULT_ERROR_META["NOT_ATTACHED" as VtxErrorCode]?.hint;
-        if (notAttachedHint) hintText += `\nHint (lastReason=NOT_ATTACHED): ${notAttachedHint}`;
-      }
       return {
         isError: true,
         content: [{
           type: "text" as const,
-          text: `Error [${code}]: ${resp.error.message}${hintText}`,
+          text: formatDispatchError(resp.error),
         }],
       };
     }
