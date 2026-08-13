@@ -9,6 +9,11 @@ import { ActionRouter } from "../src/lib/router.js";
 import { registerDomHandlers } from "../src/handlers/dom.js";
 import type { NmRequest } from "@vortex-browser/shared";
 
+// SCROLL 现在也走 healAwareGate，门在 jsdom 下无真实页面可探，放行即可。
+// 门是否真接上由 dom-scroll-heal.test.ts 单独锁，这里只测 scrolledSelf 语义。
+vi.mock("../src/action/wait-actionable-auto-force.js", () => ({
+  waitActionableAutoForce: vi.fn().mockResolvedValue(undefined),
+}));
 vi.mock("../src/adapter/page-side-loader.js", () => ({
   loadPageSideModule: vi.fn().mockResolvedValue(undefined),
 }));

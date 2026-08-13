@@ -1362,7 +1362,8 @@ export function registerDomHandlers(
 
     [DomActions.SCROLL]: async (args, tabId) => {
       const __t = resolveTargetOptional(args);
-      const selector = __t?.selector;
+      // let 声明：gate 自愈后重绑，下游统一用 selector。
+      let selector = __t?.selector;
       const container = args.container as string | undefined;
       const position = args.position as string | undefined;
       const x = args.x as number | undefined;
@@ -1376,6 +1377,19 @@ export function registerDomHandlers(
       const tid = await getActiveTabId(__t?.boundTabId ?? (args.tabId as number | undefined) ?? tabId);
       const frameId = __t?.boundFrameId ?? (args.frameId as number | undefined);
       if (frameId != null) await ensureFrameAttached(tid, frameId);
+      // SCROLL 原本不走 actionability 门（目标按定义可能在视口外）
+      // force=true 只借 NOT_ATTACHED 检测触发 descriptor 自愈，不引入严格门
+      if (selector) {
+        const __healScroll = await healAwareGate(
+          tid,
+          frameId,
+          selector,
+          { timeout: args.timeout as number | undefined },
+          /* force */ true,
+          __t?.descriptor,
+        );
+        selector = __healScroll.selector;
+      }
       const res = await nativePageQuery<{ result?: unknown; error?: string } | undefined>(
         tid,
         frameId,
