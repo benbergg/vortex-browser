@@ -1298,18 +1298,208 @@ fill_form 只返回 ok/error，回答不了「点了没有」。三态把「未�
 
 ---
 
-> **⚠ 动手前必须先定的设计缺口（2026-08-13 实测后新增）**
+> **已定的两个设计问题（2026-08-13 实测后）**
 >
-> 快照实测结论见 `docs/action-sequence-substrate-approach.md` §6.6：**MCP 视角下同时只有一个活快照**，
-> 任何一次 observe 都会让序列已持有的全部 `@ref` 立刻失效（`ref-parser.ts:200` 哈希闸，与 TTL 无关），
-> 且 descriptor 自愈救不了——哈希闸在 MCP 层先抛，请求到不了扩展侧。
+> **① drift 后剩余步骤怎么办 → 序列模式不启用 `autoRecover`。** 实测见
+> `docs/action-sequence-substrate-approach.md` §6.6：任何一次 observe 都会让序列已持有的全部 `@ref`
+> 立刻失效（`ref-parser.ts:200` 哈希闸，与 TTL 无关），descriptor 自愈救不了（哈希闸在 MCP 层先抛）。
+> 好在只要中途不 observe，序列跑多久都行（实测 75 秒后旧 ref 仍可用），60 秒 TTL 不必规避。
+> 本 Task 的实现本来就只用 `{mode:"record"}`，无需改动。
 >
-> 好消息：只要中途不 observe，序列跑多久都行（实测 75 秒后旧 ref 仍可用），60 秒 TTL 不必规避。
->
-> 坏消息：本 Task 若沿用 `autoRecover`（drift 后自动 re-observe），**re-observe 之后所有剩余步骤会集体
-> STALE_SNAPSHOT**。动手前必须在三条里选定一条并写进本 Task：①序列模式禁用 autoRecover；
-> ②drift 即中止整个序列；③序列自己存每步的 role+name，re-observe 后按 descriptor 重解析剩余步骤
-> （需新写重解析逻辑，不能复用现有自愈）。
+> **② 「每步自证」的判据 → 回读值与入参比对，见新增的 Task 7.5。** 原设计用 `record` 模式的指纹当自证，
+> 实测是死路：`record` 不产 `drift`，`classifyStep` 对每一步都判 `executed_unverified`，默认
+> `onFailure:"stop"` 下序列跑完第 1 步必然中断，且任何一步都不可能是 `executed_verified`。
+> 根因是把「重放校验」（要有 `expect` 指纹）和「单步是否生效」当成了同一件事。
+
+## Task 7.5: 单步自证判据 `verifyStepEffect`
+
+**Files:**
+- Modify: `packages/mcp/src/lib/sequence-run.ts`
+- Test: `packages/mcp/tests/sequence-run.test.ts`（既有文件，新增用例）
+
+**Interfaces:**
+- Consumes: Task 1/2 给 `fill`/`type` 加的回读值；Task 5 的 act 返回形状
+- Produces:
+  ```ts
+  export type StepEffect = "confirmed" | "unconfirmed" | "unknown";
+  export function verifyStepEffect(
+    action: string, requested: unknown, result: Record<string, unknown>,
+  ): StepEffect;
+  ```
+  并给 `classifyStep` 的入参加可选 `effect?: StepEffect`，返回值加 `effect?: StepEffect`。
+
+**三值而非布尔**：`unconfirmed`（查了，证据显示没生效）与 `unknown`（没有可用信号，无从判断）必须分开。合成布尔就等于把「不知道」说成「没生效」，是本项目最忌讳的那类失真。
+
+**select 的特殊处理（实测依据）**：`dom.select` 返回的 `value` 是 `el.value`，即 option 的 **value 属性**（`packages/extension/src/handlers/dom.ts:208`），而调用方通常传可见文本。请求 `"上海"`、回读 `"sh"` 是**正常**的。故 select 只在相等时判 `confirmed`，**不等时判 `unknown` 而非 `unconfirmed`**——我们分不清「选错了」和「标签与值本就不同」。
+
+**500 截断（实测依据）**：`fill`/`type` 的回读值在扩展侧封顶 500 字符并加省略号（Task 2 加的）。入参必须施加同样的截断才能比，否则长文本必然误判。
+
+- [ ] **Step 1: 写失败测试**
+
+在 `packages/mcp/tests/sequence-run.test.ts` 末尾追加：
+
+```ts
+describe("verifyStepEffect：单步是否生效", () => {
+  it("fill 回读值等于入参 → confirmed", () => {
+    expect(verifyStepEffect("fill", "a@b.com", { success: true, value: "a@b.com" }))
+      .toBe("confirmed");
+  });
+
+  it("fill 被受控组件改回 → unconfirmed（这是静默假成功的拦截点）", () => {
+    expect(verifyStepEffect("fill", "typed", { success: true, value: "REVERTED" }))
+      .toBe("unconfirmed");
+  });
+
+  it("fill 没有回读值 → unknown，不把「不知道」说成「没生效」", () => {
+    expect(verifyStepEffect("fill", "x", { success: true })).toBe("unknown");
+  });
+
+  it("超 500 的入参按同样规则截断后再比 → confirmed", () => {
+    const long = "字".repeat(1200);
+    const back = "字".repeat(500) + "…";
+    expect(verifyStepEffect("type", long, { success: true, value: back })).toBe("confirmed");
+  });
+
+  it("select 回读值与入参不等 → unknown（option value 与可见文本本就可能不同）", () => {
+    expect(verifyStepEffect("select", "上海", { success: true, value: "sh" })).toBe("unknown");
+  });
+
+  it("scroll moved:false → unconfirmed", () => {
+    expect(verifyStepEffect("scroll", undefined, { success: true, moved: false }))
+      .toBe("unconfirmed");
+  });
+
+  it("click 有任一副作用信号 → confirmed", () => {
+    expect(verifyStepEffect("click", undefined, {
+      success: true,
+      effect: { domMutations: 3, networkRequests: 0, urlChanged: false,
+                focusChanged: false, ariaChanged: false, userFeedback: "none" },
+    })).toBe("confirmed");
+  });
+
+  it("click 未开 observeEffect → unknown", () => {
+    expect(verifyStepEffect("click", undefined, { success: true })).toBe("unknown");
+  });
+});
+
+describe("classifyStep 接入自证", () => {
+  it("无 drift 但自证 confirmed → executed_verified", () => {
+    expect(classifyStep({ ok: true, fp: {}, effect: "confirmed" }).state)
+      .toBe("executed_verified");
+  });
+
+  it("无 drift 且自证 unconfirmed → executed_unverified，effect 原样带出", () => {
+    const r = classifyStep({ ok: true, fp: {}, effect: "unconfirmed" });
+    expect(r.state).toBe("executed_unverified");
+    expect(r.effect).toBe("unconfirmed");
+  });
+});
+```
+
+同时把文件顶部的 import 补上 `verifyStepEffect`。
+
+- [ ] **Step 2: 跑测试确认失败**
+
+```bash
+pnpm --filter @vortex-browser/mcp exec vitest run tests/sequence-run.test.ts --maxWorkers=2 --minWorkers=1
+```
+
+Expected: FAIL，`verifyStepEffect is not a function`
+
+- [ ] **Step 3: 实现**
+
+在 `packages/mcp/src/lib/sequence-run.ts` 中，`classifyStep` 之前插入：
+
+```ts
+import type { ClickEffectLike } from "@vortex-browser/shared";
+
+/** confirmed=有证据生效;unconfirmed=有证据未生效;unknown=无可用信号。三值不可合成布尔。 */
+export type StepEffect = "confirmed" | "unconfirmed" | "unknown";
+
+const READBACK_CAP = 500;
+
+/** 回读值在扩展侧封顶 500 加省略号,入参不施加同样截断则长文本必然误判。 */
+function capped(v: string): string {
+  return v.length > READBACK_CAP ? v.slice(0, READBACK_CAP) + "…" : v;
+}
+
+export function verifyStepEffect(
+  action: string,
+  requested: unknown,
+  result: Record<string, unknown>,
+): StepEffect {
+  if (action === "fill" || action === "type" || action === "select") {
+    const back = result.value;
+    if (typeof back !== "string") return "unknown";
+    const want = typeof requested === "string" ? requested : JSON.stringify(requested);
+    if (typeof want !== "string") return "unknown";
+    if (capped(want) === back) return "confirmed";
+    // select 回读的是 option value,与传入的可见文本本就可能不同,分不清选错还是标签≠值
+    return action === "select" ? "unknown" : "unconfirmed";
+  }
+  if (action === "scroll") {
+    if (typeof result.moved !== "boolean") return "unknown";
+    return result.moved ? "confirmed" : "unconfirmed";
+  }
+  if (action === "click" || action === "hover") {
+    const e = result.effect as ClickEffectLike | undefined;
+    if (!e) return "unknown";
+    const any =
+      e.domMutations > 0 || e.networkRequests > 0 || e.urlChanged ||
+      e.focusChanged || e.ariaChanged || e.userFeedback !== "none";
+    return any ? "confirmed" : "unconfirmed";
+  }
+  return "unknown";
+}
+```
+
+并把 `classifyStep` 整体替换为：
+
+```ts
+export function classifyStep(outcome: {
+  ok: boolean; error?: string; fp: FingerprintOut; effect?: StepEffect;
+}): { state: StepState; drift?: { classes: string[] } | null; effect?: StepEffect } {
+  if (!outcome.ok) return { state: "failed" };
+  const drift = outcome.fp.drift;
+  // 重放路径:有 expect 指纹时以 drift 为准
+  if (drift === null) return { state: "executed_verified", drift: null, effect: outcome.effect };
+  if (drift) return { state: "executed_unverified", drift, effect: outcome.effect };
+  // 新建序列没有 expect,只能靠单步自证
+  if (outcome.effect === "confirmed") return { state: "executed_verified", effect: "confirmed" };
+  return { state: "executed_unverified", effect: outcome.effect ?? "unknown" };
+}
+```
+
+`StepTrace` 加一个可选字段：
+
+```ts
+  effect?: StepEffect;
+```
+
+- [ ] **Step 4: 跑测试确认通过**
+
+```bash
+pnpm --filter @vortex-browser/mcp exec vitest run tests/sequence-run.test.ts --maxWorkers=2 --minWorkers=1
+```
+
+Expected: PASS（17 个用例：原 7 条 + 新增 10 条）。**原 7 条必须原样通过**——`classifyStep` 不传 `effect` 时行为不变是向后兼容的硬要求，若它们红了说明改坏了，停下汇报，不要改那 7 条断言。
+
+- [ ] **Step 5: 提交**
+
+```bash
+git add packages/mcp/src/lib/sequence-run.ts packages/mcp/tests/sequence-run.test.ts
+git commit -m "feat: 单步自证判据，回读值与入参比对
+
+record 模式不产 drift，拿它当自证会让每一步都判 unverified，
+默认 stop 策略下序列跑完第一步就中断。重放校验要有 expect 指纹，
+新建序列没有，得换判据。
+
+三值不合成布尔：unconfirmed 是有证据没生效，unknown 是没有信号，
+把后者说成前者就是失真。select 不等时判 unknown——回读的是
+option value，与传入的可见文本本就可能不同。"
+```
+
+---
 
 ## Task 8: `vortex_sequence` 工具与编排
 
@@ -1473,6 +1663,7 @@ Expected: 此时应 PASS（骨架只依赖 Task 7 的纯函数）。**如果 FAI
       let ok = false;
       let error: string | undefined;
       let fp: FingerprintOut = {};
+      let effect: StepEffect | undefined;
 
       const stepParams: Record<string, unknown> = {};
       if (step.value !== undefined) stepParams.value = step.value;
@@ -1502,14 +1693,16 @@ Expected: 此时应 PASS（骨架只依赖 Task 7 的纯函数）。**如果 FAI
           const frameId = (stepParams.frameId as number | undefined) ?? 0;
           const identity = snapId != null && idx != null ? lookupIdentity(snapId, frameId, idx) : null;
           fp = applyFingerprint({ mode: "record" }, step.action, identity, extractSignals(step.action, r));
+          // 新建序列没有 expect 指纹,verified 只能靠单步自证(Task 7.5)
+          effect = verifyStepEffect(step.action, step.value, r);
         }
       } catch (err) {
         // 解析失败与执行失败都落这里,统一归为 failed(未执行,可安全重试)
         error = formatError(err);
       }
 
-      const c = classifyStep({ ok, error, fp });
-      traces[i] = { ...traces[i], state: c.state, drift: c.drift, error };
+      const c = classifyStep({ ok, error, fp, effect });
+      traces[i] = { ...traces[i], state: c.state, drift: c.drift, effect: c.effect, error };
       if (!shouldContinue(c.state, onFailure)) break;
     }
 
@@ -1522,7 +1715,9 @@ Expected: 此时应 PASS（骨架只依赖 Task 7 的纯函数）。**如果 FAI
 
 **`wireActionFor(step.action)` 需要你先建**：把逻辑动作名（`click`/`fill`/`type`/`select`/`scroll`/`hover`）映射到下发给 extension 的 wire action。`vortex_fill_form` 分支里已经有一段等价映射（`server.ts:641` 起的注释「复用 vortex_fill dispatch 逻辑」那段），**把它抽成模块级函数再两处共用，不要另写一份**——两份映射必然漂移。抽取时保持 fill_form 现有行为不变，其单测应全绿。
 
-import 补：`classifyStep`、`shouldContinue`、`summarizeTrace`、`type StepTrace`、`type OnFailure`（来自 `./lib/sequence-run.js`），以及 `type FingerprintOut`。`formatError`、`activeSnapshotHash`、`activeSnapshotTabId` 在 `server.ts` 中已存在（fill_form 分支正在用）。
+**click 步骤必须强开 `observeEffect`**：`verifyStepEffect` 对 click/hover 靠 `result.effect` 判定，不开就永远是 `unknown`、永远拿不到 `executed_verified`。在 `stepParams` 里对 click/hover 补 `observeEffect: true`，与 `server.ts:788` 指纹守卫的做法一致。
+
+import 补：`classifyStep`、`shouldContinue`、`summarizeTrace`、`verifyStepEffect`、`type StepTrace`、`type OnFailure`、`type StepEffect`（来自 `./lib/sequence-run.js`），以及 `type FingerprintOut`。`formatError`、`activeSnapshotHash`、`activeSnapshotTabId` 在 `server.ts` 中已存在（fill_form 分支正在用）。
 
 - [ ] **Step 7: 跑 MCP 全量单测**
 
@@ -1671,7 +1866,7 @@ git commit -m "test: 序列底座的绿路径与红路径 bench 覆盖
    React 18 把 `input` 归为 discrete event 做**同步**重渲染，回滚在 `dispatchEvent` 返回前就完成了，因此 fill 现有读取时点拿到的已是最终值。**不需要延后一帧**（那会给每次 fill 增加一帧延迟）。
 
    **限制**：该 input 恰好 `readOnly: true`（antd Select 非搜索态的内层 input），是较弱的样本；且本结论只覆盖 React 18 的同步回滚路径。若某框架**异步**回滚（如 Vue `nextTick` 或 React `startTransition`），同步读到的会是回滚前的值。这不构成阻塞——同步读回的值本就是「DOM 在那一刻的事实」，符合诚实表征；但 Task 6 的 bench fixture 必须保留受控回滚用例作为回归锁。
-2. **快照 5 分钟 TTL / 20 条容量是否够序列用。** `packages/mcp/src/lib/observe-render.ts:160-229`。序列步数多、单步慢时可能跨过 TTL，`lookupIdentity` 返回 `null` → 指纹整段为空。先按典型序列估算，超了就在 Task 8 里显式处理（每步 identity 拿不到时标 `executed_unverified` 而不是静默）。
+2. ~~**快照 5 分钟 TTL / 20 条容量是否够序列用。**~~ **已实测，问法有误**，见 `docs/action-sequence-substrate-approach.md` §6.6。真正的约束不是时间而是「同时只有一个活快照」：中途任何一次 observe 会让已持有的全部 ref 立刻失效；只要不 observe，序列跑多久都行（实测 75 秒后旧 ref 仍可用）。结论已落进 Task 8 前的决议①。
 
 ## 明确不做（YAGNI）
 
