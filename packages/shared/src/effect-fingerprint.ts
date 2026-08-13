@@ -47,6 +47,23 @@ export function normalizeClickFingerprint(
   };
 }
 
+/** fill/type/select 有确定量可回读 → 只比值,不用副作用类别(那是 click 才需要的替代品)。 */
+export function normalizeValueFingerprint(
+  action: "fill" | "type" | "select",
+  targetIdentity: string,
+  valueAfter: string,
+): EffectFingerprint {
+  return { action, targetIdentity, urlChanged: false, valueAfter };
+}
+
+/** scroll 的确定量是位置,比对走 compareFingerprint 里已有的 ±SCROLL_TOL 容差。 */
+export function normalizeScrollFingerprint(
+  targetIdentity: string,
+  scrollAfter: { top: number; left: number },
+): EffectFingerprint {
+  return { action: "scroll", targetIdentity, urlChanged: false, scrollAfter };
+}
+
 export type DriftClass =
   | "target" | "url" | "value" | "scroll"
   | "dom" | "network" | "focus" | "aria" | "feedback";
