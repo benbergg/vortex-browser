@@ -1723,7 +1723,7 @@ send 抛错按该步 failed 处理：一步的异常不该掀掉整次调用，
 pnpm --filter @vortex-browser/mcp exec vitest run tests/invariants/I15.tools-list-budget.test.ts --maxWorkers=2 --minWorkers=1
 ```
 
-Expected: FAIL 两条——字节超 10400、工具数 24 ≠ 23。**记下报错里的实测字节数**，下一步要用。
+Expected: FAIL 三条——字节超 10400、工具数 24 ≠ 23、工具名清单少一项（`I15.tools-list-budget.test.ts:162` 的 `toEqual` 也会红）。**记下报错里的实测字节数**，下一步要用。
 
 - [ ] **Step 3: 按惯例登记**
 
@@ -1737,6 +1737,8 @@ Expected: FAIL 两条——字节超 10400、工具数 24 ≠ 23。**记下报�
 ```
 
 同步改三处数字：`toBeLessThanOrEqual(10400)` 与测试名里的数字、公开工具数 `23` → `24`（含测试名），以及工具名清单里加 `vortex_sequence`。
+
+该清单断言的是 `defs.map(d => d.name).sort()`，**必须按字典序插在 `"vortex_screenshot"` 与 `"vortex_storage"` 之间**，追加到数组末尾会红。
 
 - [ ] **Step 4: 跑 MCP 全量单测**
 
