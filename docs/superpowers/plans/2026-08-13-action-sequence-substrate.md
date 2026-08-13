@@ -210,68 +210,181 @@ success:true 不说明填进去的是什么。值本就在 NO_EFFECT 判据处�
 
 ---
 
-## Task 2: `type` 成功返回补回读值
+## Task 2: `type` 成功返回补回读值，并给回读值加长度上限
 
 **Files:**
-- Modify: `packages/extension/src/handlers/dom.ts:793-816`
+- Modify: `packages/extension/src/handlers/dom.ts:793-816`（type 回读）
+- Modify: `packages/extension/src/handlers/dom.ts:1109`（给 Task 1 已加的 fill 回读值补上限）
 - Test: `packages/extension/tests/dom-type-value-readback.test.ts`（新建）
+- Test: `packages/extension/tests/dom-fill-value-readback.test.ts`（Task 1 建的，追加一个截断用例）
 
 **Interfaces:**
-- Consumes: 无
-- Produces: `type` 动作成功结果新增字段 `value: string`（contentEditable 的 `textContent` 实读值）
+- Consumes: Task 1 的 `fill` 回读值字段
+- Produces: `type` 动作成功结果新增字段 `value: string`；`fill` 与 `type` 的回读值统一封顶 **500 字符**，超出截断并追加 `…`
 
-**背景**：`type` 走 CDP 路径时返回 `{ success: true, typed: text.length, path: "cdp-insertText" }`——`typed` 是**入参字符数**，不是回读结果。而 `:800-802` 的 verify 探针已经读到了 `textContent`（变量 `now`），成功时却丢弃返回 `{}`。
+**背景（两件事）**：
+
+1. `type` 走 CDP 路径时返回 `{ success: true, typed: text.length, path: "cdp-insertText" }`——`typed` 是**入参字符数**，不是回读结果。而 `:800-802` 的 verify 探针已经读到了 `textContent`（变量 `now`），成功时却丢弃返回 `{}`。
+2. **回读值必须封顶**（Task 1 评审提出）。`fill` 一个大 textarea 会把整段内容回传给模型；`type` 读的是 contentEditable 的 `textContent`，富文本编辑器可能是**整篇文档**。仓内既有口径：`dom.ts` 所有 `innerText` 回读都截断（200/500），`schema-readback.ts:191` 有显式 `SCHEMA_MAX_VALUE_CHARS = 500`。取 **500** 与后者对齐。
+   `select` 现有的 `value: el.value` 不在本次范围（值天然短）。
+
+> **截断不破坏指纹比对**：record 与 verify 两侧走同一段截断逻辑，比的是同一口径。
+> 代价是超长值只比前 500 字符、末尾差异会漏判——这个洞 `causedDomMutation` 之类的信号本来也覆盖不到，不是新增风险。
+>
+> **注入约束**：截断发生在 `executeScript` 注入的内联函数里，**模块作用域已丢失**，不能引用模块级常量。
+> 按 `dom.ts` 既有写法把 `500` 作为字面量内联（`:176`、`:212` 等处同样是内联字面量），并在旁边写明为什么是 500。
 
 - [ ] **Step 1: 写失败测试**
 
-新建 `packages/extension/tests/dom-type-value-readback.test.ts`：
+新建 `packages/extension/tests/dom-type-value-readback.test.ts`。**走 `router.dispatch` 真跑生产代码**，不复刻探针函数体（复刻等于测自己的副本，是假覆盖）。
+
+两个让 jsdom 能跑通 CDP 分支的关键（都已实测确认必需）：
+
+- **`jsdom` 的 `el.isContentEditable` 恒为 `undefined`**，而 `dom.ts:772` 靠它决定走 CDP 路径。必须
+  `Object.defineProperty(el, "isContentEditable", { value: true })` 才进得去这条分支。
+- **mock 的 `sendCommand` 必须真的改 DOM**，否则 `Input.insertText` 什么也没做，verify 探针读到
+  `now === before` 会直接报 NO_EFFECT。让它模拟真实插入行为。
 
 ```ts
 /**
  * Author: qingwa
- * Description: TYPE 回读值契约。typed 返回的是入参字符数，不是实际写入结果；
- *   编辑器规范化或部分拒收时会与实读值分叉。verify 探针已读到 textContent，
- *   本测试锁住它必须随成功返回一起交给调用方。
+ * Description: TYPE 回读值契约与长度上限。typed 返回的是入参字符数不是写入结果，
+ *   编辑器规范化或部分拒收时两者分叉；且 contentEditable 的 textContent 可能是
+ *   整篇文档，必须封顶。走 router.dispatch 真跑生产代码，不复刻探针函数体。
  */
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { JSDOM } from "jsdom";
+import { DomActions } from "@vortex-browser/shared";
+import { ActionRouter } from "../src/lib/router.js";
+import { registerDomHandlers } from "../src/handlers/dom.js";
+import type { NmRequest } from "@vortex-browser/shared";
 
-// verify 探针的内联函数体（与 dom.ts:800-812 保持一致），用真实入参断言返回形状
-function verifyProbe(now: string, before: string, txt: string): Record<string, unknown> {
-  if (now === before && now !== txt) {
-    return { errorCode: "NO_EFFECT", error: `rejected "${txt}"`, extras: { attempted: txt } };
-  }
-  return { value: now };
+vi.mock("../src/action/wait-actionable-auto-force.js", () => ({
+  waitActionableAutoForce: vi.fn().mockResolvedValue(undefined),
+}));
+vi.mock("../src/adapter/page-side-loader.js", () => ({
+  loadPageSideModule: vi.fn().mockResolvedValue(undefined),
+}));
+vi.mock("../src/lib/tab-utils.js", () => ({
+  getActiveTabId: vi.fn().mockResolvedValue(1),
+  buildExecuteTarget: vi.fn().mockReturnValue({ tabId: 1 }),
+  ensureFrameAttached: vi.fn().mockResolvedValue(undefined),
+}));
+vi.mock("../src/adapter/native.js", () => ({
+  pageQuery: async (
+    _tid: number,
+    _frameId: number | undefined,
+    fn: (...a: unknown[]) => unknown,
+    args: unknown[],
+  ) => {
+    const stripped = new Function(`return (${String(fn)})`)() as (...a: unknown[]) => unknown;
+    return await Promise.resolve(stripped(...args));
+  },
+  mapPageError: (res: { error?: string }) => {
+    throw new Error(res.error ?? "page error");
+  },
+}));
+
+function mkReq(args: Record<string, unknown>): NmRequest {
+  return { type: "tool_request", tool: DomActions.TYPE, args, requestId: "r-type-value" } as NmRequest;
 }
 
 describe("TYPE 回读值", () => {
-  it("成功时返回实读 textContent 而非入参", () => {
-    expect(verifyProbe("hello", "", "hello")).toEqual({ value: "hello" });
+  let router: ActionRouter;
+  let dom: JSDOM;
+  let editor: HTMLElement;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    dom = new JSDOM(`<!DOCTYPE html><html><body><div id="ed"></div></body></html>`, {
+      pretendToBeVisual: true,
+    });
+    const win = dom.window as unknown as Record<string, unknown>;
+    globalThis.window = dom.window as unknown as Window & typeof globalThis;
+    globalThis.document = dom.window.document as unknown as Document;
+    for (const g of ["HTMLElement", "HTMLInputElement", "HTMLTextAreaElement", "HTMLSelectElement", "Event", "InputEvent"]) {
+      (globalThis as Record<string, unknown>)[g] = win[g];
+    }
+    editor = dom.window.document.getElementById("ed") as HTMLElement;
+    // jsdom 不实现 isContentEditable（实测恒 undefined），不定义就走不到 CDP 分支
+    Object.defineProperty(editor, "isContentEditable", { value: true, configurable: true });
+    editor.getBoundingClientRect = () =>
+      ({ x: 10, y: 10, width: 200, height: 40, top: 10, bottom: 50, left: 10, right: 210 }) as DOMRect;
+
+    win.__vortexDomResolve = {
+      queryAllDeep: (sel: string) => Array.from(dom.window.document.querySelectorAll(sel)),
+      isEnabled: () => true,
+    };
+    win.__vortexFillReject = { checkRejectPattern: () => ({ rejected: false }) };
+    vi.stubGlobal("chrome", {
+      scripting: { executeScript: vi.fn().mockResolvedValue([{ result: [] }]) },
+    });
+
+    router = new ActionRouter();
+    const debuggerMgr = {
+      attach: vi.fn().mockResolvedValue(undefined),
+      // 模拟真实 insertText：不动 DOM 的话 verify 探针会读到未变化并报 NO_EFFECT
+      sendCommand: vi.fn(async (_tid: number, method: string, params?: { text?: string }) => {
+        if (method === "Input.insertText" && params?.text != null) {
+          editor.textContent = (editor.textContent ?? "") + params.text;
+        }
+      }),
+    };
+    registerDomHandlers(router, debuggerMgr as never);
   });
 
-  it("编辑器规范化后返回实读值，与入参不同", () => {
-    // 编辑器把连续空格折叠：入参 "a  b"，实读 "a b"
-    expect(verifyProbe("a b", "", "a  b")).toEqual({ value: "a b" });
+  it("成功返回带实读 value，而非入参字符数", async () => {
+    const resp = await router.dispatch(mkReq({ selector: "#ed", text: "hello" }));
+    expect(resp.error).toBeUndefined();
+    expect(resp.result).toMatchObject({ success: true, typed: 5, value: "hello" });
   });
 
-  it("整体拒收仍报 NO_EFFECT，不返回 value", () => {
-    const r = verifyProbe("", "", "hello");
-    expect(r.errorCode).toBe("NO_EFFECT");
-    expect(r.value).toBeUndefined();
+  it("编辑器改写内容时，返回的是实读值而非入参回声", async () => {
+    // 编辑器把插入内容改掉（如自动补全/格式化）：只有真回读才拿得到改写后的值
+    editor.textContent = "";
+    const resp = await router.dispatch(mkReq({ selector: "#ed", text: "raw" }));
+    expect(resp.error).toBeUndefined();
+    // 实读值来自 DOM，等于 mock 插入的结果
+    expect((resp.result as { value: string }).value).toBe(editor.textContent);
+  });
+
+  it("超长内容截断到 500 字符并加省略号", async () => {
+    const resp = await router.dispatch(mkReq({ selector: "#ed", text: "字".repeat(1200) }));
+    const v = (resp.result as { value: string }).value;
+    expect(v.length).toBe(501);              // 500 + "…"
+    expect(v.endsWith("…")).toBe(true);
+    expect(editor.textContent!.length).toBe(1200);  // DOM 里仍是完整内容，只有回传被截断
+  });
+
+  it("恰好 500 字符不截断、不加省略号", async () => {
+    const exact = "x".repeat(500);
+    const resp = await router.dispatch(mkReq({ selector: "#ed", text: exact }));
+    expect((resp.result as { value: string }).value).toBe(exact);
   });
 });
+```
+
+同时在 Task 1 建的 `packages/extension/tests/dom-fill-value-readback.test.ts` 末尾（`describe` 内）追加：
+
+```ts
+  it("超长填入值回传时截断到 500 字符", async () => {
+    const resp = await router.dispatch(mkReq({ selector: "#inp", value: "a".repeat(900) }));
+    const v = (resp.result as { value: string }).value;
+    expect(v.length).toBe(501);
+    expect(v.endsWith("…")).toBe(true);
+  });
 ```
 
 - [ ] **Step 2: 跑测试确认失败**
 
 ```bash
-pnpm --filter @vortex-browser/extension exec vitest run tests/dom-type-value-readback.test.ts --maxWorkers=2 --minWorkers=1
+pnpm --filter @vortex-browser/extension exec vitest run tests/dom-type-value-readback.test.ts tests/dom-fill-value-readback.test.ts --maxWorkers=2 --minWorkers=1
 ```
 
-Expected: FAIL，第一个用例 `expected {} to deeply equal { value: 'hello' }`（此时测试里的 `verifyProbe` 还是照抄旧实现返回 `{}`）
+Expected: FAIL。type 的四个用例都因返回对象没有 `value` 而失败；fill 的截断用例因当前不截断而失败（`expected 900 to be 501`）。
 
-> 注意：本测试刻意复刻探针函数体而非导入——该函数是 `executeScript` 注入的内联闭包，无法 import。
-> 因此 Step 3 改完生产代码后，**必须同步把测试里的 `verifyProbe` 与 `dom.ts` 的探针体对齐**，
-> 两处逻辑相同才是有效覆盖。这条同步义务写在测试文件头注释里。
+> 如果 type 的用例报的是 `NO_EFFECT` 而不是缺 `value`，说明 `sendCommand` 的模拟插入没生效——
+> 先修 mock，**不要**改断言。
 
 - [ ] **Step 3: 实现**
 
@@ -286,7 +399,8 @@ Expected: FAIL，第一个用例 `expected {} to deeply equal { value: 'hello' }
 改为
 
 ```ts
-              return { value: now };
+              // 500 与 schema 回读同口径:contentEditable 可能是整篇文档,不能原样回传
+              return { value: now.length > 500 ? now.slice(0, 500) + "…" : now };
 ```
 
 其二，把 `:816` 的
@@ -321,17 +435,33 @@ Expected: FAIL，第一个用例 `expected {} to deeply equal { value: 'hello' }
 
 同时把该 `nativePageQuery` 的泛型参数补上 `value?: string` 字段。
 
-- [ ] **Step 4: 把测试里的 `verifyProbe` 与生产探针对齐**
+- [ ] **Step 4: 给 fill 的回读值补同样的上限**
 
-把测试文件里 `verifyProbe` 的 `return {}` 改成 `return { value: now }`。
+`packages/extension/src/handlers/dom.ts:1109`（Task 1 加的那行），把
+
+```ts
+            return { result: { success: true, focused, value: el.value } };
+```
+
+改为
+
+```ts
+            // 与 type 同口径封顶 500:大 textarea 会把整段内容回传给模型
+            return {
+              result: {
+                success: true, focused,
+                value: el.value.length > 500 ? el.value.slice(0, 500) + "…" : el.value,
+              },
+            };
+```
 
 - [ ] **Step 5: 跑测试确认通过**
 
 ```bash
-pnpm --filter @vortex-browser/extension exec vitest run tests/dom-type-value-readback.test.ts --maxWorkers=2 --minWorkers=1
+pnpm --filter @vortex-browser/extension exec vitest run tests/dom-type-value-readback.test.ts tests/dom-fill-value-readback.test.ts --maxWorkers=2 --minWorkers=1
 ```
 
-Expected: PASS（3 个用例）
+Expected: PASS（type 4 个 + fill 3 个 = 7 个用例）
 
 - [ ] **Step 6: 跑扩展全量单测**
 
