@@ -1414,6 +1414,7 @@ export function registerDomHandlers(
 
             // 确定滚动容器
             let scrollTarget: Element | Window = window;
+            let scrolledSelf = false;
             if (cont) {
               const containerEl = document.querySelector(cont);
               if (!containerEl) return { error: `Container not found: ${cont}` };
@@ -1429,6 +1430,7 @@ export function registerDomHandlers(
               const ancestor = findScrollableAncestor(el);
               if (ancestor) {
                 scrollTarget = ancestor;
+                scrolledSelf = ancestor === el;
               }
               // fall through to position branch（scrollTarget 已切换）
             } else if (sel) {
@@ -1452,7 +1454,7 @@ export function registerDomHandlers(
               };
             }
 
-            const doScroll = (opts: ScrollToOptions): { success: true; moved: boolean; scrollTop: number; scrollLeft: number } => {
+            const doScroll = (opts: ScrollToOptions): { success: true; moved: boolean; scrollTop: number; scrollLeft: number; scrolledSelf: boolean } => {
               const before = readPos(scrollTarget);
               const scrollOpts: ScrollToOptions = { ...opts, behavior: "auto" };
               if (scrollTarget instanceof Window) {
@@ -1470,6 +1472,7 @@ export function registerDomHandlers(
                   Math.abs(after.left - before.left) > 1,
                 scrollTop: after.top,
                 scrollLeft: after.left,
+                scrolledSelf,
               };
             };
 
