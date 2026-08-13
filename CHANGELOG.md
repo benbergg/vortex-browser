@@ -8,6 +8,10 @@
 
 ### Added
 
+- **`vortex_query` 新增 `mode=schema`:读页面作者声明的结构化数据**(新增 `packages/extension/src/page-side/schema-readback.ts`;`packages/extension/src/handlers/query.ts`、`packages/extension/src/lib/empty-diagnosis.ts`、`packages/mcp/src/tools/schemas-public.ts`)。一次调用合并三源 —— JSON-LD(`application/ld+json`,展开 `@graph`,`@type` 取数组首项,提 `@id`)、WHATWG Microdata(`itemscope`/`itemtype`/`itemprop`/`itemid`)、OGP(`og:` meta)。`pattern` 即类型过滤(`"*"` 取全部,匹配容忍 `schema.org/Product` 这类带前缀的 `@type`),`attr=json` 出结构化载荷、缺省出摘要。预算封顶 20 个实体、单值 500 字符。每个实体带 `untrusted: true`,摘要末尾恒附「可能与页面可见内容不一致」—— 这是页面作者**声明**的数据,不是渲染结果,商品页标价与 `offers.price` 不一致是常态。**Why**:此前拿一条商品价格要么 `vortex_extract` 抓文本再让模型解析(贵且脆),要么 `vortex_evaluate` 手写 JS;而这类数据本就以机器可读形式躺在页面里。**live 实测**:bilibili 出 3 个 JSON-LD 实体、GitHub 出 Microdata、京东 0(自身无声明)—— 说明覆盖面取决于站点是否做 SEO,**内部管理后台 SPA 恒为空**,这是能力边界不是缺陷,故空结果必须自陈(见下)。
+  - **空结果自陈复用 `withDiagnosis`**:返回空时报出扫到的事实(JSON-LD script 数、解析失败段数、`itemscope` 数、`og:` meta 数、iframe 数),把「页面没有声明」与「被 `pattern` 过滤光了」分开说。自陈**只按真实计数说话**:开发期曾无条件写「有 item 因缺 `itemtype` 被跳过」,而 GitHub 上那两个 item 明明都有 `itemtype` 且被成功返回 —— 编造跳过原因比不自陈更坏,现由真实 `untypedItems` 计数驱动,bench 有反向断言锁死。
+  - **OGP 双属性回退是 live 逼出来的**:规范要求 `<meta property="og:…">`,但 MDN 等站实际写 `name="og:…"`。只认 `property` 会在这些站上静默返回空,故两个属性都收。
+  - page-side 遵循既有双源约定:真源 `schema-readback.ts` 可 import、可 jsdom 单测,`query.ts` 内自包含内联副本供 `executeScript({func})` 注入(注入丢模块作用域),parity 由源码对照测试守。tools/list 10236 B(I15 cap 10200 → 10300)。
 - **`vortex_resize`:视口模拟**(`packages/extension/src/handlers/viewport.ts`、`packages/mcp/src/tools/schemas-public.ts`)。走 CDP `Emulation.setDeviceMetricsOverride`(= DevTools 设备模式),**不动用户的真实窗口** —— vortex 接管的是用户日常 Chrome,`chrome.windows.update` 会把用户正在用的窗口拽走。参数 `width`/`height` 必填,`deviceScaleFactor`(0=跟随系统)、`mobile`、`reset` 可选。**Why**:2026-08-11 对 4269 次真实调用的日志分析显示,vortex 与 playwright 同时可用时 playwright 占 24.1%,而"vortex 完全无对应能力"的调用只有 32 次 —— 其中 21 次是 `browser_resize`。这是唯一一条实证的硬能力缺口:响应式验收一旦需要改视口就必须留在 playwright,用过 resize 的 6 个会话贡献了全部 playwright 调用的 86.4%。
 
 ### Fixed
@@ -15,6 +19,11 @@
 - **`deviceScaleFactor=2` 的截图一直失败**(`packages/extension/src/handlers/capture.ts:54`)。高 DPR 截图走 `enableDomain(tabId, "Emulation")`,而 CDP 的 Emulation 域**没有 `enable` 命令**,真机报 `{"code":-32601,"message":"'Emulation.enable' wasn't found"}`。改为 `debuggerMgr.attach()`(该方法本就成功发着 `Emulation.setFocusEmulationEnabled`,反证 Emulation 命令无需 enable)。**Why 一直没被发现**:单测里的假 DebuggerManager 把任意 `${domain}.enable` 一律 resolve,危险路径在 mock 下变安全 —— 假 fake 现已补 `attach`,并新增按真机行为 reject 未知命令的测试。
 - **截图会抹掉常驻视口**(同上)。高 DPR 截图收尾无条件 `clearDeviceMetricsOverride`,把 `vortex_resize` 设的视口一并清掉。新增纯函数 `deviceMetricsPlan` 作为两者唯一合并判据:有常驻视口时收尾改为「恢复」而非「清除」,且 DPR 以截图为准、视口保住。
 - **视口被模拟时截图返回真实窗口尺寸**(同上)。`chrome.tabs.captureVisibleTab` 快路径截的是**真实窗口**可见区,与模拟视口无关 —— 视口设成 375px 时会静默返回一张 1432px 宽的图,无任何报错。`canUseNativeCapture` 新增 override 守卫,有模拟视口时回退 CDP。
+
+### Tests
+
+- **`bench external-baseline` 子命令:与 chrome-devtools-mcp 的外部对照**(`packages/vortex-bench/src/runner/external-baseline.ts`、`src/index.ts`、`tests/external-baseline.test.ts`;报告 `reports/external-baseline-2026-08/README.md`)。同一组页面各观察一次,比输出字节。**Why**:vortex 长期只用自家 bench 自证,历史上多次「自闭环判断 → 假绿」(MUI 报 8 缺陷实为 0、班牛报 15 实为 1),需要一个外部锚点。首轮 vortex **10481 B** vs chrome-devtools-mcp **24922 B**(约 42%)。**明确标注哪一栏不能用**:耗时无效 —— runner 每样本新建 MCP 连接,对方因此每次冷启一个 Chrome(本地静态页 21.4s 几乎全是启动成本),而 vortex 附着到已在跑的浏览器;字节也只能读作上下文成本量级,两边元素筛选口径不同、不是同一份内容的两种编码。`summarize()` 恒返回 `caveat` 字段,让不对等声明跟着数据走而不是留在人的记忆里。不进 CI(要拉 npx 包并另起 Chrome)。顺带实证:chrome-devtools-mcp **默认向 Google 上报使用统计**,runner 已显式 `--no-usage-statistics` 关闭。
+- **`query-schema` bench case + fixture**(`packages/vortex-bench/cases/query-schema.case.ts`、`playground/public/synth/schema-readback.html`)。fixture 三源齐全,并刻意埋非法 JSON-LD(验证只废那一段)、`itemref`(v1 不解析跨节点引用,如实报跳过)、`name="og:"` 非规范写法。全量 bench **97/97 通过**。
 
 ---
 
