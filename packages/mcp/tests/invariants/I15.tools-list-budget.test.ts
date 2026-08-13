@@ -121,6 +121,9 @@
 // 必须在 description 里点明"may differ from visible content",否则模型会把它
 // 当页面事实。payload 实测 10236B, cap 取 10300 留 64B 余量。
 // 沿用"加能力调 cap 不压字符"惯例。
+// vortex_act scroll target 语义: payload 实测 10301B。scroll 传 target=@ref 时
+// 改为滚该元素自身(原先被 strip 掉、实际滚 window,指纹还挂着该元素的身份)。
+// 行为变了描述必须跟上,否则模型不知道能用 @ref 指容器,能力等于不存在。
 
 import { describe, it, expect, afterEach } from "vitest";
 import { COMMIT_KINDS } from "@vortex-browser/shared";
@@ -132,7 +135,7 @@ describe("I15: tools/list budget + count + internalized grep", () => {
     defs.map(d => ({ name: d.name, description: d.description, inputSchema: d.schema })),
   );
 
-  it("tools/list 字节 ≤ 10300 B (query mode=schema, 实测 10236 留 64B buffer)", () => {
+  it("tools/list 字节 ≤ 10400 B (scroll target 后实测 10301 留 99B buffer)", () => {
     // V2 P0 修复 D16: filter 子字段 description 是必要的文档化豁免
     // (handler 已实现 console.ts:160 level / network.ts:305-321 pattern+statusMin/Max),
     // 移除豁免会触发 V2 D16 真发现复发 (LLM 不知可用子字段)。
@@ -149,7 +152,7 @@ describe("I15: tools/list budget + count + internalized grep", () => {
     // (handler mouse.click 早已实现,含 frame→viewport 换算,此前只暴露坐标版 mouse.drag;
     // canvas/地图/无 ref 场景刚需,补齐"坐标 click"能力缺口)。schema 块 +~366B,payload
     // 实测 8378B,cap +400 至 8500 留 ~122B 余量。沿用"加能力调 cap 不压字符"惯例。
-    expect(toolsListPayload.length).toBeLessThanOrEqual(10300);
+    expect(toolsListPayload.length).toBeLessThanOrEqual(10400);
   });
 
   it("公开工具数量 = 23（22 + vortex_resize 视口模拟）", () => {

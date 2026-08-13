@@ -53,7 +53,7 @@ export const PUBLIC_TOOLS: ToolDef[] = [
     name: "vortex_act",
     action: "L4.act",
     description:
-      "Write to a UI element. scroll:value={container?,position}. " +
+      "Write to a UI element. scroll:value={container?,position}; target=@ref scrolls that element itself. " +
       "click observeEffect→effect signals; windowMs上限3000,慢站0网络≠失败. " +
       "onDialog:accept|dismiss(默认dismiss),promptText给prompt框.",
     schema: {
