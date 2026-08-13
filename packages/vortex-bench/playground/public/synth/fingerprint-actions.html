@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><title>指纹四动作 fixture</title></head>
+<body>
+  <label for="email">邮箱</label>
+  <input id="email" type="text" />
+
+  <label for="city">城市</label>
+  <select id="city"><option value="bj">北京</option><option value="sh">上海</option></select>
+
+  <div id="editor" contenteditable="true" aria-label="正文"></div>
+
+  <!-- 必须是 section 不能是 div：裸 div 在 a11y 里是 generic 角色，observe 不发 @ref。 -->
+  <section id="list" style="height:120px;overflow:auto" aria-label="列表">
+    <div style="height:2000px">长内容</div>
+  </section>
+
+  <!-- 受控回滚：模拟框架把值改回去，用来验证 drift 能被抓到 -->
+  <label for="controlled">受控字段</label>
+  <input id="controlled" type="text" />
+  <script>
+    document.getElementById("controlled").addEventListener("input", (e) => {
+      e.target.value = "REVERTED";
+    });
+  </script>
+</body>
+</html>
