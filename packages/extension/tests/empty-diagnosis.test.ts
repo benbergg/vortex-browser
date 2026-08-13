@@ -54,6 +54,24 @@ describe("diagnoseEmptyNetwork", () => {
     expect(d).toMatch(/Resource Timing/i);
   });
 
+  it("首次读且 pattern 含正则元字符时，两个事实都要说", () => {
+    // buffered=0 分支原本提前 return，正则提示够不着 —— 调用方会去复现请求再读，
+    // 才发现 pattern 本身永远匹配不到。日志实测 27 次带 pattern 调用有 12 次这样写。
+    const d = diagnoseEmptyNetwork({
+      ...base,
+      justSubscribed: true,
+      pattern: "header|column|query",
+    });
+    expect(d).toMatch(/started with this call/i);
+    expect(d).toMatch(/substring, not a regex/i);
+  });
+
+  it("首次读但 pattern 是普通子串时，不加无关的正则提示", () => {
+    const d = diagnoseEmptyNetwork({ ...base, justSubscribed: true, pattern: "voc/task" });
+    expect(d).toMatch(/started with this call/i);
+    expect(d).not.toMatch(/not a regex/i);
+  });
+
   it("全被 API 类过滤削光时，指路 includeResources", () => {
     const d = diagnoseEmptyNetwork({ ...base, buffered: 40, afterTypeFilter: 0 });
     expect(d).toContain("40");

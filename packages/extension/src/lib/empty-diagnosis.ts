@@ -156,13 +156,25 @@ export function diagnoseEmptyConsole(f: ConsoleEmptyFacts): string {
   return `${f.buffered} message(s) buffered yet none returned — filters removed all of them.`;
 }
 
+/** pattern 写成正则时的纠正话术。单一真源:抄一份必然只改一处。 */
+const REGEX_ADVICE =
+  " The pattern is matched as a plain substring, not a regex: '|', '.*' and friends match literally. " +
+  "Pass one URL fragment instead, and read again per fragment.";
+
+function regexAdviceFor(pattern: string | undefined): string {
+  return pattern && REGEX_ISH.test(pattern) ? REGEX_ADVICE : "";
+}
+
 export function diagnoseEmptyNetwork(f: NetworkEmptyFacts): string {
   if (f.buffered === 0) {
-    return f.justSubscribed
+    // 缓冲为空时 pattern 还没参与过滤,但它坏不坏是已知的 —— 只报"刚开始录"
+    // 会让调用方复现请求再读一次才撞见真正的问题(实测 44% 的 pattern 这样写)
+    const base = f.justSubscribed
       ? "Network capture for this tab started with this call — requests that finished earlier were only " +
         "recoverable as Resource Timing summaries, and none were found. Reproduce the request (or reload the tab), " +
         "then read again."
       : "No requests recorded for this tab at all. Reproduce the request, then read again.";
+    return base + regexAdviceFor(f.pattern);
   }
   if (f.afterTypeFilter === 0) {
     return `${f.buffered} request(s) recorded, but all of them are static resources (img/css/script/font). ` +
@@ -171,8 +183,7 @@ export function diagnoseEmptyNetwork(f: NetworkEmptyFacts): string {
   if (f.afterPattern === 0 && f.pattern) {
     // 基线里 8/10 次 network 空返回都传了 `a|b|c` 或 `.*` —— 当成正则用了
     const regexNote = REGEX_ISH.test(f.pattern)
-      ? " It is matched as a plain substring, not a regex: '|', '.*' and friends match literally. " +
-        "Pass one URL fragment instead, and read again per fragment."
+      ? REGEX_ADVICE
       : " Matching is plain substring (case-sensitive); try a shorter fragment.";
     return `${f.afterTypeFilter} API request(s) recorded, none whose URL contains '${f.pattern}'.${regexNote}`;
   }
