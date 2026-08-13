@@ -474,11 +474,16 @@ Expected: 全绿
 - [ ] **Step 7: 提交**
 
 ```bash
-git add packages/extension/src/handlers/dom.ts packages/extension/tests/dom-type-value-readback.test.ts
-git commit -m "feat: type 成功返回带回读值
+git add packages/extension/src/handlers/dom.ts \
+        packages/extension/tests/dom-type-value-readback.test.ts \
+        packages/extension/tests/dom-fill-value-readback.test.ts
+git commit -m "feat: type 补回读值，fill/type 回读值统一封顶 500 字符
 
-typed 返回的是入参字符数不是写入结果，编辑器规范化时两者分叉。
-verify 探针本就读到了 textContent，成功路径却把它丢了。"
+typed 返回的是入参字符数不是写入结果，编辑器规范化时两者分叉；
+verify 探针本就读到了 textContent，成功路径却把它丢了。
+
+封顶与 schema 回读同口径：contentEditable 可能是整篇文档，大 textarea
+同理，原样回传会把整段内容塞给模型。DOM 里仍是完整内容，只截断回传。"
 ```
 
 ---
