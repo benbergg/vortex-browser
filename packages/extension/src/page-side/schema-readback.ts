@@ -85,3 +85,68 @@ export function parseJsonLd(doc: Document): JsonLdResult {
   });
   return { entities, scripts: scripts.length, parseErrors };
 }
+
+export interface MicrodataResult {
+  entities: SchemaEntity[];
+  itemscopes: number;
+  /** 含 itemref 的 item 数。v1 不解析跨节点引用，只如实报数 */
+  itemrefsSkipped: number;
+}
+
+const SRC_TAGS = new Set(["IMG", "AUDIO", "EMBED", "IFRAME", "SOURCE", "TRACK", "VIDEO"]);
+const HREF_TAGS = new Set(["A", "AREA", "LINK"]);
+
+function itemValue(el: Element): unknown {
+  if (el.hasAttribute("itemscope")) return readItem(el);
+  const tag = el.tagName;
+  if (tag === "META") return el.getAttribute("content") || "";
+  if (HREF_TAGS.has(tag)) return el.getAttribute("href") || "";
+  if (SRC_TAGS.has(tag)) return el.getAttribute("src") || "";
+  if (tag === "OBJECT") return el.getAttribute("data") || "";
+  if (tag === "DATA" || tag === "METER") return el.getAttribute("value") || "";
+  if (tag === "TIME") return el.getAttribute("datetime") || (el.textContent || "").trim();
+  return (el.textContent || "").trim();
+}
+
+/** itemprop 元素归属最近的 itemscope 祖先；自身是嵌套 item 时要跳过自己再上溯。 */
+function ownerOf(el: Element): Element | null {
+  const start = el.hasAttribute("itemscope") ? el.parentElement : el;
+  return start ? start.closest("[itemscope]") : null;
+}
+
+function readItem(scope: Element): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  const type = scope.getAttribute("itemtype");
+  if (type) out["@type"] = type;
+  for (const el of Array.from(scope.querySelectorAll("[itemprop]"))) {
+    if (ownerOf(el) !== scope) continue;
+    const value = itemValue(el);
+    for (const name of (el.getAttribute("itemprop") || "").split(/\s+/).filter(Boolean)) {
+      const prev = out[name];
+      if (prev === undefined) out[name] = value;
+      else if (Array.isArray(prev)) prev.push(value);
+      else out[name] = [prev, value];
+    }
+  }
+  return out;
+}
+
+export function parseMicrodata(doc: Document): MicrodataResult {
+  const all = Array.from(doc.querySelectorAll("[itemscope]"));
+  const entities: SchemaEntity[] = [];
+  let itemrefsSkipped = 0;
+  let idx = 0;
+  for (const scope of all) {
+    if (scope.hasAttribute("itemref")) itemrefsSkipped++;
+    // 带 itemprop 的 itemscope 是父 item 的属性值，由 readItem 递归取，不做顶层实体
+    if (scope.hasAttribute("itemprop")) continue;
+    const type = scope.getAttribute("itemtype");
+    if (!type) continue;
+    const { "@type": _t, ...props } = readItem(scope);
+    const e: SchemaEntity = { type, props, source: `microdata:${idx++}`, untrusted: true };
+    const itemid = scope.getAttribute("itemid");
+    if (itemid) e.id = itemid;
+    entities.push(e);
+  }
+  return { entities, itemscopes: all.length, itemrefsSkipped };
+}
