@@ -85,7 +85,7 @@ describe("normalizeValueFingerprint", () => {
     expect(fp.causedNetwork).toBeUndefined();
   });
 
-  it("urlChanged 恒 false：填值不导航", () => {
+  it("urlChanged 恒 false：值类动作不采集导航信号，非「不会导航」的断言", () => {
     expect(normalizeValueFingerprint("select", "combobox::城市::0", "北京").urlChanged).toBe(false);
   });
 

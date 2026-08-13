@@ -48,6 +48,8 @@ export function normalizeClickFingerprint(
 }
 
 /** fill/type/select 有确定量可回读 → 只比值,不用副作用类别(那是 click 才需要的替代品)。 */
+// urlChanged 恒 false 是「未采集」不是「已测为假」:act 值类返回不带 url。
+// 盲区:select 跳转菜单导航时本指纹检不出,见 approach 文档已知限制。
 export function normalizeValueFingerprint(
   action: "fill" | "type" | "select",
   targetIdentity: string,

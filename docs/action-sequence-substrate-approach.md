@@ -144,6 +144,10 @@ flowchart TD
 - **「APC 没有公开 proto，结构还原不出来」——错，已订正。** 见 `reports/external-baseline-2026-08/experimental-domains-probe.md` §2 订正块。
 - **「扩展通道够不着 WebMCP/APC」——错，已实测推翻。** 见同文件 §2.5。挡路的是仓内自己的 `assertEnableable` 白名单，不是浏览器。
 
+## 6.5 已知限制（实施中审出）
+
+- **值类/滚动类指纹的 `urlChanged` 是「未采集」而非「已测为假」。** `normalizeValueFingerprint` / `normalizeScrollFingerprint` 写死 `false`，因为 act 在 fill/type/select/scroll 的返回里不带 url——只有 click 经 `effect.urlChanged` 有这个信号（`server.ts:920-940` 链路）。后果是**窄盲区**：`<select>` 跳转菜单在录制时导航、重放时未导航，只要回读值一致就仍会判 verified。补齐需要从扩展侧多传一个导航信号，属独立改动，本轮不做。
+
 ## 7. 待验证假设
 
 | 假设 | 状态 | 实施前必须做什么 |
