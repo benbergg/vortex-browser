@@ -976,6 +976,10 @@ click 强开，其余动作有确定量可读，不需要副作用观测。"
 - Consumes: Task 1-5 的全部产出
 - Produces: bench case `fingerprint-actions`
 
+**前置依赖**：本 Task 的 scroll 断言依赖 `docs/superpowers/plans/2026-08-13-scroll-respect-ref.md` 的 Task 1-4 已合入（commit `e68931d`/`9836b89`/`b0d6d25`/`63195d0`）。在那之前 scroll 传 `target=@ref` 实际滚的是 window，指纹会把 window 的位置挂在具名元素身上。
+
+**已有半成品**：2026-08-13 首次执行本 Task 时，两个文件已写在 worktree `.worktrees/task6-fingerprint-actions/` 里（未提交），fill / 同值 verify / select / type / 受控回滚五条实测均已通过，只有 scroll 因上述缺陷卡住。**优先把那两个文件取过来再按本 Task 的最新内容改**（fixture 的 `<div id="list">` 要换成 `<section>`、scroll 断言要加强），不要从零重写。取完确认 worktree 可以删除。
+
 - [ ] **Step 1: 建 fixture**
 
 新建 `packages/vortex-bench/playground/public/synth/fingerprint-actions.html`：
@@ -993,9 +997,11 @@ click 强开，其余动作有确定量可读，不需要副作用观测。"
 
   <div id="editor" contenteditable="true" aria-label="正文"></div>
 
-  <div id="list" style="height:120px;overflow:auto" aria-label="列表">
+  <!-- 必须是 section 不能是 div：裸 div 在 a11y 里是 generic 角色，observe 不发 @ref。
+       四变体实机对照实测：div 不发；section(region)/ul(list)/role=listbox 都发。 -->
+  <section id="list" style="height:120px;overflow:auto" aria-label="列表">
     <div style="height:2000px">长内容</div>
-  </div>
+  </section>
 
   <!-- 受控回滚：模拟框架把值改回去，用来验证 drift 能被抓到 -->
   <label for="controlled">受控字段</label>
@@ -1078,8 +1084,12 @@ const def: CaseDefinition = {
     const scr = await act({
       action: "scroll", target: refOf("列表"), value: { position: "bottom" }, options: rec,
     });
-    ctx.assert(typeof scr.fingerprint?.scrollAfter?.top === "number",
-      `scroll 指纹应带位置，实际 ${JSON.stringify(scr.fingerprint)}`);
+    // 断言必须是「滚到底部的真实位置」而非「有个数字」：实际滚了 window 时
+    // top 也是 number(0)，弱断言在那个缺陷下照样能过（2026-08-13 实测）
+    ctx.assert(scr.fingerprint?.scrollAfter != null,
+      `scroll 指纹缺失（滚的可能不是目标本身）：${JSON.stringify(scr)}`);
+    ctx.assert((scr.fingerprint?.scrollAfter?.top ?? 0) > 1000,
+      `scroll 应滚到容器底部（约 1880），实际 ${scr.fingerprint?.scrollAfter?.top}`);
   },
 };
 export default def;

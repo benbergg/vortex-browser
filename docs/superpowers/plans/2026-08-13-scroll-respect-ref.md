@@ -524,16 +524,14 @@ git commit -m "docs: act 描述补 scroll 下 target 的含义
 
 ## Task 5: 实机验证并跑全量 bench 对照
 
-**Files:**
-- Modify: `packages/vortex-bench/cases/fingerprint-actions.case.ts`（Task 6 产出的 case，scroll 断言加强）
-- Modify: `packages/vortex-bench/playground/public/synth/fingerprint-actions.html`（滚动容器换成有真实角色的元素）
+**Files:** 无（纯验证 Task，不改任何文件）
 
 **Interfaces:**
-- Consumes: Task 1-4 的全部产出
+- Consumes: 本计划 Task 1-4 的全部产出
 
-**前置**：本 Task 依赖 action-sequence-substrate 计划的 Task 6 已落地这两个文件。若它们尚不存在，停下汇报，不要自行新建。
+**前置**：`docs/superpowers/plans/2026-08-13-action-sequence-substrate.md` 的 Task 6 已合入主仓（它产出 `fingerprint-actions` 的 fixture 与 case，并已含本次要验证的 scroll 强断言）。若尚未合入，停下汇报，不要自行新建这两个文件。
 
-**fixture 为什么要换标签**：实测四变体对照（`<div aria-label>` / `<section aria-label>` / `<ul aria-label>` / `role=listbox`），**只有裸 `<div>` 拿不到 @ref**——它在 a11y 里是 `generic` 角色。其余三种 observe 都会发 @ref。改动最小的修法是把 `<div id="list">` 换成 `<section id="list">`。
+**边界划分说明**：fixture 的标签选择与 scroll 断言强度属于 case 本身的定义，归 action-sequence 计划的 Task 6；本 Task 只负责在真浏览器上验证 Task 1-4 的行为改动确实生效、且没有回归。
 
 - [ ] **Step 1: 重建扩展并确认加载**
 
@@ -543,41 +541,7 @@ pnpm -C packages/extension build
 
 然后调用 `vortex_dev_reload` 工具，确认返回的 `toStamp` 与 `dist/build-stamp.txt` 一致。**这一步不能省**：本轮已经发生过一次「主仓 dist 是六天前的旧构建，实测结果全是旧代码行为」的误判。
 
-- [ ] **Step 2: 改 fixture**
-
-把 `packages/vortex-bench/playground/public/synth/fingerprint-actions.html` 里的
-
-```html
-  <div id="list" style="height:120px;overflow:auto" aria-label="列表">
-    <div style="height:2000px">长内容</div>
-  </div>
-```
-
-改为
-
-```html
-  <section id="list" style="height:120px;overflow:auto" aria-label="列表">
-    <div style="height:2000px">长内容</div>
-  </section>
-```
-
-- [ ] **Step 3: 加强 case 的 scroll 断言**
-
-把 `packages/vortex-bench/cases/fingerprint-actions.case.ts` 末尾的 scroll 段替换为：
-
-```ts
-    // scroll：record 出位置。断言必须是「滚到底部的真实位置」而非「有个数字」——
-    // 之前的写法在实际滚了 window 的情况下同样能过（top:0 也是 number）
-    const scr = await act({
-      action: "scroll", target: refOf("列表"), value: { position: "bottom" }, options: rec,
-    });
-    ctx.assert(scr.fingerprint?.scrollAfter != null,
-      `scroll 指纹缺失（滚的可能不是目标本身）：${JSON.stringify(scr)}`);
-    ctx.assert((scr.fingerprint?.scrollAfter?.top ?? 0) > 1000,
-      `scroll 应滚到容器底部（约 1880），实际 ${scr.fingerprint?.scrollAfter?.top}`);
-```
-
-- [ ] **Step 4: 起 playground 并跑该 case**
+- [ ] **Step 2: 跑 fingerprint-actions case**
 
 ```bash
 # 终端 A（若尚未常驻）
@@ -586,11 +550,11 @@ pnpm --filter @vortex-browser/bench playground
 pnpm --filter @vortex-browser/bench bench run --pattern fingerprint-actions
 ```
 
-Expected: PASS。
+Expected: PASS，含 scroll。
 
 **两种失败要照实汇报、不要绕过**：拿到 `fingerprintSkipped` 说明 Task 2 的保留没生效；拿到 `top: 0` 说明滚的仍是 window。都停下汇报，不许把阈值调低来凑绿。
 
-- [ ] **Step 5: 跑全量 bench 对照**
+- [ ] **Step 3: 跑全量 bench 对照**
 
 ```bash
 pnpm --filter @vortex-browser/bench bench run --all
@@ -598,12 +562,6 @@ pnpm --filter @vortex-browser/bench bench run --all
 
 Expected: 98/98。**重点看 `f-scroll-to-bottom` 与 `jd-review-rm-03-scroll-load` 两条**——它们是仓内仅有的既有 scroll 用例，均不传 target，本次改动不应触及它们。任一变红即为回归，停下汇报。
 
-- [ ] **Step 6: 提交**
+- [ ] **Step 4: 汇报**
 
-```bash
-git add packages/vortex-bench/cases/fingerprint-actions.case.ts packages/vortex-bench/playground/public/synth/fingerprint-actions.html
-git commit -m "test: scroll 指纹断言改为校验真实滚动位置
-
-原断言只要求 scrollAfter.top 是数字,实际滚了 window(top:0)照样通过。
-fixture 的裸 div 在 a11y 里是 generic 角色拿不到 @ref,换成 section。"
-```
+本 Task 不产生提交。汇报三件事：case 里 scroll 指纹的 `scrollAfter.top` 实测值、全量 bench 的通过数、两条既有 scroll 用例的状态。
