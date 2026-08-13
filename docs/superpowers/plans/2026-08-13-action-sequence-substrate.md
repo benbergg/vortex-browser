@@ -1501,135 +1501,275 @@ option value，与传入的可见文本本就可能不同。"
 
 ---
 
-## Task 8: `vortex_sequence` 工具与编排
+## Task 8a: 序列循环抽成纯函数 `runSequence`
+
+**Files:**
+- Modify: `packages/mcp/src/lib/sequence-run.ts`
+- Test: `packages/mcp/tests/sequence-loop.test.ts`（新建）
+
+**Interfaces:**
+- Consumes: Task 7 的 `classifyStep`/`shouldContinue`/`summarizeTrace`；Task 7.5 的 `verifyStepEffect`
+- Produces:
+  ```ts
+  export interface SequenceStepInput { action: string; target: string; value?: unknown }
+  export interface SequenceOutcome {
+    ok: boolean; error?: string;
+    result?: Record<string, unknown>;
+    fp?: FingerprintOut;
+  }
+  export interface SequenceReport {
+    summary: ReturnType<typeof summarizeTrace>;
+    steps: StepTrace[];
+  }
+  export async function runSequence(
+    steps: SequenceStepInput[],
+    onFailure: OnFailure,
+    send: (step: SequenceStepInput, index: number) => Promise<SequenceOutcome>,
+  ): Promise<SequenceReport>;
+  ```
+
+**为什么要抽出来**：原计划让测试文件里**复刻一遍**循环骨架再测那个复刻版（原文写的就是「复刻 server.ts 序列分支的循环骨架」），`server.ts` 里真跑的那段一行都没被覆盖。这是本仓明令禁止的假覆盖（见 `AGENTS.md` 与 `docs/` 内既有教训）。把循环抽成注入 `send` 的纯函数后，测试驱动的就是真代码，`server.ts` 只负责把 I/O 塞进 `send`。
+
+- [ ] **Step 1: 写失败测试**
+
+新建 `packages/mcp/tests/sequence-loop.test.ts`：
+
+```ts
+import { describe, it, expect } from "vitest";
+import { runSequence, type SequenceStepInput } from "../src/lib/sequence-run.js";
+
+const three: SequenceStepInput[] = [
+  { action: "click", target: "@a" },
+  { action: "fill", target: "@b", value: "x" },
+  { action: "click", target: "@c" },
+];
+
+const clicked = { success: true, effect: {
+  domMutations: 1, networkRequests: 0, urlChanged: false,
+  focusChanged: false, ariaChanged: false, userFeedback: "none" as const,
+} };
+
+describe("runSequence 编排", () => {
+  it("stop 策略：中途自证 unconfirmed 后剩余步骤保持 not_executed", async () => {
+    const out = await runSequence(three, "stop", async (step, i) =>
+      i === 1
+        ? { ok: true, result: { success: true, value: "REVERTED" } }
+        : { ok: true, result: clicked });
+    expect(out.steps.map((s) => s.state))
+      .toEqual(["executed_verified", "executed_unverified", "not_executed"]);
+    expect(out.steps[1].effect).toBe("unconfirmed");
+    expect(out.summary.notExecuted).toBe(1);
+  });
+
+  it("continue 策略：失败步不阻断后续", async () => {
+    const out = await runSequence(three, "continue", async (step, i) =>
+      i === 1
+        ? { ok: false, error: "boom" }
+        : { ok: true, result: step.action === "fill" ? { success: true, value: "x" } : clicked });
+    expect(out.summary).toEqual({ total: 3, verified: 2, unverified: 0, failed: 1, notExecuted: 0 });
+    expect(out.steps[1].error).toBe("boom");
+  });
+
+  it("全部自证通过时无 not_executed", async () => {
+    const out = await runSequence(three, "stop", async (step) =>
+      ({ ok: true, result: step.action === "fill" ? { success: true, value: "x" } : clicked }));
+    expect(out.summary.verified).toBe(3);
+    expect(out.summary.notExecuted).toBe(0);
+  });
+
+  it("send 抛异常 → 该步 failed，不让整个调用崩掉", async () => {
+    const out = await runSequence(three, "stop", async (step, i) => {
+      if (i === 0) throw new Error("resolve failed");
+      return { ok: true, result: clicked };
+    });
+    expect(out.steps[0].state).toBe("failed");
+    expect(out.steps[0].error).toContain("resolve failed");
+    expect(out.steps[1].state).toBe("not_executed");
+  });
+
+  it("空 steps → 全零汇总，不抛错", async () => {
+    const out = await runSequence([], "stop", async () => ({ ok: true }));
+    expect(out.summary).toEqual({ total: 0, verified: 0, unverified: 0, failed: 0, notExecuted: 0 });
+  });
+});
+```
+
+- [ ] **Step 2: 跑测试确认失败**
+
+```bash
+pnpm --filter @vortex-browser/mcp exec vitest run tests/sequence-loop.test.ts --maxWorkers=2 --minWorkers=1
+```
+
+Expected: FAIL，`runSequence is not a function`
+
+- [ ] **Step 3: 实现**
+
+在 `packages/mcp/src/lib/sequence-run.ts` 末尾追加：
+
+```ts
+export interface SequenceStepInput { action: string; target: string; value?: unknown }
+
+export interface SequenceOutcome {
+  ok: boolean;
+  error?: string;
+  result?: Record<string, unknown>;
+  fp?: FingerprintOut;
+}
+
+export interface SequenceReport {
+  summary: ReturnType<typeof summarizeTrace>;
+  steps: StepTrace[];
+}
+
+/** 循环本身不做 I/O,由 send 注入,这样测试驱动的是真代码而非复刻的骨架。 */
+export async function runSequence(
+  steps: SequenceStepInput[],
+  onFailure: OnFailure,
+  send: (step: SequenceStepInput, index: number) => Promise<SequenceOutcome>,
+): Promise<SequenceReport> {
+  const traces: StepTrace[] = steps.map((s, i) => ({
+    index: i, action: s.action, target: s.target, state: "not_executed" as const,
+  }));
+  for (let i = 0; i < steps.length; i++) {
+    let out: SequenceOutcome;
+    try {
+      out = await send(steps[i], i);
+    } catch (err) {
+      // send 抛错等同该步未执行,可安全重试;不能让一步的异常掀掉整次调用
+      out = { ok: false, error: err instanceof Error ? err.message : String(err) };
+    }
+    const effect = out.ok && out.result
+      ? verifyStepEffect(steps[i].action, steps[i].value, out.result)
+      : undefined;
+    const c = classifyStep({ ok: out.ok, error: out.error, fp: out.fp ?? {}, effect });
+    traces[i] = { ...traces[i], state: c.state, drift: c.drift, effect: c.effect, error: out.error };
+    if (!shouldContinue(c.state, onFailure)) break;
+  }
+  return { summary: summarizeTrace(traces), steps: traces };
+}
+```
+
+- [ ] **Step 4: 跑测试确认通过**
+
+```bash
+pnpm --filter @vortex-browser/mcp exec vitest run tests/sequence-loop.test.ts tests/sequence-run.test.ts --maxWorkers=2 --minWorkers=1
+```
+
+Expected: PASS（22 个用例：sequence-run 17 + sequence-loop 5）。既有 17 条必须原样通过。
+
+- [ ] **Step 5: 提交**
+
+```bash
+git add packages/mcp/src/lib/sequence-run.ts packages/mcp/tests/sequence-loop.test.ts
+git commit -m "feat: 序列循环抽成注入 send 的纯函数
+
+原计划让测试复刻一遍循环再测复刻版，server.ts 里真跑的那段零覆盖。
+抽出来后测试驱动的是真代码，server.ts 只负责把 I/O 塞进 send。
+
+send 抛错按该步 failed 处理：一步的异常不该掀掉整次调用，
+且 failed 语义就是「未执行，可安全重试」。"
+```
+
+---
+
+## Task 8b: 公开 schema 与 I15 登记
 
 **Files:**
 - Modify: `packages/mcp/src/tools/schemas-public.ts`
-- Modify: `packages/mcp/src/server.ts`（在 `vortex_fill_form` 分支之后新增）
 - Modify: `packages/mcp/tests/invariants/I15.tools-list-budget.test.ts`
-- Test: `packages/mcp/tests/sequence-tool.test.ts`（新建）
 
 **Interfaces:**
-- Consumes: Task 7 的 `classifyStep` / `shouldContinue` / `summarizeTrace` / `StepTrace`；Task 5 的 `extractSignals`
-- Produces: 公开工具 `vortex_sequence`，返回 `{ summary, steps: StepTrace[] }`
+- Produces: 公开工具 `vortex_sequence` 的 schema（handler 分支由 Task 8c 补）
+
+**本 Task 结束时工具已在工具面但还没有 handler**，这是预期的中间态——与 Task 4 结束时 `tsc` 编译不过同理。Task 9 之前不会有人调用它。**不要为了让它「能用」而顺手写 server.ts 分支**，那是 Task 8c 的 Files。
 
 - [ ] **Step 1: 加 schema**
 
-在 `packages/mcp/src/tools/schemas-public.ts` 的公开工具列表中新增：
+在 `packages/mcp/src/tools/schemas-public.ts` 的 `PUBLIC_TOOLS` 数组中新增：
 
 ```ts
-{
-  name: "vortex_sequence",
-  description:
-    "Run multiple actions in one call, each verified before the next. " +
-    "Returns per-step state: not_executed | executed_unverified | executed_verified | failed.",
-  schema: {
-    type: "object",
-    properties: {
-      steps: {
-        type: "array",
-        items: {
-          type: "object",
-          properties: {
-            action: { enum: ["click", "fill", "type", "select", "scroll", "hover"] },
-            target: { type: "string" },
-            value: {},
+  {
+    name: "vortex_sequence",
+    action: "L4.sequence",
+    description:
+      "Run multiple actions in one call, each self-verified before the next. " +
+      "Per-step state: not_executed|executed_unverified|executed_verified|failed.",
+    schema: {
+      type: "object",
+      properties: {
+        steps: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              action: { enum: ["click", "fill", "type", "select", "scroll", "hover"] },
+              target: TargetRequired,
+              value: { description: "same as vortex_act: fill/type/select string; scroll {container?,position}" },
+            },
+            required: ["action", "target"],
           },
-          required: ["action", "target"],
         },
+        onFailure: { enum: ["stop", "continue"], description: "default stop" },
+        tabId: { type: "number" },
       },
-      onFailure: { enum: ["stop", "continue"], description: "default stop" },
-      tabId: { type: "number" },
+      required: ["steps"],
     },
-    required: ["steps"],
   },
-},
 ```
 
-- [ ] **Step 2: 跑 I15 看实测字节，确认失败**
+- [ ] **Step 2: 跑 I15 确认失败并记下实测字节**
 
 ```bash
 pnpm --filter @vortex-browser/mcp exec vitest run tests/invariants/I15.tools-list-budget.test.ts --maxWorkers=2 --minWorkers=1
 ```
 
-Expected: FAIL 两条——字节超 10300，且工具数 24 ≠ 23。**记下报错里的实测字节数**，下一步要用。
+Expected: FAIL 两条——字节超 10400、工具数 24 ≠ 23。**记下报错里的实测字节数**，下一步要用。
 
-- [ ] **Step 3: 按惯例登记 cap**
+- [ ] **Step 3: 按惯例登记**
 
-在 `packages/mcp/tests/invariants/I15.tools-list-budget.test.ts` 的 cap 说明区（`:118-122` 那种格式）追加一段，把 `<实测值>` 换成 Step 2 的真实数字：
+在该文件顶部 cap 说明区末尾追加，把 `<实测值>` 换成 Step 2 的真实数字：
 
-```ts
-// vortex_sequence 多步序列: 10300 → <实测值向上取整到百位> B。新增一个公开工具,
-// 一次调用跑多步且每步自证,替代模型自己写 evaluate 循环(日志实测 evaluate
-// 九成用量是无对应工具的批处理负载)。payload 实测 <实测值>B。
+```
+// vortex_sequence 多步序列: 10400 → <实测值向上取整到百位> B。新增一个公开工具,
+// 一次调用跑多步且每步自证。日志实测 observe:evaluate=1:12,其中九成是无对应工具的
+// 批处理负载(58% 循环 / 17% 跨调用状态),这是那条缺口的正面补齐。
+// payload 实测 <实测值>B。沿用"加能力调 cap 不压字符"惯例。
 ```
 
-同步把 `:152` 的 `toBeLessThanOrEqual(10300)` 与测试名里的数字、`:155-156` 的 `23` → `24`、`:159` 的工具名清单一并更新。
+同步改三处数字：`toBeLessThanOrEqual(10400)` 与测试名里的数字、公开工具数 `23` → `24`（含测试名），以及工具名清单里加 `vortex_sequence`。
 
-- [ ] **Step 4: 写编排的失败测试**
-
-新建 `packages/mcp/tests/sequence-tool.test.ts`：
-
-```ts
-import { describe, it, expect } from "vitest";
-import { classifyStep, shouldContinue, summarizeTrace, type StepTrace, type OnFailure } from "../src/lib/sequence-run.js";
-
-// 复刻 server.ts 序列分支的循环骨架，用假的 send 驱动，验证编排语义
-async function runSequence(
-  steps: Array<{ action: string; target: string }>,
-  onFailure: OnFailure,
-  send: (i: number) => Promise<{ ok: boolean; error?: string; drift?: { classes: string[] } | null }>,
-): Promise<{ summary: ReturnType<typeof summarizeTrace>; steps: StepTrace[] }> {
-  const traces: StepTrace[] = steps.map((s, i) => ({
-    index: i, action: s.action, target: s.target, state: "not_executed" as const,
-  }));
-  for (let i = 0; i < steps.length; i++) {
-    const r = await send(i);
-    const c = classifyStep({ ok: r.ok, error: r.error, fp: r.drift === undefined ? {} : { drift: r.drift } });
-    traces[i] = { ...traces[i], state: c.state, drift: c.drift, error: r.error };
-    if (!shouldContinue(c.state, onFailure)) break;
-  }
-  return { summary: summarizeTrace(traces), steps: traces };
-}
-
-const three = [
-  { action: "click", target: "@a" },
-  { action: "fill", target: "@b" },
-  { action: "click", target: "@c" },
-];
-
-describe("序列编排", () => {
-  it("stop 策略：中途 drift 后剩余步骤保持 not_executed", async () => {
-    const out = await runSequence(three, "stop", async (i) =>
-      i === 1 ? { ok: true, drift: { classes: ["value"] } } : { ok: true, drift: null });
-    expect(out.steps.map((s) => s.state))
-      .toEqual(["executed_verified", "executed_unverified", "not_executed"]);
-    expect(out.summary.notExecuted).toBe(1);
-  });
-
-  it("continue 策略：失败步不阻断后续", async () => {
-    const out = await runSequence(three, "continue", async (i) =>
-      i === 1 ? { ok: false, error: "boom" } : { ok: true, drift: null });
-    expect(out.summary).toEqual({ total: 3, verified: 2, unverified: 0, failed: 1, notExecuted: 0 });
-  });
-
-  it("全部通过时无 not_executed", async () => {
-    const out = await runSequence(three, "stop", async () => ({ ok: true, drift: null }));
-    expect(out.summary.verified).toBe(3);
-    expect(out.summary.notExecuted).toBe(0);
-  });
-});
-```
-
-- [ ] **Step 5: 跑测试确认失败**
+- [ ] **Step 4: 跑 MCP 全量单测**
 
 ```bash
-pnpm --filter @vortex-browser/mcp exec vitest run tests/sequence-tool.test.ts --maxWorkers=2 --minWorkers=1
+pnpm --filter @vortex-browser/mcp test -- --maxWorkers=2 --minWorkers=1
 ```
 
-Expected: 此时应 PASS（骨架只依赖 Task 7 的纯函数）。**如果 FAIL，说明 Task 7 的语义有问题，回头修 Task 7 而不是改这里的断言。**
+Expected: 全绿，含 I15。
 
-- [ ] **Step 6: 在 server.ts 实现分支**
+- [ ] **Step 5: 提交**
+
+```bash
+git add packages/mcp/src/tools/schemas-public.ts packages/mcp/tests/invariants/I15.tools-list-budget.test.ts
+git commit -m "feat: vortex_sequence 公开 schema 与字节预算登记
+
+日志实测 observe:evaluate=1:12，其中九成是无对应工具的批处理负载。
+序列工具是那条缺口的正面补齐。handler 分支随后补上。"
+```
+
+---
+
+## Task 8c: `server.ts` 接线
+
+**Files:**
+- Modify: `packages/mcp/src/server.ts`（在 `vortex_fill_form` 分支之后新增）
+
+**Interfaces:**
+- Consumes: Task 8a 的 `runSequence`；Task 8b 的 schema；`dispatchNewTool`
+- Produces: `vortex_sequence` 可用
+
+**必须复用 `dispatchNewTool("vortex_act", …)`，不要自己映射动作名或处理 value**。原计划让「把 fill_form 里的映射抽出来共用」，**实查那里没有这段东西**——`fill_form` 只做 `widget → dom.fill/dom.commit`（`server.ts:644-665`），不认识 click/type/select/scroll/hover。真正的通用映射是 `dispatch.ts:372` 的 `ACT_TO_V05`，而且 `vortex_act` 的 dispatch 分支已经处理好每种动作的 value 语义（scroll 结构化展开、type→text、select JSON 还原、以及 2026-08-13 修的 scroll keepTarget）。自己再写一份必然漂移。
+
+- [ ] **Step 1: 实现分支**
 
 在 `packages/mcp/src/server.ts` 的 `vortex_fill_form` 分支（`:589-703`）之后插入：
 
@@ -1638,7 +1778,7 @@ Expected: 此时应 PASS（骨架只依赖 Task 7 的纯函数）。**如果 FAI
   // 与 fill_form 的差别:后者只回 ok/error,答不了「点了没有」;序列用三态区分,
   // 非幂等动作的重试边界才有依据。
   if (toolDef.name === "vortex_sequence") {
-    const steps = params.steps as Array<{ action: string; target: string; value?: unknown }>;
+    const steps = params.steps as SequenceStepInput[] | undefined;
     if (!Array.isArray(steps) || steps.length === 0) {
       // 与 fill_form 同款错误形态(server.ts:600-608):本文件不用 McpError
       return {
@@ -1652,89 +1792,66 @@ Expected: 此时应 PASS（骨架只依赖 Task 7 的纯函数）。**如果 FAI
     const onFailure = (params.onFailure as OnFailure | undefined) ?? "stop";
     const tabId = params.tabId as number | undefined;
     const currentTabId = typeof tabId === "number" ? tabId : null;
-    const { resolveTargetParam } = await import("./lib/ref-parser.js");
 
-    const traces: StepTrace[] = steps.map((s, i) => ({
-      index: i, action: s.action, target: s.target, state: "not_executed" as const,
-    }));
-
-    for (let i = 0; i < steps.length; i++) {
-      const step = steps[i];
-      let ok = false;
-      let error: string | undefined;
-      let fp: FingerprintOut = {};
-      let effect: StepEffect | undefined;
-
-      const stepParams: Record<string, unknown> = {};
-      if (step.value !== undefined) stepParams.value = step.value;
-
-      try {
-        // target 翻译与 fill_form 同一函数,两处共用避免漂移
-        const resolved = resolveTargetParam(
-          step.target, activeSnapshotId, activeSnapshotHash, activeSnapshotTabId, currentTabId,
-        );
-        if (resolved.selector) stepParams.selector = resolved.selector;
-        if (resolved.index != null) {
-          stepParams.index = resolved.index;
-          stepParams.snapshotId = resolved.snapshotId;
-          if (resolved.frameId && resolved.frameId !== 0) stepParams.frameId = resolved.frameId;
-        }
-
-        const resp = await sendRequest(
-          wireActionFor(step.action), stepParams, PORT, tabId, DEFAULT_TIMEOUT,
-        );
-        if (resp.error) {
-          error = `[${resp.error.code}]: ${resp.error.message}`;
-        } else {
-          ok = true;
-          const r = (resp.result ?? {}) as Record<string, unknown>;
-          const snapId = (stepParams.snapshotId as string | undefined) ?? activeSnapshotId;
-          const idx = stepParams.index as number | undefined;
-          const frameId = (stepParams.frameId as number | undefined) ?? 0;
-          const identity = snapId != null && idx != null ? lookupIdentity(snapId, frameId, idx) : null;
-          fp = applyFingerprint({ mode: "record" }, step.action, identity, extractSignals(step.action, r));
-          // 新建序列没有 expect 指纹,verified 只能靠单步自证(Task 7.5)
-          effect = verifyStepEffect(step.action, step.value, r);
-        }
-      } catch (err) {
-        // 解析失败与执行失败都落这里,统一归为 failed(未执行,可安全重试)
-        error = formatError(err);
+    const report = await runSequence(steps, onFailure, async (step) => {
+      const resolved = resolveTargetParam(
+        step.target, activeSnapshotId, activeSnapshotHash, activeSnapshotTabId, currentTabId,
+      );
+      const actParams: Record<string, unknown> = { action: step.action };
+      if (resolved.selector) actParams.selector = resolved.selector;
+      if (resolved.index != null) {
+        actParams.index = resolved.index;
+        actParams.snapshotId = resolved.snapshotId;
+        if (resolved.frameId && resolved.frameId !== 0) actParams.frameId = resolved.frameId;
       }
-
-      const c = classifyStep({ ok, error, fp, effect });
-      traces[i] = { ...traces[i], state: c.state, drift: c.drift, effect: c.effect, error };
-      if (!shouldContinue(c.state, onFailure)) break;
-    }
+      if (step.value !== undefined) actParams.value = step.value;
+      // click/hover 的自证只能靠副作用信号,不强开就永远是 unknown
+      if (step.action === "click" || step.action === "hover") {
+        actParams.options = { observeEffect: true };
+      }
+      const d = dispatchNewTool("vortex_act", actParams);
+      if (!d) return { ok: false, error: "Error [INVALID_PARAMS]: unsupported action" };
+      const resp = await sendRequest(d.action, d.params, PORT, tabId, DEFAULT_TIMEOUT);
+      if (resp.error) return { ok: false, error: `[${resp.error.code}]: ${resp.error.message}` };
+      return { ok: true, result: (resp.result ?? {}) as Record<string, unknown> };
+    });
 
     return withEvents([{
       type: "text" as const,
-      text: JSON.stringify({ summary: summarizeTrace(traces), steps: traces }, null, 2),
+      text: JSON.stringify(report, null, 2),
     }]);
   }
 ```
 
-**`wireActionFor(step.action)` 需要你先建**：把逻辑动作名（`click`/`fill`/`type`/`select`/`scroll`/`hover`）映射到下发给 extension 的 wire action。`vortex_fill_form` 分支里已经有一段等价映射（`server.ts:641` 起的注释「复用 vortex_fill dispatch 逻辑」那段），**把它抽成模块级函数再两处共用，不要另写一份**——两份映射必然漂移。抽取时保持 fill_form 现有行为不变，其单测应全绿。
+**不传 `fp`**：新建序列没有 `expect` 指纹，`verified` 全靠 Task 7.5 的自证。`runSequence` 里 `out.fp ?? {}` 已兜住。
 
-**click 步骤必须强开 `observeEffect`**：`verifyStepEffect` 对 click/hover 靠 `result.effect` 判定，不开就永远是 `unknown`、永远拿不到 `executed_verified`。在 `stepParams` 里对 click/hover 补 `observeEffect: true`，与 `server.ts:788` 指纹守卫的做法一致。
+import 补：`runSequence`、`type SequenceStepInput`、`type OnFailure`（来自 `./lib/sequence-run.js`）。`dispatchNewTool` 与 `resolveTargetParam` 在 `server.ts` 中已导入。
 
-import 补：`classifyStep`、`shouldContinue`、`summarizeTrace`、`verifyStepEffect`、`type StepTrace`、`type OnFailure`、`type StepEffect`（来自 `./lib/sequence-run.js`），以及 `type FingerprintOut`。`formatError`、`activeSnapshotHash`、`activeSnapshotTabId` 在 `server.ts` 中已存在（fill_form 分支正在用）。
-
-- [ ] **Step 7: 跑 MCP 全量单测**
+- [ ] **Step 2: 跑 MCP 全量单测**
 
 ```bash
 pnpm --filter @vortex-browser/mcp test -- --maxWorkers=2 --minWorkers=1
 ```
 
-Expected: 全绿，含 I15
+Expected: 全绿。
 
-- [ ] **Step 8: 提交**
+- [ ] **Step 3: 确认可编译**
 
 ```bash
-git add packages/mcp/src/tools/schemas-public.ts packages/mcp/src/server.ts packages/mcp/src/lib/sequence-run.ts packages/mcp/tests/sequence-tool.test.ts packages/mcp/tests/invariants/I15.tools-list-budget.test.ts
-git commit -m "feat: 新增 vortex_sequence，一次调用多步且每步自证
+pnpm -C packages/mcp build
+```
 
-日志实测 observe:evaluate=1:12，其中九成是无对应工具的批处理负载。
-逐步轨迹返回三态，stop 策略下未跑到的步骤如实标 not_executed。"
+Expected: 无输出即成功。
+
+- [ ] **Step 4: 提交**
+
+```bash
+git add packages/mcp/src/server.ts
+git commit -m "feat: vortex_sequence 接线，每步复用 act 的 dispatch
+
+动作名映射与各动作的 value 语义全走 dispatchNewTool，不另写一份：
+scroll 的结构化展开、type→text、select JSON 还原都在那里，
+自己再写必然漂移。click/hover 强开 observeEffect，否则自证永远 unknown。"
 ```
 
 ---
@@ -1745,7 +1862,7 @@ git commit -m "feat: 新增 vortex_sequence，一次调用多步且每步自证
 - Create: `packages/vortex-bench/cases/sequence-substrate.case.ts`
 
 **Interfaces:**
-- Consumes: Task 8 的 `vortex_sequence`；Task 6 的 fixture（复用，不新建）
+- Consumes: Task 8a/8b/8c 的 `vortex_sequence`；Task 6 的 fixture（复用，不新建）
 
 - [ ] **Step 1: 写 case**
 
@@ -1828,7 +1945,7 @@ for(const c of r.cases) if(/sequence-substrate|fingerprint-actions/.test(c.case)
   console.log(c.case, "callCount=", c.callCount);'
 ```
 
-把这两个数字写进 Step 5 的 commit message。判据 3 的成立依据是 case 内 `summary.total === 2` 而 `vortex_sequence` 只被调了一次——**若 `callCount` 明显高于预期（绿路径 1 次 observe + 2 次 sequence = 3），说明序列分支内部在偷偷多发请求，回头查 Task 8 的 target 翻译是否重复调用。**
+把这两个数字写进 Step 5 的 commit message。判据 3 的成立依据是 case 内 `summary.total === 2` 而 `vortex_sequence` 只被调了一次——**若 `callCount` 明显高于预期（绿路径 1 次 observe + 2 次 sequence = 3），说明序列分支内部在偷偷多发请求，回头查 Task 8c 的 target 翻译是否重复调用。**
 
 - [ ] **Step 5: 刷新 baseline**
 
@@ -1866,7 +1983,7 @@ git commit -m "test: 序列底座的绿路径与红路径 bench 覆盖
    React 18 把 `input` 归为 discrete event 做**同步**重渲染，回滚在 `dispatchEvent` 返回前就完成了，因此 fill 现有读取时点拿到的已是最终值。**不需要延后一帧**（那会给每次 fill 增加一帧延迟）。
 
    **限制**：该 input 恰好 `readOnly: true`（antd Select 非搜索态的内层 input），是较弱的样本；且本结论只覆盖 React 18 的同步回滚路径。若某框架**异步**回滚（如 Vue `nextTick` 或 React `startTransition`），同步读到的会是回滚前的值。这不构成阻塞——同步读回的值本就是「DOM 在那一刻的事实」，符合诚实表征；但 Task 6 的 bench fixture 必须保留受控回滚用例作为回归锁。
-2. ~~**快照 5 分钟 TTL / 20 条容量是否够序列用。**~~ **已实测，问法有误**，见 `docs/action-sequence-substrate-approach.md` §6.6。真正的约束不是时间而是「同时只有一个活快照」：中途任何一次 observe 会让已持有的全部 ref 立刻失效；只要不 observe，序列跑多久都行（实测 75 秒后旧 ref 仍可用）。结论已落进 Task 8 前的决议①。
+2. ~~**快照 5 分钟 TTL / 20 条容量是否够序列用。**~~ **已实测，问法有误**，见 `docs/action-sequence-substrate-approach.md` §6.6。真正的约束不是时间而是「同时只有一个活快照」：中途任何一次 observe 会让已持有的全部 ref 立刻失效；只要不 observe，序列跑多久都行（实测 75 秒后旧 ref 仍可用）。结论已落进 Task 8a 前的决议①。
 
 ## 明确不做（YAGNI）
 
