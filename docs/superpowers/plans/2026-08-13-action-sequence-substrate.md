@@ -1284,7 +1284,7 @@ export function summarizeTrace(traces: StepTrace[]): {
 pnpm --filter @vortex-browser/mcp exec vitest run tests/sequence-run.test.ts --maxWorkers=2 --minWorkers=1
 ```
 
-Expected: PASS（8 个用例）
+Expected: PASS（7 个用例：classifyStep 4 + shouldContinue 2 + summarizeTrace 1）
 
 - [ ] **Step 5: 提交**
 
@@ -1297,6 +1297,19 @@ fill_form 只返回 ok/error，回答不了「点了没有」。三态把「未�
 ```
 
 ---
+
+> **⚠ 动手前必须先定的设计缺口（2026-08-13 实测后新增）**
+>
+> 快照实测结论见 `docs/action-sequence-substrate-approach.md` §6.6：**MCP 视角下同时只有一个活快照**，
+> 任何一次 observe 都会让序列已持有的全部 `@ref` 立刻失效（`ref-parser.ts:200` 哈希闸，与 TTL 无关），
+> 且 descriptor 自愈救不了——哈希闸在 MCP 层先抛，请求到不了扩展侧。
+>
+> 好消息：只要中途不 observe，序列跑多久都行（实测 75 秒后旧 ref 仍可用），60 秒 TTL 不必规避。
+>
+> 坏消息：本 Task 若沿用 `autoRecover`（drift 后自动 re-observe），**re-observe 之后所有剩余步骤会集体
+> STALE_SNAPSHOT**。动手前必须在三条里选定一条并写进本 Task：①序列模式禁用 autoRecover；
+> ②drift 即中止整个序列；③序列自己存每步的 role+name，re-observe 后按 descriptor 重解析剩余步骤
+> （需新写重解析逻辑，不能复用现有自愈）。
 
 ## Task 8: `vortex_sequence` 工具与编排
 
