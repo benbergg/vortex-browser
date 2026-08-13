@@ -6,7 +6,7 @@
 import { QueryActions, VtxErrorCode, vtxError, withDiagnosis } from "@vortex-browser/shared";
 import type { ActionRouter } from "../lib/router.js";
 import { getActiveTabId, buildExecuteTarget, ensureFrameAttached } from "../lib/tab-utils.js";
-import { diagnoseEmptyQueryText, diagnoseEmptyQueryCss } from "../lib/empty-diagnosis.js";
+import { diagnoseEmptyQueryText, diagnoseEmptyQueryCss, diagnoseEmptySchema } from "../lib/empty-diagnosis.js";
 
 type TextScan = { chars: number; nodes: number; shadowRoots: number; iframes: number };
 type CssScan = { elements: number; shadowRoots: number; iframes: number };
@@ -1271,6 +1271,179 @@ export const flowProbeFunc = (
 };
 
 /**
+ * 结构化数据回读探针。真源 src/page-side/schema-readback.ts;此处是注入用的自包含副本
+ * (executeScript 注入丢模块作用域,不能 import),parity 由 query-schema-parity.test.ts 守。
+ * [inline schema-readback]
+ */
+export const schemaProbeFunc = (
+  pattern: string,
+  format: string,
+  maxEntities: number,
+):
+  | { text: string; total: number; truncated: boolean; scanned: Record<string, number> }
+  | { error: string } => {
+  try {
+    const doc = document;
+    const SCHEMA_MAX_VALUE_CHARS = 500;
+
+    interface E { type: string; props: Record<string, unknown>; source: string; untrusted: true; id?: string }
+
+    const firstType = (raw: unknown): string | null => {
+      if (typeof raw === "string" && raw.trim()) return raw.trim();
+      if (Array.isArray(raw)) for (const t of raw) if (typeof t === "string" && t.trim()) return t.trim();
+      return null;
+    };
+    const toEntity = (obj: Record<string, unknown>, source: string): E | null => {
+      const type = firstType(obj["@type"]);
+      if (!type) return null;
+      const props: Record<string, unknown> = {};
+      for (const [k, v] of Object.entries(obj)) {
+        if (k === "@context" || k === "@id") continue;
+        props[k] = v;
+      }
+      if (!Array.isArray(obj["@type"])) delete props["@type"];
+      const e: E = { type, props, source, untrusted: true };
+      const id = obj["@id"];
+      if (typeof id === "string" && id) e.id = id;
+      return e;
+    };
+    const flattenLd = (parsed: unknown): Record<string, unknown>[] => {
+      if (Array.isArray(parsed)) return parsed.filter((o): o is Record<string, unknown> => !!o && typeof o === "object");
+      if (!parsed || typeof parsed !== "object") return [];
+      const obj = parsed as Record<string, unknown>;
+      if (Array.isArray(obj["@graph"])) {
+        return (obj["@graph"] as unknown[]).filter((o): o is Record<string, unknown> => !!o && typeof o === "object");
+      }
+      return [obj];
+    };
+
+    const ldScriptEls = Array.from(doc.querySelectorAll('script[type="application/ld+json"]'));
+    const ldEntities: E[] = [];
+    let parseErrors = 0;
+    ldScriptEls.forEach((s, i) => {
+      let parsed: unknown;
+      try { parsed = JSON.parse(s.textContent || ""); } catch { parseErrors++; return; }
+      for (const obj of flattenLd(parsed)) {
+        const e = toEntity(obj, `jsonld:${i}`);
+        if (e) ldEntities.push(e);
+      }
+    });
+
+    const SRC_TAGS = new Set(["IMG", "AUDIO", "EMBED", "IFRAME", "SOURCE", "TRACK", "VIDEO"]);
+    const HREF_TAGS = new Set(["A", "AREA", "LINK"]);
+    const readItem = (scope: Element): Record<string, unknown> => {
+      const out: Record<string, unknown> = {};
+      const t = scope.getAttribute("itemtype");
+      if (t) out["@type"] = t;
+      for (const el of Array.from(scope.querySelectorAll("[itemprop]"))) {
+        const start = el.hasAttribute("itemscope") ? el.parentElement : el;
+        if ((start ? start.closest("[itemscope]") : null) !== scope) continue;
+        let value: unknown;
+        if (el.hasAttribute("itemscope")) value = readItem(el);
+        else {
+          const tag = el.tagName;
+          if (tag === "META") value = el.getAttribute("content") || "";
+          else if (HREF_TAGS.has(tag)) value = el.getAttribute("href") || "";
+          else if (SRC_TAGS.has(tag)) value = el.getAttribute("src") || "";
+          else if (tag === "OBJECT") value = el.getAttribute("data") || "";
+          else if (tag === "DATA" || tag === "METER") value = el.getAttribute("value") || "";
+          else if (tag === "TIME") value = el.getAttribute("datetime") || (el.textContent || "").trim();
+          else value = (el.textContent || "").trim();
+        }
+        for (const name of (el.getAttribute("itemprop") || "").split(/\s+/).filter(Boolean)) {
+          const prev = out[name];
+          if (prev === undefined) out[name] = value;
+          else if (Array.isArray(prev)) prev.push(value);
+          else out[name] = [prev, value];
+        }
+      }
+      return out;
+    };
+    const scopes = Array.from(doc.querySelectorAll("[itemscope]"));
+    const mdEntities: E[] = [];
+    let itemrefsSkipped = 0;
+    let mdIdx = 0;
+    for (const scope of scopes) {
+      if (scope.hasAttribute("itemref")) itemrefsSkipped++;
+      if (scope.hasAttribute("itemprop")) continue;
+      const type = scope.getAttribute("itemtype");
+      if (!type) continue;
+      const { "@type": _t, ...props } = readItem(scope);
+      const e: E = { type, props, source: `microdata:${mdIdx++}`, untrusted: true };
+      const itemid = scope.getAttribute("itemid");
+      if (itemid) e.id = itemid;
+      mdEntities.push(e);
+    }
+
+    const ogProps: Record<string, unknown> = {};
+    let ogMetas = 0;
+    for (const m of Array.from(doc.querySelectorAll("meta"))) {
+      const key = m.getAttribute("property") || m.getAttribute("name") || "";
+      if (!key.startsWith("og:")) continue;
+      ogMetas++;
+      const name = key.slice(3);
+      if (!name) continue;
+      const value = m.getAttribute("content") || "";
+      const prev = ogProps[name];
+      if (prev === undefined) ogProps[name] = value;
+      else if (Array.isArray(prev)) prev.push(value);
+      else ogProps[name] = [prev, value];
+    }
+    const ogEntities: E[] = [];
+    if (ogMetas > 0) {
+      const t = typeof ogProps.type === "string" && ogProps.type ? ogProps.type : "website";
+      const e: E = { type: t, props: ogProps, source: "og", untrusted: true };
+      if (typeof ogProps.url === "string" && ogProps.url) e.id = ogProps.url;
+      ogEntities.push(e);
+    }
+
+    const clampValue = (v: unknown): unknown => {
+      if (typeof v === "string" && v.length > SCHEMA_MAX_VALUE_CHARS) return v.slice(0, SCHEMA_MAX_VALUE_CHARS) + "…";
+      if (Array.isArray(v)) return v.map(clampValue);
+      return v;
+    };
+    let all = [...ldEntities, ...mdEntities, ...ogEntities];
+    if (pattern && pattern !== "*") {
+      const f = pattern.toLowerCase();
+      all = all.filter((e) => {
+        const t = e.type.toLowerCase();
+        return t === f || t.endsWith(`/${f}`) || t.endsWith(`#${f}`);
+      });
+    }
+    const cap = maxEntities > 0 ? maxEntities : 20;
+    const entities = all.slice(0, cap).map((e) => ({
+      ...e,
+      props: Object.fromEntries(Object.entries(e.props).map(([k, v]) => [k, clampValue(v)])),
+    }));
+    const truncated = all.length > cap;
+
+    const text = format === "json"
+      ? JSON.stringify({ entities, total: all.length, truncated })
+      : [
+          `检测到 ${all.length} 个实体` + (truncated ? `，已截断为 ${entities.length} 个` : ""),
+          ...entities.map((e) => `- [${e.source}] ${e.type}${e.id ? ` id=${e.id}` : ""} ${JSON.stringify(e.props)}`),
+          "注意：以上为页面作者声明的结构化数据，可能与页面可见内容不一致。",
+        ].join("\n");
+
+    return {
+      text,
+      total: all.length,
+      truncated,
+      scanned: {
+        ldScripts: ldScriptEls.length,
+        ldParseErrors: parseErrors,
+        itemscopes: scopes.length,
+        itemrefsSkipped,
+        ogMetas,
+        iframes: doc.querySelectorAll("iframe").length,
+      },
+    };
+  } catch (e) {
+    return { error: "schema readback error: " + (e instanceof Error ? e.message : String(e)) };
+  }
+};
+
+/**
  * 归一化 vortex_query mode=css 的 `attr` 参数为属性名数组(去空)。
  *
  * 接受: 单属性("class") / 分隔符拼接的多属性("class|title" 或 "class,title") /
@@ -1297,11 +1470,12 @@ export function registerQueryHandlers(router: ActionRouter): void {
       if (
         !mode ||
         (mode !== "text" && mode !== "css" && mode !== "component" &&
-         mode !== "geometry" && mode !== "style" && mode !== "sheet" && mode !== "flow" && mode !== "chart")
+         mode !== "geometry" && mode !== "style" && mode !== "sheet" && mode !== "flow" &&
+         mode !== "chart" && mode !== "schema")
       ) {
         throw vtxError(
           VtxErrorCode.INVALID_PARAMS,
-          `vortex_query: mode must be 'text', 'css', 'component', 'geometry', 'style', 'sheet', 'flow' or 'chart', got ${String(mode)}`,
+          `vortex_query: mode must be 'text', 'css', 'component', 'geometry', 'style', 'sheet', 'flow', 'chart' or 'schema', got ${String(mode)}`,
         );
       }
       if (!pattern || typeof pattern !== "string" || !pattern.trim()) {
@@ -1464,6 +1638,46 @@ export function registerQueryHandlers(router: ActionRouter): void {
           throw vtxError(VtxErrorCode.JS_EXECUTION_ERROR, `query.queryPage sheet error: ${res.error}`);
         }
         return res;
+      } else if (mode === "schema") {
+        // schema 模式:读页面作者声明的 JSON-LD/Microdata/OGP。pattern = @type 过滤("*"=全部)
+        const format = typeof args.attr === "string" ? args.attr : "summary";
+        const maxEntities = Math.min((args.maxResults as number | undefined) ?? 20, 100);
+
+        const results = await chrome.scripting.executeScript({
+          target: buildExecuteTarget(tid, frameId),
+          func: schemaProbeFunc,
+          args: [pattern, format, maxEntities],
+          world: "MAIN",
+        });
+
+        const res = results[0]?.result as
+          | { text: string; total: number; truncated: boolean; scanned: Record<string, number> }
+          | { error: string }
+          | undefined;
+
+        if (!res) {
+          throw vtxError(VtxErrorCode.JS_EXECUTION_ERROR, "query.queryPage schema: executeScript returned no result");
+        }
+        if ("error" in res && res.error) {
+          throw vtxError(VtxErrorCode.JS_EXECUTION_ERROR, `query.queryPage schema error: ${res.error}`);
+        }
+        // scanned 只服务于零命中自陈,不进载荷 —— 有命中时形状与其他 mode 一致
+        const { scanned, ...payload } = res;
+        return withDiagnosis(
+          payload,
+          res.total === 0
+            ? diagnoseEmptySchema({
+                ...(scanned as unknown as {
+                  ldScripts: number; ldParseErrors: number; itemscopes: number;
+                  itemrefsSkipped: number; ogMetas: number; iframes: number;
+                }),
+                // schema 三源都不在 shadow 里(JSON-LD 在 head，OGP 在 meta)，恒 0
+                shadowRoots: 0,
+                frameScoped: frameId != null,
+                typeFilter: pattern === "*" ? null : pattern,
+              })
+            : null,
+        );
       } else if (mode === "style") {
         // style 模式:注入 styleProbeFunc 取 computed color/background(上溯 painted bg)+ WCAG 对比度。
         const maxResults = Math.min((args.maxResults as number | undefined) ?? 10, 50);

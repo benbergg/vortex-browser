@@ -245,3 +245,54 @@ describe("query.queryPage — component mode", () => {
     expect(res.error).toBeDefined();
   });
 });
+
+describe("vortex_query mode=schema", () => {
+  let router: ActionRouter;
+  let executeScript: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    vi.unstubAllGlobals();
+    router = new ActionRouter();
+    executeScript = vi.fn();
+    vi.stubGlobal("chrome", {
+      tabs: { query: vi.fn().mockResolvedValue([{ id: 42 }]) },
+      webNavigation: { getAllFrames: vi.fn().mockResolvedValue([{ frameId: 0, parentFrameId: -1, url: "https://x/" }]) },
+      scripting: { executeScript },
+      runtime: { getManifest: vi.fn().mockReturnValue({ host_permissions: ["<all_urls>"] }) },
+    });
+    registerQueryHandlers(router);
+  });
+
+  async function callQuery(args: Record<string, unknown>, result: () => Record<string, unknown>) {
+    executeScript.mockResolvedValueOnce([{ result: result() }]);
+    const res = await router.dispatch(mkReq("query.queryPage", args));
+    return res.error ?? res.result;
+  }
+
+  it("mode 白名单接受 schema，不再抛 INVALID_PARAMS", async () => {
+    const res = await callQuery({ mode: "schema", pattern: "*" }, () => ({
+      text: "检测到 1 个实体", total: 1,
+      scanned: { ldScripts: 1, ldParseErrors: 0, itemscopes: 0, itemrefsSkipped: 0, ogMetas: 0 },
+    }));
+    expect(res).toMatchObject({ text: "检测到 1 个实体", total: 1 });
+  });
+
+  it("total=0 时挂上自陈，且自陈里带上了 page-side 采集的 scanned 事实", async () => {
+    const res = await callQuery({ mode: "schema", pattern: "Product" }, () => ({
+      text: "检测到 0 个实体", total: 0,
+      scanned: { ldScripts: 2, ldParseErrors: 0, itemscopes: 0, itemrefsSkipped: 0, ogMetas: 0 },
+    }));
+    const diag = (res as Record<string, unknown>).__vtxDiagnosis as string;
+    expect(diag).toContain("2 JSON-LD script(s)");
+    expect(diag).toContain("Product");
+  });
+
+  it("total>0 时形状与从前一致：不包裹、无 scanned 泄漏", async () => {
+    const res = await callQuery({ mode: "schema", pattern: "*" }, () => ({
+      text: "检测到 3 个实体", total: 3,
+      scanned: { ldScripts: 1, ldParseErrors: 0, itemscopes: 2, itemrefsSkipped: 0, ogMetas: 1 },
+    })) as Record<string, unknown>;
+    expect(res).not.toHaveProperty("__vtxDiagnosis");
+    expect(res).not.toHaveProperty("scanned");
+  });
+});
