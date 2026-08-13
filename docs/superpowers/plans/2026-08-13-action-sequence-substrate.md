@@ -1683,7 +1683,7 @@ send 抛错按该步 failed 处理：一步的异常不该掀掉整次调用，
 
 **本 Task 结束时工具已在工具面但还没有 handler**，这是预期的中间态——与 Task 4 结束时 `tsc` 编译不过同理。Task 9 之前不会有人调用它。**不要为了让它「能用」而顺手写 server.ts 分支**，那是 Task 8c 的 Files。
 
-- [ ] **Step 1: 加 schema**
+- [x] **Step 1: 加 schema**
 
 在 `packages/mcp/src/tools/schemas-public.ts` 的 `PUBLIC_TOOLS` 数组中新增：
 
@@ -1717,7 +1717,7 @@ send 抛错按该步 failed 处理：一步的异常不该掀掉整次调用，
   },
 ```
 
-- [ ] **Step 2: 跑 I15 确认失败并记下实测字节**
+- [x] **Step 2: 跑 I15 确认失败并记下实测字节**
 
 ```bash
 pnpm --filter @vortex-browser/mcp exec vitest run tests/invariants/I15.tools-list-budget.test.ts --maxWorkers=2 --minWorkers=1
@@ -1725,7 +1725,7 @@ pnpm --filter @vortex-browser/mcp exec vitest run tests/invariants/I15.tools-lis
 
 Expected: FAIL 三条——字节超 10400、工具数 24 ≠ 23、工具名清单少一项（`I15.tools-list-budget.test.ts:162` 的 `toEqual` 也会红）。**记下报错里的实测字节数**，下一步要用。
 
-- [ ] **Step 3: 按惯例登记**
+- [x] **Step 3: 按惯例登记**
 
 在该文件顶部 cap 说明区末尾追加，把 `<实测值>` 换成 Step 2 的真实数字：
 
@@ -1740,7 +1740,7 @@ Expected: FAIL 三条——字节超 10400、工具数 24 ≠ 23、工具名清�
 
 该清单断言的是 `defs.map(d => d.name).sort()`，**必须按字典序插在 `"vortex_screenshot"` 与 `"vortex_storage"` 之间**，追加到数组末尾会红。
 
-- [ ] **Step 4: 跑 MCP 全量单测**
+- [x] **Step 4: 跑 MCP 全量单测**
 
 ```bash
 pnpm --filter @vortex-browser/mcp test -- --maxWorkers=2 --minWorkers=1
@@ -1748,7 +1748,7 @@ pnpm --filter @vortex-browser/mcp test -- --maxWorkers=2 --minWorkers=1
 
 Expected: 全绿，含 I15。
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add packages/mcp/src/tools/schemas-public.ts packages/mcp/tests/invariants/I15.tools-list-budget.test.ts

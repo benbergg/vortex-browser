@@ -207,6 +207,33 @@ export const PUBLIC_TOOLS: ToolDef[] = [
     returnsImage: true,
   },
   {
+    name: "vortex_sequence",
+    action: "L4.sequence",
+    description:
+      "Run multiple actions in one call, each self-verified before the next. " +
+      "Per-step state: not_executed|executed_unverified|executed_verified|failed.",
+    schema: {
+      type: "object",
+      properties: {
+        steps: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              action: { enum: ["click", "fill", "type", "select", "scroll", "hover"] },
+              target: TargetRequired,
+              value: { description: "same as vortex_act: fill/type/select string; scroll {container?,position}" },
+            },
+            required: ["action", "target"],
+          },
+        },
+        onFailure: { enum: ["stop", "continue"], description: "default stop" },
+        tabId: { type: "number" },
+      },
+      required: ["steps"],
+    },
+  },
+  {
     name: "vortex_resize",
     action: "page.setViewport",
     description: "Emulate viewport size for responsive checks (DevTools device mode; real window untouched). reset=true restores.",

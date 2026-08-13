@@ -124,6 +124,10 @@
 // vortex_act scroll target 语义: payload 实测 10301B。scroll 传 target=@ref 时
 // 改为滚该元素自身(原先被 strip 掉、实际滚 window,指纹还挂着该元素的身份)。
 // 行为变了描述必须跟上,否则模型不知道能用 @ref 指容器,能力等于不存在。
+// vortex_sequence 多步序列: 10400 → 11100 B。新增一个公开工具,
+// 一次调用跑多步且每步自证。日志实测 observe:evaluate=1:12,其中九成是无对应工具的
+// 批处理负载(58% 循环 / 17% 跨调用状态),这是那条缺口的正面补齐。
+// payload 实测 11005B。沿用"加能力调 cap 不压字符"惯例。
 
 import { describe, it, expect, afterEach } from "vitest";
 import { COMMIT_KINDS } from "@vortex-browser/shared";
@@ -135,7 +139,7 @@ describe("I15: tools/list budget + count + internalized grep", () => {
     defs.map(d => ({ name: d.name, description: d.description, inputSchema: d.schema })),
   );
 
-  it("tools/list 字节 ≤ 10400 B (scroll target 后实测 10301 留 99B buffer)", () => {
+  it("tools/list 字节 ≤ 11100 B (vortex_sequence 后实测 11005 留 95B buffer)", () => {
     // V2 P0 修复 D16: filter 子字段 description 是必要的文档化豁免
     // (handler 已实现 console.ts:160 level / network.ts:305-321 pattern+statusMin/Max),
     // 移除豁免会触发 V2 D16 真发现复发 (LLM 不知可用子字段)。
@@ -152,14 +156,14 @@ describe("I15: tools/list budget + count + internalized grep", () => {
     // (handler mouse.click 早已实现,含 frame→viewport 换算,此前只暴露坐标版 mouse.drag;
     // canvas/地图/无 ref 场景刚需,补齐"坐标 click"能力缺口)。schema 块 +~366B,payload
     // 实测 8378B,cap +400 至 8500 留 ~122B 余量。沿用"加能力调 cap 不压字符"惯例。
-    expect(toolsListPayload.length).toBeLessThanOrEqual(10400);
+    expect(toolsListPayload.length).toBeLessThanOrEqual(11100);
   });
 
-  it("公开工具数量 = 23（22 + vortex_resize 视口模拟）", () => {
-    expect(defs.length).toBe(23);
+  it("公开工具数量 = 24（23 + vortex_sequence 多步序列）", () => {
+    expect(defs.length).toBe(24);
   });
 
-  it("23 个公开工具名匹配 spec L4 §1.1+§1.2 + 工具横向优化 T6+T7+vortex_query+vortex_mouse_click+vortex_browser", () => {
+  it("24 个公开工具名匹配 spec L4 §1.1+§1.2 + 工具横向优化 T6+T7+vortex_query+vortex_mouse_click+vortex_browser+vortex_sequence", () => {
     const names = defs.map(d => d.name).sort();
     expect(names).toEqual([
       "vortex_act",
@@ -180,6 +184,7 @@ describe("I15: tools/list budget + count + internalized grep", () => {
       "vortex_query",
       "vortex_resize",
       "vortex_screenshot",
+      "vortex_sequence",
       "vortex_storage",
       "vortex_tab_close",
       "vortex_tab_create",
@@ -254,6 +259,9 @@ describe("I15: tools/list budget + count + internalized grep", () => {
       "vortex_query.attr": "attr 支持 , / | 分隔多属性(daddd2b),不写会复发 R11 静默失败",
       "vortex_debug_read.filter": "子字段是 handler 真能力(D16); 盲测复测实测模型把 pattern 嵌进 filter.network,故点明是平铺键",
       "vortex_act.options.fingerprint": "record/verify 契约必须文档化",
+      "vortex_sequence.steps[].target": "序列步骤复用 vortex_act 的 target 语义",
+      "vortex_sequence.steps[].value": "序列步骤复用 vortex_act 的 value 语义",
+      "vortex_sequence.onFailure": "序列失败策略需要明确 stop 或 continue",
     };
 
     const found: string[] = [];
@@ -351,22 +359,22 @@ describe("Bug F regression: vortex_observe surface must expose frames", () => {
   });
 });
 
-// caps opt-in：默认面 verify 不进 tools/list；--caps=testing 时提升进公开面（24）。
+// caps opt-in：默认面 verify 不进 tools/list；--caps=testing 时提升进公开面（25）。
 // 守住「cap 工具默认零回归 + opt-in 后可见」双向不变量。
 describe("I15-caps: vortex_verify 仅在 --caps=testing 时进 tools/list", () => {
   afterEach(() => setEnabledCaps([]));
 
-  it("默认面仍 23，不含 vortex_verify", () => {
+  it("默认面仍 24，不含 vortex_verify", () => {
     setEnabledCaps([]);
     const defs = getToolDefs();
-    expect(defs.length).toBe(23);
+    expect(defs.length).toBe(24);
     expect(defs.map((d) => d.name)).not.toContain("vortex_verify");
   });
 
-  it("--caps=testing 时公开面 = 24 且含 vortex_verify", () => {
+  it("--caps=testing 时公开面 = 25 且含 vortex_verify", () => {
     setEnabledCaps(["testing"]);
     const names = getToolDefs().map((d) => d.name);
-    expect(getToolDefs().length).toBe(24);
+    expect(getToolDefs().length).toBe(25);
     expect(names).toContain("vortex_verify");
   });
 });
