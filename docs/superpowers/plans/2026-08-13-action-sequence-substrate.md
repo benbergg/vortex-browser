@@ -1038,8 +1038,9 @@ const def: CaseDefinition = {
   tier: "medium",
   async run(ctx) {
     const obs = extractText(await ctx.call("vortex_observe", {}));
+    // a11y 树是 `- role "名" [ref=@e3]`，ref 在名字之后；反过来写永远匹配不上。
     const refOf = (label: string): string => {
-      const m = obs.match(new RegExp(`(@[\\w:]+)[^\\n]*${label}`));
+      const m = obs.match(new RegExp(`${label}[^\\n]*\\[ref=(@[\\w:]+)\\]`));
       if (!m) throw new Error(`observe 里找不到 ${label}：\n${obs.slice(0, 600)}`);
       return m[1];
     };
@@ -1903,8 +1904,9 @@ const def: CaseDefinition = {
   tier: "medium",
   async run(ctx) {
     const obs = extractText(await ctx.call("vortex_observe", {}));
+    // a11y 树是 `- role "名" [ref=@e3]`，ref 在名字之后；反过来写永远匹配不上。
     const refOf = (label: string): string => {
-      const m = obs.match(new RegExp(`(@[\\w:]+)[^\\n]*${label}`));
+      const m = obs.match(new RegExp(`${label}[^\\n]*\\[ref=(@[\\w:]+)\\]`));
       if (!m) throw new Error(`observe 里找不到 ${label}：\n${obs.slice(0, 600)}`);
       return m[1];
     };
@@ -1955,6 +1957,9 @@ pnpm --filter @vortex-browser/bench bench run --all
 ```
 
 Expected: 99/99（97 + Task 6 的 1 + 本 case 1）
+
+已知噪声：两个 date-picker 用例（`dom.commit timed out`）在满量并发下偶发红，单独跑必过。
+若红的只有它们，单独复跑确认后按 97+2 记，**不要为此改产品代码**。
 
 - [ ] **Step 4: 记录往返数，落实判据 3**
 
