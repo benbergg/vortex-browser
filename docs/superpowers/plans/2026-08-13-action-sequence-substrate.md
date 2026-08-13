@@ -1802,16 +1802,24 @@ git commit -m "feat: vortex_sequence 公开 schema 与字节预算登记
     const tabId = params.tabId as number | undefined;
     const currentTabId = typeof tabId === "number" ? tabId : null;
 
+    const { resolveTargetParam } = await import("./lib/ref-parser.js");
+
     const report = await runSequence(steps, onFailure, async (step) => {
-      const resolved = resolveTargetParam(
-        step.target, activeSnapshotId, activeSnapshotHash, activeSnapshotTabId, currentTabId,
-      );
       const actParams: Record<string, unknown> = { action: step.action };
-      if (resolved.selector) actParams.selector = resolved.selector;
-      if (resolved.index != null) {
-        actParams.index = resolved.index;
-        actParams.snapshotId = resolved.snapshotId;
-        if (resolved.frameId && resolved.frameId !== 0) actParams.frameId = resolved.frameId;
+      try {
+        const resolved = resolveTargetParam(
+          step.target, activeSnapshotId, activeSnapshotHash, activeSnapshotTabId, currentTabId,
+        );
+        if (resolved.selector) actParams.selector = resolved.selector;
+        if (resolved.index != null) {
+          actParams.index = resolved.index;
+          actParams.snapshotId = resolved.snapshotId;
+          if (resolved.frameId && resolved.frameId !== 0) actParams.frameId = resolved.frameId;
+        }
+      } catch (err) {
+        // 这里不能落到 runSequence 的兜底 catch:那只取 err.message,会把
+        // STALE_SNAPSHOT 的错误码和「重新 observe」的 hint 一起丢掉
+        return { ok: false, error: formatError(err) };
       }
       if (step.value !== undefined) actParams.value = step.value;
       // click/hover 的自证只能靠副作用信号,不强开就永远是 unknown
@@ -1834,7 +1842,9 @@ git commit -m "feat: vortex_sequence 公开 schema 与字节预算登记
 
 **不传 `fp`**：新建序列没有 `expect` 指纹，`verified` 全靠 Task 7.5 的自证。`runSequence` 里 `out.fp ?? {}` 已兜住。
 
-import 补：`runSequence`、`type SequenceStepInput`、`type OnFailure`（来自 `./lib/sequence-run.js`）。`dispatchNewTool` 与 `resolveTargetParam` 在 `server.ts` 中已导入。
+import 补：`runSequence`、`type SequenceStepInput`、`type OnFailure`（来自 `./lib/sequence-run.js`，加在文件顶部静态 import 区）。
+
+`dispatchNewTool`（`server.ts:19`）与 `formatError`（`server.ts:77` 同文件函数）可直接用。**`resolveTargetParam` 不是顶部 import**——`server.ts` 里三处（`:610` `:713` `:745`）都是分支内 `await import("./lib/ref-parser.js")` 动态引入，所以上面的代码块里保留了那一行，照抄即可，别删也别改成顶部 import。
 
 - [ ] **Step 2: 跑 MCP 全量单测**
 
