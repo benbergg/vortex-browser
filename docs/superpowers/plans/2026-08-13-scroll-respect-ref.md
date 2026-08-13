@@ -1,6 +1,6 @@
 # scroll 尊重 @ref Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** 让 `vortex_act action=scroll` 传 `target=@ref` + `position` 时真的滚那个元素，并保证效果指纹里的 `targetIdentity` 与 `scrollAfter` 永远出自同一个元素。
 
@@ -53,7 +53,7 @@
 2. **jsdom 没有 `Element.prototype.scrollTo`**（实测 `typeof el.scrollTo === "undefined"`，调用抛 `el.scrollTo is not a function`），必须手动挂。
 3. **jsdom 的 `scrollHeight`/`clientHeight` 恒为 0**，`findScrollableAncestor` 的 `scrollHeight > clientHeight` 判否，必须用 `Object.defineProperty` 显式定义。
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 新建 `packages/extension/tests/dom-scroll-scrolled-self.test.ts`：
 
@@ -171,7 +171,7 @@ describe("dom.scroll 的 scrolledSelf 标记", () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 ```bash
 pnpm --filter @vortex-browser/extension exec vitest run tests/dom-scroll-scrolled-self.test.ts --maxWorkers=2 --minWorkers=1
@@ -181,7 +181,7 @@ Expected: FAIL，前两条报 `scrolledSelf` 为 `undefined`（字段还不存�
 
 **若第一条报的是 `scrollTop: 0` 而不是 `scrolledSelf undefined`**，说明 jsdom 的 overflow/尺寸桩没生效、走到了 window 分支——停下来汇报，不要改断言迁就。
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 `packages/extension/src/handlers/dom.ts`，把 `:1415-1421` 的「确定滚动容器」块替换为：
 
@@ -238,7 +238,7 @@ Expected: FAIL，前两条报 `scrolledSelf` 为 `undefined`（字段还不存�
             };
 ```
 
-- [ ] **Step 4: 跑测试确认通过**
+- [x] **Step 4: 跑测试确认通过**
 
 ```bash
 pnpm --filter @vortex-browser/extension exec vitest run tests/dom-scroll-scrolled-self.test.ts --maxWorkers=2 --minWorkers=1
@@ -246,7 +246,7 @@ pnpm --filter @vortex-browser/extension exec vitest run tests/dom-scroll-scrolle
 
 Expected: PASS（4 个用例）
 
-- [ ] **Step 5: 跑扩展全量单测**
+- [x] **Step 5: 跑扩展全量单测**
 
 ```bash
 pnpm --filter @vortex-browser/extension test -- --maxWorkers=2 --minWorkers=1
@@ -254,7 +254,7 @@ pnpm --filter @vortex-browser/extension test -- --maxWorkers=2 --minWorkers=1
 
 Expected: 全绿。已确认仓内没有对 scroll 结果做 `toEqual` 完整形状断言的测试，新增字段不应打破任何既有用例；若真有失败，停下汇报。
 
-- [ ] **Step 6: 提交**
+- [x] **Step 6: 提交**
 
 ```bash
 git add packages/extension/src/handlers/dom.ts packages/extension/tests/dom-scroll-scrolled-self.test.ts
@@ -278,7 +278,7 @@ git commit -m "feat: dom.scroll 报出实际滚的是不是目标元素本身
 
 **为什么不是「把 selector 填进 container」**：路线 A 的原始机制在计划阶段被证伪。`server.ts:718-732` 显示 `@ref` 只翻译出 `index` + `snapshotId`，**没有 selector**（真正的 CSS selector 存在扩展侧快照里，见 `packages/extension/src/lib/resolve-target.ts:61`）。dispatch 手上没有 selector 可填，解析只能发生在扩展侧。故改为「保留目标，让 `dom.scroll` 自己解析」。
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 在 `packages/mcp/tests/tool-dispatch.test.ts` 中，紧接既有的 `vortex_act(scroll, target=...) 不传 value 时也通` 用例之后，追加：
 
@@ -324,7 +324,7 @@ git commit -m "feat: dom.scroll 报出实际滚的是不是目标元素本身
   });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 ```bash
 pnpm --filter @vortex-browser/mcp exec vitest run tests/tool-dispatch.test.ts --maxWorkers=2 --minWorkers=1
@@ -332,7 +332,7 @@ pnpm --filter @vortex-browser/mcp exec vitest run tests/tool-dispatch.test.ts --
 
 Expected: FAIL，前两条报 `params.index` / `params.selector` 为 `undefined`（当前被无条件删除）。第三条应当已经通过。
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 `packages/mcp/src/tools/dispatch.ts`，把 `:167-175` 替换为：
 
@@ -352,7 +352,7 @@ Expected: FAIL，前两条报 `params.index` / `params.selector` 为 `undefined`
         }
 ```
 
-- [ ] **Step 4: 跑测试确认通过**
+- [x] **Step 4: 跑测试确认通过**
 
 ```bash
 pnpm --filter @vortex-browser/mcp exec vitest run tests/tool-dispatch.test.ts --maxWorkers=2 --minWorkers=1
@@ -362,7 +362,7 @@ Expected: PASS。
 
 **注意既有用例 `vortex_act(scroll, value={container, position}) 把 value spread + strip selector`（`:170`）必须仍然通过**——它传了显式 container，走的是全 strip 分支。若它反而红了，说明 `keepTarget` 判据写反，停下汇报，**不要改那条既有断言**。
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add packages/mcp/src/tools/dispatch.ts packages/mcp/tests/tool-dispatch.test.ts
@@ -387,7 +387,7 @@ params.index 建 targetIdentity,指纹把 window 的位置挂在具名元素上�
 
 **这一步是路线取舍的兑现**：思路文档里否掉路线 B 的理由是「`findScrollableAncestor` 上溯到祖先时误归属会换个形式回来」。Task 1 让上溯变得可见，这一步据此闸掉——两者合起来才等于选定的路线 A 语义。
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 在 `packages/mcp/tests/act-fingerprint-actions.test.ts` 的 `describe` 内追加：
 
@@ -415,7 +415,7 @@ params.index 建 targetIdentity,指纹把 window 的位置挂在具名元素上�
   });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 ```bash
 pnpm --filter @vortex-browser/mcp exec vitest run tests/act-fingerprint-actions.test.ts --maxWorkers=2 --minWorkers=1
@@ -423,7 +423,7 @@ pnpm --filter @vortex-browser/mcp exec vitest run tests/act-fingerprint-actions.
 
 Expected: FAIL，第一条报「期望 undefined，实际拿到 `{kind:"scroll",...}`」。
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 `packages/mcp/src/lib/fingerprint-apply.ts`，把 `extractSignals` 里的 scroll 分支替换为：
 
@@ -437,7 +437,7 @@ Expected: FAIL，第一条报「期望 undefined，实际拿到 `{kind:"scroll",
   }
 ```
 
-- [ ] **Step 4: 跑测试确认通过**
+- [x] **Step 4: 跑测试确认通过**
 
 ```bash
 pnpm --filter @vortex-browser/mcp exec vitest run tests/act-fingerprint-actions.test.ts --maxWorkers=2 --minWorkers=1
@@ -445,7 +445,7 @@ pnpm --filter @vortex-browser/mcp exec vitest run tests/act-fingerprint-actions.
 
 Expected: PASS（9 个用例：既有 7 条 + 新增 2 条）
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add packages/mcp/src/lib/fingerprint-apply.ts packages/mcp/tests/act-fingerprint-actions.test.ts
@@ -469,7 +469,7 @@ git commit -m "fix: scroll 指纹仅在滚的是目标本身时才发
 
 **为什么必须改**：当前描述只有 `scroll:value={container?,position}`，完全没提 target 在 scroll 下的作用。行为改了描述不改，模型不会知道可以用 @ref 指定滚动容器——能力等于不存在（Task 5 评审时已因同类问题返工过一次）。
 
-- [ ] **Step 1: 改描述**
+- [x] **Step 1: 改描述**
 
 把 `packages/mcp/src/tools/schemas-public.ts:56` 的
 
@@ -483,7 +483,7 @@ git commit -m "fix: scroll 指纹仅在滚的是目标本身时才发
       "Write to a UI element. scroll:value={container?,position}; target=@ref scrolls that element itself. " +
 ```
 
-- [ ] **Step 2: 跑 I15 看实测字节**
+- [x] **Step 2: 跑 I15 看实测字节**
 
 ```bash
 pnpm --filter @vortex-browser/mcp exec vitest run tests/invariants/I15.tools-list-budget.test.ts --maxWorkers=2 --minWorkers=1
@@ -492,7 +492,7 @@ pnpm --filter @vortex-browser/mcp exec vitest run tests/invariants/I15.tools-lis
 若通过，记下测试打印/断言里的实测字节数即可，无需调 cap，直接做 Step 3 的登记。
 若因超过 10300 而失败，按「加能力调 cap 不压既有字符」惯例把 cap 调到实测值向上取整、留少量余量，并在 Step 3 一并写明。
 
-- [ ] **Step 3: 在 I15 登记**
+- [x] **Step 3: 在 I15 登记**
 
 在 `packages/mcp/tests/invariants/I15.tools-list-budget.test.ts` 顶部 cap 说明区末尾（`// 沿用"加能力调 cap 不压字符"惯例。` 那一段之后）追加，把 `<实测值>` 换成 Step 2 的真实数字：
 
@@ -502,7 +502,7 @@ pnpm --filter @vortex-browser/mcp exec vitest run tests/invariants/I15.tools-lis
 // 行为变了描述必须跟上,否则模型不知道能用 @ref 指容器,能力等于不存在。
 ```
 
-- [ ] **Step 4: 跑 MCP 全量单测**
+- [x] **Step 4: 跑 MCP 全量单测**
 
 ```bash
 pnpm --filter @vortex-browser/mcp test -- --maxWorkers=2 --minWorkers=1
@@ -510,7 +510,7 @@ pnpm --filter @vortex-browser/mcp test -- --maxWorkers=2 --minWorkers=1
 
 Expected: 全绿，含 I15。
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add packages/mcp/src/tools/schemas-public.ts packages/mcp/tests/invariants/I15.tools-list-budget.test.ts
@@ -533,7 +533,7 @@ git commit -m "docs: act 描述补 scroll 下 target 的含义
 
 **边界划分说明**：fixture 的标签选择与 scroll 断言强度属于 case 本身的定义，归 action-sequence 计划的 Task 6；本 Task 只负责在真浏览器上验证 Task 1-4 的行为改动确实生效、且没有回归。
 
-- [ ] **Step 1: 重建扩展并确认加载**
+- [x] **Step 1: 重建扩展并确认加载**
 
 ```bash
 pnpm -C packages/extension build
@@ -541,7 +541,7 @@ pnpm -C packages/extension build
 
 然后调用 `vortex_dev_reload` 工具，确认返回的 `toStamp` 与 `dist/build-stamp.txt` 一致。**这一步不能省**：本轮已经发生过一次「主仓 dist 是六天前的旧构建，实测结果全是旧代码行为」的误判。
 
-- [ ] **Step 2: 跑 fingerprint-actions case**
+- [x] **Step 2: 跑 fingerprint-actions case**
 
 ```bash
 # 终端 A（若尚未常驻）
@@ -554,7 +554,7 @@ Expected: PASS，含 scroll。
 
 **两种失败要照实汇报、不要绕过**：拿到 `fingerprintSkipped` 说明 Task 2 的保留没生效；拿到 `top: 0` 说明滚的仍是 window。都停下汇报，不许把阈值调低来凑绿。
 
-- [ ] **Step 3: 跑全量 bench 对照**
+- [x] **Step 3: 跑全量 bench 对照**
 
 ```bash
 pnpm --filter @vortex-browser/bench bench run --all
@@ -562,6 +562,13 @@ pnpm --filter @vortex-browser/bench bench run --all
 
 Expected: 98/98。**重点看 `f-scroll-to-bottom` 与 `jd-review-rm-03-scroll-load` 两条**——它们是仓内仅有的既有 scroll 用例，均不传 target，本次改动不应触及它们。任一变红即为回归，停下汇报。
 
-- [ ] **Step 4: 汇报**
+- [x] **Step 4: 汇报**
 
 本 Task 不产生提交。汇报三件事：case 里 scroll 指纹的 `scrollAfter.top` 实测值、全量 bench 的通过数、两条既有 scroll 用例的状态。
+
+**实测记录（2026-08-13 完成）**：
+
+- 扩展重建至 `2.0.1+msre3hor`，`vortex_dev_reload` 确认已加载（含 `scrolledSelf`）。
+- `fingerprint-actions` 单跑 PASS，10 次调用 3856ms；scroll 指纹 `scrollAfter.top` 实测落在容器底部，非 0。
+- 全量 bench 98 个 case：96 通过。`f-scroll-to-bottom`、`jd-review-rm-03-scroll-load` 两条既有 scroll 用例均 PASS，无回归。
+- 失败 2 条为 `el-date-picker-daterange` / `datetimerange`，报 `dom.commit timed out`；**单独重跑均 PASS**（4.8s / 4.1s），判为全量跑时负载下的超时 flaky，与本计划改动无关（本计划不经过 `dom.commit`）。

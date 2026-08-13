@@ -1,6 +1,6 @@
 # 多步动作序列底座 Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** 把效果指纹从 click-only 扩到五种动作，并在其上建一个独立的 `vortex_sequence` 工具，让多步动作在一次调用内执行且每步自证。
 
@@ -49,7 +49,7 @@
 
 **背景**：`fill` 当前返回 `{ success: true, focused }`。`el.value` 其实已在同一作用域被读过（`dom.ts:1090` 的 NO_EFFECT 判据），但没进成功返回——调用方拿到 `success:true` 却不知道实际填进去的是什么。
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 新建 `packages/extension/tests/dom-fill-value-readback.test.ts`，**完整内容如下**（setup 块严格对齐先例 `packages/extension/tests/dom-fill-refocus.test.ts:11-87`——该文件的 `beforeEach` 除了 window/document 还必须塞入若干全局与 page-side 桩，缺一个 handler 就跑不起来）：
 
@@ -159,7 +159,7 @@ describe("FILL 回读值", () => {
 > `"007"` 本身就是合法浮点数字符串，不会被规范化，该用例证明不了任何事。改成 `input` 监听器同步回滚：
 > 它是受控组件的最小复刻，且能**唯一地**区分「真回读」与「回声入参」——这正是本 Task 要锁的契约。
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 ```bash
 pnpm --filter @vortex-browser/extension exec vitest run tests/dom-fill-value-readback.test.ts --maxWorkers=2 --minWorkers=1
@@ -167,7 +167,7 @@ pnpm --filter @vortex-browser/extension exec vitest run tests/dom-fill-value-rea
 
 Expected: FAIL，两个用例都因返回对象里没有 `value` 而失败（形如 `expected { success: true, focused: true } to match object { success: true, value: 'hello' }`）
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 `packages/extension/src/handlers/dom.ts:1109`，把
 
@@ -182,7 +182,7 @@ Expected: FAIL，两个用例都因返回对象里没有 `value` 而失败（形
             return { result: { success: true, focused, value: el.value } };
 ```
 
-- [ ] **Step 4: 跑测试确认通过**
+- [x] **Step 4: 跑测试确认通过**
 
 ```bash
 pnpm --filter @vortex-browser/extension exec vitest run tests/dom-fill-value-readback.test.ts --maxWorkers=2 --minWorkers=1
@@ -190,7 +190,7 @@ pnpm --filter @vortex-browser/extension exec vitest run tests/dom-fill-value-rea
 
 Expected: PASS（2 个用例）
 
-- [ ] **Step 5: 跑扩展全量单测确认零回归**
+- [x] **Step 5: 跑扩展全量单测确认零回归**
 
 ```bash
 pnpm --filter @vortex-browser/extension test -- --maxWorkers=2 --minWorkers=1
@@ -198,7 +198,7 @@ pnpm --filter @vortex-browser/extension test -- --maxWorkers=2 --minWorkers=1
 
 Expected: 全绿。若有测试断言 fill 结果对象的**完整形状**（`toEqual` 而非 `toMatchObject`），把它改成 `toMatchObject` 并在该测试里补一句注释说明新增了 `value` 字段。
 
-- [ ] **Step 6: 提交**
+- [x] **Step 6: 提交**
 
 ```bash
 git add packages/extension/src/handlers/dom.ts packages/extension/tests/dom-fill-value-readback.test.ts
@@ -234,7 +234,7 @@ success:true 不说明填进去的是什么。值本就在 NO_EFFECT 判据处�
 > **注入约束**：截断发生在 `executeScript` 注入的内联函数里，**模块作用域已丢失**，不能引用模块级常量。
 > 按 `dom.ts` 既有写法把 `500` 作为字面量内联（`:176`、`:212` 等处同样是内联字面量），并在旁边写明为什么是 500。
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 新建 `packages/extension/tests/dom-type-value-readback.test.ts`。**走 `router.dispatch` 真跑生产代码**，不复刻探针函数体（复刻等于测自己的副本，是假覆盖）。
 
@@ -375,7 +375,7 @@ describe("TYPE 回读值", () => {
   });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 ```bash
 pnpm --filter @vortex-browser/extension exec vitest run tests/dom-type-value-readback.test.ts tests/dom-fill-value-readback.test.ts --maxWorkers=2 --minWorkers=1
@@ -386,7 +386,7 @@ Expected: FAIL。type 的四个用例都因返回对象没有 `value` 而失败�
 > 如果 type 的用例报的是 `NO_EFFECT` 而不是缺 `value`，说明 `sendCommand` 的模拟插入没生效——
 > 先修 mock，**不要**改断言。
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 `packages/extension/src/handlers/dom.ts`，两处改动。
 
@@ -435,7 +435,7 @@ Expected: FAIL。type 的四个用例都因返回对象没有 `value` 而失败�
 
 同时把该 `nativePageQuery` 的泛型参数补上 `value?: string` 字段。
 
-- [ ] **Step 4: 给 fill 的回读值补同样的上限**
+- [x] **Step 4: 给 fill 的回读值补同样的上限**
 
 `packages/extension/src/handlers/dom.ts:1109`（Task 1 加的那行），把
 
@@ -455,7 +455,7 @@ Expected: FAIL。type 的四个用例都因返回对象没有 `value` 而失败�
             };
 ```
 
-- [ ] **Step 5: 跑测试确认通过**
+- [x] **Step 5: 跑测试确认通过**
 
 ```bash
 pnpm --filter @vortex-browser/extension exec vitest run tests/dom-type-value-readback.test.ts tests/dom-fill-value-readback.test.ts --maxWorkers=2 --minWorkers=1
@@ -463,7 +463,7 @@ pnpm --filter @vortex-browser/extension exec vitest run tests/dom-type-value-rea
 
 Expected: PASS（type 4 个 + fill 3 个 = 7 个用例）
 
-- [ ] **Step 6: 跑扩展全量单测**
+- [x] **Step 6: 跑扩展全量单测**
 
 ```bash
 pnpm --filter @vortex-browser/extension test -- --maxWorkers=2 --minWorkers=1
@@ -471,7 +471,7 @@ pnpm --filter @vortex-browser/extension test -- --maxWorkers=2 --minWorkers=1
 
 Expected: 全绿
 
-- [ ] **Step 7: 提交**
+- [x] **Step 7: 提交**
 
 ```bash
 git add packages/extension/src/handlers/dom.ts \
@@ -500,7 +500,7 @@ verify 探针本就读到了 textContent，成功路径却把它丢了。
   - `normalizeValueFingerprint(action: "fill" | "type" | "select", targetIdentity: string, valueAfter: string): EffectFingerprint`
   - `normalizeScrollFingerprint(targetIdentity: string, scrollAfter: { top: number; left: number }): EffectFingerprint`
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 在 `packages/shared/tests/effect-fingerprint.test.ts` 末尾追加：
 
@@ -557,7 +557,7 @@ import {
 } from "../src/effect-fingerprint.js";
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 ```bash
 pnpm --filter @vortex-browser/shared exec vitest run tests/effect-fingerprint.test.ts --maxWorkers=2 --minWorkers=1
@@ -565,7 +565,7 @@ pnpm --filter @vortex-browser/shared exec vitest run tests/effect-fingerprint.te
 
 Expected: FAIL，`normalizeValueFingerprint is not a function`
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 在 `packages/shared/src/effect-fingerprint.ts` 的 `normalizeClickFingerprint`（`:47` 结尾）之后插入：
 
@@ -588,7 +588,7 @@ export function normalizeScrollFingerprint(
 }
 ```
 
-- [ ] **Step 4: 跑测试确认通过**
+- [x] **Step 4: 跑测试确认通过**
 
 ```bash
 pnpm --filter @vortex-browser/shared exec vitest run tests/effect-fingerprint.test.ts --maxWorkers=2 --minWorkers=1
@@ -596,7 +596,7 @@ pnpm --filter @vortex-browser/shared exec vitest run tests/effect-fingerprint.te
 
 Expected: PASS（新增 6 个用例，原有用例不变）
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add packages/shared/src/effect-fingerprint.ts packages/shared/tests/effect-fingerprint.test.ts
@@ -627,7 +627,7 @@ fill/type/select/scroll 有确定量，直接比值比位置更准。"
 
 **注意**：这是**破坏性改签名**。`applyFingerprint` 只有一个调用方（`packages/mcp/src/server.ts:938`），Task 5 会同步改。
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 新建 `packages/mcp/tests/fingerprint-apply-actions.test.ts`：
 
@@ -690,7 +690,7 @@ describe("applyFingerprint 按 action 派发", () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 ```bash
 pnpm --filter @vortex-browser/mcp exec vitest run tests/fingerprint-apply-actions.test.ts --maxWorkers=2 --minWorkers=1
@@ -698,7 +698,7 @@ pnpm --filter @vortex-browser/mcp exec vitest run tests/fingerprint-apply-action
 
 Expected: FAIL，类型/断言错误（`ActionSignals` 尚不存在）
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 `packages/mcp/src/lib/fingerprint-apply.ts`：import 补两个新函数，新增 `ActionSignals` 类型导出，并把 `applyFingerprint` 整体替换为：
 
@@ -737,7 +737,7 @@ export function applyFingerprint(
 
 **注意执行顺序**：`if (!signals) return {}` 必须在 `targetIdentity` 检查**之前**——无信号是「观测未到位」，与「用了 CSS selector」是两回事，顺序反了会对 hover 这类无信号动作报出误导性的 `fingerprintSkipped`。锁这一点的是**用例 8**（用例 5、7 都传了非 null 身份，两种顺序下都通过）。
 
-- [ ] **Step 4: 跑测试确认通过**
+- [x] **Step 4: 跑测试确认通过**
 
 ```bash
 pnpm --filter @vortex-browser/mcp exec vitest run tests/fingerprint-apply-actions.test.ts --maxWorkers=2 --minWorkers=1
@@ -745,7 +745,7 @@ pnpm --filter @vortex-browser/mcp exec vitest run tests/fingerprint-apply-action
 
 Expected: PASS（8 个用例）
 
-- [ ] **Step 5: 迁移既有 `verifiable-replay.test.ts`**
+- [x] **Step 5: 迁移既有 `verifiable-replay.test.ts`**
 
 这是唯一受签名变更影响的既有测试文件（`ping-fingerprint.test.ts` 测的是 MCP ping 的 schemaHash，与本函数无关，不要动它）。它有 10 处 `applyFingerprint` 调用，按下面两类处理：
 
@@ -762,7 +762,7 @@ Expected: PASS（8 个用例）
 
 **这条不许靠削弱断言来变绿**（比如把 `toEqual({})` 改成 `toBeDefined()`）：行为变了就删掉过时的用例，新行为由 `fingerprint-apply-actions.test.ts` 覆盖。删除后在文件顶部注释补一句说明为什么少了这条。
 
-- [ ] **Step 6: 跑 mcp 全量单测**
+- [x] **Step 6: 跑 mcp 全量单测**
 
 ```bash
 pnpm --filter @vortex-browser/mcp test -- --maxWorkers=2 --minWorkers=1
@@ -772,7 +772,7 @@ Expected: 全绿。vitest 走 esbuild 只剥类型不做类型检查，所以 `s
 
 **本 Task 结束时仓库处于 `tsc` 不可编译状态，这是预期的**：`server.ts:933` 仍按旧签名传 `actResult.effect`，`pnpm -C packages/mcp build` 会报类型错，由 Task 5 修复。**不要为了让 build 过而顺手改 `server.ts`**——它属于 Task 5 的 Files。也不要在本 Task 跑 build。
 
-- [ ] **Step 7: 提交**
+- [x] **Step 7: 提交**
 
 ```bash
 git add packages/mcp/src/lib/fingerprint-apply.ts packages/mcp/tests/fingerprint-apply-actions.test.ts packages/mcp/tests/verifiable-replay.test.ts
@@ -797,7 +797,7 @@ git commit -m "feat: 效果指纹按动作派发，解除 click 硬守卫
 
 **为什么抽纯函数**：信号提取要读 act 结果的具体字段（`effect` / `value` / `scrollTop`），这段逻辑埋在 `server.ts` 里就只能靠端到端测。抽出来才能用真实返回形状喂断言——这是仓内既定处方。
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 新建 `packages/mcp/tests/act-fingerprint-actions.test.ts`：
 
@@ -847,7 +847,7 @@ describe("extractSignals：从 act 真实返回形状取确定量", () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 ```bash
 pnpm --filter @vortex-browser/mcp exec vitest run tests/act-fingerprint-actions.test.ts --maxWorkers=2 --minWorkers=1
@@ -855,7 +855,7 @@ pnpm --filter @vortex-browser/mcp exec vitest run tests/act-fingerprint-actions.
 
 Expected: FAIL，`extractSignals is not a function`
 
-- [ ] **Step 3: 实现纯函数**
+- [x] **Step 3: 实现纯函数**
 
 在 `packages/mcp/src/lib/fingerprint-apply.ts` 末尾追加：
 
@@ -884,7 +884,7 @@ export function extractSignals(
 }
 ```
 
-- [ ] **Step 4: 跑测试确认通过**
+- [x] **Step 4: 跑测试确认通过**
 
 ```bash
 pnpm --filter @vortex-browser/mcp exec vitest run tests/act-fingerprint-actions.test.ts --maxWorkers=2 --minWorkers=1
@@ -892,7 +892,7 @@ pnpm --filter @vortex-browser/mcp exec vitest run tests/act-fingerprint-actions.
 
 Expected: PASS（7 个用例）
 
-- [ ] **Step 5: 接进 server.ts**
+- [x] **Step 5: 接进 server.ts**
 
 其一，`packages/mcp/src/server.ts:786`，把
 
@@ -935,7 +935,7 @@ Expected: PASS（7 个用例）
 
 `:22` 的 import 补 `extractSignals`。
 
-- [ ] **Step 5.5: 确认 `tsc` 恢复可编译**
+- [x] **Step 5.5: 确认 `tsc` 恢复可编译**
 
 Task 4 结束时 `server.ts` 还按旧签名调用，仓库处于 `tsc` 不可编译状态；本 Task 的职责之一就是解掉它。
 
@@ -945,7 +945,7 @@ pnpm -C packages/mcp build
 
 Expected: 无输出即成功。**若仍报类型错，说明上面三处没改全，停下来汇报报错原文**，不要靠 `as any` 之类的强转压掉。
 
-- [ ] **Step 6: 跑 MCP 全量单测**
+- [x] **Step 6: 跑 MCP 全量单测**
 
 ```bash
 pnpm --filter @vortex-browser/mcp test -- --maxWorkers=2 --minWorkers=1
@@ -953,7 +953,7 @@ pnpm --filter @vortex-browser/mcp test -- --maxWorkers=2 --minWorkers=1
 
 Expected: 全绿
 
-- [ ] **Step 7: 提交**
+- [x] **Step 7: 提交**
 
 ```bash
 git add packages/mcp/src/server.ts packages/mcp/src/lib/fingerprint-apply.ts packages/mcp/tests/act-fingerprint-actions.test.ts
@@ -980,7 +980,7 @@ click 强开，其余动作有确定量可读，不需要副作用观测。"
 
 **已有半成品**：2026-08-13 首次执行本 Task 时，两个文件已写在 worktree `.worktrees/task6-fingerprint-actions/` 里（未提交），fill / 同值 verify / select / type / 受控回滚五条实测均已通过，只有 scroll 因上述缺陷卡住。**优先把那两个文件取过来再按本 Task 的最新内容改**（fixture 的 `<div id="list">` 要换成 `<section>`、scroll 断言要加强），不要从零重写。取完确认 worktree 可以删除。
 
-- [ ] **Step 1: 建 fixture**
+- [x] **Step 1: 建 fixture**
 
 新建 `packages/vortex-bench/playground/public/synth/fingerprint-actions.html`：
 
@@ -1015,7 +1015,7 @@ click 强开，其余动作有确定量可读，不需要副作用观测。"
 </html>
 ```
 
-- [ ] **Step 2: 写 case**
+- [x] **Step 2: 写 case**
 
 新建 `packages/vortex-bench/cases/fingerprint-actions.case.ts`：
 
@@ -1095,7 +1095,7 @@ const def: CaseDefinition = {
 export default def;
 ```
 
-- [ ] **Step 3: 起 playground 并跑 case**
+- [x] **Step 3: 起 playground 并跑 case**
 
 ```bash
 # 终端 A
@@ -1111,7 +1111,7 @@ Expected: PASS。若 `refOf` 匹配不到，先手动看一次 observe 输出再
 - 返回里出现 `fingerprintSkipped` 而非 `fingerprint`，说明 `targetIdentity` 没建立（`server.ts:930` 要求 `params.index` 来自 @ref）。scroll 这一步尤其可能踩到——它历史上常用 `value.container` 选择器而非 @ref。**记下原始返回照实汇报**，不要改成不带指纹的断言。
 - `valueAfter` 拿到的是入参回声而不是回读值（比如受控字段那步返回 `"typed"` 而非 `"REVERTED"`），说明 Task 1/2 的回读没接通到这条链路。**这是真缺陷，停下汇报**，不要把断言改成接受任一值。
 
-- [ ] **Step 4: 跑全量 bench 确认零回归**
+- [x] **Step 4: 跑全量 bench 确认零回归**
 
 ```bash
 pnpm --filter @vortex-browser/bench bench run --all
@@ -1119,7 +1119,7 @@ pnpm --filter @vortex-browser/bench bench run --all
 
 Expected: 98/98（97 + 新增 1）
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add packages/vortex-bench/cases/fingerprint-actions.case.ts packages/vortex-bench/playground/public/synth/fingerprint-actions.html
