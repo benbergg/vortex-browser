@@ -46,6 +46,32 @@ vortex-server 会自动 watch 扩展 dist 变更并推 `reload-extension` 控制
 
 真站评测经 `scripts/run-opencode-eval.mjs` 包装(注入代理/NO_PROXY/key)。`--selfcheck` 会校验 supervisor.js + server.js 存在、模型可用、端点可达。评测只用 vortex MCP 工具。
 
+## 跑测试:必须限并发 ⚠️
+
+vitest 默认吃满核,本仓库规模下会**卡死机器**。任何时候跑测试都要带并发上限:
+
+```bash
+# 单个包
+pnpm --filter @vortex-browser/<pkg> test -- --maxWorkers=2 --minWorkers=1
+# 单个文件
+pnpm --filter @vortex-browser/<pkg> exec vitest run tests/<file>.test.ts --maxWorkers=2 --minWorkers=1
+```
+
+`--minWorkers=1` 不可省(hub 包除外)。**禁止在仓库根跑 `pnpm -r test`**,全仓测试只在发版前手动执行。
+
+bench 需要 playground 常驻:`pnpm --filter @vortex-browser/bench playground` 另开一个终端;
+bench 与 vitest **不要并行**跑(CPU 争用会造成假失败)。
+
 ## 提交规范
 
 遵循 Conventional Commits(`feat`/`fix`/`docs`/`test`/`refactor`/`chore` …),中文描述,动词开头、结尾无句号,禁止 `Co-Authored-By` 等署名。
+
+## 执行实施计划
+
+计划文件在 `docs/superpowers/plans/`,步骤用 `- [ ]` 复选框。执行约定:
+
+- **一次只做一个 Task**,做完停下汇报,等评审通过再接下一个
+- 计划里的 **Global Constraints 段对所有 Task 生效**,不会在每个 Task 里重复
+- 计划给出的测试与实现代码是**逐字**的,照做;认为计划有错**先停下说明**,不要自行改设计
+- TDD 顺序不可颠倒:先写测试 → **真跑出 RED** → 再改实现 → 跑出 GREEN
+- 只碰该 Task 的 Files 段列出的文件,要动别的先问
