@@ -33,8 +33,20 @@ describe("extractSignals：从 act 真实返回形状取确定量", () => {
   });
 
   it("scroll：取位置（dom.ts:1447 的形状）", () => {
-    expect(extractSignals("scroll", { success: true, moved: true, scrollTop: 1200, scrollLeft: 0 }))
+    expect(extractSignals("scroll", { success: true, moved: true, scrollTop: 1200, scrollLeft: 0, scrolledSelf: true }))
       .toEqual({ kind: "scroll", scrollAfter: { top: 1200, left: 0 } });
+  });
+
+  it("scroll 滚的是祖先而非目标本身 → 不发信号，绝不张冠李戴", () => {
+    expect(extractSignals("scroll", {
+      success: true, moved: true, scrollTop: 1120, scrollLeft: 0, scrolledSelf: false,
+    })).toBeUndefined();
+  });
+
+  it("scroll 滚的就是目标本身 → 正常取位置", () => {
+    expect(extractSignals("scroll", {
+      success: true, moved: true, scrollTop: 1120, scrollLeft: 0, scrolledSelf: true,
+    })).toEqual({ kind: "scroll", scrollAfter: { top: 1120, left: 0 } });
   });
 
   it("hover：无确定量 → undefined", () => {

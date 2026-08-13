@@ -74,6 +74,7 @@ export function extractSignals(
   if (action === "scroll") {
     const top = result.scrollTop, left = result.scrollLeft;
     if (typeof top !== "number" || typeof left !== "number") return undefined;
+    if (result.scrolledSelf !== true) return undefined;
     return { kind: "scroll", scrollAfter: { top, left } };
   }
   return undefined;
