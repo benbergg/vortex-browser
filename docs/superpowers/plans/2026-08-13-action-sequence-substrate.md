@@ -51,43 +51,113 @@
 
 - [ ] **Step 1: 写失败测试**
 
-新建 `packages/extension/tests/dom-fill-value-readback.test.ts`。**直接复制** `packages/extension/tests/dom-fill-refocus.test.ts:11-45` 的全部 import 与 `vi.mock` 块（含用 `new Function` 剥离闭包的 `pageQuery` mock 与 `mkReq`），只把 `mkReq` 里的 `requestId` 改成 `"r-fill-value"`，然后追加：
+新建 `packages/extension/tests/dom-fill-value-readback.test.ts`，**完整内容如下**（setup 块严格对齐先例 `packages/extension/tests/dom-fill-refocus.test.ts:11-87`——该文件的 `beforeEach` 除了 window/document 还必须塞入若干全局与 page-side 桩，缺一个 handler 就跑不起来）：
 
 ```ts
+/**
+ * Author: qingwa
+ * Description: FILL 回读值契约。fill 返回 success:true 却不说明填进去的是什么，
+ *   受控组件把值改回去时调用方完全看不见（静默假成功族）。锁住成功返回必须带
+ *   el.value 的实读值，而非入参回声。
+ *   复刻注入语义:mock pageQuery 用 new Function 剥离模块闭包真执行 inline func。
+ */
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { JSDOM } from "jsdom";
+import { DomActions } from "@vortex-browser/shared";
+import { ActionRouter } from "../src/lib/router.js";
+import { registerDomHandlers } from "../src/handlers/dom.js";
+import type { NmRequest } from "@vortex-browser/shared";
+
+vi.mock("../src/action/wait-actionable-auto-force.js", () => ({
+  waitActionableAutoForce: vi.fn().mockResolvedValue(undefined),
+}));
+vi.mock("../src/adapter/page-side-loader.js", () => ({
+  loadPageSideModule: vi.fn().mockResolvedValue(undefined),
+}));
+vi.mock("../src/lib/tab-utils.js", () => ({
+  getActiveTabId: vi.fn().mockResolvedValue(1),
+  buildExecuteTarget: vi.fn().mockReturnValue({ tabId: 1 }),
+  ensureFrameAttached: vi.fn().mockResolvedValue(undefined),
+}));
+vi.mock("../src/adapter/native.js", () => ({
+  pageQuery: async (
+    _tid: number,
+    _frameId: number | undefined,
+    fn: (...a: unknown[]) => unknown,
+    args: unknown[],
+  ) => {
+    const stripped = new Function(`return (${String(fn)})`)() as (...a: unknown[]) => unknown;
+    return await Promise.resolve(stripped(...args));
+  },
+  mapPageError: (res: { error?: string }) => {
+    throw new Error(res.error ?? "page error");
+  },
+}));
+
+function mkReq(args: Record<string, unknown>): NmRequest {
+  return { type: "tool_request", tool: DomActions.FILL, args, requestId: "r-fill-value" } as NmRequest;
+}
+
 describe("FILL 回读值", () => {
   let router: ActionRouter;
   let dom: JSDOM;
 
-  beforeEach(() => {
-    vi.clearAllMocks();
-    dom = new JSDOM(`<!DOCTYPE html><html><body><input id="inp" /></body></html>`, {
-      pretendToBeVisual: true,
-    });
+  function setup(bodyHtml: string): void {
+    dom = new JSDOM(`<!DOCTYPE html><html><body>${bodyHtml}</body></html>`, { pretendToBeVisual: true });
+    const win = dom.window as unknown as Record<string, unknown>;
     globalThis.window = dom.window as unknown as Window & typeof globalThis;
     globalThis.document = dom.window.document as unknown as Document;
+    for (const g of ["HTMLElement", "HTMLInputElement", "HTMLTextAreaElement", "HTMLSelectElement", "Event", "InputEvent"]) {
+      (globalThis as Record<string, unknown>)[g] = win[g];
+    }
+    for (const el of Array.from(dom.window.document.querySelectorAll("input"))) {
+      el.getBoundingClientRect = () =>
+        ({ x: 10, y: 10, width: 100, height: 20, top: 10, bottom: 30, left: 10, right: 110 }) as DOMRect;
+    }
+    win.__vortexDomResolve = {
+      queryAllDeep: (sel: string) => Array.from(dom.window.document.querySelectorAll(sel)),
+      isEnabled: () => true,
+    };
+    win.__vortexFillReject = { checkRejectPattern: () => ({ rejected: false }) };
+    vi.stubGlobal("chrome", {
+      scripting: { executeScript: vi.fn().mockResolvedValue([{ result: [] }]) },
+    });
     router = new ActionRouter();
-    registerDomHandlers(router);
+    const debuggerMgr = {
+      attach: vi.fn().mockResolvedValue(undefined),
+      sendCommand: vi.fn().mockResolvedValue(undefined),
+    };
+    registerDomHandlers(router, debuggerMgr as never);
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    setup(`<input id="inp" />`);
   });
 
   it("成功返回带 value，等于填后实读值", async () => {
-    const res = (await router.dispatch(mkReq({ target: "#inp", value: "hello" }))) as {
-      success: boolean;
-      value: string;
-    };
-    expect(res.success).toBe(true);
-    expect(res.value).toBe("hello");
+    const resp = await router.dispatch(mkReq({ selector: "#inp", value: "hello" }));
+    expect(resp.error).toBeUndefined();
+    expect(resp.result).toMatchObject({ success: true, value: "hello" });
   });
 
-  it("值被规范化时返回的是实读值而非入参", async () => {
-    dom.window.document.body.innerHTML = `<input id="inp" type="number" />`;
-    const res = (await router.dispatch(mkReq({ target: "#inp", value: "007" }))) as {
-      value: string;
-    };
-    // 入参 "007"，浏览器规范化后 el.value 为 "7"；返回必须是后者
-    expect(res.value).toBe("7");
+  it("页面把值改回去时，返回的是回滚后的实读值而非入参回声", async () => {
+    // 受控组件的最小复刻：input 监听器同步把值改掉。
+    // 若实现回声入参，这里会拿到 "typed"；只有真读 el.value 才是 "REVERTED"。
+    setup(`<input id="ctl" />`);
+    const el = dom.window.document.getElementById("ctl") as HTMLInputElement;
+    el.addEventListener("input", () => { el.value = "REVERTED"; });
+
+    const resp = await router.dispatch(mkReq({ selector: "#ctl", value: "typed" }));
+    expect(resp.error).toBeUndefined();
+    expect((resp.result as { value: string }).value).toBe("REVERTED");
   });
 });
 ```
+
+> **为什么第二个用例这么设计**：初稿用的是 `type=number` 填 `"007"` 断言规范化成 `"7"`——**那是错的**，
+> `"007"` 本身就是合法浮点数字符串，不会被规范化，该用例证明不了任何事。改成 `input` 监听器同步回滚：
+> 它是受控组件的最小复刻，且能**唯一地**区分「真回读」与「回声入参」——这正是本 Task 要锁的契约。
 
 - [ ] **Step 2: 跑测试确认失败**
 
@@ -95,7 +165,7 @@ describe("FILL 回读值", () => {
 pnpm --filter @vortex-browser/extension exec vitest run tests/dom-fill-value-readback.test.ts --maxWorkers=2 --minWorkers=1
 ```
 
-Expected: FAIL，`expected undefined to be 'hello'`
+Expected: FAIL，两个用例都因返回对象里没有 `value` 而失败（形如 `expected { success: true, focused: true } to match object { success: true, value: 'hello' }`）
 
 - [ ] **Step 3: 实现**
 
