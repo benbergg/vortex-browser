@@ -63,7 +63,7 @@ APC 是 vortex 当前观察输出的约 4.2 倍，而且这还是**解码之前*
 `{}` 与 `{ includeActionableInformation: true }` 两次调用返回**字节数完全相同、头部十六进制完全相同**
 （57752 / 43314 / `080112f1cf02...`）。要么该参数默认即为真，要么在此构建上未接线。单轮观测，未深究。
 
-### 无 proto 定义时只能捞字符串，捞不到结构
+### 裸字节只能捞字符串；结构要靠 proto 解码
 
 原始字节里能直接看到可读片段：
 
@@ -71,9 +71,19 @@ APC 是 vortex 当前观察输出的约 4.2 倍，而且这还是**解码之前*
 ....R...Skip to content..........."......... ......... .@.rI.Ghttps://github.com/anthropics/...#start-of-content
 ```
 
-即页面文本与 URL 是可提取的，但**节点树、role、actionability 这些真正有价值的结构，没有 Chromium 内部
-的 `AnnotatedPageContent` proto 定义就还原不出来**。这正是调研报告开放问题 #1 所问的那件事，本轮的答案是：
-没有公开解析入口。
+即页面文本与 URL 不解码也能提取，但节点树、role、actionability 必须解码 protobuf 才拿得到。
+
+> **2026-08-13 订正**：本节初稿写的是「没有公开的 `AnnotatedPageContent` proto 定义 / 没有公开解析入口」，
+> **这句话是错的**，由后续调研推翻并经我复核：
+> [`components/optimization_guide/proto/features/common_quality_data.proto`](https://chromium.googlesource.com/chromium/src/+/main/components/optimization_guide/proto/features/common_quality_data.proto)
+> 在 Chromium main 上是公开的，实查确认其中定义了 `AnnotatedPageContent`（含 `root_node`、`main_frame_data`、
+> `viewport_geometry` 等字段）、`ContentNode`、`Geometry`、`InteractionInfo`（含 `clickability_reasons`、
+> `is_focusable`、`is_disabled`）。CDP 的 `Page.getAnnotatedPageContent` 文档本身就指向该 proto。
+> 我当初只在裸字节里翻找，没去查 Chromium 源码就下了结论。
+>
+> **仍然成立的较窄表述**：本轮 spike 手上没有现成的 TypeScript/JS 解码器——要用得 vendor 这份 `.proto`
+> 并自行生成 decoder，还要承担 Experimental 协议漂移的维护成本。这是工程量问题，不是「拿不到」。
+> 注意 `InteractionInfo.clickability_reasons` 正好落在 vortex 的 actionability 主线上，值得单独评估。
 
 ## 3. 本轮探测的限制（必须跟着结论走）
 
@@ -87,7 +97,8 @@ APC 是 vortex 当前观察输出的约 4.2 倍，而且这还是**解码之前*
 
 - Chrome 151 上 `WebMCP` 与 `Page.getAnnotatedPageContent` 两个域在裸 CDP 下都能调用
 - `Schema.getDomains` 漏报这两者，不能用作能力矩阵的数据源
-- APC 可用但原始体积是 vortex 现有观察输出的约 4.2 倍，且无公开 proto 解析入口
+- APC 可用但原始体积是 vortex 现有观察输出的约 4.2 倍；proto 定义在 Chromium main 上公开（见 §2 订正），
+  缺的是现成解码器而非定义
 - WebMCP 是否真的工作、是否经 `chrome.debugger` 可达，两项均未验证
 
 是否值得进入 v-next，本记录不作判断——按约定留给下一次路线关卡。
