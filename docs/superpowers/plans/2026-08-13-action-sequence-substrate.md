@@ -1366,7 +1366,20 @@ git commit -m "test: 序列底座的绿路径与红路径 bench 覆盖
 
 这两条在动 Task 1 之前先确认，结论写进对应 commit message：
 
-1. **同步回读的 value 在受控组件下是否已落定。** 用 vortex 连真实浏览器，在一个 React 受控 input 上 `vortex_fill`，看返回的 `value` 是不是框架重渲染后的最终值。如果框架是异步回滚，同步读到的会是「回滚前」的值——那样 Task 1 的字段会给出误导性的确定量，需要改成延后一帧回读。
+1. ~~**同步回读的 value 在受控组件下是否已落定。**~~ **已实测，结论：安全，Task 1 按原设计做。**
+
+   2026-08-13 在 ant.design 的真实 React 受控 input（`ant-select-input`，有 `onChange` + `value: string` prop）上复刻 fill 的写法（原生 setter + `input`/`change` 事件），逐时点读值：
+
+   | 时点 | `el.value` |
+   |---|---|
+   | 原生 setter 后、派发事件前 | `"probe-A"` |
+   | `input` 事件派发后 | `""` ← React 已同步回滚 |
+   | `change` 事件派发后（**fill 的读取点**） | `""` |
+   | 两帧后 / 300ms 后 | `""` |
+
+   React 18 把 `input` 归为 discrete event 做**同步**重渲染，回滚在 `dispatchEvent` 返回前就完成了，因此 fill 现有读取时点拿到的已是最终值。**不需要延后一帧**（那会给每次 fill 增加一帧延迟）。
+
+   **限制**：该 input 恰好 `readOnly: true`（antd Select 非搜索态的内层 input），是较弱的样本；且本结论只覆盖 React 18 的同步回滚路径。若某框架**异步**回滚（如 Vue `nextTick` 或 React `startTransition`），同步读到的会是回滚前的值。这不构成阻塞——同步读回的值本就是「DOM 在那一刻的事实」，符合诚实表征；但 Task 6 的 bench fixture 必须保留受控回滚用例作为回归锁。
 2. **快照 5 分钟 TTL / 20 条容量是否够序列用。** `packages/mcp/src/lib/observe-render.ts:160-229`。序列步数多、单步慢时可能跨过 TTL，`lookupIdentity` 返回 `null` → 指纹整段为空。先按典型序列估算，超了就在 Task 8 里显式处理（每步 identity 拿不到时标 `executed_unverified` 而不是静默）。
 
 ## 明确不做（YAGNI）
