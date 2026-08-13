@@ -787,7 +787,8 @@ git commit -m "feat: 效果指纹按动作派发，解除 click 硬守卫
 ## Task 5: `server.ts` 放宽守卫并接入确定量
 
 **Files:**
-- Modify: `packages/mcp/src/server.ts:785-786`（守卫）、`:920-940`（信号提取）
+- Modify: `packages/mcp/src/server.ts:785-787`（守卫）、`:920-933`（信号提取与调用点）
+- Modify: `packages/mcp/src/lib/fingerprint-apply.ts`（末尾追加 `extractSignals`）
 - Test: `packages/mcp/tests/act-fingerprint-actions.test.ts`（新建）
 
 **Interfaces:**
@@ -912,7 +913,7 @@ Expected: PASS（7 个用例）
   if (fpActive && params.action === "click") {
 ```
 
-其三，`:936-938` 把
+其三，`:933`（**行号已核对为当前值**）把
 
 ```ts
       const fpOut = applyFingerprint(fpOpt, "click", identity, actResult.effect);
@@ -926,7 +927,23 @@ Expected: PASS（7 个用例）
       );
 ```
 
-并把 `:929` 的 `actResult` 类型标注里的 `effect?: ClickEffectLike` 去掉（现由 `extractSignals` 内部处理），import 补 `extractSignals`。
+并把 `:921-923` 的 `actResult` 类型标注里的 `effect?: import("@vortex-browser/shared").ClickEffectLike` 去掉——现由 `extractSignals` 内部处理，标注简化为：
+
+```ts
+      const actResult = resp.result as Record<string, unknown>;
+```
+
+`:22` 的 import 补 `extractSignals`。
+
+- [ ] **Step 5.5: 确认 `tsc` 恢复可编译**
+
+Task 4 结束时 `server.ts` 还按旧签名调用，仓库处于 `tsc` 不可编译状态；本 Task 的职责之一就是解掉它。
+
+```bash
+pnpm -C packages/mcp build
+```
+
+Expected: 无输出即成功。**若仍报类型错，说明上面三处没改全，停下来汇报报错原文**，不要靠 `as any` 之类的强转压掉。
 
 - [ ] **Step 6: 跑 MCP 全量单测**
 
