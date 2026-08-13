@@ -88,7 +88,11 @@ describe("TYPE 回读值", () => {
   it("成功返回带实读 value，而非入参字符数", async () => {
     const resp = await router.dispatch(mkReq({ selector: "#ed", text: "hello" }));
     expect(resp.error).toBeUndefined();
-    expect(resp.result).toMatchObject({ success: true, typed: 5, value: "hello" });
+    // 必须断言 path:legacy 路径同样返回 success/typed,不钉住分支的话
+    // 一旦测试落到 page-side-dispatch 上会静默变绿,测的就不是这条路
+    expect(resp.result).toMatchObject({
+      success: true, typed: 5, value: "hello", path: "cdp-insertText",
+    });
   });
 
   it("编辑器改写内容时，返回的是实读值而非入参回声", async () => {
