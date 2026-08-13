@@ -76,7 +76,7 @@ export const PUBLIC_TOOLS: ToolDef[] = [
             fingerprint: {
               type: "object",
               description:
-                "可验证重放(click):{mode:'record'} 采集效果指纹返回 fingerprint;" +
+                "可验证重放(click/fill/type/select/scroll):{mode:'record'} 采集效果指纹返回 fingerprint;" +
                 "{mode:'verify',expect:<fp>,autoRecover?} 比对并返回 drift(drift!=null=效果变了)。",
               properties: {
                 mode: { enum: ["record", "verify"] },

@@ -55,3 +55,26 @@ export function applyFingerprint(
 export function shouldRecover(opt: FingerprintOpt, drift: Drift | null): boolean {
   return opt.mode === "verify" && opt.autoRecover === true && drift != null;
 }
+
+/** 从 act 结果取确定量。字段形状对齐 extension/src/handlers/dom.ts 各动作返回。 */
+export function extractSignals(
+  action: string,
+  result: Record<string, unknown>,
+): ActionSignals | undefined {
+  if (action === "click") {
+    const effect = result.effect as ClickEffectLike | undefined;
+    return effect ? { kind: "click", effect } : undefined;
+  }
+  if (action === "fill" || action === "type" || action === "select") {
+    const v = result.value;
+    if (v === undefined) return undefined;
+    // 多选 select 回读是数组,序列化后才能进 valueAfter 的字符串比对
+    return { kind: "value", value: typeof v === "string" ? v : JSON.stringify(v) };
+  }
+  if (action === "scroll") {
+    const top = result.scrollTop, left = result.scrollLeft;
+    if (typeof top !== "number" || typeof left !== "number") return undefined;
+    return { kind: "scroll", scrollAfter: { top, left } };
+  }
+  return undefined;
+}

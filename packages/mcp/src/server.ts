@@ -19,7 +19,7 @@ import { getToolDefs, getToolDef, setEnabledCaps } from "./tools/registry.js";
 import { dispatchNewTool } from "./tools/dispatch.js";
 import { timeoutLadder, splitDiagnosis } from "@vortex-browser/shared";
 import { liftWaitForRefToTarget } from "./lib/wait-for-ref.js";
-import { applyFingerprint, shouldRecover, type FingerprintOpt } from "./lib/fingerprint-apply.js";
+import { applyFingerprint, extractSignals, shouldRecover, type FingerprintOpt } from "./lib/fingerprint-apply.js";
 import { lookupIdentity } from "./lib/observe-render.js";
 import { pickOtherBrowsers, type HealthBrowser } from "./lib/other-browsers.js";
 import { ensureBrowserRunning, installedBrowsers } from "./lib/launch-browser.js";
@@ -778,13 +778,15 @@ export async function handleCallTool(
     params.frameId = parseInt(m[1], 10);
   }
 
-  // ── 可验证确定性重放(click)──
+  // ── 可验证确定性重放(FP_ACTIONS 五种动作)──
   // 零开销契约:options.fingerprint 缺失时整段跳过,act 行为字节级不变。
-  // 守卫双条件:① fpOpt 存在 ② 逻辑 act action === "click"(Phase 1 仅 click 有 effect)。
+  // 守卫双条件:① fpOpt 存在 ② action 在 FP_ACTIONS 内。
   // 注意 action 取 params.action(逻辑 act 动作),非下方 dispatch 后的 dom.click。
+  // observeEffect 只为 click 强开:其余动作有确定量可回读,不需要副作用观测。
   const fpOpt = (params.options as { fingerprint?: FingerprintOpt } | undefined)?.fingerprint;
-  const fpActive = !!fpOpt && params.action === "click";
-  if (fpActive) {
+  const FP_ACTIONS = new Set(["click", "fill", "type", "select", "scroll"]);
+  const fpActive = !!fpOpt && FP_ACTIONS.has(String(params.action));
+  if (fpActive && params.action === "click") {
     // record/verify 都需要 effect 信号 → 强制 observeEffect(caller 未显式开时补上)。
     const opts = (params.options ?? {}) as Record<string, unknown>;
     if (opts.observeEffect === undefined) opts.observeEffect = true;
@@ -915,12 +917,10 @@ export async function handleCallTool(
     }
 
     // ── 可验证确定性重放:record/verify 在 act 正常 JSON 上挂 fingerprint/drift/recovered。──
-    // 两信号正交:fingerprint drift 与 stale-ref 互不相干,本块只在 act 成功且带 effect 后跑,
+    // 两信号正交:fingerprint drift 与 stale-ref 互不相干,本块只在 act 成功且有确定量信号后跑,
     // 不触碰 resolveTargetParam 的 STALE_SNAPSHOT 路径。
     if (fpActive && fpOpt && resp.result && typeof resp.result === "object") {
-      const actResult = resp.result as Record<string, unknown> & {
-        effect?: import("@vortex-browser/shared").ClickEffectLike;
-      };
+      const actResult = resp.result as Record<string, unknown>;
       // targetIdentity:由解析得的 {index, frameId} 经快照缓存反查语义身份(role::name::frameId)。
       // params.index/frameId/snapshotId 由上方 target 翻译写入;snapshotId 优先用解析结果,
       // 回退当前 activeSnapshotId。index 缺失(selector 直传无快照坐标)→ identity 为 null,
@@ -930,7 +930,9 @@ export async function handleCallTool(
       const frameId = (params.frameId as number | undefined) ?? 0;
       const identity =
         snapId != null && idx != null ? lookupIdentity(snapId, frameId, idx) : null;
-      const fpOut = applyFingerprint(fpOpt, "click", identity, actResult.effect);
+      const fpOut = applyFingerprint(
+        fpOpt, String(params.action), identity, extractSignals(String(params.action), actResult),
+      );
       Object.assign(actResult, fpOut);
       // autoRecover:仅当 verify 检出 drift 且显式 autoRecover:true 时再 observe 一次,
       // 否则诚实交回调用方(不自动 re-observe)。
