@@ -20,6 +20,7 @@ import { dispatchNewTool } from "./tools/dispatch.js";
 import { timeoutLadder, splitDiagnosis } from "@vortex-browser/shared";
 import { liftWaitForRefToTarget } from "./lib/wait-for-ref.js";
 import { applyFingerprint, extractSignals, shouldRecover, type FingerprintOpt } from "./lib/fingerprint-apply.js";
+import { runSequence, type SequenceStepInput, type OnFailure } from "./lib/sequence-run.js";
 import { lookupIdentity } from "./lib/observe-render.js";
 import { pickOtherBrowsers, type HealthBrowser } from "./lib/other-browsers.js";
 import { ensureBrowserRunning, installedBrowsers } from "./lib/launch-browser.js";
@@ -699,6 +700,62 @@ export async function handleCallTool(
     return withEvents([{
       type: "text" as const,
       text: JSON.stringify(summary, null, 2),
+    }]);
+  }
+
+  // 特殊 tool: vortex_sequence(多步序列,每步自证)
+  // 与 fill_form 的差别:后者只回 ok/error,答不了「点了没有」;序列用三态区分,
+  // 非幂等动作的重试边界才有依据。
+  if (toolDef.name === "vortex_sequence") {
+    const steps = params.steps as SequenceStepInput[] | undefined;
+    if (!Array.isArray(steps) || steps.length === 0) {
+      // 与 fill_form 同款错误形态(server.ts:600-608):本文件不用 McpError
+      return {
+        isError: true,
+        content: [{
+          type: "text" as const,
+          text: "Error [INVALID_PARAMS]: vortex_sequence: steps must be a non-empty array.",
+        }],
+      };
+    }
+    const onFailure = (params.onFailure as OnFailure | undefined) ?? "stop";
+    const tabId = params.tabId as number | undefined;
+    const currentTabId = typeof tabId === "number" ? tabId : null;
+
+    const { resolveTargetParam } = await import("./lib/ref-parser.js");
+
+    const report = await runSequence(steps, onFailure, async (step) => {
+      const actParams: Record<string, unknown> = { action: step.action };
+      try {
+        const resolved = resolveTargetParam(
+          step.target, activeSnapshotId, activeSnapshotHash, activeSnapshotTabId, currentTabId,
+        );
+        if (resolved.selector) actParams.selector = resolved.selector;
+        if (resolved.index != null) {
+          actParams.index = resolved.index;
+          actParams.snapshotId = resolved.snapshotId;
+          if (resolved.frameId && resolved.frameId !== 0) actParams.frameId = resolved.frameId;
+        }
+      } catch (err) {
+        // 这里不能落到 runSequence 的兜底 catch:那只取 err.message,会把
+        // STALE_SNAPSHOT 的错误码和「重新 observe」的 hint 一起丢掉
+        return { ok: false, error: formatError(err) };
+      }
+      if (step.value !== undefined) actParams.value = step.value;
+      // click/hover 的自证只能靠副作用信号,不强开就永远是 unknown
+      if (step.action === "click" || step.action === "hover") {
+        actParams.options = { observeEffect: true };
+      }
+      const d = dispatchNewTool("vortex_act", actParams);
+      if (!d) return { ok: false, error: "Error [INVALID_PARAMS]: unsupported action" };
+      const resp = await sendRequest(d.action, d.params, PORT, tabId, DEFAULT_TIMEOUT);
+      if (resp.error) return { ok: false, error: `[${resp.error.code}]: ${resp.error.message}` };
+      return { ok: true, result: (resp.result ?? {}) as Record<string, unknown> };
+    });
+
+    return withEvents([{
+      type: "text" as const,
+      text: JSON.stringify(report, null, 2),
     }]);
   }
 

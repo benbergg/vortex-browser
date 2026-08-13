@@ -1778,7 +1778,7 @@ git commit -m "feat: vortex_sequence 公开 schema 与字节预算登记
 
 **必须复用 `dispatchNewTool("vortex_act", …)`，不要自己映射动作名或处理 value**。原计划让「把 fill_form 里的映射抽出来共用」，**实查那里没有这段东西**——`fill_form` 只做 `widget → dom.fill/dom.commit`（`server.ts:644-665`），不认识 click/type/select/scroll/hover。真正的通用映射是 `dispatch.ts:372` 的 `ACT_TO_V05`，而且 `vortex_act` 的 dispatch 分支已经处理好每种动作的 value 语义（scroll 结构化展开、type→text、select JSON 还原、以及 2026-08-13 修的 scroll keepTarget）。自己再写一份必然漂移。
 
-- [ ] **Step 1: 实现分支**
+- [x] **Step 1: 实现分支**
 
 在 `packages/mcp/src/server.ts` 的 `vortex_fill_form` 分支（`:589-703`）之后插入：
 
@@ -1846,7 +1846,7 @@ import 补：`runSequence`、`type SequenceStepInput`、`type OnFailure`（来�
 
 `dispatchNewTool`（`server.ts:19`）与 `formatError`（`server.ts:77` 同文件函数）可直接用。**`resolveTargetParam` 不是顶部 import**——`server.ts` 里三处（`:610` `:713` `:745`）都是分支内 `await import("./lib/ref-parser.js")` 动态引入，所以上面的代码块里保留了那一行，照抄即可，别删也别改成顶部 import。
 
-- [ ] **Step 2: 跑 MCP 全量单测**
+- [x] **Step 2: 跑 MCP 全量单测**
 
 ```bash
 pnpm --filter @vortex-browser/mcp test -- --maxWorkers=2 --minWorkers=1
@@ -1854,7 +1854,7 @@ pnpm --filter @vortex-browser/mcp test -- --maxWorkers=2 --minWorkers=1
 
 Expected: 全绿。
 
-- [ ] **Step 3: 确认可编译**
+- [x] **Step 3: 确认可编译**
 
 ```bash
 pnpm -C packages/mcp build
@@ -1862,7 +1862,7 @@ pnpm -C packages/mcp build
 
 Expected: 无输出即成功。
 
-- [ ] **Step 4: 提交**
+- [x] **Step 4: 提交**
 
 ```bash
 git add packages/mcp/src/server.ts
