@@ -150,13 +150,39 @@ flowchart TD
 
 - **值类/滚动类指纹的 `urlChanged` 是「未采集」而非「已测为假」。** `normalizeValueFingerprint` / `normalizeScrollFingerprint` 写死 `false`，因为 act 在 fill/type/select/scroll 的返回里不带 url——只有 click 经 `effect.urlChanged` 有这个信号（`server.ts:920-940` 链路）。后果是**窄盲区**：`<select>` 跳转菜单在录制时导航、重放时未导航，只要回读值一致就仍会判 verified。补齐需要从扩展侧多传一个导航信号，属独立改动，本轮不做。
 
+## 6.6 快照生命周期实测（2026-08-13，Task 7-9 的承重前提）
+
+原假设「快照 5 分钟 TTL / 20 条容量够不够序列用」**问错了对象**，实测澄清如下。
+
+**三层机制，此前混为一谈：**
+
+| 层 | 文件 | 作用 | 失效条件 |
+|---|---|---|---|
+| MCP 渲染缓存 | `observe-render.ts:166-169` | 存 `role::name::frameId` 供指纹反查与 observe diff | 5 分钟 TTL / 20 条容量 |
+| 扩展快照存储 | `snapshot-store.ts:36` | `@ref` → 元素解析 | 60 秒 TTL，**无容量上限** |
+| MCP ref 哈希闸 | `ref-parser.ts:200` | 拒绝非当前快照的 ref | `activeSnapshotHash` 一变即失效 |
+
+**实测（真浏览器，同一页面）：**
+
+1. observe 得 `@8295:e0` → 静置 **75 秒**（期间无任何 observe）→ 用该 ref `extract` **成功**返回 `"长内容"`。
+   说明扩展侧 60s TTL 是**惰性**的：`getSnapshotEntry()`（`snapshot-store.ts:54-56`）读取时不查 TTL，GC 只在 `newSnapshotId()` 时被动跑（`observe.ts:4220`）。
+2. 再 observe 一次 → 同一个旧 ref **立刻失败**：`STALE_SNAPSHOT: Ref bound to expired snapshot (hash mismatch)`。
+
+**真正的约束是「同时只有一个活快照」，与时间无关。** `ref-parser.ts:205` 解析成功时返回的是 `activeSnapshotId` 而非 ref 自带的 id——MCP 视角下不存在「多个并存的快照」。
+
+**对 `vortex_sequence` 的两条硬约束：**
+
+- 「observe 一次 → 跑 N 步」的序列**不受时长限制**，跑几分钟也没事，只要中途不再 observe。60 秒这个数字不必设计规避。
+- **任何中途 observe 会一次性作废序列已持有的全部 ref**，包括 drift 后 `autoRecover` 的那次 re-observe。这不是 60 秒后才发生，是立刻发生。
+- 需注意 descriptor 自愈（`resolve-target.ts` 按 role+name 重匹配）**救不了这个场景**：哈希闸在 MCP 层先抛错，请求根本到不了扩展侧。
+
 ## 7. 待验证假设
 
 | 假设 | 状态 | 实施前必须做什么 |
 |---|---|---|
 | ~~micro-verify 的回读时机与指纹要求的时机一致~~ | **已推翻** | micro-verify 是死代码；真实回读在 dom.ts 内联，见 §2 订正 |
 | 同步回读的 value 在受控组件下已落定 | **推测** | 拿 React 受控 input 实测：`fill` 后同步读 `el.value` 是否已是最终值（框架可能异步重渲染回滚） |
-| 快照 5 分钟 TTL / 20 条容量够序列用 | **推测** | 按典型序列长度与耗时估算，必要时实测跨 TTL 的行为 |
+| ~~快照 5 分钟 TTL / 20 条容量够序列用~~ | **问法有误，已实测澄清** | 见下方 §6.6：TTL 根本不是约束，「同时只有一个活快照」才是 |
 | 序列能显著降低往返次数 | **推测** | 用 bench `callCount` 对同一任务做序列 vs N 次单动作的对照 |
 | 新增一个公开工具后仍在 I15 预算内 | **推测** | 写完 schema 后实测 payload 字节，按惯例登记 |
 | 重名元素在序列重放中的误命中率可接受 | **未测** | 需要构造重名 fixture 实测，这是 luna 列出的核心证伪条件 |
