@@ -150,3 +150,31 @@ export function parseMicrodata(doc: Document): MicrodataResult {
   }
   return { entities, itemscopes: all.length, itemrefsSkipped };
 }
+
+export interface OpenGraphResult {
+  entities: SchemaEntity[];
+  metas: number;
+}
+
+export function parseOpenGraph(doc: Document): OpenGraphResult {
+  const props: Record<string, unknown> = {};
+  let metas = 0;
+  for (const m of Array.from(doc.querySelectorAll("meta"))) {
+    // OGP 规范要求 property=，但 MDN 等站实际用 name=，两个都收否则静默空
+    const key = m.getAttribute("property") || m.getAttribute("name") || "";
+    if (!key.startsWith("og:")) continue;
+    metas++;
+    const name = key.slice(3);
+    if (!name) continue;
+    const value = m.getAttribute("content") || "";
+    const prev = props[name];
+    if (prev === undefined) props[name] = value;
+    else if (Array.isArray(prev)) prev.push(value);
+    else props[name] = [prev, value];
+  }
+  if (metas === 0) return { entities: [], metas: 0 };
+  const type = typeof props.type === "string" && props.type ? props.type : "website";
+  const e: SchemaEntity = { type, props, source: "og", untrusted: true };
+  if (typeof props.url === "string" && props.url) e.id = props.url;
+  return { entities: [e], metas };
+}

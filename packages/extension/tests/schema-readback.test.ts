@@ -5,7 +5,7 @@
 
 import { describe, it, expect } from "vitest";
 import { JSDOM } from "jsdom";
-import { parseJsonLd, parseMicrodata } from "../src/page-side/schema-readback.js";
+import { parseJsonLd, parseMicrodata, parseOpenGraph } from "../src/page-side/schema-readback.js";
 
 /**
  * query mode=schema 真源单测。jsdom 构造真实 document，真实执行解析器，不 mock 内部。
@@ -175,5 +175,41 @@ describe("parseMicrodata", () => {
 
   it("页面无 microdata：全零，不抛", () => {
     expect(parseMicrodata(bodyOf("<p>hi</p>"))).toEqual({ entities: [], itemscopes: 0, itemrefsSkipped: 0 });
+  });
+});
+
+describe("parseOpenGraph", () => {
+  it("规范写法 property=：收成单个实体，键去掉 og: 前缀", () => {
+    const doc = docOf(`
+      <meta property="og:type" content="video.other">
+      <meta property="og:title" content="Never Gonna Give You Up">
+      <meta property="og:url" content="https://b.tv/BV1GJ">`);
+    const r = parseOpenGraph(doc);
+    expect(r.metas).toBe(3);
+    expect(r.entities).toHaveLength(1);
+    expect(r.entities[0]).toMatchObject({ type: "video.other", source: "og", untrusted: true, id: "https://b.tv/BV1GJ" });
+    expect(r.entities[0].props).toEqual({ type: "video.other", title: "Never Gonna Give You Up", url: "https://b.tv/BV1GJ" });
+  });
+
+  it("非规范写法 name=：一样要收（MDN 实测就是这么写的）", () => {
+    const doc = docOf(`<meta name="og:title" content="MDN table"><meta name="og:site_name" content="MDN Web Docs">`);
+    const r = parseOpenGraph(doc);
+    expect(r.metas).toBe(2);
+    expect(r.entities[0].props).toEqual({ title: "MDN table", site_name: "MDN Web Docs" });
+  });
+
+  it("无 og:type 时 type 回退为 website", () => {
+    const doc = docOf(`<meta property="og:title" content="T">`);
+    expect(parseOpenGraph(doc).entities[0].type).toBe("website");
+  });
+
+  it("同键重复（og:image 多张）：值收成数组", () => {
+    const doc = docOf(`<meta property="og:image" content="a.png"><meta property="og:image" content="b.png">`);
+    expect(parseOpenGraph(doc).entities[0].props.image).toEqual(["a.png", "b.png"]);
+  });
+
+  it("只有 twitter:/其他 meta：不产实体", () => {
+    const doc = docOf(`<meta name="twitter:card" content="summary"><meta name="description" content="d">`);
+    expect(parseOpenGraph(doc)).toEqual({ entities: [], metas: 0 });
   });
 });
