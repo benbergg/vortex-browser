@@ -85,26 +85,77 @@ APC 是 vortex 当前观察输出的约 4.2 倍，而且这还是**解码之前*
 > 并自行生成 decoder，还要承担 Experimental 协议漂移的维护成本。这是工程量问题，不是「拿不到」。
 > 注意 `InteractionInfo.clickability_reasons` 正好落在 vortex 的 actionability 主线上，值得单独评估。
 
+## 2.5 后续 spike：`chrome.debugger` 通道实测（2026-08-13，二次）
+
+上一轮把「扩展通道是否可达」列为最大未验证项。本轮用**一次性探针扩展**（MV3，仅 `debugger`+`tabs` 权限，
+与 vortex 源码零关联）实测，答案是**可达**。
+
+**环境**：Chrome for Testing `151.0.7922.138`，mac-x64，headful，临时 profile，同一目标页
+`github.com/anthropics/anthropic-sdk-typescript`。用 CfT 是因为**品牌版 Chrome 137+ 已移除 `--load-extension`，
+142 起连 `--disable-features=DisableLoadExtensionCommandLineSwitch` 这个绕法也一并砍掉**（本机 151 上两条都实测失效：
+扩展根本不进 profile）。CfT 是官方给自动化的替代二进制，Chromium 版本相同。
+
+| 探针 | 结果 |
+|---|---|
+| `Page.enable`（阳性对照） | OK |
+| `Accessibility.enable`（阳性对照） | OK |
+| `Accessibility.getFullAXTree`（阳性对照） | OK，1628 节点 |
+| `Schema.getDomains` | **ERR `-32601 'Schema.getDomains' wasn't found`** |
+| `Page.getAnnotatedPageContent {}` | **OK**，base64 105720 → 解码 **79288 B** |
+| `Page.getAnnotatedPageContent {includeActionableInformation:true}` | OK，字节与上一行完全相同 |
+| `WebMCP.enable` | **OK** |
+| `WebMCP.disable` | **OK** |
+
+三条阳性对照全过（都是 vortex 现在正在用的命令），故这不是探针故障。
+
+**三点值得记下**：
+
+1. **`Schema.getDomains` 在扩展通道上根本不存在**，而它在裸 CDP 上是能返回 35 个域的。同一个方法两条通道
+   行为不同——这从第二个角度坐实了 §1 的结论：它不能用作能力矩阵数据源。
+2. **`includeActionableInformation` 字节相同这次有了解释**：CDP 文档写明该参数**默认即为 true**，所以显式传
+   与不传本就该一样。上一轮记的「要么默认为真、要么未接线」，现在可以收敛到前者。
+3. **同一 URL 的 APC 体积两轮差了近一倍**：裸 CDP headless 43314 B vs 扩展通道 headful **79288 B**。
+   最可能是 headless 与 headful 的布局/渲染差异（headful 有真实视口，内容铺开更多），但**本轮没做对照实验，
+   这个归因仍是推测**。要用 APC 体积做预算判断，必须先把这个变量控住。
+
+**仍未验证**：`WebMCP.enable` 成功只证明域可达。该页面没有注册任何 WebMCP 工具，所以「WebMCP 是否真能工作」
+与上一轮一样没有答案——要验必须找到真正调用 `document.modelContext` 注册工具的页面。
+
+**vortex 自身还有一道门**：即便通道可达，仓内 `assertEnableable` 的白名单
+（`packages/extension/src/lib/cdp-domains.ts`，仅 Accessibility/DOM/Network/Page/Runtime 五个域）会先把
+`WebMCP.enable` 拒掉，且该文件顶部明确写着「不要凭印象往里加」。这是我们自己的门，不是浏览器的限制。
+
 ## 3. 本轮探测的限制（必须跟着结论走）
 
-1. **走的是裸调试端口，不是 `chrome.debugger`。** 扩展传输有受限域名单，因此「WebMCP.enable 在裸 CDP 上
-   可调」**不等于** vortex 能用它。这一条未验证，要验必须在扩展里加代码——超出本 spike 范围。
+1. ~~**走的是裸调试端口，不是 `chrome.debugger`。**~~ **已由 §2.5 的二次 spike 解决：扩展通道实测可达。**
+   遗留的限制变成：实测用的是 Chrome for Testing 而非用户日常的品牌版 Chrome/Edge——`chrome.debugger` 的域限制
+   是 Chromium 代码而非品牌差异，故认为可迁移，但**未在品牌版上直接复现**。
 2. 单次运行、单个 Chrome 构建、headless 模式、空 profile。无跨通道（Stable/Beta/Dev/Canary）对比。
 3. WebMCP 的实际功能未验证（无 Origin Trial、无声明工具的页面）。
 4. APC 只测了一个页面。字节量随页面复杂度的变化未测。
 
 ## 4. 事实小结（不含路线判断）
 
-- Chrome 151 上 `WebMCP` 与 `Page.getAnnotatedPageContent` 两个域在裸 CDP 下都能调用
-- `Schema.getDomains` 漏报这两者，不能用作能力矩阵的数据源
-- APC 可用但原始体积是 vortex 现有观察输出的约 4.2 倍；proto 定义在 Chromium main 上公开（见 §2 订正），
-  缺的是现成解码器而非定义
-- WebMCP 是否真的工作、是否经 `chrome.debugger` 可达，两项均未验证
+- Chrome 151 上 `WebMCP` 与 `Page.getAnnotatedPageContent` 两个域**在裸 CDP 与 `chrome.debugger` 扩展通道下都能调用**（§2.5）
+- `Schema.getDomains` 不能用作能力矩阵的数据源：裸 CDP 下漏报这两者，扩展通道下该方法干脆不存在
+- APC 可用；proto 定义在 Chromium main 上公开（见 §2 订正），缺的是现成解码器而非定义。
+  体积两轮分别为 43314 B（headless 裸 CDP）与 79288 B（headful 扩展通道），差异归因未做对照，不可直接引用
+- **WebMCP 是否真的工作仍未验证**——域可达 ≠ 有功能，需要一个真正注册了工具的页面
+- 阻碍 vortex 用上它们的下一道门在仓内自己手里（`assertEnableable` 白名单），不在浏览器
 
 是否值得进入 v-next，本记录不作判断——按约定留给下一次路线关卡。
 
 ## 复现
 
-探测脚本为一次性产物，未入仓。要点：临时 `--user-data-dir` + `--remote-debugging-port`
+探测脚本为一次性产物，未入仓。
+
+**第一轮（裸 CDP）**：临时 `--user-data-dir` + `--remote-debugging-port`
 （Chrome 136+ 只封默认 profile，临时 profile 不受影响），裸 WebSocket 发 `Schema.getDomains`、
 各域 `enable`、`Page.getAnnotatedPageContent`。
+
+**第二轮（扩展通道）**：写一个 MV3 探针扩展（`permissions: ["debugger","tabs"]`，SW 里
+`chrome.debugger.attach` 后逐条 `sendCommand`），用 **Chrome for Testing** 加载
+（品牌版 Chrome 已不支持 `--load-extension`），结果 POST 到本地 sink 落盘。两个必要设计：
+① 每条命令带独立本地超时——首版没有，某条回调不返回时整轮静默无输出；
+② 逐条增量回传而非跑完一次性回传——否则中途挂死就什么都看不到。
+阳性对照（`Page.enable` / `Accessibility.*`）必须放在待验证项之前，用来区分「API 被禁」与「探针坏了」。
