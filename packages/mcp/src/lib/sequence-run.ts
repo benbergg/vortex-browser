@@ -2,6 +2,7 @@
 // 三态而非 ok/error:非幂等动作在「已执行但未验证」下重试会造成重复副作用,
 // 调用方必须能把它与「根本没执行」分开。
 import type { FingerprintOut } from "./fingerprint-apply.js";
+import type { ClickEffectLike } from "@vortex-browser/shared";
 
 export type StepState = "not_executed" | "executed_unverified" | "executed_verified" | "failed";
 export type OnFailure = "stop" | "continue";
@@ -13,18 +14,59 @@ export interface StepTrace {
   state: StepState;
   error?: string;
   drift?: { classes: string[] } | null;
+  effect?: StepEffect;
 }
 
-export function classifyStep(outcome: { ok: boolean; error?: string; fp: FingerprintOut }): {
-  state: StepState;
-  drift?: { classes: string[] } | null;
-} {
+/** confirmed=有证据生效;unconfirmed=有证据未生效;unknown=无可用信号。三值不可合成布尔。 */
+export type StepEffect = "confirmed" | "unconfirmed" | "unknown";
+
+const READBACK_CAP = 500;
+
+/** 回读值在扩展侧封顶 500 加省略号,入参不施加同样截断则长文本必然误判。 */
+function capped(v: string): string {
+  return v.length > READBACK_CAP ? v.slice(0, READBACK_CAP) + "…" : v;
+}
+
+export function verifyStepEffect(
+  action: string,
+  requested: unknown,
+  result: Record<string, unknown>,
+): StepEffect {
+  if (action === "fill" || action === "type" || action === "select") {
+    const back = result.value;
+    if (typeof back !== "string") return "unknown";
+    const want = typeof requested === "string" ? requested : JSON.stringify(requested);
+    if (typeof want !== "string") return "unknown";
+    if (capped(want) === back) return "confirmed";
+    // select 回读的是 option value,与传入的可见文本本就可能不同,分不清选错还是标签≠值
+    return action === "select" ? "unknown" : "unconfirmed";
+  }
+  if (action === "scroll") {
+    if (typeof result.moved !== "boolean") return "unknown";
+    return result.moved ? "confirmed" : "unconfirmed";
+  }
+  if (action === "click" || action === "hover") {
+    const e = result.effect as ClickEffectLike | undefined;
+    if (!e) return "unknown";
+    const any =
+      e.domMutations > 0 || e.networkRequests > 0 || e.urlChanged ||
+      e.focusChanged || e.ariaChanged || e.userFeedback !== "none";
+    return any ? "confirmed" : "unconfirmed";
+  }
+  return "unknown";
+}
+
+export function classifyStep(outcome: {
+  ok: boolean; error?: string; fp: FingerprintOut; effect?: StepEffect;
+}): { state: StepState; drift?: { classes: string[] } | null; effect?: StepEffect } {
   if (!outcome.ok) return { state: "failed" };
   const drift = outcome.fp.drift;
-  if (drift === null) return { state: "executed_verified", drift: null };
-  if (drift) return { state: "executed_unverified", drift };
-  // 无指纹:record 模式或信号未到位,已执行但无从验证,不谎称已验证
-  return { state: "executed_unverified" };
+  // 重放路径:有 expect 指纹时以 drift 为准
+  if (drift === null) return { state: "executed_verified", drift: null, effect: outcome.effect };
+  if (drift) return { state: "executed_unverified", drift, effect: outcome.effect };
+  // 新建序列没有 expect,只能靠单步自证
+  if (outcome.effect === "confirmed") return { state: "executed_verified", effect: "confirmed" };
+  return { state: "executed_unverified", effect: outcome.effect ?? "unknown" };
 }
 
 export function shouldContinue(state: StepState, onFailure: OnFailure): boolean {

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { classifyStep, shouldContinue, summarizeTrace, type StepTrace } from "../src/lib/sequence-run.js";
+import { classifyStep, shouldContinue, summarizeTrace, verifyStepEffect, type StepTrace } from "../src/lib/sequence-run.js";
 
 describe("classifyStep：三态必须可分", () => {
   it("请求失败 → failed（未执行或执行未知，交由 error 说明）", () => {
@@ -46,5 +46,61 @@ describe("summarizeTrace", () => {
     expect(summarizeTrace(traces)).toEqual({
       total: 3, verified: 1, unverified: 0, failed: 1, notExecuted: 1,
     });
+  });
+});
+
+describe("verifyStepEffect：单步是否生效", () => {
+  it("fill 回读值等于入参 → confirmed", () => {
+    expect(verifyStepEffect("fill", "a@b.com", { success: true, value: "a@b.com" }))
+      .toBe("confirmed");
+  });
+
+  it("fill 被受控组件改回 → unconfirmed（这是静默假成功的拦截点）", () => {
+    expect(verifyStepEffect("fill", "typed", { success: true, value: "REVERTED" }))
+      .toBe("unconfirmed");
+  });
+
+  it("fill 没有回读值 → unknown，不把「不知道」说成「没生效」", () => {
+    expect(verifyStepEffect("fill", "x", { success: true })).toBe("unknown");
+  });
+
+  it("超 500 的入参按同样规则截断后再比 → confirmed", () => {
+    const long = "字".repeat(1200);
+    const back = "字".repeat(500) + "…";
+    expect(verifyStepEffect("type", long, { success: true, value: back })).toBe("confirmed");
+  });
+
+  it("select 回读值与入参不等 → unknown（option value 与可见文本本就可能不同）", () => {
+    expect(verifyStepEffect("select", "上海", { success: true, value: "sh" })).toBe("unknown");
+  });
+
+  it("scroll moved:false → unconfirmed", () => {
+    expect(verifyStepEffect("scroll", undefined, { success: true, moved: false }))
+      .toBe("unconfirmed");
+  });
+
+  it("click 有任一副作用信号 → confirmed", () => {
+    expect(verifyStepEffect("click", undefined, {
+      success: true,
+      effect: { domMutations: 3, networkRequests: 0, urlChanged: false,
+                focusChanged: false, ariaChanged: false, userFeedback: "none" },
+    })).toBe("confirmed");
+  });
+
+  it("click 未开 observeEffect → unknown", () => {
+    expect(verifyStepEffect("click", undefined, { success: true })).toBe("unknown");
+  });
+});
+
+describe("classifyStep 接入自证", () => {
+  it("无 drift 但自证 confirmed → executed_verified", () => {
+    expect(classifyStep({ ok: true, fp: {}, effect: "confirmed" }).state)
+      .toBe("executed_verified");
+  });
+
+  it("无 drift 且自证 unconfirmed → executed_unverified，effect 原样带出", () => {
+    const r = classifyStep({ ok: true, fp: {}, effect: "unconfirmed" });
+    expect(r.state).toBe("executed_unverified");
+    expect(r.effect).toBe("unconfirmed");
   });
 });
