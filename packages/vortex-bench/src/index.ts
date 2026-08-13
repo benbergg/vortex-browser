@@ -28,6 +28,7 @@ import { judgePage, type JudgeTarget } from "./runner/judge.js";
 import { renderJudgeMarkdown } from "./judge-report.js";
 import type { JudgeReport, JudgePageResult } from "./judge-types.js";
 import { resolveProfile } from "./runner/judge-screenshot-profile.js";
+import { runExternalBaseline, summarize } from "./runner/external-baseline.js";
 import type { ScreenshotProfile } from "./runner/judge-screenshot-profile.js";
 import { generate } from "./runner/fuzz-generate.js";
 import { runPage, runSelfTest, cleanupTmp, extractDiscrepancies, selfTestPassed } from "./runner/fuzz-run.js";
@@ -782,6 +783,39 @@ async function cmdEval(args: string[]): Promise<number> {
   return 0;
 }
 
+/**
+ * 外部基线对照:同一组页面上跑 vortex 与 chrome-devtools-mcp,产出字节/耗时对照。
+ * 不进 CI —— 它要拉 npx 包并另起一个 Chrome,只在人工需要外部锚点时手动跑。
+ */
+async function cmdExternalBaseline(args: string[]): Promise<number> {
+  const pages = args.length > 0 ? args : [playgroundUrl() + "/synth/schema-readback.html"];
+  const mcpBin = resolveMcpBin();
+  process.stdout.write(`[vortex-bench] external-baseline  pages=${pages.length}  mcp=${mcpBin}\n`);
+
+  const samples = await runExternalBaseline(pages, mcpBin);
+  const summary = summarize(samples);
+  for (const s of samples) {
+    const status = s.ok ? "✓" : "✗";
+    process.stdout.write(
+      `  ${status} ${s.tool.padEnd(22)} ${String(s.bytes).padStart(7)}B ${String(s.durationMs).padStart(6)}ms  ${s.page}` +
+        (s.error ? `\n      ${s.error}` : "") + "\n",
+    );
+  }
+  for (const [tool, t] of Object.entries(summary.tools)) {
+    process.stdout.write(
+      `[summary] ${tool}: pages=${t.pages} failures=${t.failures} bytes=${t.totalBytes} avgMs=${t.avgDurationMs}\n`,
+    );
+  }
+  process.stdout.write(`[caveat] ${summary.caveat}\n`);
+
+  const dir = resolve(PKG_ROOT, "..", "..", "reports", "external-baseline-2026-08");
+  await mkdir(dir, { recursive: true });
+  const out = resolve(dir, "latest.json");
+  await writeFile(out, JSON.stringify({ samples, summary }, null, 2), "utf-8");
+  process.stdout.write(`[report] ${out}\n`);
+  return 0;
+}
+
 async function main(): Promise<number> {
   const [, , cmd, ...rest] = process.argv;
   if (!cmd || cmd === "--help" || cmd === "-h") {
@@ -809,6 +843,8 @@ async function main(): Promise<number> {
       return cmdFuzz(rest);
     case "eval":
       return cmdEval(rest);
+    case "external-baseline":
+      return cmdExternalBaseline(rest);
     default:
       process.stderr.write(`[vortex-bench] 未知命令: ${cmd}\n\n${USAGE}`);
       return 1;

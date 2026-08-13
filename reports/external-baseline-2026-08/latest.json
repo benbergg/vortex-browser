@@ -1,0 +1,49 @@
+{
+  "samples": [
+    {
+      "tool": "vortex",
+      "page": "http://localhost:5173/synth/schema-readback.html",
+      "bytes": 233,
+      "durationMs": 715,
+      "ok": true
+    },
+    {
+      "tool": "chrome-devtools-mcp",
+      "page": "http://localhost:5173/synth/schema-readback.html",
+      "bytes": 477,
+      "durationMs": 21432,
+      "ok": true
+    },
+    {
+      "tool": "vortex",
+      "page": "https://github.com/anthropics/anthropic-sdk-typescript",
+      "bytes": 10248,
+      "durationMs": 13631,
+      "ok": true
+    },
+    {
+      "tool": "chrome-devtools-mcp",
+      "page": "https://github.com/anthropics/anthropic-sdk-typescript",
+      "bytes": 24445,
+      "durationMs": 17479,
+      "ok": true
+    }
+  ],
+  "summary": {
+    "tools": {
+      "vortex": {
+        "pages": 2,
+        "failures": 0,
+        "totalBytes": 10481,
+        "avgDurationMs": 7173
+      },
+      "chrome-devtools-mcp": {
+        "pages": 2,
+        "failures": 0,
+        "totalBytes": 24922,
+        "avgDurationMs": 19456
+      }
+    },
+    "caveat": "环境不对等：vortex 接管真实已登录浏览器，chrome-devtools-mcp 使用自启隔离实例。字节与耗时仅供量级参考，不构成 parity（not comparable as parity）。"
+  }
+}
