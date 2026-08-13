@@ -219,9 +219,18 @@ describe("diagnoseEmptySchema", () => {
     expect(s).toMatch(/malformed|invalid JSON/i);
   });
 
-  it("有 itemscope 但都缺 itemtype：指出无类型无法成实体", () => {
-    const s = diagnoseEmptySchema({ ...base, itemscopes: 3 });
+  it("有 itemscope 且确实缺 itemtype：指出无类型无法成实体", () => {
+    const s = diagnoseEmptySchema({ ...base, itemscopes: 3, untypedItems: 3 });
     expect(s).toContain("itemtype");
+    expect(s).toContain("3");
+  });
+
+  // GitHub live 实测:两个 item 都有 itemtype 且被成功返回,自陈却仍声称有 item 因缺
+  // itemtype 被跳过 —— 自陈编造不存在的跳过原因,比不自陈更坏。
+  it("item 都带 itemtype 时不得声称有跳过", () => {
+    const s = diagnoseEmptySchema({ ...base, itemscopes: 2, untypedItems: 0, typeFilter: "Recipe" });
+    expect(s).not.toContain("itemtype");
+    expect(s).toContain("Recipe");
   });
 
   it("跳过了 itemref：如实报数", () => {

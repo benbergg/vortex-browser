@@ -57,6 +57,7 @@ export interface SchemaEmptyFacts extends QueryScanFacts {
   ldParseErrors: number;
   itemscopes: number;
   itemrefsSkipped: number;
+  untypedItems: number;
   ogMetas: number;
   typeFilter: string | null;
 }
@@ -122,8 +123,10 @@ export function diagnoseEmptySchema(f: SchemaEmptyFacts): string {
     if (f.ldParseErrors > 0) {
       parts.push(`${f.ldParseErrors} JSON-LD block(s) contained malformed JSON and were skipped.`);
     }
-    if (f.itemscopes > 0) {
-      parts.push("Microdata items without an itemtype attribute are skipped — they carry no entity type.");
+    // 必须按真实计数说话:曾经无条件写这句,GitHub 上两个 item 明明都有 itemtype
+    // 且被成功返回,自陈却声称它们被跳过 —— 编造跳过原因比不自陈更坏
+    if (f.untypedItems > 0) {
+      parts.push(`${f.untypedItems} Microdata item(s) carry no itemtype attribute and were skipped.`);
     }
     if (f.itemrefsSkipped > 0) {
       parts.push(`${f.itemrefsSkipped} item(s) use itemref; cross-node references are not resolved.`);

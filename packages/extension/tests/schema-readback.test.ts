@@ -177,15 +177,37 @@ describe("parseMicrodata", () => {
     expect(r.entities[0].props).toEqual({ name: "N" });
   });
 
-  it("无 itemtype 的 itemscope 跳过（无类型无法判定实体）", () => {
+  it("无 itemtype 的 itemscope 跳过（无类型无法判定实体），并计入 untypedItems", () => {
     const doc = bodyOf(`<div itemscope><span itemprop="x">1</span></div>`);
     const r = parseMicrodata(doc);
     expect(r.itemscopes).toBe(1);
     expect(r.entities).toHaveLength(0);
+    expect(r.untypedItems).toBe(1);
+  });
+
+  // GitHub live 实测:两个 item 都有 itemtype 且成功返回,自陈却仍说"有 item 缺 itemtype 被跳过"。
+  // untypedItems 必须是真实计数,否则自陈会编造一个不存在的跳过原因。
+  it("item 都带 itemtype 时 untypedItems 为 0", () => {
+    const doc = bodyOf(`
+      <div itemscope itemtype="A"><span itemprop="n">1</span></div>
+      <div itemscope itemtype="B"><span itemprop="n">2</span></div>`);
+    const r = parseMicrodata(doc);
+    expect(r.entities).toHaveLength(2);
+    expect(r.untypedItems).toBe(0);
+  });
+
+  it("嵌套 item 缺 itemtype 不算 untypedItems（它是父属性值，不该成顶层实体）", () => {
+    const doc = bodyOf(`
+      <div itemscope itemtype="Outer">
+        <div itemprop="inner" itemscope><span itemprop="a">1</span></div>
+      </div>`);
+    const r = parseMicrodata(doc);
+    expect(r.itemscopes).toBe(2);
+    expect(r.untypedItems).toBe(0);
   });
 
   it("页面无 microdata：全零，不抛", () => {
-    expect(parseMicrodata(bodyOf("<p>hi</p>"))).toEqual({ entities: [], itemscopes: 0, itemrefsSkipped: 0 });
+    expect(parseMicrodata(bodyOf("<p>hi</p>"))).toEqual({ entities: [], itemscopes: 0, itemrefsSkipped: 0, untypedItems: 0 });
   });
 });
 
@@ -235,7 +257,7 @@ describe("readPageSchema", () => {
     expect(r.entities.map((e) => e.source)).toEqual(["jsonld:0", "microdata:0", "og"]);
     expect(r.total).toBe(3);
     expect(r.truncated).toBe(false);
-    expect(r.scanned).toEqual({ ldScripts: 1, ldParseErrors: 0, itemscopes: 1, itemrefsSkipped: 0, ogMetas: 1, iframes: 0 });
+    expect(r.scanned).toEqual({ ldScripts: 1, ldParseErrors: 0, itemscopes: 1, itemrefsSkipped: 0, untypedItems: 0, ogMetas: 1, iframes: 0 });
   });
 
   it("iframes 计数在 page-side 一并采集（SW 侧看不到页面 DOM，事后补不回来）", () => {

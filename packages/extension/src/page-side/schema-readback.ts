@@ -91,6 +91,8 @@ export interface MicrodataResult {
   itemscopes: number;
   /** 含 itemref 的 item 数。v1 不解析跨节点引用，只如实报数 */
   itemrefsSkipped: number;
+  /** 顶层 itemscope 里真正因缺 itemtype 被跳过的数量。自陈只能按真实计数说话 */
+  untypedItems: number;
 }
 
 const SRC_TAGS = new Set(["IMG", "AUDIO", "EMBED", "IFRAME", "SOURCE", "TRACK", "VIDEO"]);
@@ -135,20 +137,24 @@ export function parseMicrodata(doc: Document): MicrodataResult {
   const all = Array.from(doc.querySelectorAll("[itemscope]"));
   const entities: SchemaEntity[] = [];
   let itemrefsSkipped = 0;
+  let untypedItems = 0;
   let idx = 0;
   for (const scope of all) {
     if (scope.hasAttribute("itemref")) itemrefsSkipped++;
     // 带 itemprop 的 itemscope 是父 item 的属性值，由 readItem 递归取，不做顶层实体
     if (scope.hasAttribute("itemprop")) continue;
     const type = scope.getAttribute("itemtype");
-    if (!type) continue;
+    if (!type) {
+      untypedItems++;
+      continue;
+    }
     const { "@type": _t, ...props } = readItem(scope);
     const e: SchemaEntity = { type, props, source: `microdata:${idx++}`, untrusted: true };
     const itemid = scope.getAttribute("itemid");
     if (itemid) e.id = itemid;
     entities.push(e);
   }
-  return { entities, itemscopes: all.length, itemrefsSkipped };
+  return { entities, itemscopes: all.length, itemrefsSkipped, untypedItems };
 }
 
 export interface OpenGraphResult {
@@ -189,6 +195,7 @@ export interface SchemaScanFacts {
   ldParseErrors: number;
   itemscopes: number;
   itemrefsSkipped: number;
+  untypedItems: number;
   ogMetas: number;
   /** 同页 iframe 数。只能在 page-side 采，SW 侧拿不到页面 DOM */
   iframes: number;
@@ -227,6 +234,7 @@ export function readPageSchema(
     ldParseErrors: ld.parseErrors,
     itemscopes: md.itemscopes,
     itemrefsSkipped: md.itemrefsSkipped,
+    untypedItems: md.untypedItems,
     ogMetas: og.metas,
     iframes: doc.querySelectorAll("iframe").length,
   };

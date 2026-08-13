@@ -45,6 +45,12 @@ describe("schemaProbeFunc 内联 ↔ schema-readback 真源 parity", () => {
       expect(s).toContain('closest("[itemscope]")');
     }
   });
+  // 自陈按真实计数说话:两边都必须真的累加,否则内联那侧会退回无条件断言
+  it("内联含 untypedItems 真实累加(与真源一致)", () => {
+    for (const s of [src, trueSrc]) {
+      expect(s).toContain("untypedItems++");
+    }
+  });
   it("内联含预算截断与 untrusted 恒真(与真源一致)", () => {
     for (const s of [src, trueSrc]) {
       expect(s).toContain("SCHEMA_MAX_VALUE_CHARS");

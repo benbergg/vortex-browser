@@ -1362,12 +1362,16 @@ export const schemaProbeFunc = (
     const scopes = Array.from(doc.querySelectorAll("[itemscope]"));
     const mdEntities: E[] = [];
     let itemrefsSkipped = 0;
+    let untypedItems = 0;
     let mdIdx = 0;
     for (const scope of scopes) {
       if (scope.hasAttribute("itemref")) itemrefsSkipped++;
       if (scope.hasAttribute("itemprop")) continue;
       const type = scope.getAttribute("itemtype");
-      if (!type) continue;
+      if (!type) {
+        untypedItems++;
+        continue;
+      }
       const { "@type": _t, ...props } = readItem(scope);
       const e: E = { type, props, source: `microdata:${mdIdx++}`, untrusted: true };
       const itemid = scope.getAttribute("itemid");
@@ -1434,6 +1438,7 @@ export const schemaProbeFunc = (
         ldParseErrors: parseErrors,
         itemscopes: scopes.length,
         itemrefsSkipped,
+        untypedItems,
         ogMetas,
         iframes: doc.querySelectorAll("iframe").length,
       },
@@ -1669,7 +1674,7 @@ export function registerQueryHandlers(router: ActionRouter): void {
             ? diagnoseEmptySchema({
                 ...(scanned as unknown as {
                   ldScripts: number; ldParseErrors: number; itemscopes: number;
-                  itemrefsSkipped: number; ogMetas: number; iframes: number;
+                  itemrefsSkipped: number; untypedItems: number; ogMetas: number; iframes: number;
                 }),
                 // schema 三源都不在 shadow 里(JSON-LD 在 head，OGP 在 meta)，恒 0
                 shadowRoots: 0,
