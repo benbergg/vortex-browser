@@ -1884,7 +1884,7 @@ scroll 的结构化展开、type→text、select JSON 还原都在那里，
 **Interfaces:**
 - Consumes: Task 8a/8b/8c 的 `vortex_sequence`；Task 6 的 fixture（复用，不新建）
 
-- [ ] **Step 1: 写 case**
+- [x] **Step 1: 写 case**
 
 新建 `packages/vortex-bench/cases/sequence-substrate.case.ts`：
 
@@ -1942,7 +1942,7 @@ const def: CaseDefinition = {
 export default def;
 ```
 
-- [ ] **Step 2: 跑 case**
+- [x] **Step 2: 跑 case**
 
 ```bash
 pnpm --filter @vortex-browser/bench bench run --pattern sequence-substrate
@@ -1950,7 +1950,7 @@ pnpm --filter @vortex-browser/bench bench run --pattern sequence-substrate
 
 Expected: PASS
 
-- [ ] **Step 3: 跑全量 bench**
+- [x] **Step 3: 跑全量 bench**
 
 ```bash
 pnpm --filter @vortex-browser/bench bench run --all
@@ -1961,7 +1961,7 @@ Expected: 99/99（97 + Task 6 的 1 + 本 case 1）
 已知噪声：两个 date-picker 用例（`dom.commit timed out`）在满量并发下偶发红，单独跑必过。
 若红的只有它们，单独复跑确认后按 97+2 记，**不要为此改产品代码**。
 
-- [ ] **Step 4: 记录往返数，落实判据 3**
+- [x] **Step 4: 记录往返数，落实判据 3**
 
 ```bash
 node -e 'const r=require("./packages/vortex-bench/reports/latest.json");
@@ -1981,13 +1981,13 @@ for(const c of r.cases) if(/sequence-substrate|fingerprint-actions/.test(c.case)
 
 **若显著高于 6，才说明序列分支内部在多发请求，回头查 Task 8c 的 target 翻译是否重复调用。**
 
-- [ ] **Step 5: 刷新 baseline**
+- [x] **Step 5: 刷新 baseline**
 
 ```bash
 cp packages/vortex-bench/reports/latest.json packages/vortex-bench/reports/baseline.json
 ```
 
-- [ ] **Step 6: 提交**
+- [x] **Step 6: 提交**
 
 ```bash
 git add packages/vortex-bench/cases/sequence-substrate.case.ts packages/vortex-bench/reports/baseline.json
