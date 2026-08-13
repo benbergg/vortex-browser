@@ -53,8 +53,29 @@ flowchart TD
 - **指纹类型早就为 5 种动作留了位置**：`packages/shared/src/effect-fingerprint.ts:16` 的 `action` 联合类型就是 `"click" | "fill" | "type" | "select" | "scroll"`，且 `:21-22` 已声明 `valueAfter`、`scrollAfter` 两个确定量字段。
 - **但归一化只有 click**：同文件 `:33-47` 只有 `normalizeClickFingerprint`，靠副作用类别签名判生效（click 没有值可回读）。
 - **接线处硬守卫在 click**：`packages/mcp/src/lib/fingerprint-apply.ts:32` 是 `if (action !== "click" || !effect) return {}`；`packages/mcp/src/server.ts:786` 的 `fpActive` 同样双条件卡 `params.action === "click"`。
-- **确定量的原料已经在采**：`packages/extension/src/action/micro-verify.ts:102` fill 回读 `el.value`、`:120` type 回读 `el.value`、`:138` select 回读 `el.value`、`:162` scroll 回读 `el.scrollTop/scrollLeft`。**这些值目前只进 `VerifyResult.effects`，没有流进指纹。**
-- **弱效果动作已诚实降级**：`micro-verify.ts:50` 对 hover/drag 返回 `effects: null`，不谎称强成功——与指纹的 `weak?: true`（`effect-fingerprint.ts:30`）语义天然对齐。
+- **确定量原料只到了一半**（**2026-08-13 订正，见下方补记**）：`select` 与 `scroll` 的成功返回已带确定量，`fill` 与 `type` 没有。
+
+> **订正（写实施计划时实查发现）**
+>
+> 本节初稿写的是「确定量的原料已经在采，见 `micro-verify.ts:102/120/138/162`」。**这条是错的，两处错**：
+>
+> 1. **`packages/extension/src/action/micro-verify.ts` 是死代码。** 全仓 grep `microVerify` 只剩它自己的定义
+>    与 `action/fallback.ts:4` 的一句注释，**零生产调用方、零测试**。它描述的回读逻辑从不执行。
+> 2. **真实回读内联在 `dom.ts` 各动作分支里，且四种动作的成熟度不同**：
+>
+> | 动作 | 成功返回（`packages/extension/src/handlers/dom.ts`） | 有确定量？ |
+> |---|---|---|
+> | `select` | `{ success, value: el.value }`（`:1331`）／多选 `{ success, value: selectedNow }`（`:1296`） | **有** |
+> | `scroll` | `{ success, moved, scrollTop, scrollLeft }`（`:1447-1453`） | **有** |
+> | `fill` | `{ success, focused }`（`:1109`） | **没有** |
+> | `type` | `{ success, typed: text.length, path }`（`:816`） | **没有**（只有字符数） |
+>
+> `fill` 其实在 `:1090` 读了 `el.value`，但只用于 NO_EFFECT 拒绝判据，**没有放进成功返回**——值就在作用域里，
+> 少的是一个字段。
+>
+> **对路线的影响**：阶段一不是「纯接线」。`select`/`scroll` 是接线，`fill`/`type` 要先补回读字段。
+> 这抬高了阶段一的工作量，但也说明这件事本身有独立价值：**`fill` 现在返回 `success:true` 却不告诉调用方
+> 填进去的到底是什么**，这正是 vortex 一直在灭的「静默假成功」族。
 - **前置 actionability 已统一**：`packages/extension/src/action/auto-wait.ts:47-111` 按 visible/stable/obscured/disabled/editable 区分可重试与不可重试。
 - **批量执行有现成先例**：`packages/mcp/src/server.ts:589-703` 的 `vortex_fill_form`——串行、失败不中断、结果 `{index, target, ok, error}`（`:673-681`）。**它没有每步 postcondition，也没有 rollback。**
 - **响应挂载与 autoRecover 已成形**：`packages/mcp/src/server.ts:920-958`，drift 与 stale-ref 两条信号正交，只在 act 成功且带 effect 后运行。
@@ -109,7 +130,7 @@ flowchart TD
 | `packages/shared/src/effect-fingerprint.ts` | 新增 `normalizeValueFingerprint`（fill/type/select 共用 `valueAfter`）与 `normalizeScrollFingerprint`（`scrollAfter` + 现有 ±5px 容差）；`compareFingerprint` 补对应 drift class |
 | `packages/mcp/src/lib/fingerprint-apply.ts` | 解除 `:32` 的 click 硬守卫，改为按 action 派发到对应归一化函数；无回读值时仍诚实返回空 |
 | `packages/mcp/src/server.ts` | `:786` 的 `fpActive` 守卫放宽到 5 种动作；新增序列编排分支（参考 `:589-703` 的 fill_form 形态，但每步挂 postcondition） |
-| `packages/extension/src/action/micro-verify.ts` | 不改逻辑，只把已回读的确定量向上透出到 act 响应（当前只进 `VerifyResult.effects`） |
+| `packages/extension/src/handlers/dom.ts` | `fill` 成功返回补 `value: el.value`（值已在 `:1090` 作用域内）；`type` 成功返回补回读值。`select`/`scroll` 不动，已有确定量 |
 | `packages/mcp/src/tools/schemas-public.ts` | 新增 `vortex_sequence` 定义 |
 | `packages/mcp/tests/invariants/I15...` | 实测新 payload，按惯例登记 cap 调整理由 |
 | `packages/vortex-bench/cases/` | 每种动作一个指纹 case + 一个序列 case（含中途 drift 的红路径） |
@@ -127,7 +148,8 @@ flowchart TD
 
 | 假设 | 状态 | 实施前必须做什么 |
 |---|---|---|
-| micro-verify 的回读时机与指纹要求的时机一致 | **推测** | 拿一个异步渲染的真实控件实测：动作后立即回读的 value 是否已落定 |
+| ~~micro-verify 的回读时机与指纹要求的时机一致~~ | **已推翻** | micro-verify 是死代码；真实回读在 dom.ts 内联，见 §2 订正 |
+| 同步回读的 value 在受控组件下已落定 | **推测** | 拿 React 受控 input 实测：`fill` 后同步读 `el.value` 是否已是最终值（框架可能异步重渲染回滚） |
 | 快照 5 分钟 TTL / 20 条容量够序列用 | **推测** | 按典型序列长度与耗时估算，必要时实测跨 TTL 的行为 |
 | 序列能显著降低往返次数 | **推测** | 用 bench `callCount` 对同一任务做序列 vs N 次单动作的对照 |
 | 新增一个公开工具后仍在 I15 预算内 | **推测** | 写完 schema 后实测 payload 字节，按惯例登记 |
