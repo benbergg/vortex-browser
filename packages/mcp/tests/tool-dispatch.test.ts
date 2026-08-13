@@ -228,6 +228,43 @@ describe("dispatchNewTool", () => {
     expect(params).not.toHaveProperty("value");
   });
 
+  it("vortex_act(scroll, index + position 无 container) 保留 index/snapshotId", () => {
+    const { action, params } = dispatchNewTool("vortex_act", {
+      index: 7,
+      snapshotId: "snap_x",
+      action: "scroll",
+      value: { position: "bottom" },
+    })!;
+    expect(action).toBe("dom.scroll");
+    expect(params.position).toBe("bottom");
+    expect(params.index).toBe(7);
+    expect(params.snapshotId).toBe("snap_x");
+    expect(params).not.toHaveProperty("target");
+  });
+
+  it("vortex_act(scroll, selector + position 无 container) 保留 selector", () => {
+    const { params } = dispatchNewTool("vortex_act", {
+      selector: "#list",
+      action: "scroll",
+      value: { position: "bottom" },
+    })!;
+    expect(params.selector).toBe("#list");
+    expect(params.position).toBe("bottom");
+  });
+
+  it("显式 container 时仍全 strip：调用方指名的容器优先于目标", () => {
+    const { params } = dispatchNewTool("vortex_act", {
+      selector: "#list",
+      index: 7,
+      snapshotId: "snap_x",
+      action: "scroll",
+      value: { container: ".other", position: "bottom" },
+    })!;
+    expect(params.container).toBe(".other");
+    expect(params).not.toHaveProperty("selector");
+    expect(params).not.toHaveProperty("index");
+  });
+
   // ── 2026-06-01 真实站点 dogfood(ag-grid)发现 ────────────────────────────
   // BUG G:MCP client 会把 untyped `value:{}` 的对象实参序列化成 JSON 字符串。
   // 旧测试传「真对象」所以一直 green,但 e2e 实际收到的是字符串 →

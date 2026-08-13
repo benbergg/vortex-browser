@@ -170,8 +170,11 @@ export function dispatchNewTool(
         const v = scrollValue as Record<string, unknown>;
         if ("container" in v || "position" in v || "x" in v || "y" in v) {
           delete next.target;
-          delete next.selector;
-          delete next.index; // ref 形式翻成 index 时也 strip
+          const keepTarget = "position" in v && !("container" in v);
+          if (!keepTarget) {
+            delete next.selector;
+            delete next.index; // ref 形式翻成 index 时也 strip
+          }
         }
       } else if (actionName === "type") {
         if (value !== undefined) next.text = value;
