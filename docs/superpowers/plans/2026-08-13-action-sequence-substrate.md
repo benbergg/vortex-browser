@@ -612,6 +612,7 @@ fill/type/select/scroll 有确定量，直接比值比位置更准。"
 
 **Files:**
 - Modify: `packages/mcp/src/lib/fingerprint-apply.ts:19-45`
+- Modify: `packages/mcp/tests/verifiable-replay.test.ts`（既有测试，10 处调用点要随签名迁移，其中一处要删）
 - Test: `packages/mcp/tests/fingerprint-apply-actions.test.ts`（新建）
 
 **Interfaces:**
@@ -680,6 +681,12 @@ describe("applyFingerprint 按 action 派发", () => {
   it("hover/drag 等无确定量动作 → 返回空", () => {
     expect(applyFingerprint({ mode: "record" }, "hover", "button::赞::0", undefined)).toEqual({});
   });
+
+  // 上面两条都传了非 null 的 targetIdentity，两种判断顺序下都会通过，锁不住顺序。
+  // 只有两者同时缺失时，返回 {} 还是 fingerprintSkipped 才能区分实现的先后。
+  it("无信号且无身份 → 返回空而非 skipped：无信号先判", () => {
+    expect(applyFingerprint({ mode: "record" }, "hover", null, undefined)).toEqual({});
+  });
 });
 ```
 
@@ -728,7 +735,7 @@ export function applyFingerprint(
 }
 ```
 
-**注意执行顺序**：`if (!signals) return {}` 必须在 `targetIdentity` 检查**之前**——无信号是「观测未到位」，与「用了 CSS selector」是两回事，顺序反了会对 hover 这类无信号动作报出误导性的 `fingerprintSkipped`。测试用例 7 锁的就是这一点。
+**注意执行顺序**：`if (!signals) return {}` 必须在 `targetIdentity` 检查**之前**——无信号是「观测未到位」，与「用了 CSS selector」是两回事，顺序反了会对 hover 这类无信号动作报出误导性的 `fingerprintSkipped`。锁这一点的是**用例 8**（用例 5、7 都传了非 null 身份，两种顺序下都通过）。
 
 - [ ] **Step 4: 跑测试确认通过**
 
@@ -736,20 +743,39 @@ export function applyFingerprint(
 pnpm --filter @vortex-browser/mcp exec vitest run tests/fingerprint-apply-actions.test.ts --maxWorkers=2 --minWorkers=1
 ```
 
-Expected: PASS（7 个用例）
+Expected: PASS（8 个用例）
 
-- [ ] **Step 5: 跑既有指纹测试确认未破坏 click 语义**
+- [ ] **Step 5: 迁移既有 `verifiable-replay.test.ts`**
 
-```bash
-pnpm --filter @vortex-browser/mcp exec vitest run tests/ping-fingerprint.test.ts --maxWorkers=2 --minWorkers=1
+这是唯一受签名变更影响的既有测试文件（`ping-fingerprint.test.ts` 测的是 MCP ping 的 schemaHash，与本函数无关，不要动它）。它有 10 处 `applyFingerprint` 调用，按下面两类处理：
+
+**其一，机械迁移**：`:13`、`:28`、`:35`、`:43`、`:64`、`:69`、`:87`、`:94` 这 8 处，把第四参 `effect`（或内联的 effect 对象字面量）包一层：
+
+```ts
+// 原:  applyFingerprint({ mode: "record" }, "click", null, effect)
+// 改为:applyFingerprint({ mode: "record" }, "click", null, { kind: "click", effect })
 ```
 
-Expected: PASS。若因签名变更编译失败，把该测试里的第四参改成 `{ kind: "click", effect: <原 effect 对象> }`。
+`:64` 那处第四参本来就是 `undefined`，**保持 `undefined` 不变**（它测的正是「信号缺失返回空」）。
 
-- [ ] **Step 6: 提交**
+**其二，删掉一条**：`:53-61` 的 `it("非 click action 返回空(Phase 1 仅 click 有 effect)")` **整条删除**。它断言的正是本 Task 要解除的 Phase-1 限制——新实现按 `signals.kind` 派发而非按 action，传 `{ kind: "click", effect }` 就会正常产出 click 指纹。
+
+**这条不许靠削弱断言来变绿**（比如把 `toEqual({})` 改成 `toBeDefined()`）：行为变了就删掉过时的用例，新行为由 `fingerprint-apply-actions.test.ts` 覆盖。删除后在文件顶部注释补一句说明为什么少了这条。
+
+- [ ] **Step 6: 跑 mcp 全量单测**
 
 ```bash
-git add packages/mcp/src/lib/fingerprint-apply.ts packages/mcp/tests/fingerprint-apply-actions.test.ts packages/mcp/tests/ping-fingerprint.test.ts
+pnpm --filter @vortex-browser/mcp test -- --maxWorkers=2 --minWorkers=1
+```
+
+Expected: 全绿。vitest 走 esbuild 只剥类型不做类型检查，所以 `server.ts:933` 那个还没迁移的调用点**不会**让测试变红。
+
+**本 Task 结束时仓库处于 `tsc` 不可编译状态，这是预期的**：`server.ts:933` 仍按旧签名传 `actResult.effect`，`pnpm -C packages/mcp build` 会报类型错，由 Task 5 修复。**不要为了让 build 过而顺手改 `server.ts`**——它属于 Task 5 的 Files。也不要在本 Task 跑 build。
+
+- [ ] **Step 7: 提交**
+
+```bash
+git add packages/mcp/src/lib/fingerprint-apply.ts packages/mcp/tests/fingerprint-apply-actions.test.ts packages/mcp/tests/verifiable-replay.test.ts
 git commit -m "feat: 效果指纹按动作派发，解除 click 硬守卫
 
 第四参从 ClickEffectLike 改为 ActionSignals 联合类型。无信号先于
