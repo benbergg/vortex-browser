@@ -1530,7 +1530,7 @@ option value，与传入的可见文本本就可能不同。"
 
 **为什么要抽出来**：原计划让测试文件里**复刻一遍**循环骨架再测那个复刻版（原文写的就是「复刻 server.ts 序列分支的循环骨架」），`server.ts` 里真跑的那段一行都没被覆盖。这是本仓明令禁止的假覆盖（见 `AGENTS.md` 与 `docs/` 内既有教训）。把循环抽成注入 `send` 的纯函数后，测试驱动的就是真代码，`server.ts` 只负责把 I/O 塞进 `send`。
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 新建 `packages/mcp/tests/sequence-loop.test.ts`：
 
@@ -1594,7 +1594,7 @@ describe("runSequence 编排", () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 ```bash
 pnpm --filter @vortex-browser/mcp exec vitest run tests/sequence-loop.test.ts --maxWorkers=2 --minWorkers=1
@@ -1602,7 +1602,7 @@ pnpm --filter @vortex-browser/mcp exec vitest run tests/sequence-loop.test.ts --
 
 Expected: FAIL，`runSequence is not a function`
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 在 `packages/mcp/src/lib/sequence-run.ts` 末尾追加：
 
@@ -1649,7 +1649,7 @@ export async function runSequence(
 }
 ```
 
-- [ ] **Step 4: 跑测试确认通过**
+- [x] **Step 4: 跑测试确认通过**
 
 ```bash
 pnpm --filter @vortex-browser/mcp exec vitest run tests/sequence-loop.test.ts tests/sequence-run.test.ts --maxWorkers=2 --minWorkers=1
@@ -1657,7 +1657,7 @@ pnpm --filter @vortex-browser/mcp exec vitest run tests/sequence-loop.test.ts te
 
 Expected: PASS（22 个用例：sequence-run 17 + sequence-loop 5）。既有 17 条必须原样通过。
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add packages/mcp/src/lib/sequence-run.ts packages/mcp/tests/sequence-loop.test.ts
