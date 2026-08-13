@@ -96,4 +96,11 @@ describe("FILL 回读值", () => {
     expect(resp.error).toBeUndefined();
     expect((resp.result as { value: string }).value).toBe("REVERTED");
   });
+
+  it("超长填入值回传时截断到 500 字符", async () => {
+    const resp = await router.dispatch(mkReq({ selector: "#inp", value: "a".repeat(900) }));
+    const v = (resp.result as { value: string }).value;
+    expect(v.length).toBe(501);
+    expect(v.endsWith("…")).toBe(true);
+  });
 });

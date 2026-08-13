@@ -789,11 +789,13 @@ export function registerDomHandlers(
         // 拒绝也不抛错。回读 textContent,若非空文本写完内容完全未变(now===before)且未含
         // 写入文本(now!==txt)→ 编辑器拒收,报 NO_EFFECT 而非假成功(2026-06-20 白盒复现)。
         // now!==txt 排除「重输相同文本」假阳;成功插入必改 textContent(now!==before)已先排除。
+        let verifiedValue: string | undefined;
         if (text !== "") {
           const verify = await nativePageQuery<{
             errorCode?: string;
             error?: string;
             extras?: Record<string, unknown>;
+            value?: string;
           } | undefined>(
             tid,
             frameId,
@@ -807,13 +809,21 @@ export function registerDomHandlers(
                   extras: { attempted: txt },
                 };
               }
-              return {};
+              // 500 与 schema 回读同口径:contentEditable 可能是整篇文档,不能原样回传
+              return { value: now.length > 500 ? now.slice(0, 500) + "…" : now };
             },
             [selector, probe?.ceText ?? "", text],
           );
           if (verify?.error) mapPageError(verify, selector);
+          if (typeof verify?.value === "string") verifiedValue = verify.value;
         }
-        const cdpTypeResult = { success: true, typed: text.length, path: "cdp-insertText" };
+        // typed 是入参字符数,不等于实写入;编辑器规范化时以 verify 实读为准
+        const cdpTypeResult = {
+          success: true,
+          typed: text.length,
+          path: "cdp-insertText",
+          ...(typeof verifiedValue === "string" ? { value: verifiedValue } : {}),
+        };
         return __healType.healed ? { ...cdpTypeResult, healed: true } : cdpTypeResult;
       }
 
@@ -1107,7 +1117,13 @@ export function registerDomHandlers(
             const __root = (el.getRootNode?.() ?? el.ownerDocument) as Document | ShadowRoot;
             const focused = __root?.activeElement === el;
             // 回读值随成功返回:success 不说明填进去的是什么,受控组件常回滚
-            return { result: { success: true, focused, value: el.value } };
+            // 与 type 同口径封顶 500:大 textarea 会把整段内容回传给模型
+            return {
+              result: {
+                success: true, focused,
+                value: el.value.length > 500 ? el.value.slice(0, 500) + "…" : el.value,
+              },
+            };
           } catch (err) {
             return { error: err instanceof Error ? err.message : String(err) };
           }
