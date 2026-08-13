@@ -22,7 +22,8 @@ import {
   type SessionEntry,
   SessionRegistry,
 } from "./registry.js";
-import { matchBrowser, noBrowserMessage } from "./browser-match.js";
+import { matchBrowser, noBrowserHint, noBrowserMessage } from "./browser-match.js";
+import { RPC_TIMEOUT_HINT } from "./error-hints.js";
 import { BROWSER_CONTROL_ACTIONS, listBrowsers } from "./browser-control.js";
 import { PendingTable, type HubPending } from "./pending.js";
 import { prepareRequestWithState } from "./tab-ownership.js";
@@ -141,7 +142,11 @@ export class HubRouter {
       session.lastBrowserId = null;
       session.rebindUntil = 0;
       this.sendResponse(sessionId, request, "", {
-        error: this.error(VtxErrorCode.EXTENSION_NOT_CONNECTED, noBrowserMessage(pref, this.browsers)),
+        error: this.error(
+          VtxErrorCode.EXTENSION_NOT_CONNECTED,
+          noBrowserMessage(pref, this.browsers),
+          noBrowserHint(pref, this.browsers),
+        ),
       });
       return;
     }
@@ -303,7 +308,7 @@ export class HubRouter {
     if (deadline <= this.now()) {
       if (!this.sessions.has(sessionId)) return;
       this.sendResponse(sessionId, request, browserId, {
-        error: this.error(VtxErrorCode.TIMEOUT, `Request ${request.action} timed out`),
+        error: this.error(VtxErrorCode.TIMEOUT, `Request ${request.action} timed out`, RPC_TIMEOUT_HINT),
       });
       return;
     }
@@ -315,7 +320,7 @@ export class HubRouter {
     const hubRequestId = `${session.sessionId}#${++this.requestCounter}`;
     const timeout = setTimeout(() => {
       const pending = this.pending.take(hubRequestId);
-      pending?.fail(this.error(VtxErrorCode.TIMEOUT, `Request ${request.action} timed out`));
+      pending?.fail(this.error(VtxErrorCode.TIMEOUT, `Request ${request.action} timed out`, RPC_TIMEOUT_HINT));
     }, Math.max(0, deadline - this.now()));
     const pending: HubPending = {
       hubRequestId,
@@ -564,6 +569,7 @@ export class HubRouter {
       error: this.error(
         VtxErrorCode.EXTENSION_NOT_CONNECTED,
         noBrowserMessage(session.browserPref, this.browsers),
+        noBrowserHint(session.browserPref, this.browsers),
       ),
     });
     return null;
@@ -661,6 +667,7 @@ export class HubRouter {
       error: this.error(
         VtxErrorCode.EXTENSION_NOT_CONNECTED,
         noBrowserMessage(session.browserPref, this.browsers),
+        noBrowserHint(session.browserPref, this.browsers),
       ),
     });
   }
@@ -946,7 +953,9 @@ export class HubRouter {
     });
   }
 
-  private error(code: VtxErrorCode, message: string): VtxErrorPayload {
-    return vtxError(code, message).toJSON();
+  // hint 不传 override 就会被填成按错误码查表的通用文案，连接类故障因此长期
+  // 指向错误动作（2026-08-13 日志）。override 是唯一的 case-specific 通道。
+  private error(code: VtxErrorCode, message: string, hint?: string): VtxErrorPayload {
+    return vtxError(code, message, undefined, hint ? { hint } : undefined).toJSON();
   }
 }

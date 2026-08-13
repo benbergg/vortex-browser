@@ -13,6 +13,7 @@ import {
 import type { HubHandle } from "./hub.js";
 import type { BrowserRegistry, SessionEntry, SessionRegistry } from "./registry.js";
 import { matchBrowser } from "./browser-match.js";
+import { RPC_TIMEOUT_HINT } from "./error-hints.js";
 import { sweepIdleVirtualSessions } from "./virtual-session.js";
 
 const DEFAULT_VIRTUAL_SESSION_IDLE_MS = 10 * 60_000;
@@ -314,6 +315,7 @@ function waitForHttpResponse(
       waiter?.reject({
         code: VtxErrorCode.TIMEOUT,
         message: `Request ${request.action} timed out`,
+        hint: RPC_TIMEOUT_HINT,
         recoverable: false,
       } satisfies VtxErrorPayload);
     }, Math.max(0, timeoutMs));

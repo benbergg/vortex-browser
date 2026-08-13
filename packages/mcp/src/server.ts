@@ -423,13 +423,18 @@ export async function handleCallTool(
         error?: { code?: string; message?: string };
       };
       if (!r.ok || body.ok === false) {
+        // hint 按本地已观测到的事实分支:步骤 1 的 diagnostics.version 拿到了
+        // browserId,就说明扩展当刻是连着的,再说"扩展未连"与 hub 报的 code 自相
+        // 矛盾(2026-08-11 live:同一刻 tab_list 正常)。
         return {
           isError: true,
           content: [{ type: "text" as const, text: JSON.stringify({
             reloaded: false,
             error: body.error?.code ?? "RELOAD_TRIGGER_FAILED",
             message: body.error?.message ?? `reload trigger failed (HTTP ${r.status})`,
-            hint: "扩展未连(SW 可能睡眠或未加载)。先调一次任意 vortex 工具唤醒 SW,或确认扩展已在目标浏览器（Chrome / Edge 等）加载。",
+            hint: boundBrowserId === undefined
+              ? "扩展未连(SW 可能睡眠或未加载)。先调一次任意 vortex 工具唤醒 SW,或确认扩展已在目标浏览器（Chrome / Edge 等）加载。"
+              : `扩展连着(当前绑定 ${boundBrowserId}),重载触发被 hub 拒绝——按上面的 error/message 处理,不要去查扩展是否加载。`,
           }, null, 2) }],
         };
       }

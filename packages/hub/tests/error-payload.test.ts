@@ -3,6 +3,7 @@
  */
 import { afterEach, describe, expect, it } from "vitest";
 import { DEFAULT_ERROR_META, VtxErrorCode } from "@vortex-browser/shared";
+import { RPC_TIMEOUT_HINT } from "../src/error-hints.js";
 import { PendingTable } from "../src/pending.js";
 import { connectClient, connectFakeAgent, startTestHub, type FakeAgent, type TestClient } from "./helpers/harness.js";
 
@@ -18,7 +19,10 @@ describe("hub error payloads", () => {
     closeHub = undefined;
   });
 
-  it("emits TIMEOUT with the shared hint and recoverable flag", async () => {
+  // 原断言锁的是"hub 的 TIMEOUT hint == 表文案",而表文案是写给页面 actionability
+  // 超时的(建议等页面 idle);hub 这条是 RPC 通道超时,页面稳不稳定无关。
+  // 2026-08-13 日志 3/60 次都被引向了无效动作,故改为断言 RPC 专属 hint。
+  it("emits TIMEOUT with the RPC-specific hint and the shared recoverable flag", async () => {
     const started = await startTestHub({ requestTimeoutMs: 50 });
     closeHub = started.close;
     agent = await connectFakeAgent(started.port, {
@@ -32,7 +36,7 @@ describe("hub error payloads", () => {
 
     expect(response.error?.code).toBe(VtxErrorCode.TIMEOUT);
     expect(response.error?.recoverable).toBe(DEFAULT_ERROR_META[VtxErrorCode.TIMEOUT].recoverable);
-    expect(response.error?.hint).toBe(DEFAULT_ERROR_META[VtxErrorCode.TIMEOUT].hint);
+    expect(response.error?.hint).toBe(RPC_TIMEOUT_HINT);
   });
 
   it("emits EXTENSION_NOT_CONNECTED with the shared hint and recoverable flag", async () => {

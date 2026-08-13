@@ -99,6 +99,55 @@ describe("vortex_dev_reload 绑定到当前浏览器", () => {
     expect(elapsed).toBeLessThan(5_000);
   });
 
+  // 2026-08-13 日志:失败分支的 hint 是无条件硬编码的"扩展未连(SW 可能睡眠)",
+  // 与它自己转发的 hub error code 自相矛盾。hint 应按本地已观测到的事实分支:
+  // 步骤 1 拿到了 browserId,就说明扩展当刻连着。
+  it("拿到 browserId 却被 hub 拒绝时，hint 不再诬告扩展未连", async () => {
+    const { sendRequest } = await import("../src/client.js");
+    vi.mocked(sendRequest).mockResolvedValue({
+      action: "diagnostics.version",
+      id: "1",
+      result: { buildStamp: "stamp-old" },
+      browserId: "chrome-uuid-1",
+    } as never);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: false,
+        status: 400,
+        json: async () => ({ ok: false, error: { code: "INVALID_PARAMS", message: "browserId 必填" } }),
+      } as unknown as Response)),
+    );
+
+    const { handleCallTool } = await import("../src/server.js");
+    const res = await handleCallTool({ params: { name: "vortex_dev_reload", arguments: { timeoutMs: 1 } } });
+
+    expect(res.isError).toBe(true);
+    const payload = JSON.parse((res.content as Array<{ text: string }>)[0].text);
+    expect(payload.error).toBe("INVALID_PARAMS");
+    expect(payload.hint).not.toContain("扩展未连");
+    expect(payload.hint).toContain("chrome-uuid-1");
+  });
+
+  it("确实拿不到 browserId 时，仍指向扩展未连（此时该判断有依据）", async () => {
+    const { sendRequest } = await import("../src/client.js");
+    vi.mocked(sendRequest).mockRejectedValue(new Error("no browser"));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: false,
+        status: 503,
+        json: async () => ({ ok: false, error: { code: "EXTENSION_NOT_CONNECTED", message: "没有可用 browser" } }),
+      } as unknown as Response)),
+    );
+
+    const { handleCallTool } = await import("../src/server.js");
+    const res = await handleCallTool({ params: { name: "vortex_dev_reload", arguments: { timeoutMs: 1 } } });
+
+    const payload = JSON.parse((res.content as Array<{ text: string }>)[0].text);
+    expect(payload.hint).toContain("扩展未连");
+  });
+
   it("拿不到 browserId 时不硬塞(单浏览器场景保持原行为)", async () => {
     const { sendRequest } = await import("../src/client.js");
     vi.mocked(sendRequest).mockResolvedValue({
