@@ -14,7 +14,7 @@ import { JSDOM } from "jsdom";
 import { splitDiagnosis } from "@vortex-browser/shared";
 import { ActionRouter } from "../src/lib/router.js";
 import { textSearchFunc, cssQueryFunc, registerQueryHandlers } from "../src/handlers/query.js";
-import { diagnoseEmptyQueryText, diagnoseEmptyQueryCss } from "../src/lib/empty-diagnosis.js";
+import { diagnoseEmptyQueryText, diagnoseEmptyQueryCss, diagnoseEmptySchema } from "../src/lib/empty-diagnosis.js";
 
 function mountDom(html: string) {
   const dom = new JSDOM(`<!DOCTYPE html><html><body>${html}</body></html>`);
@@ -191,5 +191,48 @@ describe("diagnoseEmptyQueryCss", () => {
 
   it("任何输入都给出非空的一行", () => {
     expect(diagnoseEmptyQueryCss({ ...base, elements: 0, shadowRoots: 0 }).trim().length).toBeGreaterThan(10);
+  });
+});
+
+const base = {
+  shadowRoots: 0, iframes: 0, frameScoped: false,
+  ldScripts: 0, ldParseErrors: 0, itemscopes: 0, itemrefsSkipped: 0, ogMetas: 0,
+  typeFilter: null as string | null,
+};
+
+describe("diagnoseEmptySchema", () => {
+  it("三源全无：说清这页根本没有作者声明，别再换参数重试", () => {
+    const s = diagnoseEmptySchema({ ...base });
+    expect(s).toContain("no JSON-LD, Microdata or Open Graph");
+    expect(s).toMatch(/vortex_extract|vortex_observe/);
+  });
+
+  it("有数据但被 typeFilter 滤空：点名过滤条件是空的原因", () => {
+    const s = diagnoseEmptySchema({ ...base, ldScripts: 2, typeFilter: "Product" });
+    expect(s).toContain("Product");
+    expect(s).toContain("pattern");
+  });
+
+  it("JSON-LD 全部解析失败：报错误段数，不谎称页面没有数据", () => {
+    const s = diagnoseEmptySchema({ ...base, ldScripts: 2, ldParseErrors: 2 });
+    expect(s).toContain("2");
+    expect(s).toMatch(/malformed|invalid JSON/i);
+  });
+
+  it("有 itemscope 但都缺 itemtype：指出无类型无法成实体", () => {
+    const s = diagnoseEmptySchema({ ...base, itemscopes: 3 });
+    expect(s).toContain("itemtype");
+  });
+
+  it("跳过了 itemref：如实报数", () => {
+    expect(diagnoseEmptySchema({ ...base, itemscopes: 1, itemrefsSkipped: 1 })).toContain("itemref");
+  });
+
+  it("同页有 iframe 且未指定 frameId：沿用既有 iframe 提示", () => {
+    expect(diagnoseEmptySchema({ ...base, iframes: 2 })).toContain("frameId");
+  });
+
+  it("已指定 frameId：不再劝去传 frameId", () => {
+    expect(diagnoseEmptySchema({ ...base, iframes: 2, frameScoped: true })).not.toContain("pass frameId");
   });
 });

@@ -52,6 +52,15 @@ export interface QueryCssEmptyFacts extends QueryScanFacts {
   selector: string;
 }
 
+export interface SchemaEmptyFacts extends QueryScanFacts {
+  ldScripts: number;
+  ldParseErrors: number;
+  itemscopes: number;
+  itemrefsSkipped: number;
+  ogMetas: number;
+  typeFilter: string | null;
+}
+
 function iframeNote(f: QueryScanFacts): string | null {
   if (f.frameScoped || f.iframes <= 0) return null;
   return `${f.iframes} same-page iframe(s) were NOT searched — query runs in one frame at a time. ` +
@@ -91,6 +100,37 @@ export function diagnoseEmptyQueryCss(f: QueryCssEmptyFacts): string {
   const iframes = iframeNote(f);
   if (iframes) parts.push(iframes);
   else parts.push("Out of scope: closed shadow DOM.");
+  return parts.join(" ");
+}
+
+export function diagnoseEmptySchema(f: SchemaEmptyFacts): string {
+  const parts: string[] = [];
+  const found = f.ldScripts > 0 || f.itemscopes > 0 || f.ogMetas > 0;
+
+  if (!found) {
+    parts.push(
+      "This frame declares no JSON-LD, Microdata or Open Graph data — the page author published none. " +
+        "Call vortex_extract for visible content, or vortex_observe for interactive elements.",
+    );
+  } else {
+    parts.push(
+      `Scanned ${f.ldScripts} JSON-LD script(s), ${f.itemscopes} itemscope element(s) and ${f.ogMetas} og: meta(s).`,
+    );
+    if (f.typeFilter && f.typeFilter !== "*") {
+      parts.push(`Nothing matched type "${f.typeFilter}" — pass pattern:"*" to list every declared entity.`);
+    }
+    if (f.ldParseErrors > 0) {
+      parts.push(`${f.ldParseErrors} JSON-LD block(s) contained malformed JSON and were skipped.`);
+    }
+    if (f.itemscopes > 0) {
+      parts.push("Microdata items without an itemtype attribute are skipped — they carry no entity type.");
+    }
+    if (f.itemrefsSkipped > 0) {
+      parts.push(`${f.itemrefsSkipped} item(s) use itemref; cross-node references are not resolved.`);
+    }
+  }
+  const iframes = iframeNote(f);
+  if (iframes) parts.push(iframes);
   return parts.join(" ");
 }
 
