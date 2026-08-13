@@ -146,6 +146,8 @@ flowchart TD
 
 ## 6.5 已知限制（实施中审出）
 
+- **指纹只能经 `vortex_act` 生效，便捷工具够不着。** 守卫判的是 `params.action`（`server.ts:787`），只有 `vortex_act` 有这个字段。`vortex_fill` / `vortex_fill_form` 这些独立公开工具 dispatch 到 `dom.fill` 时没有 `action`，且 schema 里没有 `options` 属性。好在传不进去也就不会静默失效——但同一个 fill 动作，走 `vortex_act` 有指纹、走 `vortex_fill` 没有，这个不一致要么后续统一，要么在工具描述里说清。
+
 - **值类/滚动类指纹的 `urlChanged` 是「未采集」而非「已测为假」。** `normalizeValueFingerprint` / `normalizeScrollFingerprint` 写死 `false`，因为 act 在 fill/type/select/scroll 的返回里不带 url——只有 click 经 `effect.urlChanged` 有这个信号（`server.ts:920-940` 链路）。后果是**窄盲区**：`<select>` 跳转菜单在录制时导航、重放时未导航，只要回读值一致就仍会判 verified。补齐需要从扩展侧多传一个导航信号，属独立改动，本轮不做。
 
 ## 7. 待验证假设

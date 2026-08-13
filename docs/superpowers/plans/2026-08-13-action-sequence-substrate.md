@@ -1013,8 +1013,11 @@ click 强开，其余动作有确定量可读，不需要副作用观测。"
 
 新建 `packages/vortex-bench/cases/fingerprint-actions.case.ts`：
 
+**必须全部走 `vortex_act`，不能用 `vortex_fill`**：指纹守卫判的是 `params.action`（`server.ts:787`），而 `vortex_fill` 是独立公开工具，dispatch 到 `dom.fill` 时压根没有 `action` 字段，且它的 schema 里没有 `options` 属性——传 `options.fingerprint` 不会报错也不会生效。`vortex_act` 的 `action` enum 含 `click/fill/type/select/scroll/hover`，是唯一能触发指纹的入口。
+
 ```ts
-// 四种动作的效果指纹：record 拿到确定量，verify 一致为 null、不一致报 value/scroll drift。
+// 四种动作的效果指纹：record 拿到确定量，verify 一致为 null、不一致报 value drift。
+// 全走 vortex_act：指纹守卫读 params.action，vortex_fill 这类独立工具没有该字段。
 import type { CaseDefinition } from "../src/types.js";
 import { extractText } from "./_helpers.js";
 
@@ -1035,34 +1038,46 @@ const def: CaseDefinition = {
       return m[1];
     };
 
+    const act = async (args: Record<string, unknown>): Promise<ActResult> =>
+      JSON.parse(extractText(await ctx.call("vortex_act", args))) as ActResult;
+    const rec = { fingerprint: { mode: "record" } };
+
     // fill：record 出 valueAfter
-    const fill = JSON.parse(extractText(await ctx.call("vortex_fill", {
-      target: refOf("邮箱"), value: "a@b.com", options: { fingerprint: { mode: "record" } },
-    }))) as ActResult;
+    const fill = await act({
+      action: "fill", target: refOf("邮箱"), value: "a@b.com", options: rec,
+    });
     ctx.assert(fill.fingerprint?.action === "fill", `fill 指纹缺失：${JSON.stringify(fill)}`);
     ctx.assert(fill.fingerprint?.valueAfter === "a@b.com",
       `fill valueAfter 应为回读值，实际 ${fill.fingerprint?.valueAfter}`);
 
     // verify 同值 → drift null
-    const same = JSON.parse(extractText(await ctx.call("vortex_fill", {
-      target: refOf("邮箱"), value: "a@b.com",
+    const same = await act({
+      action: "fill", target: refOf("邮箱"), value: "a@b.com",
       options: { fingerprint: { mode: "verify", expect: fill.fingerprint } },
-    }))) as ActResult;
+    });
     ctx.assert(same.drift === null, `同值 verify 应 matched，实际 ${JSON.stringify(same.drift)}`);
 
-    // 受控回滚 → 必须报 value drift，这是「静默假成功」的正面拦截
-    const ctl = JSON.parse(extractText(await ctx.call("vortex_fill", {
-      target: refOf("受控字段"), value: "typed",
-      options: { fingerprint: { mode: "record" } },
-    }))) as ActResult;
+    // select：确定量是选中值
+    const sel = await act({ action: "select", target: refOf("城市"), value: "上海", options: rec });
+    ctx.assert(sel.fingerprint?.action === "select",
+      `select 指纹缺失：${JSON.stringify(sel)}`);
+    ctx.assert(typeof sel.fingerprint?.valueAfter === "string",
+      `select valueAfter 应为字符串，实际 ${JSON.stringify(sel.fingerprint)}`);
+
+    // type：contentEditable 的确定量是回读文本
+    const typ = await act({ action: "type", target: refOf("正文"), value: "hello", options: rec });
+    ctx.assert(typ.fingerprint?.valueAfter === "hello",
+      `type valueAfter 应为回读文本，实际 ${typ.fingerprint?.valueAfter}`);
+
+    // 受控回滚 → 指纹必须是回滚后的值，这是「静默假成功」的正面拦截
+    const ctl = await act({ action: "fill", target: refOf("受控字段"), value: "typed", options: rec });
     ctx.assert(ctl.fingerprint?.valueAfter === "REVERTED",
       `受控回滚必须体现在指纹里，实际 ${ctl.fingerprint?.valueAfter}`);
 
-    // scroll：record 出位置
-    const scr = JSON.parse(extractText(await ctx.call("vortex_act", {
-      action: "scroll", target: refOf("列表"), value: 500,
-      options: { fingerprint: { mode: "record" } },
-    }))) as ActResult;
+    // scroll：record 出位置。value 是结构化参数对象，不是裸数字
+    const scr = await act({
+      action: "scroll", target: refOf("列表"), value: { position: "bottom" }, options: rec,
+    });
     ctx.assert(typeof scr.fingerprint?.scrollAfter?.top === "number",
       `scroll 指纹应带位置，实际 ${JSON.stringify(scr.fingerprint)}`);
   },
@@ -1080,6 +1095,11 @@ pnpm --filter @vortex-browser/bench bench run --pattern fingerprint-actions
 ```
 
 Expected: PASS。若 `refOf` 匹配不到，先手动看一次 observe 输出再调正则——**不要**把断言改宽来迁就。
+
+**两种失败要照实汇报、不要绕过**：
+
+- 返回里出现 `fingerprintSkipped` 而非 `fingerprint`，说明 `targetIdentity` 没建立（`server.ts:930` 要求 `params.index` 来自 @ref）。scroll 这一步尤其可能踩到——它历史上常用 `value.container` 选择器而非 @ref。**记下原始返回照实汇报**，不要改成不带指纹的断言。
+- `valueAfter` 拿到的是入参回声而不是回读值（比如受控字段那步返回 `"typed"` 而非 `"REVERTED"`），说明 Task 1/2 的回读没接通到这条链路。**这是真缺陷，停下汇报**，不要把断言改成接受任一值。
 
 - [ ] **Step 4: 跑全量 bench 确认零回归**
 
