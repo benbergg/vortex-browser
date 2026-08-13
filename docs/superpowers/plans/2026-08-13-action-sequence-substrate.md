@@ -1161,7 +1161,7 @@ fixture 埋了受控回滚 input：fill 报 success 但值被框架改回，
 
 **为什么三态而不是 ok/error**：现有 `fill_form` 只返回 `{ok, error}`（`server.ts:673-681`），回答不了「点了没有」。序列里这个区分是安全边界——非幂等动作在「已执行但回读失败」下重试会造成重复副作用。
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 新建 `packages/mcp/tests/sequence-run.test.ts`：
 
@@ -1218,7 +1218,7 @@ describe("summarizeTrace", () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 ```bash
 pnpm --filter @vortex-browser/mcp exec vitest run tests/sequence-run.test.ts --maxWorkers=2 --minWorkers=1
@@ -1226,7 +1226,7 @@ pnpm --filter @vortex-browser/mcp exec vitest run tests/sequence-run.test.ts --m
 
 Expected: FAIL，找不到模块 `../src/lib/sequence-run.js`
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 新建 `packages/mcp/src/lib/sequence-run.ts`：
 
@@ -1279,7 +1279,7 @@ export function summarizeTrace(traces: StepTrace[]): {
 }
 ```
 
-- [ ] **Step 4: 跑测试确认通过**
+- [x] **Step 4: 跑测试确认通过**
 
 ```bash
 pnpm --filter @vortex-browser/mcp exec vitest run tests/sequence-run.test.ts --maxWorkers=2 --minWorkers=1
@@ -1287,7 +1287,7 @@ pnpm --filter @vortex-browser/mcp exec vitest run tests/sequence-run.test.ts --m
 
 Expected: PASS（7 个用例：classifyStep 4 + shouldContinue 2 + summarizeTrace 1）
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add packages/mcp/src/lib/sequence-run.ts packages/mcp/tests/sequence-run.test.ts
@@ -1335,7 +1335,7 @@ fill_form 只返回 ok/error，回答不了「点了没有」。三态把「未�
 
 **500 截断（实测依据）**：`fill`/`type` 的回读值在扩展侧封顶 500 字符并加省略号（Task 2 加的）。入参必须施加同样的截断才能比，否则长文本必然误判。
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 在 `packages/mcp/tests/sequence-run.test.ts` 末尾追加：
 
@@ -1399,7 +1399,7 @@ describe("classifyStep 接入自证", () => {
 
 同时把文件顶部的 import 补上 `verifyStepEffect`。
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 ```bash
 pnpm --filter @vortex-browser/mcp exec vitest run tests/sequence-run.test.ts --maxWorkers=2 --minWorkers=1
@@ -1407,7 +1407,7 @@ pnpm --filter @vortex-browser/mcp exec vitest run tests/sequence-run.test.ts --m
 
 Expected: FAIL，`verifyStepEffect is not a function`
 
-- [ ] **Step 3: 实现**
+- [x] **Step 3: 实现**
 
 在 `packages/mcp/src/lib/sequence-run.ts` 中，`classifyStep` 之前插入：
 
@@ -1477,7 +1477,7 @@ export function classifyStep(outcome: {
   effect?: StepEffect;
 ```
 
-- [ ] **Step 4: 跑测试确认通过**
+- [x] **Step 4: 跑测试确认通过**
 
 ```bash
 pnpm --filter @vortex-browser/mcp exec vitest run tests/sequence-run.test.ts --maxWorkers=2 --minWorkers=1
@@ -1485,7 +1485,7 @@ pnpm --filter @vortex-browser/mcp exec vitest run tests/sequence-run.test.ts --m
 
 Expected: PASS（17 个用例：原 7 条 + 新增 10 条）。**原 7 条必须原样通过**——`classifyStep` 不传 `effect` 时行为不变是向后兼容的硬要求，若它们红了说明改坏了，停下汇报，不要改那 7 条断言。
 
-- [ ] **Step 5: 提交**
+- [x] **Step 5: 提交**
 
 ```bash
 git add packages/mcp/src/lib/sequence-run.ts packages/mcp/tests/sequence-run.test.ts
