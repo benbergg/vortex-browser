@@ -35,9 +35,9 @@ describe("vortex_verify caps 可见性", () => {
     expect(def!.action).toBe("verify.assert");
   });
 
-  it("--caps=testing 时公开面 = 24（23 默认 + vortex_verify）", () => {
+  it("--caps=testing 时公开面 = 25（24 默认 + vortex_verify）", () => {
     setEnabledCaps(["testing"]);
-    expect(getToolDefs().length).toBe(24);
+    expect(getToolDefs().length).toBe(25);
   });
 
   it("verify schema 暴露 mode enum visible|value|text|list", () => {
