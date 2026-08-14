@@ -3,6 +3,24 @@ import type { NmRequest } from "@vortex-browser/shared";
 import { VtxErrorCode, MouseActions } from "@vortex-browser/shared";
 import { ActionRouter } from "../src/lib/router.js";
 import { registerMouseHandlers } from "../src/handlers/mouse.js";
+import { hitProbePageSide, type HitProbe } from "../src/lib/hit-probe.js";
+
+/**
+ * 命中探测和 iframe offset 共用 chrome.scripting.executeScript —— 一律返回同一个
+ * 对象等于没测（探测拿到 offset 也会被形状守卫吞掉，看不出接没接线）。按注入体
+ * 身份分流，让探测的返回值真的来自本测试。
+ */
+function scriptingMock(probe: HitProbe | Error | null, offset: unknown = null) {
+  return {
+    executeScript: vi.fn().mockImplementation(async (o: any) => {
+      if (o.func === hitProbePageSide) {
+        if (probe instanceof Error) throw probe;
+        return [{ result: probe }];
+      }
+      return [{ result: offset }];
+    }),
+  };
+}
 
 function mkReq(
   tool: string,
@@ -255,6 +273,79 @@ describe("mouse handlers", () => {
       y: 100,
       offsetApplied: { x: 0, y: 0 },
     });
+  });
+});
+
+// CDP 命中测试是浏览器做的:事件落在该点最上层的元素上。dispatchMouseEvent 不抛错
+// 就返回 success:true,于是「点在浮层上」与「点中目标」结果完全一样(2026-08-14 日志:
+// 同一坐标被反复重点,页面自查显示 48 个按钮 32 个被插入面板压住)。
+describe("mouse.click 命中自证", () => {
+  let router: ActionRouter;
+  let sent: Array<{ tabId: number; method: string; params: any }>;
+
+  function setup(scripting: unknown) {
+    router = new ActionRouter();
+    sent = [];
+    const debuggerMgr = makeDebuggerMock({
+      onSend: (tabId, method, params) => sent.push({ tabId, method, params }),
+    });
+    vi.stubGlobal("chrome", {
+      tabs: { query: vi.fn().mockResolvedValue([{ id: 42 }]) },
+      webNavigation: {
+        getAllFrames: vi.fn().mockResolvedValue([
+          { frameId: 0, parentFrameId: -1, url: "https://a/" },
+        ]),
+      },
+      scripting,
+    });
+    registerMouseHandlers(router, debuggerMgr);
+  }
+
+  beforeEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("把实际命中的元素随结果带回，调用方才看得出点在浮层上", async () => {
+    setup(scriptingMock({ ok: true, el: "DIV.insert-pane", text: "插入面板" }));
+    const resp = await router.dispatch(mkReq("mouse.click", { x: 714, y: 755 }, 42));
+    expect(resp.error).toBeUndefined();
+    expect(resp.result).toMatchObject({
+      success: true,
+      hit: { ok: true, el: "DIV.insert-pane", text: "插入面板" },
+    });
+  });
+
+  it("视口外坐标直接报错，且一个 CDP 事件都不派发", async () => {
+    setup(scriptingMock({ ok: false, reason: "OUT_OF_VIEWPORT", viewport: { w: 1920, h: 1080 } }));
+    const resp = await router.dispatch(mkReq("mouse.click", { x: 922, y: -3974 }, 42));
+    expect(resp.error?.code).toBe(VtxErrorCode.INVALID_PARAMS);
+    expect(resp.error?.message).toContain("1920x1080");
+    expect(resp.error?.hint).toMatch(/scroll/i);
+    // 报错却仍旧白点一次是最坏结果:调用方看到错误,页面上却已经发生了点击
+    expect(sent).toEqual([]);
+  });
+
+  it("视口内没有元素时如实报 NO_ELEMENT，但照常派发", async () => {
+    setup(scriptingMock({ ok: false, reason: "NO_ELEMENT" }));
+    const resp = await router.dispatch(mkReq("mouse.click", { x: 10, y: 10 }, 42));
+    expect(resp.error).toBeUndefined();
+    expect(resp.result).toMatchObject({ hit: { ok: false, reason: "NO_ELEMENT" } });
+    expect(sent.length).toBe(3);
+  });
+
+  it("探测不可用时优雅降级 —— 自证是增益，不能让它挡住本来能派发的点击", async () => {
+    setup(scriptingMock(new Error("Cannot access a chrome:// URL")));
+    const resp = await router.dispatch(mkReq("mouse.click", { x: 10, y: 10 }, 42));
+    expect(resp.error).toBeUndefined();
+    expect(resp.result).not.toHaveProperty("hit");
+    expect(sent.length).toBe(3);
+  });
+
+  it("doubleClick 走同一条自证路径", async () => {
+    setup(scriptingMock({ ok: true, el: "TD.cell" }));
+    const resp = await router.dispatch(mkReq("mouse.doubleClick", { x: 10, y: 10 }, 42));
+    expect(resp.result).toMatchObject({ hit: { el: "TD.cell" } });
+    expect(sent.length).toBe(5);
   });
 });
 

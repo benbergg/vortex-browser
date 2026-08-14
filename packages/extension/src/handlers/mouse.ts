@@ -6,8 +6,46 @@ import { getIframeOffset } from "../lib/iframe-offset.js";
 import { resolveTarget } from "../lib/resolve-target.js";
 import { waitActionable } from "../action/auto-wait.js";
 import { loadPageSideModule } from "../adapter/page-side-loader.js";
+import { hitProbePageSide, isHitProbe, type HitProbe } from "../lib/hit-probe.js";
 
 type CoordSpace = "frame" | "viewport";
+
+/**
+ * 派发前照一次视口坐标处的实际命中元素。探测失败一律降级为 null —— 自证是增益，
+ * 不能让它把本来能派发的点击变成报错。
+ */
+async function probeHit(tabId: number, x: number, y: number): Promise<HitProbe | null> {
+  try {
+    const results = await chrome.scripting.executeScript({
+      target: buildExecuteTarget(tabId, 0),
+      world: "MAIN",
+      func: hitProbePageSide,
+      args: [x, y],
+    });
+    const r = results[0]?.result;
+    return isHitProbe(r) ? r : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 视口外的坐标 CDP 送不到任何元素,这不是启发式判断而是算术:再返回 success:true
+ * 就是撒谎。日志里出现过 y=-3974(调用方拿了未滚动的 rect)白点一整轮。
+ */
+function throwIfOutOfViewport(hit: HitProbe | null, x: number, y: number): void {
+  if (!hit || hit.ok || hit.reason !== "OUT_OF_VIEWPORT") return;
+  throw vtxError(
+    VtxErrorCode.INVALID_PARAMS,
+    `Point (${x}, ${y}) is outside the ${hit.viewport.w}x${hit.viewport.h} viewport; no element can receive the event`,
+    { extras: { viewport: hit.viewport } },
+    {
+      hint:
+        "Mouse coordinates are viewport-relative CSS pixels. The element is probably scrolled out of view — " +
+        "scroll it into view first (vortex_act scroll), then re-read its rect; a rect captured before scrolling is stale.",
+    },
+  );
+}
 
 async function dispatchMouse(
   debuggerMgr: DebuggerManager,
@@ -82,6 +120,9 @@ export function registerMouseHandlers(
         coordSpace,
       );
 
+      const hit = await probeHit(tid, x, y);
+      throwIfOutOfViewport(hit, x, y);
+
       await debuggerMgr.attach(tid);
       await dispatchMouse(debuggerMgr, tid, "mouseMoved", x, y, button);
       await dispatchMouse(debuggerMgr, tid, "mousePressed", x, y, button, 1);
@@ -95,6 +136,8 @@ export function registerMouseHandlers(
         coordSpace,
         frameId: frameId ?? null,
         offsetApplied,
+        // OUT_OF_VIEWPORT 已在上面抛错,这里剩下的是「命中了谁」或「点上什么都没有」
+        ...(hit ? { hit } : {}),
       };
     },
 
@@ -116,6 +159,9 @@ export function registerMouseHandlers(
         coordSpace,
       );
 
+      const hit = await probeHit(tid, x, y);
+      throwIfOutOfViewport(hit, x, y);
+
       await debuggerMgr.attach(tid);
       await dispatchMouse(debuggerMgr, tid, "mouseMoved", x, y);
       await dispatchMouse(debuggerMgr, tid, "mousePressed", x, y, "left", 1);
@@ -130,6 +176,7 @@ export function registerMouseHandlers(
         coordSpace,
         frameId: frameId ?? null,
         offsetApplied,
+        ...(hit ? { hit } : {}),
       };
     },
 
