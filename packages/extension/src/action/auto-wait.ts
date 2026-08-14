@@ -124,6 +124,17 @@ export async function waitActionable(
   // R6 的 inertBlocked 分支命中不了)→ 同样追加关 modal 指引(等待/idle 无用,正解关
   // dialog)。modalBlocked 由 actionability probe 经 `dialog:modal` 判据携带。
   const modalBlocked = lastReason === "OBSCURED" && lastExtras?.modalBlocked === true;
+  // 真遮挡:门在 receivesEvents 里早就算出了压在上面的是谁(actionability.ts:218-223),
+  // 却只塞进 context.extras —— 而调用方看到的只有 message + hint。于是模型收到的是
+  // 「timeout,加大 timeout 或 wait_for idle」,对着一个不会自己消失的浮层永远等不到。
+  // 日志实测 30 天 5 次 TIMEOUT/OBSCURED,无一拿到 blocker(2026-08-14)。
+  const blocker =
+    lastReason === "OBSCURED" && !modalBlocked
+      ? (lastExtras?.blocker as string | undefined)
+      : undefined;
+  // hit-test 落空不是「被谁盖住」,是中心点根本没有元素(被祖先裁剪 / 定位到视口外),
+  // 按遮挡话术说会把调用方推去找根本不存在的浮层。
+  const noHit = blocker === "elementFromPoint=null";
   let message: string;
   if (lastReasonIsStability) {
     message = `Element not stable after ${timeout}ms (last reason: NOT_STABLE)`;
@@ -137,11 +148,26 @@ export async function waitActionable(
       `Actionability timeout after ${timeout}ms; last reason: OBSCURED ` +
       `(element is covered by an open modal <dialog> in the top layer; the rest of the page is ` +
       `inert while it is open — dismiss the dialog first, e.g. press Escape or click its close button, then retry)`;
+  } else if (noHit) {
+    message =
+      `Hit-testing the element's center reached no element at all after ${timeout}ms ` +
+      `(clipped by an ancestor, or positioned outside the viewport)`;
+  } else if (blocker) {
+    message =
+      `Element is covered by <${blocker}> after ${timeout}ms of retrying; ` +
+      `hit-testing its center reaches that element, not the target`;
   } else {
     message = `Actionability timeout after ${timeout}ms; last reason: ${lastReason ?? "unknown"}`;
   }
+  // OBSCURED 不再压成 TIMEOUT:TIMEOUT 的 hint 是「加大 timeout / 等 idle」,对遮挡是
+  // 死路,而 OBSCURED 自带「关掉浮层再重试」。同 NOT_STABLE 的先例(见上方注释)——
+  // 只改 hint 文本不改错误码,修复路径就是错的。
   throw vtxError(
-    lastReasonIsStability ? VtxErrorCode.NOT_STABLE : VtxErrorCode.TIMEOUT,
+    lastReasonIsStability
+      ? VtxErrorCode.NOT_STABLE
+      : lastReason === "OBSCURED"
+        ? VtxErrorCode.OBSCURED
+        : VtxErrorCode.TIMEOUT,
     message,
     {
       selector,
