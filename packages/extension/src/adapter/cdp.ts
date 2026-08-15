@@ -164,54 +164,24 @@ export async function cdpClickElement(
         const topEl = resolve
           ? (resolve.deepElementFromPoint(cxInner, cyInner) as Element | null)
           : document.elementFromPoint(cxInner, cyInner);
-        // 复合输入控件(Element Plus el-select 等)把可见显示层(placeholder /
-        // selected-item)作为兄弟节点叠在透明真控件之上。hit-test 命中显示层兄弟——
-        // 既非 target 也非其后代——但它非交互且与 target 同处一个交互 widget 容器
-        // (el 的最近交互祖先 contains hit),点击经显示层冒泡仍到达控件,非真遮挡。
-        // 与 actionability.ts receivesEvents 的 carve-out 同源(2026-06-01 el-select dogfood)。
-        const isInteractiveEl = (x: Element): boolean => {
-          const t = x.tagName.toLowerCase();
-          return (
-            !!x.getAttribute("role") ||
-            x.getAttribute("tabindex") != null ||
-            t === "button" ||
-            t === "a" ||
-            t === "input" ||
-            t === "select" ||
-            t === "textarea"
-          );
-        };
-        let sameWidgetDecoration = false;
-        if (topEl && !isInteractiveEl(topEl)) {
-          let w: Element | null = el.parentElement;
-          while (w && w !== document.documentElement) {
-            if (isInteractiveEl(w)) {
-              if (w.contains(topEl)) sameWidgetDecoration = true;
-              break;
-            }
-            w = w.parentElement;
-          }
-        }
+        // 命中归属判定收敛到 __vortexDomResolve.classifyHit(与门同一真源)。
         if (!force) {
-          if (
-            topEl &&
-            topEl !== el &&
-            !el.contains(topEl) &&
-            !topEl.contains(el) &&
-            !sameWidgetDecoration
-          ) {
-            const classStr =
-              typeof topEl.className === "string" && topEl.className
-                ? "." + topEl.className.split(" ").filter(Boolean).join(".")
-                : "";
-            const desc =
-              topEl.tagName.toLowerCase() +
-              (topEl.id ? "#" + topEl.id : "") +
-              classStr;
+          // fail closed:判定不可用(模块未注入 / 两次 executeScript 之间页面导航)时
+          // 报 NOT_ATTACHED。**不会自动恢复**——派发在 gate 之后,这里的 errorCode 经
+          // mapPageError 直接抛出,不回到 auto-wait 自旋(codex 二轮 P1-1)。但这是正确
+          // 语义:导航后本就该重新 observe。静默放行才是把 P0 根因留在降级路径上。
+          if (!resolve?.classifyHit) {
+            return {
+              errorCode: "NOT_ATTACHED",
+              error: `Hit-ownership check unavailable for ${sel} (page-side module missing — page likely navigated); retry re-injects it`,
+            };
+          }
+          const own = resolve.classifyHit(el, topEl) as { ok: boolean; blocker?: string; kind?: string };
+          if (!own.ok) {
             return {
               errorCode: "ELEMENT_OCCLUDED",
-              error: `Element ${sel} is covered by <${desc}>`,
-              extras: { blocker: desc },
+              error: `Element ${sel} is covered by <${own.blocker}>`,
+              extras: { blocker: own.blocker, hitKind: own.kind },
             };
           }
         }

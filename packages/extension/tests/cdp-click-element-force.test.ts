@@ -22,6 +22,7 @@ import { JSDOM } from "jsdom";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
+import { classifyHit } from "../src/page-side/hit-ownership.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const CDP_TS = resolve(__dirname, "../src/adapter/cdp.ts");
@@ -146,15 +147,17 @@ describe("cdpClickElement force option — runtime (Case 7, anti-brittleness)", 
 
     // Stub window.__vortexDomResolve so the page-side func uses the gated
     // branch (it checks for this object first, then falls back to light-DOM).
-    // We need both queryAllDeep + deepElementFromPoint + isEnabled.
+    // We need queryAllDeep + deepElementFromPoint + isEnabled + classifyHit
+    // （命中归属判定收敛到 classifyHit 后，occlusion 检查改走这里，见 cdp.ts）。
     const target = dom.window.document.getElementById("t") as HTMLElement;
     const blocker = dom.window.document.getElementById("blocker") as HTMLElement;
     Object.defineProperty(dom.window, "__vortexDomResolve", {
       value: {
-        version: 1,
+        version: 2,
         queryAllDeep: (_sel: string) => [target],
         deepElementFromPoint: (_cx: number, _cy: number) => blocker,
         isEnabled: (_el: Element) => true,
+        classifyHit: (el: Element, hit: Element | null) => classifyHit(el, hit),
       },
       writable: true,
       configurable: true,
