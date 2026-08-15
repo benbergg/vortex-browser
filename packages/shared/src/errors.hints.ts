@@ -164,8 +164,8 @@ export const DEFAULT_ERROR_META: Record<VtxErrorCode, VtxErrorMeta> = {
   OBSCURED: {
     // 原文让调用方去看 context.extras.blocker —— 那是个它永远看不到的字段(MCP 只渲染
     // message + hint)。遮挡者现由 message 直接点名,指引改为可执行的下一步。
-    // 别在这里推荐 force:true —— 它只跳过 actionability 门,合成 click 路径的 page-side
-    // 遮挡检查(dom.ts CLICK)根本收不到 force,仍会抛 ELEMENT_OCCLUDED(2026-08-14 live 实测)。
+    // 别在这里推荐 force:true —— 它现已穿透门/CDP/合成三条路径,但跳过的是全部质量门
+    // (可见性/可用性/稳定性…),对通用 hint 来说是危险的逃生舱,不该推荐给 LLM。
     hint: "Element hit-test failed; another element covers it (the covering element is named in the message). Waiting will not help and neither will a larger timeout — dismiss or scroll away that element (e.g. vortex_act click on its close control), then retry.",
     recoverable: true,
   },
