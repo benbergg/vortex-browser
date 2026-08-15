@@ -1,0 +1,160 @@
+{
+  "schema": 1,
+  "window": {
+    "from": "2026-08-14T14:57:49.247Z",
+    "to": "2026-08-15T13:56:59.608Z",
+    "activeDays": 2,
+    "requestedDays": 1,
+    "transcriptFiles": 5,
+    "sessions": 2,
+    "projects": 3
+  },
+  "totals": {
+    "calls": 134,
+    "errors": 9,
+    "errorRate": 0.0672,
+    "emptySuccess": 1,
+    "emptyRate": 0.0075
+  },
+  "skew": {
+    "top1SessionShare": 0.6194,
+    "top5SessionShare": 1
+  },
+  "routes": {
+    "vortex": 134,
+    "playwright": 2,
+    "vortexShare": 0.9853
+  },
+  "ratios": {
+    "observeToEvaluate": 0.052
+  },
+  "perTool": [
+    {
+      "tool": "evaluate",
+      "calls": 77,
+      "errors": 6,
+      "errorRate": 0.0779,
+      "emptySuccess": 1,
+      "emptyRate": 0.013
+    },
+    {
+      "tool": "act",
+      "calls": 20,
+      "errors": 3,
+      "errorRate": 0.15,
+      "emptySuccess": 0,
+      "emptyRate": 0
+    },
+    {
+      "tool": "navigate",
+      "calls": 8,
+      "errors": 0,
+      "errorRate": 0,
+      "emptySuccess": 0,
+      "emptyRate": 0
+    },
+    {
+      "tool": "screenshot",
+      "calls": 5,
+      "errors": 0,
+      "errorRate": 0,
+      "emptySuccess": 0,
+      "emptyRate": 0
+    },
+    {
+      "tool": "tab_create",
+      "calls": 4,
+      "errors": 0,
+      "errorRate": 0,
+      "emptySuccess": 0,
+      "emptyRate": 0
+    },
+    {
+      "tool": "tab_list",
+      "calls": 4,
+      "errors": 0,
+      "errorRate": 0,
+      "emptySuccess": 0,
+      "emptyRate": 0
+    },
+    {
+      "tool": "observe",
+      "calls": 4,
+      "errors": 0,
+      "errorRate": 0,
+      "emptySuccess": 0,
+      "emptyRate": 0
+    },
+    {
+      "tool": "tab_close",
+      "calls": 3,
+      "errors": 0,
+      "errorRate": 0,
+      "emptySuccess": 0,
+      "emptyRate": 0
+    },
+    {
+      "tool": "browser",
+      "calls": 3,
+      "errors": 0,
+      "errorRate": 0,
+      "emptySuccess": 0,
+      "emptyRate": 0
+    },
+    {
+      "tool": "extract",
+      "calls": 3,
+      "errors": 0,
+      "errorRate": 0,
+      "emptySuccess": 0,
+      "emptyRate": 0
+    },
+    {
+      "tool": "query",
+      "calls": 2,
+      "errors": 0,
+      "errorRate": 0,
+      "emptySuccess": 0,
+      "emptyRate": 0
+    },
+    {
+      "tool": "debug_read",
+      "calls": 1,
+      "errors": 0,
+      "errorRate": 0,
+      "emptySuccess": 0,
+      "emptyRate": 0
+    }
+  ],
+  "topErrors": [
+    {
+      "sig": "evaluate | Error [TIMEOUT]: js.evaluateAsync timed out after Nms (page-side func may still be running; set shorter timeout, simplify code, or use vortex_navigate to clear ",
+      "count": 3
+    },
+    {
+      "sig": "evaluate | Error [JS_EXECUTION_ERROR]: Unexpected token '<' Hint: Injected JavaScript threw an error. Inspect the error message in context.extras and adjust the selector o",
+      "count": 1
+    },
+    {
+      "sig": "act | Error [INVALID_SELECTOR]: target \"button:has-text(\"⋯\")\" uses Playwright locator syntax (text= / >> / :has-text()), which is not supported. vortex_act target acc",
+      "count": 1
+    },
+    {
+      "sig": "evaluate | Error [JS_EXECUTION_ERROR]: Cannot read properties of undefined (reading 'joinExamObj') Hint: Injected JavaScript threw an error. Inspect the error message in c",
+      "count": 1
+    },
+    {
+      "sig": "evaluate | Error [INVALID_PARAMS]: timeout must be an integer in [N, N]; got N Hint: Invalid parameters. Check the tool schema for required fields and value constraints, t",
+      "count": 1
+    },
+    {
+      "sig": "act | Error [NOT_ATTACHED]: target \"div.practice-answer-card__submit, .answer-card-submit\" matched no element (not an @ref, so it was used as a CSS selector). No elem",
+      "count": 1
+    },
+    {
+      "sig": "act | Error [SELECTOR_AMBIGUOUS]: Selector \"span.xiaoe-button__text\" matched N elements Hint: Selector matched multiple elements. Use a more specific selector, or cal",
+      "count": 1
+    }
+  ],
+  "label": "today-0815"
+}
