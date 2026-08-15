@@ -20,6 +20,7 @@ import { JSDOM } from "jsdom";
 import { DomActions } from "@vortex-browser/shared";
 import { ActionRouter } from "../src/lib/router.js";
 import { registerDomHandlers } from "../src/handlers/dom.js";
+import { classifyHit } from "../src/page-side/hit-ownership.js";
 import type { NmRequest } from "@vortex-browser/shared";
 
 vi.mock("../src/action/auto-wait.js", () => ({
@@ -61,10 +62,19 @@ describe("合成 click inline func 注入作用域(P0 isTransient 回归锁)", (
     (globalThis as Record<string, unknown>).PointerEvent = dom.window.MouseEvent;
     (win as Record<string, unknown>).PointerEvent = dom.window.MouseEvent;
 
+    // 命中归属收敛到 classifyHit 后,occlusion 检查须要 hit 参数——deepElementFromPoint
+    // 返回 queryAllDeep 刚解析出的目标本身(点击点天然落在目标上,无遮挡场景),
+    // 而非旧版的 null(旧逻辑把 topEl=null 当无遮挡放行,classifyHit 把它当真遮挡拦截)。
+    let __lastResolved: Element | null = null;
     (win as Record<string, unknown>).__vortexDomResolve = {
-      queryAllDeep: (sel: string) => Array.from(dom.window.document.querySelectorAll(sel)),
+      queryAllDeep: (sel: string) => {
+        const els = Array.from(dom.window.document.querySelectorAll(sel));
+        __lastResolved = (els[0] as Element | undefined) ?? null;
+        return els;
+      },
       isEnabled: () => true,
-      deepElementFromPoint: () => null,
+      deepElementFromPoint: () => __lastResolved,
+      classifyHit: (el: Element, hit: Element | null) => classifyHit(el, hit),
     };
     const btn = dom.window.document.getElementById("btn")!;
     btn.getBoundingClientRect = () =>

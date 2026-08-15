@@ -108,17 +108,13 @@ describe("click probe 集成: isTransient 在 vortex click 中放行 (BUG-012 N0
     expect(DOM_SRC).toMatch(/export\s+function\s+isTransient/);
   });
 
-  it("click probe 中 isTransientInline(topEl) 调用在 isInteractiveEl 函数定义之后 (不破坏淘宝 el-select carve-out)", () => {
-    // 验证 click probe 内 isTransientInline(topEl) 调用位置在 isInteractiveEl
-    // 函数定义之后 (顺序敏感, 否则会破坏现有 sameWidgetDecoration 路径)。
-    // 注:probe 内用的是 isTransient 的**内联副本** isTransientInline——
-    // executeScript 注入丢模块作用域,裸引用模块级 isTransient 会
-    // ReferenceError(2026-06-10 spike 实测 P0,行为级守护见
-    // tests/click-synthetic-inline-scope.test.ts)。
-    const interactiveDefIdx = DOM_SRC.indexOf("isInteractiveEl = (x: Element)");
-    const transientCallIdx = DOM_SRC.indexOf("isTransientInline(topEl)");
-    expect(interactiveDefIdx).toBeGreaterThan(-1);
-    expect(transientCallIdx).toBeGreaterThan(-1);
-    expect(transientCallIdx).toBeGreaterThan(interactiveDefIdx);
+  // el-select carve-out(原 isInteractiveEl/sameWidgetDecoration)已收敛进
+  // __vortexDomResolve.classifyHit 单一真源(hit-ownership.ts isSameWidgetDecoration),
+  // dom.ts click probe 不再自持一份、故不再有顺序依赖可锁——覆盖见
+  // dom-resolve-classify-hit.test.ts + dom-click-ancestor-hit.test.ts。
+  it("click probe 的遮挡判定收敛到 classifyHit(不再自持 isInteractiveEl)", () => {
+    expect(DOM_SRC).toMatch(/isTransientInline\(topEl\)/);
+    expect(DOM_SRC).toMatch(/__vortexDomResolve.*classifyHit|classifyHit.*el.*topEl/);
+    expect(DOM_SRC).not.toMatch(/isInteractiveEl = \(x: Element\)/);
   });
 });
