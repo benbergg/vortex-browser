@@ -43,6 +43,17 @@ describe("actionability backdrop carve-out (@since 0.8.2 BUG 9)", () => {
     expect(ACTIONABILITY_SRC).toMatch(/classifyHit\(el,\s*deepElementFromPoint\(cx,\s*cy\)\)/);
   });
 
+  // 只查"委托调用还在"防不住"旁边又贴回一份判据"——那条正向断言哪怕本地重新长出
+  // 完整 carve-out 逻辑依然会绿。补负向断言锁死 actionability.ts 不得再出现这些
+  // backdrop carve-out 的特征字面量,这批词在 hit-ownership.ts 之外没有正当出现理由。
+  it("actionability.ts 不得再出现 backdrop carve-out 判据字面量（防第二份拷贝复活）", () => {
+    expect(ACTIONABILITY_SRC).not.toMatch(/isBackdrop/);
+    expect(ACTIONABILITY_SRC).not.toMatch(/cdk-overlay-backdrop/);
+    expect(ACTIONABILITY_SRC).not.toMatch(/ant-modal-mask/);
+    expect(ACTIONABILITY_SRC).not.toMatch(/md-select-menu/);
+    expect(ACTIONABILITY_SRC).not.toMatch(/el-select-dropdown/);
+  });
+
   it("detects AngularJS Material backdrop (md-backdrop tag)", () => {
     expect(SRC).toMatch(/hitTag\s*===\s*"md-backdrop"/);
   });
