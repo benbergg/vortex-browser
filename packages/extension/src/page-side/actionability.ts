@@ -10,6 +10,7 @@
 // - All checks are sync except Stable (which uses RAF double-sample)
 
 import { queryDeep, deepElementFromPoint, isEnabledElement } from "./shadow-walk.js";
+import { classifyHit } from "./hit-ownership.js";
 
 export type ActionabilityFailure =
   | "NOT_ATTACHED"
@@ -30,11 +31,11 @@ export type ActionabilityResult =
   | {
       ok: false;
       reason: ActionabilityFailure;
-      extras?: { blocker?: string; tagName?: string; hasReadOnly?: boolean; inert?: boolean; ariaValueWidget?: string };
+      extras?: { blocker?: string; tagName?: string; hasReadOnly?: boolean; inert?: boolean; ariaValueWidget?: string; hitKind?: "overlay" | "ancestor"; modalBlocked?: boolean };
     };
 
 (function () {
-  if ((window as any).__vortexActionability?.version === 1) return;
+  if ((window as any).__vortexActionability?.version === 2) return;
 
   function isAttached(el: Element): boolean {
     return el.isConnected;
@@ -137,90 +138,10 @@ export type ActionabilityResult =
     el: Element,
     cx: number,
     cy: number,
-  ): { ok: boolean; blocker?: string } {
-    const hit = deepElementFromPoint(cx, cy);
-    if (!hit) return { ok: false, blocker: "elementFromPoint=null" };
-    if (hit === el || el.contains(hit) || hit.contains(el)) return { ok: true };
-    // 复合输入控件(Element Plus el-select、各类 fake-input combobox)把可见显示层
-    // (placeholder / selected-item)作为兄弟节点叠在透明真控件之上。点击经显示层
-    // 冒泡仍到达同一 widget,但 hit-test 命中显示层兄弟——既非 target 也非其后代。
-    // carve-out:hit 自身非交互(无 role / 无 tabindex / 非 button·a·input·select·
-    // textarea)且与 target 同处一个交互 widget 容器(el 的最近交互祖先 contains hit)
-    // → 同 widget 装饰层,不算 obscured。foreign 模态覆盖时 hit 在 target widget 之外,
-    // contains 为 false,OBSCURED 保持(见 I6 invariant)。(2026-06-01 el-select dogfood)
-    const isInteractiveEl = (x: Element): boolean => {
-      const t = x.tagName.toLowerCase();
-      return (
-        !!x.getAttribute("role") ||
-        x.getAttribute("tabindex") != null ||
-        t === "button" ||
-        t === "a" ||
-        t === "input" ||
-        t === "select" ||
-        t === "textarea"
-      );
-    };
-    if (!isInteractiveEl(hit)) {
-      let w: Element | null = el.parentElement;
-      while (w && w !== document.documentElement) {
-        if (isInteractiveEl(w)) {
-          if (w.contains(hit)) return { ok: true };
-          break;
-        }
-        w = w.parentElement;
-      }
-    }
-    // Backdrop compatibility: when an overlay (md-select dropdown / md-dialog /
-    // CDK overlay / bootstrap modal) is open, its expected backdrop visually
-    // covers the page area. elementFromPoint correctly returns the backdrop
-    // because backdrops sit below the overlay pane in stacking context. But
-    // the user-actioned target lives inside a higher-z overlay container and
-    // is fully clickable. Without this carve-out, vortex couldn't fill the
-    // search input or click md-option inside an md-select dropdown — the
-    // root cause of the 2026-05-21 dogfood "Topic select 选不上" blocker.
-    //
-    // Heuristic: hit looks like a backdrop AND target sits inside a known
-    // overlay container ancestry → not obscured.
-    const hitTag = hit.tagName.toLowerCase();
-    const hitClsLower =
-      typeof hit.className === "string" ? hit.className.toLowerCase() : "";
-    const isBackdrop =
-      hitTag === "md-backdrop" ||
-      hitClsLower.includes("cdk-overlay-backdrop") ||
-      hitClsLower.includes("modal-backdrop") ||
-      hitClsLower.includes("ant-modal-mask") ||
-      hitClsLower.includes("backdrop");
-    if (isBackdrop) {
-      let cur: Element | null = el;
-      while (cur && cur !== document.documentElement) {
-        const t = cur.tagName.toLowerCase();
-        const c =
-          typeof cur.className === "string" ? cur.className.toLowerCase() : "";
-        if (
-          t === "md-select-menu" ||
-          t === "md-dialog" ||
-          t === "md-menu-content" ||
-          c.includes("md-open-menu-container") ||
-          c.includes("md-select-menu-container") ||
-          c.includes("cdk-overlay-pane") ||
-          c.includes("cdk-overlay-container") ||
-          c.includes("ngdialog-content") ||
-          c.includes("modal-content") ||
-          c.includes("ant-modal-content") ||
-          c.includes("el-dialog") ||
-          c.includes("el-select-dropdown")
-        ) {
-          return { ok: true };
-        }
-        cur = cur.parentElement;
-      }
-    }
-    const cls =
-      typeof hit.className === "string" && hit.className
-        ? "." + hit.className.split(" ").filter(Boolean).slice(0, 2).join(".")
-        : "";
-    const desc = hit.tagName.toLowerCase() + (hit.id ? "#" + hit.id : "") + cls;
-    return { ok: false, blocker: desc };
+  ): { ok: boolean; blocker?: string; kind?: "overlay" | "ancestor" } {
+    // 判据收敛到 hit-ownership.classifyHit(单一真源,dom.ts / cdp.ts 同款)。
+    const own = classifyHit(el, deepElementFromPoint(cx, cy));
+    return own.ok ? { ok: true } : { ok: false, blocker: own.blocker, kind: own.kind };
   }
 
   // Stable check: sample bounding rect across 1 RAF cycle, 0.5px sub-pixel
@@ -379,7 +300,7 @@ export type ActionabilityResult =
         } catch {
           modalBlocked = false; // :modal 伪类不被支持的旧引擎 → 静默降级
         }
-        return { ok: false, reason: "OBSCURED", extras: { blocker: re.blocker, modalBlocked } };
+        return { ok: false, reason: "OBSCURED", extras: { blocker: re.blocker, hitKind: re.kind, modalBlocked } };
       }
     }
     return { ok: true, rect: { x: r.x, y: r.y, w: r.width, h: r.height } };
@@ -399,7 +320,7 @@ export type ActionabilityResult =
   }
 
   (window as any).__vortexActionability = {
-    version: 1,
+    version: 2,
     probe,
     probeStable,
     // Atomic methods exposed for host-side direct use

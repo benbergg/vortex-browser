@@ -21,16 +21,28 @@ import { dirname, join } from "node:path";
  * The fix adds a carve-out: when hit is a backdrop AND target lives in
  * a known overlay container ancestry, treat as not-obscured.
  *
+ * @since task-2-ancestor-hit-gate: 判据收敛到 hit-ownership.ts 单一真源，
+ * receivesEvents() 只负责调用 classifyHit。锁点相应迁到 hit-ownership.ts，
+ * 并加一条委托断言防止 actionability.ts 再长出第二份拷贝。
+ *
  * Source-level contract: covers the 4 mainstream UI library backdrop
  * vocabularies (AngularJS Material, Angular CDK, Bootstrap, Ant Design).
  */
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const SRC = readFileSync(
+const ACTIONABILITY_SRC = readFileSync(
   join(__dirname, "..", "src", "page-side", "actionability.ts"),
+  "utf8",
+);
+const SRC = readFileSync(
+  join(__dirname, "..", "src", "page-side", "hit-ownership.ts"),
   "utf8",
 );
 
 describe("actionability backdrop carve-out (@since 0.8.2 BUG 9)", () => {
+  it("receivesEvents 委托给 hit-ownership.classifyHit（单一真源，不再自带判据拷贝）", () => {
+    expect(ACTIONABILITY_SRC).toMatch(/classifyHit\(el,\s*deepElementFromPoint\(cx,\s*cy\)\)/);
+  });
+
   it("detects AngularJS Material backdrop (md-backdrop tag)", () => {
     expect(SRC).toMatch(/hitTag\s*===\s*"md-backdrop"/);
   });
@@ -47,11 +59,10 @@ describe("actionability backdrop carve-out (@since 0.8.2 BUG 9)", () => {
     expect(SRC).toMatch(/ant-modal-mask/);
   });
 
-  it("walks parentElement chain to find an overlay container", () => {
-    // The carve-out logic must climb ancestry; without that climb,
-    // targets that aren't direct children of the overlay (e.g. an
-    // md-option inside md-select-menu > md-content) would still fail.
-    expect(SRC).toMatch(/cur\.parentElement/);
+  it("walks composed ancestry (穿 shadow) to find an overlay container", () => {
+    // 判据改走 composedParent 上溯（穿 shadow），取代此前的 cur.parentElement。
+    // 不这样爬，非直接子节点（如 md-select-menu > md-content > md-option）会漏判。
+    expect(SRC).toMatch(/composedParent\(cur\)/);
   });
 
   it("recognises AngularJS Material overlay containers", () => {
@@ -74,14 +85,13 @@ describe("actionability backdrop carve-out (@since 0.8.2 BUG 9)", () => {
   });
 
   it("only fires the carve-out when hit was identified as a backdrop", () => {
-    // The ancestry walk must be gated behind `if (isBackdrop)`.
-    // Without the gate, every false-positive OBSCURED case would pass.
-    const block = SRC.match(/const isBackdrop[\s\S]*?if\s*\(\s*isBackdrop\s*\)/);
+    // 早退写法变了（!isBackdrop 则 return false），门控意图不变：非 backdrop 时不进入爬祖先分支。
+    const block = SRC.match(/const isBackdrop[\s\S]*?if\s*\(\s*!isBackdrop\s*\)\s*return\s*false/);
     expect(block).not.toBeNull();
   });
 
   it("still returns blocker description when not a backdrop case", () => {
-    // The original failure path must remain intact.
-    expect(SRC).toMatch(/return\s*\{\s*ok:\s*false,\s*blocker:\s*desc\s*\}/);
+    // 原始失败路径的等价物：classifyHit 兜底分支，附 kind:"overlay"。
+    expect(SRC).toMatch(/return\s*\{\s*ok:\s*false,\s*blocker:\s*describeElement\(hit\),\s*kind:\s*"overlay"\s*\}/);
   });
 });

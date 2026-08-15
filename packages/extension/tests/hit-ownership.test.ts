@@ -144,4 +144,12 @@ describe("classifyHit", () => {
     sr.innerHTML = `<div id="w" role="combobox"><input id="i"><span id="disp">占位</span></div>`;
     expect(classifyHit(sr.getElementById("i")!, sr.getElementById("disp")!)).toEqual({ ok: true });
   });
+
+  it("目标是 shadow host、命中其 shadow 内部元素 → ok（composedContains(el, hit) 订正的直接覆盖）", () => {
+    const d = mk(`<div id="host"></div>`);
+    const host = d.getElementById("host")!;
+    const sr = host.attachShadow({ mode: "open" });
+    sr.innerHTML = `<span id="inner">x</span>`;
+    expect(classifyHit(host, sr.getElementById("inner")!)).toEqual({ ok: true });
+  });
 });
