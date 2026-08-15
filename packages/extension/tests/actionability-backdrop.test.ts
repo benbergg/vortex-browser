@@ -47,9 +47,13 @@ describe("actionability backdrop carve-out (@since 0.8.2 BUG 9)", () => {
   // 完整 carve-out 逻辑依然会绿。补负向断言锁死 actionability.ts 不得再出现这些
   // backdrop carve-out 的特征字面量,这批词在 hit-ownership.ts 之外没有正当出现理由。
   it("actionability.ts 不得再出现 backdrop carve-out 判据字面量（防第二份拷贝复活）", () => {
-    expect(ACTIONABILITY_SRC).not.toMatch(/isBackdrop/);
-    expect(ACTIONABILITY_SRC).not.toMatch(/cdk-overlay-backdrop/);
+    // 字符串字面量中的 backdrop 相关类名（cdk-overlay-backdrop, modal-backdrop, 等）
+    // 正则 ["'][\w-]*backdrop 匹配引号包围的字符串中的 backdrop，但不会匹配注释中的 ::backdrop
+    expect(ACTIONABILITY_SRC).not.toMatch(/["'][\w-]*backdrop/i);
+    // Bootstrap 特定类名（不含 backdrop 词根）
     expect(ACTIONABILITY_SRC).not.toMatch(/ant-modal-mask/);
+    // 判据变量名与 overlay 容器词汇表
+    expect(ACTIONABILITY_SRC).not.toMatch(/isBackdrop/);
     expect(ACTIONABILITY_SRC).not.toMatch(/md-select-menu/);
     expect(ACTIONABILITY_SRC).not.toMatch(/el-select-dropdown/);
   });
