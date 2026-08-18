@@ -238,6 +238,7 @@ interface FramePageResult {
     | { kind: "virtual"; total: number; rendered: number; name: string; confidence?: "low" }
     | { kind: "canvas"; name: string; chartLib: string; readback: "chart" }
     | { kind: "image"; name: string; src: string }
+    | { kind: "occlusion"; name: string }
   >;
   /** 模态作用域信号(aria-modal 弹层打开,裁剪了背景)。@since modal-scope */
   modal?: { name: string; role: string; suppressed: number };
@@ -2509,6 +2510,9 @@ const INTERACTIVE_SELECTORS = [
           return el;
         }
 
+        // 遮挡判定缺席要出声:注入快失败被吞掉时,整帧元素会静默翻成 visible:true
+        let __hitOwnMissing = false;
+
         const nodeList = querySelectorAllDeep(ROOT_SELECTORS, document);
 
         // AE: aria-activedescendant 指向的「虚拟焦点」目标元素集合。combobox /
@@ -3390,6 +3394,7 @@ const INTERACTIVE_SELECTORS = [
               }
             ).__vortexDomResolve?.classifyHit;
             // 模块缺失时不猜:只读快照宁可不标遮挡也不放第二份判据
+            if (!hitOwn && topEl) __hitOwnMissing = true;
             const own = hitOwn && topEl ? hitOwn(htmlEl, topEl) : undefined;
             if (own && !own.ok) {
               visible = false;
@@ -3808,7 +3813,11 @@ const INTERACTIVE_SELECTORS = [
           | { kind: "canvas"; name: string; chartLib: string; readback: "chart" }
           | { kind: "image"; name: string; src: string }
           | { kind: "sheet"; name: string; lib: "lakesheet"; rows: number; cols: number }
+          | { kind: "occlusion"; name: string }
         > = [];
+        if (__hitOwnMissing) {
+          pageBlindspots.push({ kind: "occlusion", name: "hit-ownership" });
+        }
         {
           const __vc = querySelectorAllDeep("[role=grid],[role=treegrid],[role=table],[role=listbox],[role=tree]", document);
           for (const c of __vc) {
@@ -4475,6 +4484,7 @@ export function registerObserveHandlers(router: ActionRouter, debuggerMgr: Debug
           | { kind: "virtual"; total: number; rendered: number; name: string; confidence?: "low" }
           | { kind: "canvas"; name: string; chartLib: string; readback: "chart" }
           | { kind: "image"; name: string; src: string }
+          | { kind: "occlusion"; name: string }
         >;
         /** 模态作用域信号。@since modal-scope */
         modal?: { name: string; role: string; suppressed: number };

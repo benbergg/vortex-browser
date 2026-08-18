@@ -69,7 +69,7 @@ function stubChrome() {
   });
 }
 
-async function observeFirst(html: string, hitId: string, withResolve = true) {
+async function observeSnapshot(html: string, hitId: string, withResolve = true) {
   setupDom(html, hitId, withResolve);
   stubChrome();
   const router = new ActionRouter();
@@ -78,7 +78,12 @@ async function observeFirst(html: string, hitId: string, withResolve = true) {
     type: "tool_request", tool: "observe.snapshot", args: {}, requestId: "r", tabId: 42,
   } as NmRequest);
   expect(resp.error).toBeUndefined();
-  return resp.result.elements as Array<Record<string, unknown>>;
+  return resp.result;
+}
+
+async function observeFirst(html: string, hitId: string, withResolve = true) {
+  const result = await observeSnapshot(html, hitId, withResolve);
+  return result.elements as Array<Record<string, unknown>>;
 }
 
 beforeEach(() => vi.mocked(loadPageSideModule).mockClear());
@@ -120,6 +125,22 @@ describe("observe 遮挡判定与门同判据", () => {
     const els = await observeFirst(`<button id="b">确定</button>`, "b");
     expect(els[0].visible).toBe(true);
     expect(els[0].occludedBy).toBeUndefined();
+  });
+
+  it("判定不可用 → 该帧出 occlusion 盲区信号（降级必须出声）", async () => {
+    // 注入快失败(frame 已移除 / sandbox 帧 / 取不到资源)被 catch 吞掉,扫描照样成功,
+    // 整帧元素静默翻成 visible:true —— 探测/门分叉被搬到失败路径上。
+    vi.mocked(loadPageSideModule).mockRejectedValueOnce(new Error("inject failed"));
+    const result = await observeSnapshot(`<div id="clip"><button id="b">确定</button></div>`, "clip", false);
+    expect(result.elements[0].visible).toBe(true); // 判过 = 无遮挡?不,是没判过
+    const bs = (result.frames[0].blindspots ?? []) as Array<Record<string, unknown>>;
+    expect(bs.some((b) => b.kind === "occlusion")).toBe(true);
+  });
+
+  it("判定可用 → 不出 occlusion 盲区（负例，避免常亮警报）", async () => {
+    const result = await observeSnapshot(`<button id="b">确定</button>`, "b");
+    const bs = (result.frames[0].blindspots ?? []) as Array<Record<string, unknown>>;
+    expect(bs.some((b) => b.kind === "occlusion")).toBe(false);
   });
 
   it("el-select 装饰层兄弟命中 → visible:true（carve-out 回归保护）", async () => {

@@ -63,6 +63,26 @@ describe("frame 级虚拟列表盲区（容器未收集时）", () => {
     const out = renderObserveTree(data as any, null);
     expect(out).toMatch(/# blindspots:.*virtual.*1003\/37/);
   });
+  it("occlusion 盲区(遮挡判定不可用)进 # blindspots 摘要", () => {
+    const data = obs([], {
+      frames: [{ frameId: 0, parentFrameId: -1, url: "http://x", offset: { x: 0, y: 0 }, elementCount: 3, truncated: false, scanned: true,
+        blindspots: [{ kind: "occlusion", name: "hit-ownership" }] }],
+    });
+    const out = renderObserveTree(data as any, null);
+    // visible 只是「没判过」而非「没被挡」,必须说清 act 仍可能 OBSCURED
+    expect(out).toMatch(/# blindspots:.*occlusion/i);
+    expect(out).toMatch(/# blindspots:.*visible/i);
+    expect(out).toMatch(/# blindspots:.*OBSCURED/);
+  });
+
+  it("occlusion 盲区带 frame 号(非主 frame)", () => {
+    const data = obs([], {
+      frames: [{ frameId: 7, parentFrameId: 0, url: "http://x", offset: { x: 0, y: 0 }, elementCount: 3, truncated: false, scanned: true,
+        blindspots: [{ kind: "occlusion", name: "hit-ownership" }] }],
+    });
+    expect(renderObserveTree(data as any, null)).toMatch(/occlusion check unavailable[^\n]*\(frame 7\)/i);
+  });
+
   it("A2-fb 低置信虚拟(confidence:low) total 带 ~ 前缀(估算)", () => {
     const data = obs([], {
       frames: [{ frameId: 0, parentFrameId: -1, url: "http://x", offset: { x: 0, y: 0 }, elementCount: 12, truncated: false, scanned: true,

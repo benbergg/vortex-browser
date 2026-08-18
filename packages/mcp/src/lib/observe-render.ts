@@ -98,6 +98,7 @@ interface CompactFrame {
     | { kind: "canvas"; name: string; chartLib: string; readback: "chart" }
     | { kind: "image"; name: string; src: string }
     | { kind: "sheet"; name: string; lib: "lakesheet"; rows: number; cols: number }
+    | { kind: "occlusion"; name: string }
   >;
   /** 模态作用域信号(aria-modal 弹层裁剪了背景)。@since modal-scope */
   modal?: { name: string; role: string; suppressed: number };
@@ -425,6 +426,12 @@ function blindspotSummary(
         parts.push(`${b.name} chart(${b.chartLib}) → read via ${chartReadback(b.chartLib).tool}${fr}`);
       } else if (b.kind === "sheet") {
         parts.push(`${b.name} sheet ${b.lib}(${b.rows}×${b.cols}) → readable via vortex_query mode=sheet${fr}`);
+      } else if (b.kind === "occlusion") {
+        // 判定缺席:visible 是「没判过」而非「没被挡」,act 仍可能抛 OBSCURED
+        parts.push(
+          `${b.name} occlusion check unavailable → visible/occludedBy not judged in this frame; ` +
+            `vortex_act may still fail with OBSCURED${fr}`,
+        );
       } else if (b.kind === "image") {
         // 无 alt 内容图:先试 query src/上下文,真需视觉内容才 screenshot(⑨ affordance)。
         parts.push(`${b.name}(no alt) → src=${b.src} | visual content, use vortex_screenshot${fr}`);
