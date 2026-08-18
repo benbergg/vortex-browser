@@ -27,6 +27,7 @@ afterEach(() => {
   // doMock 的登记不随 resetModules 清除，漏掉这行会让后续用例静默用上假探针
   vi.doUnmock("../src/lib/liveness-probe.js");
   vi.resetModules();
+  delete (globalThis as any).chrome;
 });
 
 describe("ActionRouter 内层 deadline", () => {
@@ -134,6 +135,28 @@ describe("ActionRouter 内层 deadline", () => {
     expect(resp.error?.context?.extras?.liveness).toBe("tab-gone");
     expect(String(resp.error?.hint)).toContain("vortex_tab_create");
     expect(resp.error?.recoverable).toBe(false);
+  });
+
+  // TABLESS_ACTIONS / hub GLOBAL_ACTIONS / verify.ts 的嵌套 dispatch 都不带 tabId,
+  // 而 probeLiveness 对 tabId==null 是「不需要探」直接返回 page-alive——router 若
+  // 照搬就会对一个根本没有 tab 的调用断言页面死活。
+  it("🔴 tabless action 超时归因为 probe-failed，不得谎报 page-alive", async () => {
+    vi.useFakeTimers();
+    vi.resetModules();
+    chromeAlive();
+    const { ActionRouter } = await import("../src/lib/router.js");
+    const router = new ActionRouter();
+    router.register("tab.list", () => new Promise(() => {}));
+
+    let resp: any;
+    const p = router.dispatch(mkReq("tab.list")).then((r) => { resp = r; });
+    await vi.advanceTimersByTimeAsync(31_000);
+    await p;
+
+    expect(resp.error?.code).toBe(VtxErrorCode.TIMEOUT);
+    expect(resp.error?.context?.extras?.liveness).toBe("probe-failed");
+    expect(String(resp.error?.hint)).not.toMatch(/main thread/i);
+    expect(resp.error?.recoverable).toBe(true);
   });
 
   it("🔴 探活自己抛错时按 probe-failed 处置，仍返回 TIMEOUT 而非 JS_EXECUTION_ERROR", async () => {

@@ -18,6 +18,8 @@ export { TABLESS_ACTIONS };
 
 /** 探活自身抛错时不能把 TIMEOUT 降级成 JS_EXECUTION_ERROR，归因反而更差 */
 async function attributeTimeout(tabId: number | undefined): Promise<Liveness> {
+  // tabless action 压根没探过，唯一诚实的说法是「原因未判定」而非页面活着
+  if (tabId == null) return "probe-failed";
   try {
     return await probeLiveness(tabId);
   } catch {
