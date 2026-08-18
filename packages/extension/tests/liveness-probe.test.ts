@@ -62,4 +62,21 @@ describe("probeLiveness", () => {
     const { probeLiveness } = await import("../src/lib/liveness-probe.js");
     expect(await probeLiveness(1)).toBe("probe-failed");
   });
+
+  it("chrome.tabs.get 永不 settle → page-unresponsive，且总预算不翻倍（budgetMs 内即返回）", async () => {
+    vi.useFakeTimers();
+    vi.resetModules();
+    (globalThis as any).chrome = {
+      tabs: { get: () => new Promise(() => {}) },
+      scripting: { executeScript: async () => [{ result: 1 }] },
+    };
+    const { probeLiveness } = await import("../src/lib/liveness-probe.js");
+    let out: string | undefined;
+    const p = probeLiveness(1, 300).then((r) => { out = r; });
+    // 只推进到 budgetMs 本身（不额外加余量）：若实现把 tabs.get 与探针各配 300ms
+    // 预算，此时尚未到第二段超时，out 仍为 undefined，断言会失败。
+    await vi.advanceTimersByTimeAsync(300);
+    await p;
+    expect(out).toBe("page-unresponsive");
+  });
 });
