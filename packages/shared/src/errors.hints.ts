@@ -27,6 +27,18 @@ export interface VtxErrorMeta {
 export const ANCESTOR_HIT_HINT =
   "Hit-testing lands on one of the element's own ancestors, not on an overlay — no floating layer to close, and waiting will not help. Call vortex_act with action='scroll' on that ancestor to bring the target's center into its visible box, or retry on the element that truly receives the click.";
 
+/**
+ * 祖先命中的核心话术。门 / CDP / 合成三条路径共用,各自只追加自己的上下文,
+ * 否则「同一判据、三种说法」会重演(2026-08-18 评审 I1)。
+ */
+export function ancestorHitMessage(target: string, blocker: string): string {
+  return (
+    `${target}'s center hit-tests to its own ancestor <${blocker}> ` +
+    `(clipped by that ancestor, pointer-events:none, or the ancestor paints over it) — ` +
+    `a real click at those coordinates would not reach the target`
+  );
+}
+
 export const DEFAULT_ERROR_META: Record<VtxErrorCode, VtxErrorMeta> = {
   // -- 元素定位 --
   ELEMENT_NOT_FOUND: {

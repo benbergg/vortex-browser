@@ -581,16 +581,9 @@ export function registerDomHandlers(
         extras?: Record<string, unknown>;
       };
       };
+      // 走 mapPageError 而非自己映射:祖先命中的话术/hint 覆盖只在那里,复制一份必然分叉。
       const throwIfClickError = (r: { error?: string; errorCode?: string; extras?: Record<string, unknown> } | undefined) => {
-        if (r?.error) {
-          const code: VtxErrorCode =
-            r.errorCode && r.errorCode in VtxErrorCode
-              ? (r.errorCode as VtxErrorCode)
-              : r.error.startsWith("Element not found:")
-                ? VtxErrorCode.ELEMENT_NOT_FOUND
-                : VtxErrorCode.JS_EXECUTION_ERROR;
-          throw vtxError(code, r.error, { selector, extras: r.extras });
-        }
+        if (r?.error) mapPageError(r, selector);
       };
       // 首跑:cdpAvailable=!!debuggerMgr。submit-intent 会返回 deferToCdp(未点击)。
       let res = await runSyntheticClick(!!debuggerMgr);

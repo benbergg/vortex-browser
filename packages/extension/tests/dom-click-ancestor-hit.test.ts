@@ -95,6 +95,27 @@ describe("合成 click 祖先命中", () => {
     expect(lastResult?.errorCode).toBeUndefined();
   });
 
+  it("投递给调用方的 payload：祖先话术 + 覆盖 hint，不指向浮层", async () => {
+    setup(`<div id="w" class="row"><button id="b">x</button></div>`);
+    const resp: any = await click({ selector: "#b" });
+    expect(resp.error.code).toBe("ELEMENT_OCCLUDED");
+    expect(resp.error.message).toMatch(/ancestor/i);
+    expect(resp.error.message).not.toMatch(/covered by/i);
+    expect(resp.error.hint).toMatch(/ancestor/i);
+    expect(resp.error.hint).not.toMatch(/cookie banner|dismiss it via/i);
+  });
+
+  it("兄弟浮层命中仍是既有遮挡话术与 hint（回归保护）", async () => {
+    setup(`<div id="w" class="mask">mask</div><button id="b">x</button>`);
+    const win = dom.window as any;
+    const mask = win.document.getElementById("w")!;
+    win.__vortexDomResolve.deepElementFromPoint = () => mask;
+    const resp: any = await click({ selector: "#b" });
+    expect(resp.error.code).toBe("ELEMENT_OCCLUDED");
+    expect(resp.error.message).toMatch(/covered by <div#w\.mask>/);
+    expect(resp.error.hint).toMatch(/cookie banner/i);
+  });
+
   it("force=true → 跳过判定（与 CDP 路径对齐）", async () => {
     setup(`<div id="w" class="row"><button id="b">x</button></div>`);
     await click({ selector: "#b", force: true });

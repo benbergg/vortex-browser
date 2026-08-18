@@ -69,6 +69,29 @@ describe("cdp realMouse 祖先命中", () => {
     expect(lastResult).toMatchObject({ extras: { blocker: "div#w.row", hitKind: "ancestor" } });
   });
 
+  it("抛出的错误：祖先话术 + 覆盖 hint，不指向浮层", async () => {
+    installChrome(true);
+    const err: any = await cdpClickElement(mkMgr(), 1, undefined, "#b", {}).catch((e) => e);
+    const payload = err.toJSON();
+    expect(payload.code).toBe("ELEMENT_OCCLUDED");
+    expect(payload.message).toMatch(/ancestor/i);
+    expect(payload.message).not.toMatch(/covered by/i);
+    expect(payload.hint).toMatch(/ancestor/i);
+    expect(payload.hint).not.toMatch(/cookie banner|dismiss it via/i);
+  });
+
+  it("兄弟浮层命中仍是既有遮挡话术与 hint（回归保护）", async () => {
+    const mask = dom.window.document.createElement("div");
+    mask.id = "ov";
+    dom.window.document.body.appendChild(mask);
+    Object.defineProperty(dom.window.document, "elementFromPoint", { value: () => mask, configurable: true });
+    installChrome(true);
+    const err: any = await cdpClickElement(mkMgr(), 1, undefined, "#b", {}).catch((e) => e);
+    const payload = err.toJSON();
+    expect(payload.message).toMatch(/covered by <div#ov>/);
+    expect(payload.hint).toMatch(/cookie banner/i);
+  });
+
   it("classifyHit 不可用（模块未注入 / 刚导航）→ fail closed 抛 NOT_ATTACHED", async () => {
     installChrome(false);
     await expect(cdpClickElement(mkMgr(), 1, undefined, "#b", {})).rejects.toMatchObject({

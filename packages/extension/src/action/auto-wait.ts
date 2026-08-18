@@ -5,7 +5,7 @@
 // Each reason has its own retry interval (per spec §2 table).
 // On timeout exhaustion, throws vtxError(TIMEOUT) with extras.lastReason carrying the last failure code.
 
-import { ANCESTOR_HIT_HINT, VtxErrorCode, vtxError } from "@vortex-browser/shared";
+import { ANCESTOR_HIT_HINT, VtxErrorCode, ancestorHitMessage, vtxError } from "@vortex-browser/shared";
 import {
   checkActionability,
   type ActionabilityFailure,
@@ -78,9 +78,7 @@ export function buildActionabilityTimeoutDiagnosis(a: {
   // 与浮层遮挡的修法完全不同,不能让调用方去关一个不存在的浮层。
   if (blocker && lastExtras?.hitKind === "ancestor") {
     return {
-      message: `Element's center hit-tests to its own ancestor <${blocker}> after ${timeout}ms ` +
-        `(clipped by that ancestor, pointer-events:none, or the ancestor paints over it) — ` +
-        `a real click at those coordinates would not reach the target; ` +
+      message: `${ancestorHitMessage("Element", blocker)} (still true after ${timeout}ms of retrying); ` +
         `scroll that container to bring the element into its visible area, or target the element that actually receives the click`,
       // 默认 OBSCURED hint 指引去关浮层,祖先命中时根本没有浮层可关
       hint: ANCESTOR_HIT_HINT,
