@@ -4,12 +4,13 @@
  *   报 visible:true,模型据此认为可点,act 却抛 OBSCURED——探测与门相互矛盾。
  *   本测试真执行 inject 的扫描体(new Function 剥离模块作用域),不做源码正则。
  */
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { JSDOM } from "jsdom";
 import type { NmRequest } from "@vortex-browser/shared";
 import { ActionRouter } from "../src/lib/router.js";
 import { registerObserveHandlers } from "../src/handlers/observe.js";
 import { classifyHit } from "../src/page-side/hit-ownership.js";
+import { loadPageSideModule } from "../src/adapter/page-side-loader.js";
 
 vi.mock("../src/adapter/page-side-loader.js", () => ({
   loadPageSideModule: vi.fn().mockResolvedValue(undefined),
@@ -80,9 +81,17 @@ async function observeFirst(html: string, hitId: string, withResolve = true) {
   return resp.result.elements as Array<Record<string, unknown>>;
 }
 
+beforeEach(() => vi.mocked(loadPageSideModule).mockClear());
 afterEach(() => vi.unstubAllGlobals());
 
 describe("observe 遮挡判定与门同判据", () => {
+  // 判定本身正确不代表生产里跑得到:扫描体拿 classifyHit 的前提是这一帧真注入过
+  // dom-resolve。缺这条断言时,删掉 scanOneFrame 里的注入整行,本文件仍然全绿。
+  it("扫描前把 dom-resolve 注进目标 frame（承重接线）", async () => {
+    await observeFirst(`<button id="b">确定</button>`, "b");
+    expect(vi.mocked(loadPageSideModule)).toHaveBeenCalledWith(42, 0, "dom-resolve");
+  });
+
   it("祖先裁剪命中 → visible:false 且点名祖先（与门的 ancestor 判定一致）", async () => {
     const els = await observeFirst(`<div id="clip"><button id="b">确定</button></div>`, "clip");
     expect(els).toHaveLength(1);
