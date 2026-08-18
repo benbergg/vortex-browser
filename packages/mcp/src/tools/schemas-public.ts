@@ -67,7 +67,7 @@ export const PUBLIC_TOOLS: ToolDef[] = [
           type: "object",
           // onDialog 含义见工具级 description
           properties: {
-            timeout: { type: "number" },
+            timeout: { type: "number", maximum: MAX_INNER_TIMEOUT_MS },
             force: { type: "boolean" },
             observeEffect: { type: "boolean" },
             windowMs: { type: "number" },
@@ -258,7 +258,7 @@ export const PUBLIC_TOOLS: ToolDef[] = [
       properties: {
         mode: { enum: ["element", "idle", "info", "custom"] },
         value: { description: "element: CSS selector; custom: JS expression; idle: net|xhr|dom; info: omit" },
-        timeout: { type: "number" },
+        timeout: { type: "number", maximum: MAX_INNER_TIMEOUT_MS },
         ...tabFields,
       },
       required: ["mode"],
