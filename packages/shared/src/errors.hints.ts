@@ -39,6 +39,20 @@ export function ancestorHitMessage(target: string, blocker: string): string {
   );
 }
 
+export const NO_HIT_HINT =
+  "Hit-testing the element's center reached no element at all — it is clipped by an ancestor or sits outside the viewport, so no covering element exists. Call vortex_act with action='scroll' to bring it into view, then call vortex_observe to confirm its box before retrying.";
+
+/**
+ * 中心点落空的核心话术。blocker 串 "elementFromPoint=null" 不是元素描述,
+ * 按遮挡话术渲染会造出 `covered by <elementFromPoint=null>` 这种荒谬报文。
+ */
+export function noHitMessage(target: string): string {
+  return (
+    `Hit-testing ${target}'s center reached no element at all ` +
+    `(clipped by an ancestor, or positioned outside the viewport)`
+  );
+}
+
 export const DEFAULT_ERROR_META: Record<VtxErrorCode, VtxErrorMeta> = {
   // -- 元素定位 --
   ELEMENT_NOT_FOUND: {

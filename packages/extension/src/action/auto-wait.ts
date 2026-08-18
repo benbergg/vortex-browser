@@ -5,7 +5,14 @@
 // Each reason has its own retry interval (per spec §2 table).
 // On timeout exhaustion, throws vtxError(TIMEOUT) with extras.lastReason carrying the last failure code.
 
-import { ANCESTOR_HIT_HINT, VtxErrorCode, ancestorHitMessage, vtxError } from "@vortex-browser/shared";
+import {
+  ANCESTOR_HIT_HINT,
+  NO_HIT_HINT,
+  VtxErrorCode,
+  ancestorHitMessage,
+  noHitMessage,
+  vtxError,
+} from "@vortex-browser/shared";
 import {
   checkActionability,
   type ActionabilityFailure,
@@ -70,8 +77,10 @@ export function buildActionabilityTimeoutDiagnosis(a: {
       `inert while it is open — dismiss the dialog first, e.g. press Escape or click its close button, then retry)` };
   }
   if (noHit) {
-    return { message: `Hit-testing the element's center reached no element at all after ${timeout}ms ` +
-      `(clipped by an ancestor, or positioned outside the viewport)` };
+    return {
+      message: `${noHitMessage("the element")} (still true after ${timeout}ms of retrying)`,
+      hint: NO_HIT_HINT,
+    };
   }
   // 祖先命中:目标在 DOM 里、CSS 上也"可见",但中心点 hit-test 落到自己的祖先——
   // 被祖先 overflow:hidden 裁掉、pointer-events:none、或祖先自身层压在上面。

@@ -54,6 +54,13 @@ describe("祖先命中投递给调用方的 payload", () => {
     expect(payload.hint).toMatch(/ancestor/i);
   });
 
+  it("中心点落空 → payload.hint 也不指向浮层（三条路径同一份）", async () => {
+    const payload = (await thrownFrom({ blocker: "elementFromPoint=null" })).toJSON();
+    expect(payload.message).toMatch(/no element at all/i);
+    expect(payload.hint).toMatch(/viewport|scroll/i);
+    expect(payload.hint).not.toMatch(/dismiss/i);
+  });
+
   it("hitKind=overlay → payload.hint 保持既有关浮层话术（回归保护）", async () => {
     const payload = (await thrownFrom({ blocker: "div#mask", hitKind: "overlay" })).toJSON();
     expect(payload.hint).toMatch(/dismiss/i);

@@ -116,6 +116,19 @@ describe("合成 click 祖先命中", () => {
     expect(resp.error.hint).toMatch(/cookie banner/i);
   });
 
+  it("中心点没命中任何元素 → 报「没命中元素」，不谎称被 <elementFromPoint=null> 盖住", async () => {
+    setup(`<div id="w" class="row"><button id="b">x</button></div>`);
+    const win = dom.window as any;
+    win.__vortexDomResolve.deepElementFromPoint = () => null;
+    Object.defineProperty(win.document, "elementFromPoint", { value: () => null, configurable: true });
+    const resp: any = await click({ selector: "#b" });
+    expect(resp.error.code).toBe("ELEMENT_OCCLUDED");
+    expect(resp.error.message).toMatch(/no element at all/i);
+    expect(resp.error.message).not.toMatch(/elementFromPoint=null|covered by/);
+    expect(resp.error.hint).toMatch(/viewport|scroll/i);
+    expect(resp.error.hint).not.toMatch(/cookie banner/i);
+  });
+
   it("force=true → 跳过判定（与 CDP 路径对齐）", async () => {
     setup(`<div id="w" class="row"><button id="b">x</button></div>`);
     await click({ selector: "#b", force: true });

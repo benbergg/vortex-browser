@@ -92,6 +92,17 @@ describe("cdp realMouse 祖先命中", () => {
     expect(payload.hint).toMatch(/cookie banner/i);
   });
 
+  it("中心点没命中任何元素 → 报「没命中元素」，与门话术一致", async () => {
+    Object.defineProperty(dom.window.document, "elementFromPoint", { value: () => null, configurable: true });
+    installChrome(true);
+    const err: any = await cdpClickElement(mkMgr(), 1, undefined, "#b", {}).catch((e) => e);
+    const payload = err.toJSON();
+    expect(payload.code).toBe("ELEMENT_OCCLUDED");
+    expect(payload.message).toMatch(/no element at all/i);
+    expect(payload.message).not.toMatch(/elementFromPoint=null|covered by/);
+    expect(payload.hint).toMatch(/viewport|scroll/i);
+  });
+
   it("classifyHit 不可用（模块未注入 / 刚导航）→ fail closed 抛 NOT_ATTACHED", async () => {
     installChrome(false);
     await expect(cdpClickElement(mkMgr(), 1, undefined, "#b", {})).rejects.toMatchObject({
