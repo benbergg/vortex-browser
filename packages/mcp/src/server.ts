@@ -17,7 +17,7 @@ import {
 import { sendRequest } from "./client.js";
 import { getToolDefs, getToolDef, setEnabledCaps } from "./tools/registry.js";
 import { dispatchNewTool } from "./tools/dispatch.js";
-import { timeoutLadder, splitDiagnosis } from "@vortex-browser/shared";
+import { timeoutLadder, splitDiagnosis, hubDeadlineFor } from "@vortex-browser/shared";
 import { liftWaitForRefToTarget } from "./lib/wait-for-ref.js";
 import { applyFingerprint, extractSignals, shouldRecover, type FingerprintOpt } from "./lib/fingerprint-apply.js";
 import { runSequence, type SequenceStepInput, type OnFailure } from "./lib/sequence-run.js";
@@ -538,12 +538,13 @@ export async function handleCallTool(
     if (filter !== undefined) next.filter = filter;
     // 始终用显式 "observe.snapshot" 作为发到 extension 的 action（toolDef.action
     // 在 v0.6 是 "L4.observe"，extension 端无对应 handler）。
+    // hub deadline 改由 action 预算推导，不再被调用方小 timeout 挤压（Task 2）
     const resp = await sendRequest(
       "observe.snapshot",
       next,
       PORT,
       tabId as number | undefined,
-      ladder.hub,
+      hubDeadlineFor("observe.snapshot", timeout as number | undefined),
     );
     if (resp.error) {
       return {
@@ -863,12 +864,13 @@ export async function handleCallTool(
     const action = mapped ? mapped.action : toolDef.action;
     const mappedParams = mapped ? mapped.params : rest;
 
+    // hub deadline 改由 action 预算推导，不再被调用方小 timeout 挤压（Task 2）
     const resp = await sendRequest(
       action,
       mappedParams,
       PORT,
       tabId as number | undefined,
-      ladder.hub,
+      hubDeadlineFor(action, timeout as number | undefined),
     );
 
     // Action 执行错误
