@@ -54,3 +54,45 @@ export function clampHubTimeout(requested: number | undefined, fallback: number)
   if (requested == null || !Number.isFinite(requested) || requested <= 0) return fallback;
   return Math.min(requested, MAX_HUB_TIMEOUT_MS);
 }
+
+/** 未登记 action 的缺省内层预算 */
+export const DEFAULT_ACTION_BUDGET_MS = 30_000;
+
+// 取值来自 30 天真实调用中「未传 timeout 的成功调用」耗时上限，向上留 margin。
+// 低于实测上限会砍掉本来能成功的尾部调用，见 docs/inner-timeout-budget-approach.md 第 8 节。
+export const ACTION_BUDGET_MS: Readonly<Record<string, number>> = Object.freeze({
+  "page.navigate": 60_000,
+  "observe.snapshot": 35_000,
+  "dom.click": 35_000,
+  "dom.type": 35_000,
+  "dom.hover": 35_000,
+  "mouse.click": 30_000,
+  "mouse.doubleClick": 30_000,
+  "mouse.drag": 30_000,
+  "capture.screenshot": 30_000,
+  "content.getText": 20_000,
+  "content.getHtml": 20_000,
+  "page.waitForExpression": 20_000,
+});
+
+export function actionBudgetMs(action: string): number {
+  return ACTION_BUDGET_MS[action] ?? DEFAULT_ACTION_BUDGET_MS;
+}
+
+/**
+ * router 施加的内层 deadline。
+ * 取 max 而非直接用调用方值——act 的 timeout 是 gate 自旋预算（默认 2000ms），
+ * 拿它当整体 deadline 会把 scrollIntoView 与 CDP 三连击一起砍掉；
+ * 而 js.evaluate 拿它当脚本预算，传 45s 时内层必须跟着上移，否则砍掉合法调用。
+ */
+export function innerDeadlineFor(action: string, callerTimeoutMs: number | undefined): number {
+  const caller = Number.isFinite(callerTimeoutMs) && (callerTimeoutMs as number) > 0
+    ? (callerTimeoutMs as number) + TIMEOUT_LADDER_STEP_MS
+    : 0;
+  return Math.max(actionBudgetMs(action), caller);
+}
+
+/** hub 永远比内层多一档，保证「说得清原因的那一层」先应答 */
+export function hubDeadlineFor(action: string, callerTimeoutMs: number | undefined): number {
+  return innerDeadlineFor(action, callerTimeoutMs) + TIMEOUT_LADDER_STEP_MS;
+}
