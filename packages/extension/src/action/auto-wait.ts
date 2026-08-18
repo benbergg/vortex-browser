@@ -5,7 +5,7 @@
 // Each reason has its own retry interval (per spec §2 table).
 // On timeout exhaustion, throws vtxError(TIMEOUT) with extras.lastReason carrying the last failure code.
 
-import { VtxErrorCode, vtxError } from "@vortex-browser/shared";
+import { ANCESTOR_HIT_HINT, VtxErrorCode, vtxError } from "@vortex-browser/shared";
 import {
   checkActionability,
   type ActionabilityFailure,
@@ -44,43 +44,53 @@ export interface WaitOk {
   rect: { x: number; y: number; w: number; h: number };
 }
 
+export interface ActionabilityTimeoutDiagnosis {
+  message: string;
+  /** 非空时经 vtxError 第 4 参覆盖该错误码的默认 hint。 */
+  hint?: string;
+}
+
 /**
- * Builds the OBSCURED 分支超时消息(modalBlocked/noHit/祖先命中/普通遮挡/兜底)。
- * 抽成导出函数供单测直接锁话术;lastReasonIsStability/inertBlocked 仍留在
- * waitActionable 内联——它们不属于 OBSCURED 分支,不在本函数覆盖范围。
+ * Builds the OBSCURED 分支超时诊断(modalBlocked/noHit/祖先命中/普通遮挡/兜底)。
+ * message 与 hint 同一处产出:MCP 把两者一起渲染给模型,分开算必然再次分叉。
+ * lastReasonIsStability/inertBlocked 仍留在 waitActionable 内联——不属于 OBSCURED 分支。
  */
-export function buildActionabilityTimeoutMessage(a: {
+export function buildActionabilityTimeoutDiagnosis(a: {
   timeout: number;
   lastReason?: string;
   lastExtras?: { blocker?: string; hitKind?: string; modalBlocked?: boolean };
-}): string {
+}): ActionabilityTimeoutDiagnosis {
   const { timeout, lastReason, lastExtras } = a;
   const modalBlocked = lastReason === "OBSCURED" && lastExtras?.modalBlocked === true;
   const blocker = lastReason === "OBSCURED" && !modalBlocked ? lastExtras?.blocker : undefined;
   const noHit = blocker === "elementFromPoint=null";
   if (modalBlocked) {
-    return `Actionability timeout after ${timeout}ms; last reason: OBSCURED ` +
+    return { message: `Actionability timeout after ${timeout}ms; last reason: OBSCURED ` +
       `(element is covered by an open modal <dialog> in the top layer; the rest of the page is ` +
-      `inert while it is open — dismiss the dialog first, e.g. press Escape or click its close button, then retry)`;
+      `inert while it is open — dismiss the dialog first, e.g. press Escape or click its close button, then retry)` };
   }
   if (noHit) {
-    return `Hit-testing the element's center reached no element at all after ${timeout}ms ` +
-      `(clipped by an ancestor, or positioned outside the viewport)`;
+    return { message: `Hit-testing the element's center reached no element at all after ${timeout}ms ` +
+      `(clipped by an ancestor, or positioned outside the viewport)` };
   }
   // 祖先命中:目标在 DOM 里、CSS 上也"可见",但中心点 hit-test 落到自己的祖先——
   // 被祖先 overflow:hidden 裁掉、pointer-events:none、或祖先自身层压在上面。
   // 与浮层遮挡的修法完全不同,不能让调用方去关一个不存在的浮层。
   if (blocker && lastExtras?.hitKind === "ancestor") {
-    return `Element's center hit-tests to its own ancestor <${blocker}> after ${timeout}ms ` +
-      `(clipped by that ancestor, pointer-events:none, or the ancestor paints over it) — ` +
-      `a real click at those coordinates would not reach the target; ` +
-      `scroll that container to bring the element into its visible area, or target the element that actually receives the click`;
+    return {
+      message: `Element's center hit-tests to its own ancestor <${blocker}> after ${timeout}ms ` +
+        `(clipped by that ancestor, pointer-events:none, or the ancestor paints over it) — ` +
+        `a real click at those coordinates would not reach the target; ` +
+        `scroll that container to bring the element into its visible area, or target the element that actually receives the click`,
+      // 默认 OBSCURED hint 指引去关浮层,祖先命中时根本没有浮层可关
+      hint: ANCESTOR_HIT_HINT,
+    };
   }
   if (blocker) {
-    return `Element is covered by <${blocker}> after ${timeout}ms of retrying; ` +
-      `hit-testing its center reaches that element, not the target`;
+    return { message: `Element is covered by <${blocker}> after ${timeout}ms of retrying; ` +
+      `hit-testing its center reaches that element, not the target` };
   }
-  return `Actionability timeout after ${timeout}ms; last reason: ${lastReason ?? "unknown"}`;
+  return { message: `Actionability timeout after ${timeout}ms; last reason: ${lastReason ?? "unknown"}` };
 }
 
 /**
@@ -163,6 +173,7 @@ export async function waitActionable(
   // R6 的 inertBlocked 分支命中不了)→ 同样追加关 modal 指引(等待/idle 无用,正解关
   // dialog)。modalBlocked 由 actionability probe 经 `dialog:modal` 判据携带。
   let message: string;
+  let hintOverride: string | undefined;
   if (lastReasonIsStability) {
     message = `Element not stable after ${timeout}ms (last reason: NOT_STABLE)`;
   } else if (inertBlocked) {
@@ -171,13 +182,15 @@ export async function waitActionable(
       `(element is in an [inert] subtree — commonly a modal/overlay backgrounding the page; ` +
       `dismiss the overlay/modal first, e.g. press Escape or click its close button, then retry)`;
   } else {
-    message = buildActionabilityTimeoutMessage({
+    const diagnosis = buildActionabilityTimeoutDiagnosis({
       timeout,
       lastReason: lastReason ?? undefined,
       lastExtras: lastExtras as
         | { blocker?: string; hitKind?: string; modalBlocked?: boolean }
         | undefined,
     });
+    message = diagnosis.message;
+    hintOverride = diagnosis.hint;
   }
   // OBSCURED 不再压成 TIMEOUT:TIMEOUT 的 hint 是「加大 timeout / 等 idle」,对遮挡是
   // 死路,而 OBSCURED 自带「关掉浮层再重试」。同 NOT_STABLE 的先例(见上方注释)——
@@ -193,6 +206,7 @@ export async function waitActionable(
       selector,
       extras: { lastReason, ...(lastExtras ?? {}) },
     },
+    hintOverride ? { hint: hintOverride } : undefined,
   );
 }
 

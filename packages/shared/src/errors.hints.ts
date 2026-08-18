@@ -20,6 +20,13 @@ export interface VtxErrorMeta {
   recoverable: boolean;
 }
 
+/**
+ * 祖先命中的 hint。修法与浮层遮挡相反(没有浮层可关),故走 vtxError 第 4 参覆盖
+ * 默认 OBSCURED / ELEMENT_OCCLUDED 话术。门、CDP、合成三条路径共用这一份。
+ */
+export const ANCESTOR_HIT_HINT =
+  "Hit-testing lands on one of the element's own ancestors, not on an overlay — no floating layer to close, and waiting will not help. Call vortex_act with action='scroll' on that ancestor to bring the target's center into its visible box, or retry on the element that truly receives the click.";
+
 export const DEFAULT_ERROR_META: Record<VtxErrorCode, VtxErrorMeta> = {
   // -- 元素定位 --
   ELEMENT_NOT_FOUND: {
