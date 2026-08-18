@@ -145,6 +145,54 @@ describe("classifyHit", () => {
     expect(classifyHit(sr.getElementById("i")!, sr.getElementById("disp")!)).toEqual({ ok: true });
   });
 
+  // 语料此前系统性缺「阻挡祖先之上还嵌着 role/tabindex 容器」这一层:阻挡祖先都直挂
+  // body,向上一步就撞 documentElement 退出,装饰层 carve-out 恒返回 false,假绿。
+  it("阻挡祖先嵌在 role=tabpanel 容器内 → 仍是 ancestor（装饰层 carve-out 不得吞掉）", () => {
+    const d = mk(`<div role="tabpanel"><div id="clip"><button id="b">x</button></div></div>`);
+    expect(classifyHit(d.getElementById("b")!, d.getElementById("clip")!)).toEqual({
+      ok: false, blocker: "div#clip", kind: "ancestor",
+    });
+  });
+
+  it("阻挡祖先嵌在 tabindex=-1 容器内 → 仍是 ancestor", () => {
+    const d = mk(`<div tabindex="-1"><div id="clip"><button id="b">x</button></div></div>`);
+    expect(classifyHit(d.getElementById("b")!, d.getElementById("clip")!)).toEqual({
+      ok: false, blocker: "div#clip", kind: "ancestor",
+    });
+  });
+
+  it("阻挡祖先嵌在 role=main 容器内、目标是 <a> → 仍是 ancestor", () => {
+    const d = mk(`<main role="main"><div id="clip"><a id="b" href="#">x</a></div></main>`);
+    expect(classifyHit(d.getElementById("b")!, d.getElementById("clip")!)).toEqual({
+      ok: false, blocker: "div#clip", kind: "ancestor",
+    });
+  });
+
+  it("swiper 轨道 role=group 内的 slide 层命中 → ancestor（动机场景的多层版）", () => {
+    const d = mk(`<div id="track" role="group"><div id="slide"><button id="b">题3</button></div></div>`);
+    expect(classifyHit(d.getElementById("b")!, d.getElementById("slide")!)).toEqual({
+      ok: false, blocker: "div#slide", kind: "ancestor",
+    });
+  });
+
+  it("el-dialog 动机场景：hit 落在 overflow:hidden 的 __body 祖先 → ancestor", () => {
+    const d = mk(
+      `<div class="el-dialog" role="dialog"><div id="body" class="el-dialog__body">` +
+      `<button id="b">确定</button></div></div>`,
+    );
+    expect(classifyHit(d.getElementById("b")!, d.getElementById("body")!)).toEqual({
+      ok: false, blocker: "div#body.el-dialog__body", kind: "ancestor",
+    });
+  });
+
+  it("装饰层 carve-out 保留：hit 是兄弟显示层、外层还套 role 容器 → 仍 ok", () => {
+    const d = mk(
+      `<div role="tabpanel"><div id="w" class="el-select" role="combobox">` +
+      `<input id="i"><span id="disp">占位</span></div></div>`,
+    );
+    expect(classifyHit(d.getElementById("i")!, d.getElementById("disp")!)).toEqual({ ok: true });
+  });
+
   it("目标是 shadow host、命中其 shadow 内部元素 → ok（composedContains(el, hit) 订正的直接覆盖）", () => {
     const d = mk(`<div id="host"></div>`);
     const host = d.getElementById("host")!;

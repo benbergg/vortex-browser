@@ -77,6 +77,8 @@ export function composedContains(ancestor: Element, node: Element): boolean {
 // 祖先遍历与包含判断都走 composed 树:否则 shadow 内的 widget 装饰层在这里失效,
 // 而 classifyHit 的祖先分支却穿了 shadow,三条路径判定不一致(codex 二轮 P2-3)。
 function isSameWidgetDecoration(el: Element, hit: Element): boolean {
+  // 只认兄弟装饰层:hit 是目标祖先时任何 role/tabindex 外壳都会误放行
+  if (composedContains(hit, el)) return false;
   if (isWidgetContainer(hit)) return false;
   const root = el.ownerDocument.documentElement;
   let w: Element | null = composedParent(el);
