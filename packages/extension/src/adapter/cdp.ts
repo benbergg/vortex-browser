@@ -166,10 +166,7 @@ export async function cdpClickElement(
           : document.elementFromPoint(cxInner, cyInner);
         // 命中归属判定收敛到 __vortexDomResolve.classifyHit(与门同一真源)。
         if (!force) {
-          // fail closed:判定不可用(模块未注入 / 两次 executeScript 之间页面导航)时
-          // 报 NOT_ATTACHED。**不会自动恢复**——派发在 gate 之后,这里的 errorCode 经
-          // mapPageError 直接抛出,不回到 auto-wait 自旋(codex 二轮 P1-1)。但这是正确
-          // 语义:导航后本就该重新 observe。静默放行才是把 P0 根因留在降级路径上。
+          // fail closed:判定不可用即报错,导航后本就该重新 observe
           if (!resolve?.classifyHit) {
             return {
               errorCode: "NOT_ATTACHED",

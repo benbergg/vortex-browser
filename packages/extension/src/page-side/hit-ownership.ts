@@ -42,8 +42,7 @@ const CLICKABLE_ROLES = new Set([
 
 export function isClickTargetAncestor(el: Element, hit: Element): boolean {
   const t = hit.tagName.toLowerCase();
-  // label:点它把激活转发给**关联控件**。目标不是那个控件时不算到达
-  // ——<label><div id=target></label> 点 label 不会激活 div(codex 二轮 P2-1)。
+  // label 只把激活转发给关联控件,别的后代不算被点到
   if (t === "label") return (hit as HTMLLabelElement).control === el;
   if (t === "button" || t === "select" || t === "textarea" || t === "input" || t === "summary") return true;
   if (t === "a" || t === "area") return hit.hasAttribute("href");
@@ -75,7 +74,7 @@ export function composedContains(ancestor: Element, node: Element): boolean {
 // 复合输入控件(el-select 等)把可见显示层作为兄弟节点叠在透明真控件之上,点击经显示层
 // 冒泡仍到达同一 widget。hit 非交互且与目标同处一个交互容器 → 装饰层,不算遮挡。
 // 祖先遍历与包含判断都走 composed 树:否则 shadow 内的 widget 装饰层在这里失效,
-// 而 classifyHit 的祖先分支却穿了 shadow,三条路径判定不一致(codex 二轮 P2-3)。
+// 而 classifyHit 的祖先分支却穿了 shadow,三条路径判定不一致。
 function isSameWidgetDecoration(el: Element, hit: Element): boolean {
   // 只认兄弟装饰层:hit 是目标祖先时任何 role/tabindex 外壳都会误放行
   if (composedContains(hit, el)) return false;

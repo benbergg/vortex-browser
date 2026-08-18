@@ -1091,8 +1091,7 @@ async function scanOneFrame(
   filterMode: "interactive" | "all",
 ): Promise<FramePageResult | null> {
   try {
-    // 遮挡判定要用 dom-resolve 的 classifyHit。best-effort:注入失败不拖垮整帧扫描
-    // (只读快照报错比降级更坏),扫描体内自会因缺模块跳过遮挡标注。
+    // 遮挡判定要用 dom-resolve 的 classifyHit;注入失败不拖垮整帧扫描
     await loadPageSideModule(tabId, frameId, "dom-resolve").catch(() => {});
     const results = await chrome.scripting.executeScript({
       target: buildExecuteTarget(tabId, frameId),
@@ -3384,14 +3383,13 @@ const INTERACTIVE_SELECTORS = [
               Math.min(window.innerHeight - 1, rect.top + rect.height / 2),
             );
             const topEl = deepElementFromPoint(cx, cy);
-            // 命中归属走 act 的门同一份 classifyHit(dom-resolve 注入):自持一份拷贝
-            // 必然分叉,模型会拿到「observe 说可点、act 抛 OBSCURED」的矛盾输出。
+            // 命中归属与 act 的门共用 classifyHit,自持拷贝必然分叉
             const hitOwn = (
               window as unknown as {
                 __vortexDomResolve?: { classifyHit?: (el: Element, hit: Element | null) => { ok: boolean } };
               }
             ).__vortexDomResolve?.classifyHit;
-            // 模块缺失(注入失败/刚导航)时不猜:observe 是只读快照,宁可不标遮挡
+            // 模块缺失时不猜:只读快照宁可不标遮挡也不放第二份判据
             const own = hitOwn && topEl ? hitOwn(htmlEl, topEl) : undefined;
             if (own && !own.ok) {
               visible = false;

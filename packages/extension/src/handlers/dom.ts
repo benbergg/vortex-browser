@@ -389,10 +389,7 @@ export function registerDomHandlers(
                 };
               }
               const __own = __resolve.classifyHit(el, topEl) as { ok: boolean; blocker?: string; kind?: string };
-              // transient 豁免**只对 overlay 成立**:它的语义是「兄弟浮层在做动画,点击会
-              // 冒泡到目标」。祖先命中不会因为祖先在做动画而变得可点——而 isTransient 的
-              // 判据里恰好有「transform 含 matrix」,swiper 轨道正是 translateX,不分流的话
-              // 本次修复在合成路径上对原始 bug 场景完全失效(codex 审核 P1-2)。
+              // 豁免只对 overlay:祖先在做动画不会让它变得可点
               const exempt = __own.kind === "overlay" && isTransientOverlay;
               if (!__own.ok && !exempt) {
                 return {
@@ -581,7 +578,7 @@ export function registerDomHandlers(
         extras?: Record<string, unknown>;
       };
       };
-      // 走 mapPageError 而非自己映射:祖先命中的话术/hint 覆盖只在那里,复制一份必然分叉。
+      // 走 mapPageError:祖先命中的话术/hint 覆盖只在那一处
       const throwIfClickError = (r: { error?: string; errorCode?: string; extras?: Record<string, unknown> } | undefined) => {
         if (r?.error) mapPageError(r, selector);
       };
