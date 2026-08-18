@@ -53,6 +53,30 @@ export function noHitMessage(target: string): string {
   );
 }
 
+export const TIMEOUT_PAGE_ALIVE_HINT =
+  "The page's main thread still responds, so the stall is in this action's own path (a CDP command queued, or chrome.debugger held by another client). Close DevTools on this tabId, then retry; raising the timeout argument only helps if the path is merely slow.";
+
+export const TIMEOUT_PAGE_UNRESPONSIVE_HINT =
+  "The page's main thread is blocked by a long task, so it never answered within the action budget — waiting longer and a bigger timeout argument are both useless. Call vortex_navigate to reload and reset this tab, or switch to another tabId and retry there.";
+
+/** 探活没做成时只能说「原因未判定」。声称页面死活正是本次要消灭的假信号。 */
+export const TIMEOUT_PROBE_FAILED_HINT =
+  "The liveness probe itself could not run on this tab (no host permission, a chrome:// page, or a discarded tab), so the timeout cause is undetermined. Call vortex_observe on this tabId to check whether the page is reachable at all before retrying.";
+
+export const TIMEOUT_TAB_GONE_HINT =
+  "The target tab no longer exists or cannot be accessed, so this action can never complete on that tabId. Call vortex_tab_create to open a fresh tab and re-run the flow, or retry with a tabId that is still open.";
+
+/**
+ * 内层 deadline 到点后按探活结果分发的 hint + recoverable。两者必须同处一地:
+ * hint 说「重试无用」而 recoverable=true 会自相矛盾(2026-08-18 裁决三)。
+ */
+export const TIMEOUT_LIVENESS_META: Readonly<Record<string, VtxErrorMeta>> = Object.freeze({
+  "page-alive": { hint: TIMEOUT_PAGE_ALIVE_HINT, recoverable: true },
+  "probe-failed": { hint: TIMEOUT_PROBE_FAILED_HINT, recoverable: true },
+  "page-unresponsive": { hint: TIMEOUT_PAGE_UNRESPONSIVE_HINT, recoverable: false },
+  "tab-gone": { hint: TIMEOUT_TAB_GONE_HINT, recoverable: false },
+});
+
 /**
  * 经 vtxError 第 4 参下发的 override hint 登记表。它们和 DEFAULT_ERROR_META 一样
  * 直达 LLM,故必须一起受 I19/I20 不变量扫描——不登记就是绕过契约。
@@ -60,6 +84,10 @@ export function noHitMessage(target: string): string {
 export const OVERRIDE_HINTS: Record<string, string> = {
   ANCESTOR_HIT_HINT,
   NO_HIT_HINT,
+  TIMEOUT_PAGE_ALIVE_HINT,
+  TIMEOUT_PAGE_UNRESPONSIVE_HINT,
+  TIMEOUT_PROBE_FAILED_HINT,
+  TIMEOUT_TAB_GONE_HINT,
 };
 
 export const DEFAULT_ERROR_META: Record<VtxErrorCode, VtxErrorMeta> = {
