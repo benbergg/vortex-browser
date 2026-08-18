@@ -53,6 +53,15 @@ export function noHitMessage(target: string): string {
   );
 }
 
+/**
+ * 经 vtxError 第 4 参下发的 override hint 登记表。它们和 DEFAULT_ERROR_META 一样
+ * 直达 LLM,故必须一起受 I19/I20 不变量扫描——不登记就是绕过契约。
+ */
+export const OVERRIDE_HINTS: Record<string, string> = {
+  ANCESTOR_HIT_HINT,
+  NO_HIT_HINT,
+};
+
 export const DEFAULT_ERROR_META: Record<VtxErrorCode, VtxErrorMeta> = {
   // -- 元素定位 --
   ELEMENT_NOT_FOUND: {
