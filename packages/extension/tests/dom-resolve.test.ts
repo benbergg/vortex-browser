@@ -10,11 +10,12 @@ describe("dom-resolve page-side module", () => {
     (globalThis as any).HTMLElement = dom.window.HTMLElement;
   });
 
-  it("挂载 __vortexDomResolve（version=1，含三个函数含 deepElementFromPoint）", async () => {
+  it("挂载 __vortexDomResolve（version=2，含三个函数含 deepElementFromPoint）", async () => {
     vi.resetModules();
     await import("../src/page-side/dom-resolve.js");
     const ns = (window as any).__vortexDomResolve;
-    expect(ns.version).toBe(1);
+    // version 2：命中归属判定收敛后新增 classifyHit（ead6cbe），version 守卫据此拒绝复用旧 v1 全局对象。
+    expect(ns.version).toBe(2);
     expect(typeof ns.queryDeep).toBe("function");
     expect(typeof ns.queryAllDeep).toBe("function");
     expect(typeof ns.deepElementFromPoint).toBe("function");

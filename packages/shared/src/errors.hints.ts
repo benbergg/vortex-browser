@@ -20,6 +20,48 @@ export interface VtxErrorMeta {
   recoverable: boolean;
 }
 
+/**
+ * 祖先命中的 hint。修法与浮层遮挡相反(没有浮层可关),故走 vtxError 第 4 参覆盖
+ * 默认 OBSCURED / ELEMENT_OCCLUDED 话术。门、CDP、合成三条路径共用这一份。
+ */
+export const ANCESTOR_HIT_HINT =
+  "Hit-testing lands on one of the element's own ancestors, not on an overlay — no floating layer to close, and waiting will not help. Call vortex_act with action='scroll' on that ancestor to bring the target's center into its visible box, or retry on the element that truly receives the click.";
+
+/**
+ * 祖先命中的核心话术。门 / CDP / 合成三条路径共用,各自只追加自己的上下文,
+ * 否则「同一判据、三种说法」会重演(2026-08-18 评审 I1)。
+ */
+export function ancestorHitMessage(target: string, blocker: string): string {
+  return (
+    `${target}'s center hit-tests to its own ancestor <${blocker}> ` +
+    `(clipped by that ancestor, pointer-events:none, or the ancestor paints over it) — ` +
+    `a real click at those coordinates would not reach the target`
+  );
+}
+
+export const NO_HIT_HINT =
+  "Hit-testing the element's center reached no element at all — it is clipped by an ancestor or sits outside the viewport, so no covering element exists. Call vortex_act with action='scroll' to bring it into view, then call vortex_observe to confirm its box before retrying.";
+
+/**
+ * 中心点落空的核心话术。blocker 串 "elementFromPoint=null" 不是元素描述,
+ * 按遮挡话术渲染会造出 `covered by <elementFromPoint=null>` 这种荒谬报文。
+ */
+export function noHitMessage(target: string): string {
+  return (
+    `Hit-testing ${target}'s center reached no element at all ` +
+    `(clipped by an ancestor, or positioned outside the viewport)`
+  );
+}
+
+/**
+ * 经 vtxError 第 4 参下发的 override hint 登记表。它们和 DEFAULT_ERROR_META 一样
+ * 直达 LLM,故必须一起受 I19/I20 不变量扫描——不登记就是绕过契约。
+ */
+export const OVERRIDE_HINTS: Record<string, string> = {
+  ANCESTOR_HIT_HINT,
+  NO_HIT_HINT,
+};
+
 export const DEFAULT_ERROR_META: Record<VtxErrorCode, VtxErrorMeta> = {
   // -- 元素定位 --
   ELEMENT_NOT_FOUND: {
@@ -164,8 +206,8 @@ export const DEFAULT_ERROR_META: Record<VtxErrorCode, VtxErrorMeta> = {
   OBSCURED: {
     // 原文让调用方去看 context.extras.blocker —— 那是个它永远看不到的字段(MCP 只渲染
     // message + hint)。遮挡者现由 message 直接点名,指引改为可执行的下一步。
-    // 别在这里推荐 force:true —— 它只跳过 actionability 门,合成 click 路径的 page-side
-    // 遮挡检查(dom.ts CLICK)根本收不到 force,仍会抛 ELEMENT_OCCLUDED(2026-08-14 live 实测)。
+    // 别在这里推荐 force:true —— 它现已穿透门/CDP/合成三条路径,但跳过的是全部质量门
+    // (可见性/可用性/稳定性…),对通用 hint 来说是危险的逃生舱,不该推荐给 LLM。
     hint: "Element hit-test failed; another element covers it (the covering element is named in the message). Waiting will not help and neither will a larger timeout — dismiss or scroll away that element (e.g. vortex_act click on its close control), then retry.",
     recoverable: true,
   },

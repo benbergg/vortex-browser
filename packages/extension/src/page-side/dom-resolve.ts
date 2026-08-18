@@ -8,11 +8,12 @@ import {
   deepElementFromPoint,
   isEnabledElement,
 } from "./shadow-walk.js";
+import { classifyHit } from "./hit-ownership.js";
 
 (function () {
-  if ((window as any).__vortexDomResolve?.version === 1) return;
+  if ((window as any).__vortexDomResolve?.version === 2) return;
   (window as any).__vortexDomResolve = {
-    version: 1,
+    version: 2,
     queryDeep: (selector: string): Element | null => {
       try {
         return queryDeep(selector, document);
@@ -48,6 +49,9 @@ import {
     // cdp.ts useRealMouse 探测旧版只判 .disabled 漏 aria-disabled,与门不一致(探测放行→门拦,
     // 或 div[role=textbox] aria-disabled 探测漏判)。收敛到单一真源保证探测==门(#26/#29)。
     isEnabled: (el: Element): boolean => isEnabledElement(el),
+    // 命中归属判定,与门 actionability.receivesEvents 共用 hit-ownership.classifyHit。
+    // 注入函数丢模块作用域,只能经这里拿(#1a,2026-08-15)。
+    classifyHit: (el: Element, hit: Element | null) => classifyHit(el, hit),
   };
 })();
 export {};

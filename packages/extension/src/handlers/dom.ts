@@ -305,7 +305,7 @@ export function registerDomHandlers(
       const runSyntheticClick = async (cdpAvailable: boolean) => {
       const results = await chrome.scripting.executeScript({
         target: buildExecuteTarget(tid, frameId),
-        func: async (sel: string, cdpAvailable: boolean, observeEffect: boolean, windowMs: number | undefined, dialogAnswer: string, dialogPromptText: string | null) => {
+        func: async (sel: string, cdpAvailable: boolean, observeEffect: boolean, windowMs: number | undefined, dialogAnswer: string, dialogPromptText: string | null, force: boolean) => {
           try {
             // 探测阶段：逐项检查失败原因，细化错误码
             const els = (window as any).__vortexDomResolve.queryAllDeep(sel) as Element[];
@@ -360,41 +360,12 @@ export function registerDomHandlers(
             // 使用穿 shadow 的 deepElementFromPoint，避免对 shadow-internal 元素返回 shadow host
             // 导致 host.contains(el) 不穿 shadow 而误判 ELEMENT_OCCLUDED。
             const topEl = (window as any).__vortexDomResolve.deepElementFromPoint(cx, cy);
-            // 复合输入控件(Element Plus el-select 等)把可见显示层(placeholder /
-            // selected-item)作为兄弟节点叠在透明真控件之上。hit-test 命中显示层兄弟——
-            // 既非 target 也非其后代——但它非交互且与 target 同处一个交互 widget 容器
-            // (el 的最近交互祖先 contains hit),点击经显示层冒泡仍到达控件,非真遮挡。
-            // 与 actionability.ts / cdp.ts 的 carve-out 同源(2026-06-01 el-select dogfood)。
-            const isInteractiveEl = (x: Element): boolean => {
-              const t = x.tagName.toLowerCase();
-              return (
-                !!x.getAttribute("role") ||
-                x.getAttribute("tabindex") != null ||
-                t === "button" ||
-                t === "a" ||
-                t === "input" ||
-                t === "select" ||
-                t === "textarea"
-              );
-            };
-            let sameWidgetDecoration = false;
-            if (topEl && !isInteractiveEl(topEl)) {
-              let w: Element | null = el.parentElement;
-              while (w && w !== document.documentElement) {
-                if (isInteractiveEl(w)) {
-                  if (w.contains(topEl)) sameWidgetDecoration = true;
-                  break;
-                }
-                w = w.parentElement;
-              }
-            }
             // BUG-012 N0060 京东评测: react-virtuoso 虚拟列表容器与 viewport 间
             // 有"动画覆盖层" (opacity/transform 动画 + aria-hidden 容器),
             // elementFromPoint 命中覆盖层而非目标 ref, 但点击经 React root
-            // delegation 仍能到达目标。在 isInteractiveEl 失败后追加 isTransient
-            // 检测, 命中 transient overlay → 放行。真遮挡 (京东物流弹层遮罩)
-            // opacity=1 / transform=定位 matrix / aria-hidden="false" → 不被
-            // 误判, 仍报 ELEMENT_OCCLUDED。
+            // delegation 仍能到达目标。命中 transient overlay → 放行。真遮挡
+            // (京东物流弹层遮罩) opacity=1 / transform=定位 matrix /
+            // aria-hidden="false" → 不被误判, 仍报 ELEMENT_OCCLUDED。
             // isTransient 内联副本(与模块级 export 同步,改一处须改另一处——
             // executeScript 注入丢模块作用域,不能裸引用模块 helper)。
             const isTransientInline = (x: Element | null): boolean => {
@@ -408,27 +379,25 @@ export function registerDomHandlers(
               return false;
             };
             const isTransientOverlay = isTransientInline(topEl);
-            if (
-              topEl &&
-              topEl !== el &&
-              !el.contains(topEl) &&
-              !topEl.contains(el) &&
-              !sameWidgetDecoration &&
-              !isTransientOverlay
-            ) {
-              const classStr =
-                typeof topEl.className === "string" && topEl.className
-                  ? "." + topEl.className.split(" ").filter(Boolean).join(".")
-                  : "";
-              const desc =
-                topEl.tagName.toLowerCase() +
-                (topEl.id ? "#" + topEl.id : "") +
-                classStr;
-              return {
-                errorCode: "ELEMENT_OCCLUDED",
-                error: `Element ${sel} is covered by <${desc}>`,
-                extras: { blocker: desc },
-              };
+            const __resolve = (window as any).__vortexDomResolve;
+            if (!force) {
+              // fail closed,同 cdp.ts:判定不可用时报可重试的 NOT_ATTACHED。
+              if (!__resolve?.classifyHit) {
+                return {
+                  errorCode: "NOT_ATTACHED",
+                  error: `Hit-ownership check unavailable for ${sel} (page-side module missing — page likely navigated); retry re-injects it`,
+                };
+              }
+              const __own = __resolve.classifyHit(el, topEl) as { ok: boolean; blocker?: string; kind?: string };
+              // 豁免只对 overlay:祖先在做动画不会让它变得可点
+              const exempt = __own.kind === "overlay" && isTransientOverlay;
+              if (!__own.ok && !exempt) {
+                return {
+                  errorCode: "ELEMENT_OCCLUDED",
+                  error: `Element ${sel} is covered by <${__own.blocker}>`,
+                  extras: { blocker: __own.blocker, hitKind: __own.kind },
+                };
+              }
             }
             // 方案 A:表单提交意图元素(button[type=submit] / input[type=submit] /
             // <form> 内无显式 type 的 <button>——HTML 默认 type=submit)。合成 click 的
@@ -599,7 +568,7 @@ export function registerDomHandlers(
         // ——observeEffect=false 时该值不被使用(begin 不调),observeEffect=true 且未传时给回正确
         // 的 300ms 窗口(用 ?? 0 会因 0 非 nullish 把窗口塌成 0ms,故不可用 0)。observeEffect
         // 恒为 boolean(args.observeEffect === true),无需兜底。
-        args: [selector, cdpAvailable, observeEffect, windowMs ?? 300, (args.onDialog as string) ?? "dismiss", (args.promptText as string | undefined) ?? null],
+        args: [selector, cdpAvailable, observeEffect, windowMs ?? 300, (args.onDialog as string) ?? "dismiss", (args.promptText as string | undefined) ?? null, args.force === true],
         world: "MAIN",
       });
       return results[0]?.result as {
@@ -609,16 +578,9 @@ export function registerDomHandlers(
         extras?: Record<string, unknown>;
       };
       };
+      // 走 mapPageError:祖先命中的话术/hint 覆盖只在那一处
       const throwIfClickError = (r: { error?: string; errorCode?: string; extras?: Record<string, unknown> } | undefined) => {
-        if (r?.error) {
-          const code: VtxErrorCode =
-            r.errorCode && r.errorCode in VtxErrorCode
-              ? (r.errorCode as VtxErrorCode)
-              : r.error.startsWith("Element not found:")
-                ? VtxErrorCode.ELEMENT_NOT_FOUND
-                : VtxErrorCode.JS_EXECUTION_ERROR;
-          throw vtxError(code, r.error, { selector, extras: r.extras });
-        }
+        if (r?.error) mapPageError(r, selector);
       };
       // 首跑:cdpAvailable=!!debuggerMgr。submit-intent 会返回 deferToCdp(未点击)。
       let res = await runSyntheticClick(!!debuggerMgr);

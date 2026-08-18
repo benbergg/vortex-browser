@@ -3,6 +3,7 @@ import type { ActionRouter } from "../lib/router.js";
 import type { DebuggerManager } from "../lib/debugger-manager.js";
 import { getActiveTabId, buildExecuteTarget, ensureFrameAttached } from "../lib/tab-utils.js";
 import { getIframeOffset } from "../lib/iframe-offset.js";
+import { loadPageSideModule } from "../adapter/page-side-loader.js";
 import { raceTimeout, TIMED_OUT } from "../lib/race-timeout.js";
 import {
   gcSnapshots,
@@ -237,6 +238,7 @@ interface FramePageResult {
     | { kind: "virtual"; total: number; rendered: number; name: string; confidence?: "low" }
     | { kind: "canvas"; name: string; chartLib: string; readback: "chart" }
     | { kind: "image"; name: string; src: string }
+    | { kind: "occlusion"; name: string }
   >;
   /** 模态作用域信号(aria-modal 弹层打开,裁剪了背景)。@since modal-scope */
   modal?: { name: string; role: string; suppressed: number };
@@ -1090,6 +1092,8 @@ async function scanOneFrame(
   filterMode: "interactive" | "all",
 ): Promise<FramePageResult | null> {
   try {
+    // 遮挡判定要用 dom-resolve 的 classifyHit;注入失败不拖垮整帧扫描
+    await loadPageSideModule(tabId, frameId, "dom-resolve").catch(() => {});
     const results = await chrome.scripting.executeScript({
       target: buildExecuteTarget(tabId, frameId),
       func: (
@@ -1319,20 +1323,6 @@ const INTERACTIVE_SELECTORS = [
         // 原生交互元素 / 启发式入口不命中此选择器 → 不过门,直接入池。
         const ROLE_GATE_TRIGGER_SELECTORS =
           "[role],table,nav,main,header,footer,aside,fieldset,ul,ol,li,section";
-
-        // 元素是否带交互可供性(用于 occlusion carve-out 判定 widget 容器)。
-        function isInteractiveEl(x: Element): boolean {
-          const t = x.tagName.toLowerCase();
-          return (
-            !!x.getAttribute("role") ||
-            x.getAttribute("tabindex") != null ||
-            t === "button" ||
-            t === "a" ||
-            t === "input" ||
-            t === "select" ||
-            t === "textarea"
-          );
-        }
 
         // Icon-only fallback：先 svg `<title>` / img alt / aria-label，失败再 className。
         // 触发条件：元素含 svg/img 后代（典型 svg/img 图标按钮）。
@@ -2520,6 +2510,9 @@ const INTERACTIVE_SELECTORS = [
           return el;
         }
 
+        // 遮挡判定缺席要出声:注入快失败被吞掉时,整帧元素会静默翻成 visible:true
+        let __hitOwnMissing = false;
+
         const nodeList = querySelectorAllDeep(ROOT_SELECTORS, document);
 
         // AE: aria-activedescendant 指向的「虚拟焦点」目标元素集合。combobox /
@@ -3394,31 +3387,18 @@ const INTERACTIVE_SELECTORS = [
               Math.min(window.innerHeight - 1, rect.top + rect.height / 2),
             );
             const topEl = deepElementFromPoint(cx, cy);
-            // 复合输入控件(Element Plus el-select 等)把可见显示层作为兄弟节点叠在
-            // 透明真控件之上。hit-test 命中显示层兄弟时,若它非交互且与 htmlEl 同处
-            // 一个交互 widget 容器(htmlEl 最近交互祖先 contains hit),是同 widget
-            // 装饰层而非真遮挡,不应把真控件标记为不可见。与 actionability/cdp/dom
-            // 的 carve-out 同源(2026-06-01 el-select dogfood)。
-            let sameWidgetDecoration = false;
-            if (topEl && !isInteractiveEl(topEl)) {
-              let w: Element | null = htmlEl.parentElement;
-              while (w && w !== document.documentElement) {
-                if (isInteractiveEl(w)) {
-                  if (w.contains(topEl)) sameWidgetDecoration = true;
-                  break;
-                }
-                w = w.parentElement;
+            // 命中归属与 act 的门共用 classifyHit,自持拷贝必然分叉
+            const hitOwn = (
+              window as unknown as {
+                __vortexDomResolve?: { classifyHit?: (el: Element, hit: Element | null) => { ok: boolean } };
               }
-            }
-            if (
-              topEl &&
-              topEl !== htmlEl &&
-              !htmlEl.contains(topEl) &&
-              !topEl.contains(htmlEl) &&
-              !sameWidgetDecoration
-            ) {
+            ).__vortexDomResolve?.classifyHit;
+            // 模块缺失时不猜:只读快照宁可不标遮挡也不放第二份判据
+            if (!hitOwn && topEl) __hitOwnMissing = true;
+            const own = hitOwn && topEl ? hitOwn(htmlEl, topEl) : undefined;
+            if (own && !own.ok) {
               visible = false;
-              occludedBy = describeElement(topEl);
+              occludedBy = describeElement(topEl!);
             }
           }
 
@@ -3833,7 +3813,11 @@ const INTERACTIVE_SELECTORS = [
           | { kind: "canvas"; name: string; chartLib: string; readback: "chart" }
           | { kind: "image"; name: string; src: string }
           | { kind: "sheet"; name: string; lib: "lakesheet"; rows: number; cols: number }
+          | { kind: "occlusion"; name: string }
         > = [];
+        if (__hitOwnMissing) {
+          pageBlindspots.push({ kind: "occlusion", name: "hit-ownership" });
+        }
         {
           const __vc = querySelectorAllDeep("[role=grid],[role=treegrid],[role=table],[role=listbox],[role=tree]", document);
           for (const c of __vc) {
@@ -4500,6 +4484,7 @@ export function registerObserveHandlers(router: ActionRouter, debuggerMgr: Debug
           | { kind: "virtual"; total: number; rendered: number; name: string; confidence?: "low" }
           | { kind: "canvas"; name: string; chartLib: string; readback: "chart" }
           | { kind: "image"; name: string; src: string }
+          | { kind: "occlusion"; name: string }
         >;
         /** 模态作用域信号。@since modal-scope */
         modal?: { name: string; role: string; suppressed: number };

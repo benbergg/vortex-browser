@@ -1,7 +1,14 @@
 // L1 Native Adapter：chrome.tabs / scripting / storage 包装。
 // 见 ../handlers/dom.ts 内现有调用，PR #1 各 task 逐步迁入本文件。
 
-import { VtxErrorCode, vtxError } from "@vortex-browser/shared";
+import {
+  ANCESTOR_HIT_HINT,
+  NO_HIT_HINT,
+  VtxErrorCode,
+  ancestorHitMessage,
+  noHitMessage,
+  vtxError,
+} from "@vortex-browser/shared";
 import type { NativeAdapter } from "./types.js";
 import { buildExecuteTarget } from "../lib/tab-utils.js";
 
@@ -62,6 +69,26 @@ export async function pageQuery<T>(
  * 调用方仅在 page-side func 返回 error 时调用本 helper（其他情况按原代码 throw）。
  * 返回 never，便于 TS 在调用点 narrow res.error 为非 undefined。
  */
+/**
+ * page-side 只带回 extras.hitKind / blocker,话术在宿主侧单点成型:注入函数里再写
+ * 一遍必然与门分叉(评审 I1 实测三条路径共判据但不共话术)。祖先命中与中心点落空
+ * 的修法都与「关掉浮层」相反,故连 hint 一并覆盖。
+ */
+function hitOwnershipOverride(
+  res: { errorCode?: string; extras?: Record<string, unknown> } | undefined,
+  selector: string | undefined,
+): { message: string; hint: string } | undefined {
+  if (res?.errorCode !== VtxErrorCode.ELEMENT_OCCLUDED) return undefined;
+  const blocker = res.extras?.blocker;
+  if (typeof blocker !== "string") return undefined;
+  const target = selector ? `Element ${selector}` : "Element";
+  if (blocker === "elementFromPoint=null") {
+    return { message: noHitMessage(target), hint: NO_HIT_HINT };
+  }
+  if (res.extras?.hitKind !== "ancestor") return undefined;
+  return { message: ancestorHitMessage(target, blocker), hint: ANCESTOR_HIT_HINT };
+}
+
 export function mapPageError(
   res: { error?: string; errorCode?: string; extras?: Record<string, unknown> } | undefined,
   selector: string | undefined,
@@ -75,7 +102,13 @@ export function mapPageError(
         : VtxErrorCode.JS_EXECUTION_ERROR;
   // 保持与原 dom.ts 行为：selector 缺失时仅在有 extras 时附 context；都缺则不传 context。
   const hasContext = selector !== undefined || res?.extras !== undefined;
-  throw vtxError(code, error, hasContext ? { selector, extras: res?.extras } : undefined);
+  const override = hitOwnershipOverride(res, selector);
+  throw vtxError(
+    code,
+    override?.message ?? error,
+    hasContext ? { selector, extras: res?.extras } : undefined,
+    override ? { hint: override.hint } : undefined,
+  );
 }
 
 // 整个 adapter 的 facade（保留供 future 注入用）
