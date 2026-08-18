@@ -4,6 +4,7 @@
  */
 import {
   clampHubTimeout,
+  hubDeadlineFor,
   VtxErrorCode,
   VtxEventType,
   vtxError,
@@ -218,9 +219,12 @@ export class HubRouter {
     retryCount = 0,
     // 调用方的预算随请求上线（VtxRequest.timeoutMs）。写死 requestTimeoutMs 会让
     // 设了 45s 的调用在 30s 被砍，且报的是 hub 的错而非 handler 说得清的原因。
-    // 调用方的预算随请求上线（VtxRequest.timeoutMs）。写死 requestTimeoutMs 会让
-    // 设了 45s 的调用在 30s 被砍，且报的是 hub 的错而非 handler 说得清的原因。
-    deadline = this.now() + clampHubTimeout(request.timeoutMs, this.requestTimeoutMs),
+    // CLI 路径不下发 timeoutMs，兜底不能低于内层预算，否则 hub 先于内层 fire，
+    // 内层按探活归因的 hint 就永远到不了调用方（见 hubDeadlineFor 调用方）。
+    deadline = this.now() + Math.max(
+      clampHubTimeout(request.timeoutMs, this.requestTimeoutMs),
+      hubDeadlineFor(request.action, request.timeoutMs),
+    ),
   ): Promise<void> {
     const session = this.sessions.get(sessionId);
     if (!session) return;
