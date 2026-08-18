@@ -1,0 +1,240 @@
+{
+  "schema": 1,
+  "window": {
+    "from": "2026-08-17T14:18:45.143Z",
+    "to": "2026-08-18T13:28:01.313Z",
+    "activeDays": 2,
+    "requestedDays": 1,
+    "transcriptFiles": 5,
+    "sessions": 3,
+    "projects": 3
+  },
+  "totals": {
+    "calls": 518,
+    "errors": 25,
+    "errorRate": 0.0483,
+    "emptySuccess": 1,
+    "emptyRate": 0.0019
+  },
+  "skew": {
+    "top1SessionShare": 0.7143,
+    "top5SessionShare": 1
+  },
+  "routes": {
+    "vortex": 518,
+    "playwright": 1,
+    "vortexShare": 0.9981
+  },
+  "ratios": {
+    "observeToEvaluate": 0.109
+  },
+  "perTool": [
+    {
+      "tool": "evaluate",
+      "calls": 220,
+      "errors": 5,
+      "errorRate": 0.0227,
+      "emptySuccess": 1,
+      "emptyRate": 0.0045
+    },
+    {
+      "tool": "act",
+      "calls": 98,
+      "errors": 8,
+      "errorRate": 0.0816,
+      "emptySuccess": 0,
+      "emptyRate": 0
+    },
+    {
+      "tool": "mouse_click",
+      "calls": 43,
+      "errors": 3,
+      "errorRate": 0.0698,
+      "emptySuccess": 0,
+      "emptyRate": 0
+    },
+    {
+      "tool": "screenshot",
+      "calls": 40,
+      "errors": 1,
+      "errorRate": 0.025,
+      "emptySuccess": 0,
+      "emptyRate": 0
+    },
+    {
+      "tool": "observe",
+      "calls": 24,
+      "errors": 0,
+      "errorRate": 0,
+      "emptySuccess": 0,
+      "emptyRate": 0
+    },
+    {
+      "tool": "navigate",
+      "calls": 21,
+      "errors": 1,
+      "errorRate": 0.0476,
+      "emptySuccess": 0,
+      "emptyRate": 0
+    },
+    {
+      "tool": "extract",
+      "calls": 16,
+      "errors": 5,
+      "errorRate": 0.3125,
+      "emptySuccess": 0,
+      "emptyRate": 0
+    },
+    {
+      "tool": "browser",
+      "calls": 15,
+      "errors": 0,
+      "errorRate": 0,
+      "emptySuccess": 0,
+      "emptyRate": 0
+    },
+    {
+      "tool": "press",
+      "calls": 13,
+      "errors": 0,
+      "errorRate": 0,
+      "emptySuccess": 0,
+      "emptyRate": 0
+    },
+    {
+      "tool": "tab_list",
+      "calls": 11,
+      "errors": 0,
+      "errorRate": 0,
+      "emptySuccess": 0,
+      "emptyRate": 0
+    },
+    {
+      "tool": "tab_create",
+      "calls": 6,
+      "errors": 0,
+      "errorRate": 0,
+      "emptySuccess": 0,
+      "emptyRate": 0
+    },
+    {
+      "tool": "tab_close",
+      "calls": 4,
+      "errors": 0,
+      "errorRate": 0,
+      "emptySuccess": 0,
+      "emptyRate": 0
+    },
+    {
+      "tool": "mouse_drag",
+      "calls": 3,
+      "errors": 1,
+      "errorRate": 0.3333,
+      "emptySuccess": 0,
+      "emptyRate": 0
+    },
+    {
+      "tool": "fill",
+      "calls": 2,
+      "errors": 0,
+      "errorRate": 0,
+      "emptySuccess": 0,
+      "emptyRate": 0
+    },
+    {
+      "tool": "drag",
+      "calls": 1,
+      "errors": 0,
+      "errorRate": 0,
+      "emptySuccess": 0,
+      "emptyRate": 0
+    },
+    {
+      "tool": "wait_for",
+      "calls": 1,
+      "errors": 1,
+      "errorRate": 1,
+      "emptySuccess": 0,
+      "emptyRate": 0
+    }
+  ],
+  "topErrors": [
+    {
+      "sig": "extract | Error [PAGE_NOT_READY]: page-side module \"dom-resolve\" injection timed out after Nms (target tab likely in a bad SW/navigation state); cache evicted, retryable ",
+      "count": 3
+    },
+    {
+      "sig": "extract | Error [TIMEOUT]: Request content.getText timed out Hint: The hub-to-extension request exceeded its deadline; the page itself may be fine. Retry with a larger ti",
+      "count": 2
+    },
+    {
+      "sig": "evaluate | Error [TIMEOUT]: js.evaluate timed out after Nms (page-side func may still be running; set shorter timeout, simplify code, or use vortex_navigate to clear the t",
+      "count": 2
+    },
+    {
+      "sig": "act | Error [OBSCURED]: Element is covered by <div.el-dialog__wrapper.bn-dialog-wrapper> after Nms of retrying; hit-testing its center reaches that element, not the t",
+      "count": 2
+    },
+    {
+      "sig": "mouse_click | Error [TIMEOUT]: Request mouse.click timed out Hint: The hub-to-extension request exceeded its deadline; the page itself may be fine. Retry with a larger timeou",
+      "count": 2
+    },
+    {
+      "sig": "act | Error [STALE_SNAPSHOT]: Ref bound to expired snapshot (hash mismatch) Hint: Page has changed since the snapshot. Call vortex_observe to capture a fresh snapshot",
+      "count": 1
+    },
+    {
+      "sig": "screenshot | Error [TIMEOUT]: Request capture.screenshot timed out Hint: The hub-to-extension request exceeded its deadline; the page itself may be fine. Retry with a larger",
+      "count": 1
+    },
+    {
+      "sig": "evaluate | Error [TIMEOUT]: js.evaluateAsync timed out after Nms (page-side func may still be running; set shorter timeout, simplify code, or use vortex_navigate to clear ",
+      "count": 1
+    },
+    {
+      "sig": "evaluate | Error [JS_EXECUTION_ERROR]: Cannot read properties of null (reading 'dispatchEvent') Hint: Injected JavaScript threw an error. Inspect the error message in cont",
+      "count": 1
+    },
+    {
+      "sig": "navigate | Error [TIMEOUT]: Request page.navigate timed out Hint: The hub-to-extension request exceeded its deadline; the page itself may be fine. Retry with a larger time",
+      "count": 1
+    },
+    {
+      "sig": "act | Error [INVALID_SELECTOR]: target \"button:has-text(\"空白演示\")\" uses Playwright locator syntax (text= / >> / :has-text()), which is not supported. vortex_act target ",
+      "count": 1
+    },
+    {
+      "sig": "act | Error [SELECTOR_AMBIGUOUS]: Selector \"[data-block-index=\"N\"] [data-path]\" matched N elements Hint: Selector matched multiple elements. Use a more specific selec",
+      "count": 1
+    },
+    {
+      "sig": "act | Error [NOT_EDITABLE]: NOT_EDITABLE on selector \"[data-path=\"blocks.N.items.N.title\"]\" Hint: Target is not editable (readonly or non-input element). Use vortex_e",
+      "count": 1
+    },
+    {
+      "sig": "evaluate | Error [JS_EXECUTION_ERROR]: Cannot read properties of undefined (reading 'N') Hint: Injected JavaScript threw an error. Inspect the error message in context.ext",
+      "count": 1
+    },
+    {
+      "sig": "mouse_drag | Error [INVALID_PARAMS]: fromX/fromY/toX/toY are required Hint: Invalid parameters. Check the tool schema for required fields and value constraints, then retry w",
+      "count": 1
+    },
+    {
+      "sig": "mouse_click | Error [CDP_NOT_ATTACHED]: Another debugger is already attached to the tab with id: N. Hint: Another debugger owns this tab — usually DevTools is open on it, or ",
+      "count": 1
+    },
+    {
+      "sig": "act | Error [SELECTOR_AMBIGUOUS]: Selector \"[data-block-index=\"N\"]\" matched N elements Hint: Selector matched multiple elements. Use a more specific selector, or call",
+      "count": 1
+    },
+    {
+      "sig": "act | Error [CDP_NOT_ATTACHED]: Another debugger is already attached to the tab with id: N. Hint: Another debugger owns this tab — usually DevTools is open on it, or ",
+      "count": 1
+    },
+    {
+      "sig": "wait_for | Error [TIMEOUT]: Request page.waitForExpression timed out Hint: The hub-to-extension request exceeded its deadline; the page itself may be fine. Retry with a la",
+      "count": 1
+    }
+  ],
+  "label": "today-1d"
+}
