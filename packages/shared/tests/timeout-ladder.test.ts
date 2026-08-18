@@ -100,6 +100,8 @@ describe("per-action 内层预算表", () => {
   it("登记的 action 用自己的预算", () => {
     expect(actionBudgetMs("page.navigate")).toBe(60_000);
     expect(actionBudgetMs("content.getText")).toBe(20_000);
+    // key 曾误拼 content.getHtml，真实 action 是驼峰 HTML 全大写
+    expect(actionBudgetMs("content.getHTML")).toBe(20_000);
   });
 
   // 零回归锁：预算不得低于 30 天「未传 timeout 的成功调用」max（spec 第 8 节）
@@ -130,10 +132,8 @@ describe("per-action 内层预算表", () => {
 
   it("调用方的小 timeout 不压低任何一层", () => {
     // act 传 5000 不得把 hub 挤到 10s——act 成功 P99 是 25.5s
-    expect(innerDeadlineFor("dom.click", 5_000)).toBe(actionBudgetMs("dom.click"));
-    expect(hubDeadlineFor("dom.click", 5_000)).toBe(
-      actionBudgetMs("dom.click") + TIMEOUT_LADDER_STEP_MS,
-    );
+    expect(innerDeadlineFor("dom.click", 5_000)).toBe(35_000);
+    expect(hubDeadlineFor("dom.click", 5_000)).toBe(35_000 + 5_000);
   });
 
   it("🔴 REGRESSION: 自管超时的 handler 传大 timeout 时 inner 随之上移", () => {
@@ -146,9 +146,28 @@ describe("per-action 内层预算表", () => {
   });
 
   it("调用方未指定时 inner = 该 action 预算，hub 再加一档", () => {
-    expect(innerDeadlineFor("mouse.click", undefined)).toBe(actionBudgetMs("mouse.click"));
-    expect(hubDeadlineFor("mouse.click", undefined)).toBe(
-      actionBudgetMs("mouse.click") + TIMEOUT_LADDER_STEP_MS,
-    );
+    expect(innerDeadlineFor("mouse.click", undefined)).toBe(30_000);
+    expect(hubDeadlineFor("mouse.click", undefined)).toBe(30_000 + 5_000);
+  });
+
+  it("🔴 REGRESSION: 越界入参被钳在 MAX_INNER_TIMEOUT_MS 而非顶格放行", () => {
+    // 合法上限 60_000：inner = 60_000 + step，非零 margin
+    expect(innerDeadlineFor("js.evaluate", 60_000)).toBe(65_000);
+    expect(hubDeadlineFor("js.evaluate", 60_000)).toBe(70_000);
+    // 越界 90_000：先钳到 60_000 再 +step，不是 95_000
+    expect(innerDeadlineFor("js.evaluate", 90_000)).toBe(65_000);
+    expect(hubDeadlineFor("js.evaluate", 90_000)).toBe(70_000);
+  });
+
+  it("不变量：任意 action × 任意合法 caller，inner 不超过硬上限一档", () => {
+    const actions = [...Object.keys(ACTION_BUDGET_MS), "some.unregistered"];
+    const callers = [undefined, 0, 1, 5_000, 60_000, 90_000, 3_600_000];
+    for (const action of actions) {
+      for (const caller of callers) {
+        expect(innerDeadlineFor(action, caller)).toBeLessThanOrEqual(
+          MAX_INNER_TIMEOUT_MS + TIMEOUT_LADDER_STEP_MS,
+        );
+      }
+    }
   });
 });

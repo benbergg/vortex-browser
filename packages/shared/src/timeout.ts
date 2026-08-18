@@ -71,7 +71,7 @@ export const ACTION_BUDGET_MS: Readonly<Record<string, number>> = Object.freeze(
   "mouse.drag": 30_000,
   "capture.screenshot": 30_000,
   "content.getText": 20_000,
-  "content.getHtml": 20_000,
+  "content.getHTML": 20_000,
   "page.waitForExpression": 20_000,
 });
 
@@ -80,14 +80,13 @@ export function actionBudgetMs(action: string): number {
 }
 
 /**
- * router 施加的内层 deadline。
- * 取 max 而非直接用调用方值——act 的 timeout 是 gate 自旋预算（默认 2000ms），
- * 拿它当整体 deadline 会把 scrollIntoView 与 CDP 三连击一起砍掉；
- * 而 js.evaluate 拿它当脚本预算，传 45s 时内层必须跟着上移，否则砍掉合法调用。
+ * router 施加的内层 deadline，取 max 而非直接用调用方值。
+ * js.evaluate 等自管超时的 handler 传大 timeout 时，内层需跟着上移才不砍掉合法调用。
  */
 export function innerDeadlineFor(action: string, callerTimeoutMs: number | undefined): number {
+  // 钳的是入参不是结果：结果钳顶会让合法长调用零 margin，与内层硬碰撞
   const caller = Number.isFinite(callerTimeoutMs) && (callerTimeoutMs as number) > 0
-    ? (callerTimeoutMs as number) + TIMEOUT_LADDER_STEP_MS
+    ? Math.min(callerTimeoutMs as number, MAX_INNER_TIMEOUT_MS) + TIMEOUT_LADDER_STEP_MS
     : 0;
   return Math.max(actionBudgetMs(action), caller);
 }
