@@ -57,20 +57,23 @@ export const TIMEOUT_PAGE_ALIVE_HINT =
   "The page's main thread still responds, so the stall is in this action's own path (a CDP command queued, or chrome.debugger held by another client). Close DevTools on this tabId, then retry; raising the timeout argument only helps if the path is merely slow.";
 
 export const TIMEOUT_PAGE_UNRESPONSIVE_HINT =
-  "The page's main thread is blocked by a long task, so it never answered within the action budget — waiting longer and a bigger timeout argument are both useless. Call vortex_navigate to reload and reset this tab, or switch to another tabId and retry there.";
+  "The page's main thread is blocked by a long task, so it never answered within the action budget — waiting longer and a bigger timeout argument are both useless. Call vortex_navigate to reload and reset this tab, or call vortex_tab_list and retry on another live tabId.";
 
 /** 探活没做成时只能说「原因未判定」。声称页面死活正是本次要消灭的假信号。 */
 export const TIMEOUT_PROBE_FAILED_HINT =
   "The liveness probe itself could not run on this tab (no host permission, a chrome:// page, or a discarded tab), so the timeout cause is undetermined. Call vortex_observe on this tabId to check whether the page is reachable at all before retrying.";
 
 export const TIMEOUT_TAB_GONE_HINT =
-  "The target tab no longer exists or cannot be accessed, so this action can never complete on that tabId. Call vortex_tab_create to open a fresh tab and re-run the flow, or retry with a tabId that is still open.";
+  "The target tab no longer exists or cannot be accessed, so this action can never complete on that tabId. Call vortex_tab_list to see which tabs are still open and retry with a live tabId, or vortex_tab_create if none of them fits.";
+
+/** 超时归因的四态。扩态时 TIMEOUT_LIVENESS_META 少一条即编译失败,不静默回落默认 hint */
+export type TimeoutLiveness = "page-alive" | "page-unresponsive" | "probe-failed" | "tab-gone";
 
 /**
  * 内层 deadline 到点后按探活结果分发的 hint + recoverable。两者必须同处一地:
  * hint 说「重试无用」而 recoverable=true 会自相矛盾(2026-08-18 裁决三)。
  */
-export const TIMEOUT_LIVENESS_META: Readonly<Record<string, VtxErrorMeta>> = Object.freeze({
+export const TIMEOUT_LIVENESS_META: Readonly<Record<TimeoutLiveness, VtxErrorMeta>> = Object.freeze({
   "page-alive": { hint: TIMEOUT_PAGE_ALIVE_HINT, recoverable: true },
   "probe-failed": { hint: TIMEOUT_PROBE_FAILED_HINT, recoverable: true },
   "page-unresponsive": { hint: TIMEOUT_PAGE_UNRESPONSIVE_HINT, recoverable: false },

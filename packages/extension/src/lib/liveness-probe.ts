@@ -1,13 +1,15 @@
 /**
  * Description: 超时归因用的有界探活——区分「页面主线程卡死」与「探针本身失败」。
  */
+import type { TimeoutLiveness } from "@vortex-browser/shared";
 import { raceTimeout, TIMED_OUT } from "./race-timeout.js";
 import { pageQuery } from "../adapter/native.js";
 
 // 内层界到点后才跑的归因动作,调用方在等错误消息,等不起 actionability.ts:24 的 2000ms。
 const PROBE_BUDGET_MS = 300;
 
-export type Liveness = "page-alive" | "page-unresponsive" | "probe-failed" | "tab-gone";
+// 与 hint/recoverable 表同源，扩态时两侧一起编译失败
+export type Liveness = TimeoutLiveness;
 
 /**
  * 打一个极短空脚本探页面主线程死活；budgetMs 覆盖 tabs.get+探针全程，超时一律
