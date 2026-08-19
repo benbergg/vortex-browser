@@ -1,9 +1,17 @@
 // packages/extension/src/lib/debugger-manager.ts
 
-import { VtxErrorCode, vtxError } from "@vortex-browser/shared";
+import { CDP_BUSY_ATTACH_HINT, VtxErrorCode, vtxError } from "@vortex-browser/shared";
 import { assertEnableable } from "./cdp-domains.js";
 
 type CdpEventCallback = (tabId: number, method: string, params: unknown) => void;
+
+/**
+ * 「被别的 debugger 占着」的判据。Chrome 对这种失败只给一句裸文案,分类与调用方
+ * 的再提示都靠它,故只留这一份。
+ */
+export function isDebuggerBusyMessage(message: string): boolean {
+  return /already attached/i.test(message);
+}
 
 interface AttachedTab {
   domains: Set<string>; // 已启用的 CDP domain（"Runtime", "Network" 等）
@@ -82,10 +90,9 @@ export class DebuggerManager {
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       // 被占用是可恢复的：关掉 DevTools 就能重试，与缺权限/chrome:// 那类不同
-      const busy = /already attached/i.test(message);
+      const busy = isDebuggerBusyMessage(message);
       throw vtxError(VtxErrorCode.CDP_NOT_ATTACHED, message, { tabId }, busy ? {
-        hint: "Another debugger owns this tab — usually DevTools is open on it, or another extension attached first. " +
-          "Close DevTools on that tab (or act on a different tab) and retry.",
+        hint: CDP_BUSY_ATTACH_HINT,
         recoverable: true,
       } : undefined);
     }

@@ -17,7 +17,7 @@ import {
 import { sendRequest } from "./client.js";
 import { getToolDefs, getToolDef, setEnabledCaps } from "./tools/registry.js";
 import { dispatchNewTool } from "./tools/dispatch.js";
-import { timeoutLadder, splitDiagnosis } from "@vortex-browser/shared";
+import { timeoutLadder, splitDiagnosis, hubDeadlineFor } from "@vortex-browser/shared";
 import { liftWaitForRefToTarget } from "./lib/wait-for-ref.js";
 import { applyFingerprint, extractSignals, shouldRecover, type FingerprintOpt } from "./lib/fingerprint-apply.js";
 import { runSequence, type SequenceStepInput, type OnFailure } from "./lib/sequence-run.js";
@@ -538,12 +538,13 @@ export async function handleCallTool(
     if (filter !== undefined) next.filter = filter;
     // 始终用显式 "observe.snapshot" 作为发到 extension 的 action（toolDef.action
     // 在 v0.6 是 "L4.observe"，extension 端无对应 handler）。
+    // hub deadline 由 action 预算推导，不被调用方小 timeout 挤压
     const resp = await sendRequest(
       "observe.snapshot",
       next,
       PORT,
       tabId as number | undefined,
-      ladder.hub,
+      hubDeadlineFor("observe.snapshot", timeout as number | undefined),
     );
     if (resp.error) {
       return {
@@ -669,7 +670,7 @@ export async function handleCallTool(
 
       // 发请求
       try {
-        const resp = await sendRequest(action, fieldParams, PORT, tabId, DEFAULT_TIMEOUT);
+        const resp = await sendRequest(action, fieldParams, PORT, tabId);
         if (resp.error) {
           results.push({
             index: i,
@@ -749,9 +750,15 @@ export async function handleCallTool(
       }
       const d = dispatchNewTool("vortex_act", actParams);
       if (!d) return { ok: false, error: "Error [INVALID_PARAMS]: unsupported action" };
-      const resp = await sendRequest(d.action, d.params, PORT, tabId, DEFAULT_TIMEOUT);
+      const resp = await sendRequest(d.action, d.params, PORT, tabId);
       if (resp.error) return { ok: false, error: formatDispatchError(resp.error) };
-      return { ok: true, result: (resp.result ?? {}) as Record<string, unknown> };
+      // 降级的 click 结果包在自陈信封里,不拆包单步自证就读不到 effect,恒退化成 unknown
+      const { value: stepResult, diagnosis } = splitDiagnosis(resp.result);
+      return {
+        ok: true,
+        result: (stepResult ?? {}) as Record<string, unknown>,
+        ...(diagnosis ? { diagnosis } : {}),
+      };
     });
 
     return withEvents([{
@@ -863,12 +870,13 @@ export async function handleCallTool(
     const action = mapped ? mapped.action : toolDef.action;
     const mappedParams = mapped ? mapped.params : rest;
 
+    // hub deadline 由 action 预算推导，不被调用方小 timeout 挤压
     const resp = await sendRequest(
       action,
       mappedParams,
       PORT,
       tabId as number | undefined,
-      ladder.hub,
+      hubDeadlineFor(action, timeout as number | undefined),
     );
 
     // Action 执行错误
@@ -956,8 +964,8 @@ export async function handleCallTool(
     // ── 可验证确定性重放:record/verify 在 act 正常 JSON 上挂 fingerprint/drift/recovered。──
     // 两信号正交:fingerprint drift 与 stale-ref 互不相干,本块只在 act 成功且有确定量信号后跑,
     // 不触碰 resolveTargetParam 的 STALE_SNAPSHOT 路径。
-    if (fpActive && fpOpt && resp.result && typeof resp.result === "object") {
-      const actResult = resp.result as Record<string, unknown>;
+    if (fpActive && fpOpt && rawResult && typeof rawResult === "object") {
+      const actResult = rawResult as Record<string, unknown>;
       // targetIdentity:由解析得的 {index, frameId} 经快照缓存反查语义身份(role::name::frameId)。
       // params.index/frameId/snapshotId 由上方 target 翻译写入;snapshotId 优先用解析结果,
       // 回退当前 activeSnapshotId。index 缺失(selector 直传无快照坐标)→ identity 为 null,

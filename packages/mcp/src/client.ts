@@ -1,6 +1,11 @@
 import WebSocket from "ws";
 import type { VtxEvent, VtxRequest, VtxResponse } from "@vortex-browser/shared";
-import { transportTimeoutFor, VtxEventType, VTX_WIRE_VERSION } from "@vortex-browser/shared";
+import {
+  hubDeadlineFor,
+  transportTimeoutFor,
+  VtxEventType,
+  VTX_WIRE_VERSION,
+} from "@vortex-browser/shared";
 import { eventStore } from "./lib/event-store.js";
 import { currentSessionId } from "./lib/session-id.js";
 
@@ -180,19 +185,22 @@ class VortexClient {
 
   /**
    * 发送请求（含瞬态错误自动重试 1 次）。
-   * @param hubTimeoutMs hub pending 的 deadline；本地传输超时由此再加一档推出
+   * @param hubTimeoutMs hub pending 的 deadline；省略时按 action 预算推导，
+   *   本地传输超时再由它加一档推出
    */
   async request(
     action: string,
     params: Record<string, unknown>,
     tabId?: number,
-    hubTimeoutMs = 30000,
+    hubTimeoutMs?: number,
     maxRetries = 1,
   ): Promise<VtxResponse> {
+    // 缺省不能是扁平常量:内层预算 >30s 的 action 会让 hub 先 fire,归因就丢了
+    const hubMs = hubTimeoutMs ?? hubDeadlineFor(action, params.timeout as number | undefined);
     let lastErr: unknown;
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       try {
-        return await this.requestOnce(action, params, tabId, hubTimeoutMs);
+        return await this.requestOnce(action, params, tabId, hubMs);
       } catch (err) {
         lastErr = err;
         if (attempt === maxRetries || !isTransient(err)) throw err;

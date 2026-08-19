@@ -41,7 +41,8 @@ describe("hub request timeout", () => {
     });
     const response = client.request({ action: "slow.action", id: "slow-1", tabId: 1 });
     await arrived;
-    await vi.advanceTimersByTimeAsync(30_000);
+    // 未登记 action 的 hub 缺省 = DEFAULT_ACTION_BUDGET_MS(30s) + 5s，见 timeout.ts
+    await vi.advanceTimersByTimeAsync(35_000);
     vi.useRealTimers();
 
     await expect(response).resolves.toMatchObject({ error: { code: "TIMEOUT" } });

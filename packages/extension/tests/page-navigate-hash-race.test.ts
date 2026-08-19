@@ -62,9 +62,10 @@ async function importPage() {
   return import("../src/handlers/page.js");
 }
 
-function flushMicrotasks(): Promise<void> {
+async function flushMicrotasks(): Promise<void> {
   // 多轮 microtask flush,让 update→complete→loadPromise→get 链式 await 跑完。
-  return Promise.resolve().then(() => Promise.resolve()).then(() => Promise.resolve());
+  // 轮数需覆盖 router 内层 deadline 的 Promise.race 多出的那一跳,仍不推进 timer。
+  for (let i = 0; i < 8; i++) await Promise.resolve();
 }
 
 describe("navigate hash 同文档导航竞态 (NAV-1b)", () => {

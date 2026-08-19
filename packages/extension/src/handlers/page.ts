@@ -1,8 +1,16 @@
-import { PageActions, VtxErrorCode, vtxError } from "@vortex-browser/shared";
+import {
+  MAX_INNER_TIMEOUT_MS,
+  PAGE_HANDLER_MARGIN_MS,
+  PageActions,
+  VtxErrorCode,
+  vtxError,
+} from "@vortex-browser/shared";
 import type { ActionRouter } from "../lib/router.js";
 import type { DebuggerManager } from "../lib/debugger-manager.js";
 import { buildExecuteTarget, ensureFrameAttached, getActiveTabId } from "../lib/tab-utils.js";
 import { resolveTargetOptional } from "../lib/resolve-target.js";
+import { pageQuery, PageQueryTimeoutError } from "../adapter/native.js";
+import { raceTimeout, TIMED_OUT } from "../lib/race-timeout.js";
 
 // 探一次目标 tab 的 document.readyState（仅主 frame）。executeScript 异常时返回
 // 空串，调用方按"未就绪"处理。
@@ -289,11 +297,17 @@ export function registerPageHandlers(router: ActionRouter, debuggerMgr: Debugger
       const selector = __t?.selector;
       const tid = await getActiveTabId(__t?.boundTabId ?? tabId);
       const timeout = (args.timeout as number) ?? 10_000;
+      // 超界会让 handler 的界晚于 router 的,语义化消息被通用归因抢走
+      if (!Number.isInteger(timeout) || timeout < 1 || timeout > MAX_INNER_TIMEOUT_MS) {
+        throw vtxError(VtxErrorCode.INVALID_PARAMS,
+          `timeout must be an integer in [1, ${MAX_INNER_TIMEOUT_MS}]; got ${timeout}`);
+      }
 
       if (selector) {
         const frameId = __t?.boundFrameId ?? (args.frameId as number | undefined);
         if (frameId != null) await ensureFrameAttached(tid, frameId);
-        const result = await chrome.scripting.executeScript({
+        // 不走 pageQuery:它硬编码 world:MAIN,会把 observer 暴露给站点全局
+        const injected = chrome.scripting.executeScript({
           target: buildExecuteTarget(tid, frameId),
           func: (sel: string, ms: number) => {
             return new Promise<boolean>((resolve) => {
@@ -311,7 +325,16 @@ export function registerPageHandlers(router: ActionRouter, debuggerMgr: Debugger
           },
           args: [selector, timeout],
         });
-        const found = result[0]?.result;
+        // +margin 让页面还活着时 page-side 结果优先胜出
+        const raced = await raceTimeout(injected, timeout + PAGE_HANDLER_MARGIN_MS);
+        if (raced === TIMED_OUT) {
+          throw vtxError(
+            VtxErrorCode.TIMEOUT,
+            `Selector "${selector}" not found within ${timeout}ms (page-side observer did not report back)`,
+            { tabId: tid, frameId, selector },
+          );
+        }
+        const found = raced[0]?.result;
         if (!found) throw vtxError(VtxErrorCode.TIMEOUT, `Selector "${selector}" not found within ${timeout}ms`, { selector });
         return { found: true, selector };
       }
@@ -361,6 +384,11 @@ export function registerPageHandlers(router: ActionRouter, debuggerMgr: Debugger
       if (!expression) throw vtxError(VtxErrorCode.INVALID_PARAMS, "Missing required param: expression");
       const tid = await getActiveTabId(tabId);
       const timeout = (args.timeout as number) ?? 10_000;
+      // 超界会让 handler 的界晚于 router 的,语义化消息被通用归因抢走
+      if (!Number.isInteger(timeout) || timeout < 1 || timeout > MAX_INNER_TIMEOUT_MS) {
+        throw vtxError(VtxErrorCode.INVALID_PARAMS,
+          `timeout must be an integer in [1, ${MAX_INNER_TIMEOUT_MS}]; got ${timeout}`);
+      }
       const pollInterval = (args.pollInterval as number) ?? 100;
       const frameId = args.frameId as number | undefined;
       if (frameId != null) await ensureFrameAttached(tid, frameId);
@@ -380,56 +408,65 @@ export function registerPageHandlers(router: ActionRouter, debuggerMgr: Debugger
         );
       }
 
-      const results = await chrome.scripting.executeScript({
-        target: buildExecuteTarget(tid, frameId),
-        // page-side polling: 纯 setTimeout 调度(不用 requestAnimationFrame)。
-        // rAF 在隐藏 tab(active:false / 后台 tab,document.visibilityState='hidden')
-        // 被浏览器冻结不回调 → poll 体(含超时判定)永不执行 → promise 挂死到传输超时
-        // (2026-06-20 白盒+DAST 双证)。setTimeout 在隐藏 tab 仍触发(虽节流),与
-        // page.wait / dom.waitSettled 一致。Stops on first truthy value or on
-        // timeout. Returns { ok, value, waitedMs, error? } so the caller can
-        // distinguish "expr threw" from "expr never went truthy".
-        func: (expr: string, timeoutMs: number, intervalMs: number) => {
-          return new Promise<{ ok: boolean; value?: unknown; waitedMs: number; error?: string }>(
-            (resolve) => {
-              const start = Date.now();
-              let lastError: string | undefined;
-              // BUG-004: detect IIFE forms and auto-invoke. Without this,
-              // `() => false` is `eval`-ed to an arrow function (truthy!) and
-              // `if (v)` immediately resolves, defeating "wait until X" semantics.
-              const isIIFE = /^\s*(?:async\s+)?(?:\([^)]*\)|[A-Za-z_$][\w$]*)\s*=>/.test(expr)
-                || /^\s*(?:async\s+)?function\s*[*(]/.test(expr);
-              const tryOnce = () => {
-                try {
-                  const v = isIIFE ? eval('(' + expr + ')()') : eval(expr);
-                  if (v) {
-                    resolve({ ok: true, value: v as unknown, waitedMs: Date.now() - start });
-                    return true;
+      let res: { ok: boolean; value?: unknown; waitedMs: number; error?: string } | undefined;
+      try {
+        res = await pageQuery(
+          tid,
+          frameId,
+          // page-side polling: 纯 setTimeout 调度(不用 requestAnimationFrame)。
+          // rAF 在隐藏 tab(active:false / 后台 tab,document.visibilityState='hidden')
+          // 被浏览器冻结不回调 → poll 体(含超时判定)永不执行 → promise 挂死到传输超时
+          // (2026-06-20 白盒+DAST 双证)。setTimeout 在隐藏 tab 仍触发(虽节流),与
+          // page.wait / dom.waitSettled 一致。Stops on first truthy value or on
+          // timeout. Returns { ok, value, waitedMs, error? } so the caller can
+          // distinguish "expr threw" from "expr never went truthy".
+          (expr: string, timeoutMs: number, intervalMs: number) => {
+            return new Promise<{ ok: boolean; value?: unknown; waitedMs: number; error?: string }>(
+              (resolve) => {
+                const start = Date.now();
+                let lastError: string | undefined;
+                // BUG-004: detect IIFE forms and auto-invoke. Without this,
+                // `() => false` is `eval`-ed to an arrow function (truthy!) and
+                // `if (v)` immediately resolves, defeating "wait until X" semantics.
+                const isIIFE = /^\s*(?:async\s+)?(?:\([^)]*\)|[A-Za-z_$][\w$]*)\s*=>/.test(expr)
+                  || /^\s*(?:async\s+)?function\s*[*(]/.test(expr);
+                const tryOnce = () => {
+                  try {
+                    const v = isIIFE ? eval('(' + expr + ')()') : eval(expr);
+                    if (v) {
+                      resolve({ ok: true, value: v as unknown, waitedMs: Date.now() - start });
+                      return true;
+                    }
+                  } catch (err) {
+                    lastError = err instanceof Error ? err.message : String(err);
                   }
-                } catch (err) {
-                  lastError = err instanceof Error ? err.message : String(err);
-                }
-                return false;
-              };
-              if (tryOnce()) return;
-              const poll = () => {
+                  return false;
+                };
                 if (tryOnce()) return;
-                if (Date.now() - start >= timeoutMs) {
-                  resolve({ ok: false, waitedMs: Date.now() - start, error: lastError });
-                  return;
-                }
+                const poll = () => {
+                  if (tryOnce()) return;
+                  if (Date.now() - start >= timeoutMs) {
+                    resolve({ ok: false, waitedMs: Date.now() - start, error: lastError });
+                    return;
+                  }
+                  setTimeout(poll, intervalMs);
+                };
                 setTimeout(poll, intervalMs);
-              };
-              setTimeout(poll, intervalMs);
-            },
-          );
-        },
-        args: [expression, timeout, pollInterval],
-        world: "MAIN",
-      });
-      const res = results[0]?.result as
-        | { ok: boolean; value?: unknown; waitedMs: number; error?: string }
-        | undefined;
+              },
+            );
+          },
+          [expression, timeout, pollInterval],
+          // SW 侧兜底,+margin 让页面还活着时 page-side 语义化结果优先胜出
+          timeout + PAGE_HANDLER_MARGIN_MS,
+        );
+      } catch (err) {
+        if (!(err instanceof PageQueryTimeoutError)) throw err;
+        throw vtxError(
+          VtxErrorCode.TIMEOUT,
+          `Expression never resolved truthy within ${timeout}ms (page-side polling did not report back)`,
+          { tabId: tid, frameId, extras: { expression } },
+        );
+      }
       if (!res) throw vtxError(VtxErrorCode.INTERNAL_ERROR, "waitForExpression returned no result", { tabId: tid, frameId });
       if (!res.ok) {
         throw vtxError(

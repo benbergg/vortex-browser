@@ -53,13 +53,66 @@ export function noHitMessage(target: string): string {
   );
 }
 
+export const TIMEOUT_PAGE_ALIVE_HINT =
+  "The page's main thread still responds, so the stall is inside this action's own path — for CDP-backed actions typically a queued command or a debugger another extension holds. The action may still be in flight: call vortex_observe to check state before retrying anything non-idempotent.";
+
+export const TIMEOUT_PAGE_UNRESPONSIVE_HINT =
+  "The page's main thread is blocked by a long task, so it never answered within the action budget — waiting longer and a bigger timeout argument are both useless. Call vortex_navigate to reload and reset this tab, or call vortex_tab_list and retry on another live tabId.";
+
+/** 探活没做成时只能说「原因未判定」。声称页面死活正是本次要消灭的假信号。 */
+export const TIMEOUT_PROBE_FAILED_HINT =
+  "The liveness probe itself could not run on this tab (no host permission, a chrome:// page, or a discarded tab), so the timeout cause is undetermined. Call vortex_observe on this tabId to check reachability — and whether the action already took effect — before retrying.";
+
+export const TIMEOUT_TAB_GONE_HINT =
+  "The target tab no longer exists or cannot be accessed, so this action can never complete on that tabId. Call vortex_tab_list to see which tabs are still open and retry with a live tabId, or vortex_tab_create if none of them fits.";
+
+/**
+ * chrome.debugger.attach 撞上「别的 debugger 占着」时的提示。CDP 被占是可恢复的,
+ * 与缺权限 / chrome:// 那类不同,故不能沿用 CDP_NOT_ATTACHED 的默认文案。
+ * 这条服务所有 CDP 消费者(抓包/截图/鼠标),故只说对谁都成立的事——「改用 vortex_act」
+ * 只在有合成替代路径的地方成立,归 CDP_BUSY_MOUSE_CLICK_HINT 那类专用文案。
+ */
+export const CDP_BUSY_ATTACH_HINT =
+  "Another debugger owns this tab — normally a second extension that attached first; DevTools " +
+  "shares chrome.debugger on current Chrome, so closing it rarely frees the tab. Detach that " +
+  "extension, or retry on another tabId from vortex_tab_list.";
+
+/**
+ * CDP 被别的 debugger 占住时 mouse.click 的提示。它靠真实坐标派发,没有 act 那样的
+ * 合成降级,故必须把「换 vortex_act」这条能走通的路说出来。
+ */
+export const CDP_BUSY_MOUSE_CLICK_HINT =
+  "Another debugger owns this tab, so vortex_mouse_click cannot dispatch a trusted event at those " +
+  "coordinates. Detach that debugger client and retry; if you only need the click and not a trusted " +
+  "event, call vortex_act with action='click' instead.";
+
+/** 超时归因的四态。扩态时 TIMEOUT_LIVENESS_META 少一条即编译失败,不静默回落默认 hint */
+export type TimeoutLiveness = "page-alive" | "page-unresponsive" | "probe-failed" | "tab-gone";
+
+/**
+ * 内层 deadline 到点后按探活结果分发的 hint + recoverable。两者必须同处一地:
+ * hint 说「重试无用」而 recoverable=true 会自相矛盾(2026-08-18 裁决三)。
+ */
+export const TIMEOUT_LIVENESS_META: Readonly<Record<TimeoutLiveness, VtxErrorMeta>> = Object.freeze({
+  "page-alive": { hint: TIMEOUT_PAGE_ALIVE_HINT, recoverable: true },
+  "probe-failed": { hint: TIMEOUT_PROBE_FAILED_HINT, recoverable: true },
+  "page-unresponsive": { hint: TIMEOUT_PAGE_UNRESPONSIVE_HINT, recoverable: false },
+  "tab-gone": { hint: TIMEOUT_TAB_GONE_HINT, recoverable: false },
+});
+
 /**
  * 经 vtxError 第 4 参下发的 override hint 登记表。它们和 DEFAULT_ERROR_META 一样
  * 直达 LLM,故必须一起受 I19/I20 不变量扫描——不登记就是绕过契约。
  */
 export const OVERRIDE_HINTS: Record<string, string> = {
   ANCESTOR_HIT_HINT,
+  CDP_BUSY_ATTACH_HINT,
+  CDP_BUSY_MOUSE_CLICK_HINT,
   NO_HIT_HINT,
+  TIMEOUT_PAGE_ALIVE_HINT,
+  TIMEOUT_PAGE_UNRESPONSIVE_HINT,
+  TIMEOUT_PROBE_FAILED_HINT,
+  TIMEOUT_TAB_GONE_HINT,
 };
 
 export const DEFAULT_ERROR_META: Record<VtxErrorCode, VtxErrorMeta> = {
@@ -224,7 +277,7 @@ export const DEFAULT_ERROR_META: Record<VtxErrorCode, VtxErrorMeta> = {
     recoverable: false,
   },
   DRAG_REQUIRES_CDP: {
-    hint: "Drag operation requires CDP, but CDP is unavailable (DevTools may be open, or chrome.debugger attach was denied). Close DevTools and retry; drag is exposed via vortex_act with action='drag' once CDP attaches.",
+    hint: "Drag operation requires CDP, but CDP is unavailable (another extension holds chrome.debugger, or attach was denied). Detach that debugger client and retry; drag is exposed via vortex_act with action='drag' once CDP attaches.",
     recoverable: false,
   },
 

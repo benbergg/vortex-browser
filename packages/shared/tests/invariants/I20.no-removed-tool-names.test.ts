@@ -1,27 +1,16 @@
-// I20: hint 不引用 v0.5 已删工具名（regression grep）
+// I20: hint 不引用未公开的工具名（regression grep）
 // spec: vortex重构-L5-spec.md §1.4
 //
-// v0.6 LLM 只看到 11 公开工具；hint 引用任何不在白名单的 vortex_* 名字 = 误导
-// LLM 调一个 tools/list 拿不到的工具。
+// LLM 的 tools/list 只看得到 schemas-public.ts 暴露的那些工具；hint 引用任何不在
+// 其中的 vortex_* 名字 = 指引 LLM 去调一个它拿不到的工具。
 //
-// 白名单 = v0.6 公开 11 工具（与 schemas-public.ts PUBLIC_TOOLS 对齐）
+// 白名单取自 shared 的 PUBLIC_TOOL_NAMES 单一真源。本文件曾手抄一份并冻结在
+// v0.6 的 11 个，结果反过来把 hint 逼差（2026-08-19）：正确指引被判红。
+// 真源与 schemas-public.ts 的漂移由 packages/mcp 的用例锁住。
 
 import { describe, it, expect } from "vitest";
 import { DEFAULT_ERROR_META, OVERRIDE_HINTS } from "../../src/errors.hints.js";
-
-const PUBLIC_TOOL_NAMES = new Set([
-  "vortex_act",
-  "vortex_observe",
-  "vortex_extract",
-  "vortex_navigate",
-  "vortex_tab_create",
-  "vortex_tab_close",
-  "vortex_screenshot",
-  "vortex_wait_for",
-  "vortex_press",
-  "vortex_debug_read",
-  "vortex_storage",
-]);
+import { PUBLIC_TOOL_NAMES } from "../../src/public-tools.js";
 
 const TOOL_NAME_RE = /vortex_[a-z][a-z_0-9]*/g;
 
@@ -31,9 +20,9 @@ const ALL_HINTS: Array<[string, string]> = [
   ...Object.entries(OVERRIDE_HINTS),
 ];
 
-describe("I20: hint 引用工具名必须是公开 11 之一", () => {
+describe("I20: hint 引用工具名必须是公开工具之一", () => {
   for (const [code, hint] of ALL_HINTS) {
-    it(`${code} hint 不含 v0.5 已删 / 内部化工具名`, () => {
+    it(`${code} hint 不含未公开 / 内部化工具名`, () => {
       const matches = hint.match(TOOL_NAME_RE) ?? [];
       const removed = matches.filter((name) => !PUBLIC_TOOL_NAMES.has(name));
       expect(

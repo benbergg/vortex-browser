@@ -2,14 +2,42 @@ import type { NmRequest, NmResponse } from "@vortex-browser/shared";
 import {
   DEFAULT_ERROR_META,
   TABLESS_ACTIONS,
+  TIMEOUT_LIVENESS_META,
   VtxError,
   VtxErrorCode,
+  innerDeadlineFor,
+  vtxError,
 } from "@vortex-browser/shared";
+import { probeLiveness, type Liveness } from "./liveness-probe.js";
+import { raceTimeout, TIMED_OUT } from "./race-timeout.js";
 
 type Handler = (args: Record<string, unknown>, tabId?: number) => Promise<unknown>;
 type StrictTabRequest = NmRequest & { strictTab?: boolean };
 
 export { TABLESS_ACTIONS };
+
+/** 探活自身抛错时不能把 TIMEOUT 降级成 JS_EXECUTION_ERROR，归因反而更差 */
+async function attributeTimeout(tabId: number | undefined, frameId?: number): Promise<Liveness> {
+  // tabless action 压根没探过，唯一诚实的说法是「原因未判定」而非页面活着
+  if (tabId == null) return "probe-failed";
+  try {
+    // 必须探被超时那个 frame:只探主 frame 会把 OOPIF 卡死误判成 page-alive
+    return await probeLiveness(tabId, undefined, frameId);
+  } catch {
+    return "probe-failed";
+  }
+}
+
+// inFlight:raceTimeout 只是不再等,handler 还在跑;tab 没了则不可能再生效
+function timeoutPayload(action: string, budgetMs: number, liveness: Liveness) {
+  const meta = TIMEOUT_LIVENESS_META[liveness];
+  return vtxError(
+    VtxErrorCode.TIMEOUT,
+    `Action ${action} exceeded its ${budgetMs}ms budget`,
+    { extras: { action, budgetMs, liveness, inFlight: liveness !== "tab-gone" } },
+    meta,
+  );
+}
 
 export class ActionRouter {
   private handlers = new Map<string, Handler>();
@@ -49,8 +77,22 @@ export class ActionRouter {
       };
     }
 
+    // 内层预算与调用方 timeout 同源推导，防止砍掉自管超时的 handler（如 js.evaluate）
+    const budgetMs = innerDeadlineFor(request.tool, request.args?.timeout as number | undefined);
     try {
-      const result = await handler(request.args, request.tabId);
+      const result = await raceTimeout(handler(request.args, request.tabId), budgetMs);
+      if (result === TIMED_OUT) {
+        // 超时后才探活：正常路径零开销
+        const liveness = await attributeTimeout(
+          request.tabId,
+          request.args?.frameId as number | undefined,
+        );
+        return {
+          type: "tool_response",
+          requestId: request.requestId,
+          error: timeoutPayload(request.tool, budgetMs, liveness).toJSON(),
+        };
+      }
       return { type: "tool_response", requestId: request.requestId, result };
     } catch (err) {
       // VtxError 走优先通道：保留完整 payload（code + hint + recoverable + context）

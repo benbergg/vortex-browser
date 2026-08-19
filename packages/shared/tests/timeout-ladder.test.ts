@@ -4,8 +4,14 @@
  */
 import { describe, it, expect } from "vitest";
 import {
+  ACTION_BUDGET_MS,
   clampHubTimeout,
+  DEFAULT_ACTION_BUDGET_MS,
+  actionBudgetMs,
+  hubDeadlineFor,
+  innerDeadlineFor,
   MAX_HUB_TIMEOUT_MS,
+  MAX_INNER_TIMEOUT_MS,
   TIMEOUT_LADDER_STEP_MS,
   timeoutLadder,
   transportTimeoutFor,
@@ -83,5 +89,85 @@ describe("clampHubTimeout", () => {
 
   it("0 视为非法，回退默认（hub 侧 0 会让 pending 立刻自杀）", () => {
     expect(clampHubTimeout(0, 30_000)).toBe(30_000);
+  });
+});
+
+describe("per-action 内层预算表", () => {
+  it("未登记的 action 落到缺省预算", () => {
+    expect(actionBudgetMs("some.unregistered")).toBe(DEFAULT_ACTION_BUDGET_MS);
+  });
+
+  it("登记的 action 用自己的预算", () => {
+    expect(actionBudgetMs("page.navigate")).toBe(60_000);
+    expect(actionBudgetMs("content.getText")).toBe(20_000);
+    // key 曾误拼 content.getHtml，真实 action 是驼峰 HTML 全大写
+    expect(actionBudgetMs("content.getHTML")).toBe(20_000);
+  });
+
+  // 零回归锁：预算不得低于 30 天「未传 timeout 的成功调用」max（spec 第 8 节）
+  it("🔴 REGRESSION: 每个登记预算都覆盖其实测成功耗时上限", () => {
+    const observedMaxMs: Record<string, number> = {
+      "page.navigate": 69_861,
+      "observe.snapshot": 27_999,
+      "dom.click": 26_114,
+      "mouse.click": 22_145,
+      "capture.screenshot": 20_870,
+      "content.getText": 10_689,
+      "page.waitForExpression": 10_046,
+    };
+    for (const [action, observed] of Object.entries(observedMaxMs)) {
+      const budget = actionBudgetMs(action);
+      // navigate 的 69861 单点超过内层硬上限，按上限封顶（P99 为 27028，覆盖充分）
+      const expectedFloor = Math.min(observed, MAX_INNER_TIMEOUT_MS);
+      expect(budget, `${action} 预算 ${budget} 低于实测上限 ${expectedFloor}`)
+        .toBeGreaterThanOrEqual(expectedFloor);
+    }
+  });
+
+  it("任何预算都不超过内层硬上限", () => {
+    for (const [action, ms] of Object.entries(ACTION_BUDGET_MS)) {
+      expect(ms, `${action} 超出 MAX_INNER_TIMEOUT_MS`).toBeLessThanOrEqual(MAX_INNER_TIMEOUT_MS);
+    }
+  });
+
+  it("调用方的小 timeout 不压低任何一层", () => {
+    // act 传 5000 不得把 hub 挤到 10s——act 成功 P99 是 25.5s
+    expect(innerDeadlineFor("dom.click", 5_000)).toBe(35_000);
+    expect(hubDeadlineFor("dom.click", 5_000)).toBe(35_000 + 5_000);
+  });
+
+  it("🔴 REGRESSION: 自管超时的 handler 传大 timeout 时 inner 随之上移", () => {
+    // js.evaluate 自己用 args.timeout 作脚本预算，30 天内成功样本 max 42545ms。
+    // inner 若停在缺省 30s，会砍掉 evaluate(timeout:45000) 这类合法调用。
+    expect(innerDeadlineFor("js.evaluate", 45_000)).toBe(45_000 + TIMEOUT_LADDER_STEP_MS);
+    expect(hubDeadlineFor("js.evaluate", 45_000)).toBeGreaterThan(
+      innerDeadlineFor("js.evaluate", 45_000),
+    );
+  });
+
+  it("调用方未指定时 inner = 该 action 预算，hub 再加一档", () => {
+    expect(innerDeadlineFor("mouse.click", undefined)).toBe(30_000);
+    expect(hubDeadlineFor("mouse.click", undefined)).toBe(30_000 + 5_000);
+  });
+
+  it("🔴 REGRESSION: 越界入参被钳在 MAX_INNER_TIMEOUT_MS 而非顶格放行", () => {
+    // 合法上限 60_000：inner = 60_000 + step，非零 margin
+    expect(innerDeadlineFor("js.evaluate", 60_000)).toBe(65_000);
+    expect(hubDeadlineFor("js.evaluate", 60_000)).toBe(70_000);
+    // 越界 90_000：先钳到 60_000 再 +step，不是 95_000
+    expect(innerDeadlineFor("js.evaluate", 90_000)).toBe(65_000);
+    expect(hubDeadlineFor("js.evaluate", 90_000)).toBe(70_000);
+  });
+
+  it("不变量：任意 action × 任意合法 caller，inner 不超过硬上限一档", () => {
+    const actions = [...Object.keys(ACTION_BUDGET_MS), "some.unregistered"];
+    const callers = [undefined, 0, 1, 5_000, 60_000, 90_000, 3_600_000];
+    for (const action of actions) {
+      for (const caller of callers) {
+        expect(innerDeadlineFor(action, caller)).toBeLessThanOrEqual(
+          MAX_INNER_TIMEOUT_MS + TIMEOUT_LADDER_STEP_MS,
+        );
+      }
+    }
   });
 });

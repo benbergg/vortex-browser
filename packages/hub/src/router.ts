@@ -4,6 +4,7 @@
  */
 import {
   clampHubTimeout,
+  hubDeadlineFor,
   VtxErrorCode,
   VtxEventType,
   vtxError,
@@ -75,6 +76,7 @@ export class HubRouter {
   private readonly browsers: BrowserRegistry;
   private readonly now: () => number;
   private readonly requestTimeoutMs: number;
+  private readonly requestTimeoutExplicit: boolean;
   private readonly onWarn: NonNullable<RouterOptions["onWarn"]>;
   private readonly sendToSession: RouterOptions["sendToSession"];
   private readonly sendToBrowser: RouterOptions["sendToBrowser"];
@@ -93,6 +95,8 @@ export class HubRouter {
     this.browsers = options.browsers;
     this.pending = options.pending ?? new PendingTable();
     this.now = options.now ?? Date.now;
+    // 与"回落到常量"分开记,否则 0 这个 kill switch 无法与缺省值区分
+    this.requestTimeoutExplicit = options.requestTimeoutMs != null;
     this.requestTimeoutMs = options.requestTimeoutMs ?? REQUEST_TIMEOUT_MS;
     this.onWarn = options.onWarn ?? ((message, details) => {
       console.warn(`[hub] ${message}`, details);
@@ -216,11 +220,12 @@ export class HubRouter {
     sessionId: string,
     request: VtxRequest,
     retryCount = 0,
-    // 调用方的预算随请求上线（VtxRequest.timeoutMs）。写死 requestTimeoutMs 会让
-    // 设了 45s 的调用在 30s 被砍，且报的是 hub 的错而非 handler 说得清的原因。
-    // 调用方的预算随请求上线（VtxRequest.timeoutMs）。写死 requestTimeoutMs 会让
-    // 设了 45s 的调用在 30s 被砍，且报的是 hub 的错而非 handler 说得清的原因。
-    deadline = this.now() + clampHubTimeout(request.timeoutMs, this.requestTimeoutMs),
+    // 显式值(caller timeoutMs / 部署方 requestTimeoutMs,含 0)一律照办
+    deadline = this.now() +
+      clampHubTimeout(
+        request.timeoutMs,
+        this.hubFallbackMs(request.action, request.params?.timeout as number | undefined),
+      ),
   ): Promise<void> {
     const session = this.sessions.get(sessionId);
     if (!session) return;
@@ -736,6 +741,14 @@ export class HubRouter {
   private requestTabId(request: VtxRequest): number | undefined {
     if (typeof request.tabId === "number") return request.tabId;
     return typeof request.params?.tabId === "number" ? request.params.tabId : undefined;
+  }
+
+  // 写死常量会让 dom.click(内层 35s)被 30s 的 hub 抢先 fire
+  // callerTimeoutMs 不可省:HTTP/CLI 路径不写 timeoutMs,漏了它大 timeout 又倒挂
+  private hubFallbackMs(action: string, callerTimeoutMs?: number): number {
+    return this.requestTimeoutExplicit
+      ? this.requestTimeoutMs
+      : hubDeadlineFor(action, callerTimeoutMs);
   }
 
   private isBoundToBrowser(session: SessionEntry, browserId: string, browser: BrowserEntry): boolean {

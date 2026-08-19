@@ -9,5 +9,6 @@ export * from "./dialog-policy.js";
 export * from "./click-effect.js";
 export * from "./effect-fingerprint.js";
 export * from "./browsers.js";
+export * from "./public-tools.js";
 export * from "./timeout.js";
 export * from "./diagnosis.js";

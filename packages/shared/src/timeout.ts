@@ -54,3 +54,50 @@ export function clampHubTimeout(requested: number | undefined, fallback: number)
   if (requested == null || !Number.isFinite(requested) || requested <= 0) return fallback;
   return Math.min(requested, MAX_HUB_TIMEOUT_MS);
 }
+
+/**
+ * handler 自带的 SW 侧兜底比调用方 timeout 多留的余量。页面还活着时让 page-side
+ * 的语义化结果先胜出，卡死时又先于 router 的通用归因 fire。
+ */
+export const PAGE_HANDLER_MARGIN_MS = 500;
+
+/** 未登记 action 的缺省内层预算 */
+export const DEFAULT_ACTION_BUDGET_MS = 30_000;
+
+// 取值来自 30 天真实调用中「未传 timeout 的成功调用」耗时上限，向上留 margin。
+// 低于实测上限会砍掉本来能成功的尾部调用，见 docs/inner-timeout-budget-approach.md 第 8 节。
+export const ACTION_BUDGET_MS: Readonly<Record<string, number>> = Object.freeze({
+  "page.navigate": 60_000,
+  "observe.snapshot": 35_000,
+  "dom.click": 35_000,
+  "dom.type": 35_000,
+  "dom.hover": 35_000,
+  "mouse.click": 30_000,
+  "mouse.doubleClick": 30_000,
+  "mouse.drag": 30_000,
+  "capture.screenshot": 30_000,
+  "content.getText": 20_000,
+  "content.getHTML": 20_000,
+  "page.waitForExpression": 20_000,
+});
+
+export function actionBudgetMs(action: string): number {
+  return ACTION_BUDGET_MS[action] ?? DEFAULT_ACTION_BUDGET_MS;
+}
+
+/**
+ * router 施加的内层 deadline，取 max 而非直接用调用方值。
+ * js.evaluate 等自管超时的 handler 传大 timeout 时，内层需跟着上移才不砍掉合法调用。
+ */
+export function innerDeadlineFor(action: string, callerTimeoutMs: number | undefined): number {
+  // 钳的是入参不是结果：结果钳顶会让合法长调用零 margin，与内层硬碰撞
+  const caller = Number.isFinite(callerTimeoutMs) && (callerTimeoutMs as number) > 0
+    ? Math.min(callerTimeoutMs as number, MAX_INNER_TIMEOUT_MS) + TIMEOUT_LADDER_STEP_MS
+    : 0;
+  return Math.max(actionBudgetMs(action), caller);
+}
+
+/** hub 永远比内层多一档，保证「说得清原因的那一层」先应答 */
+export function hubDeadlineFor(action: string, callerTimeoutMs: number | undefined): number {
+  return innerDeadlineFor(action, callerTimeoutMs) + TIMEOUT_LADDER_STEP_MS;
+}

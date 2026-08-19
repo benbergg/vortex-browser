@@ -1,6 +1,6 @@
-import { MouseActions, VtxErrorCode, vtxError } from "@vortex-browser/shared";
+import { CDP_BUSY_MOUSE_CLICK_HINT, MouseActions, VtxError, VtxErrorCode, vtxError } from "@vortex-browser/shared";
 import type { ActionRouter } from "../lib/router.js";
-import type { DebuggerManager } from "../lib/debugger-manager.js";
+import { isDebuggerBusyMessage, type DebuggerManager } from "../lib/debugger-manager.js";
 import { getActiveTabId, ensureFrameAttached, buildExecuteTarget } from "../lib/tab-utils.js";
 import { getIframeOffset } from "../lib/iframe-offset.js";
 import { resolveTarget } from "../lib/resolve-target.js";
@@ -9,6 +9,19 @@ import { loadPageSideModule } from "../adapter/page-side-loader.js";
 import { hitProbePageSide, isHitProbe, type HitProbe } from "../lib/hit-probe.js";
 
 type CoordSpace = "frame" | "viewport";
+
+/**
+ * CDP 被占时 mouse.click 无等价降级(act 的合成路径要不到真实坐标),把通用 attach
+ * 提示换成指向 vortex_act 的那份。非「被占用」的 attach 失败原样透传。
+ */
+function rehintBusyAttach(err: unknown): unknown {
+  if (!(err instanceof VtxError) || err.code !== VtxErrorCode.CDP_NOT_ATTACHED) return err;
+  if (!isDebuggerBusyMessage(err.message)) return err;
+  return vtxError(err.code, err.message, err.extra?.context, {
+    hint: CDP_BUSY_MOUSE_CLICK_HINT,
+    recoverable: true,
+  });
+}
 
 /**
  * 派发前照一次视口坐标处的实际命中元素。探测失败一律降级为 null —— 自证是增益，
@@ -123,7 +136,11 @@ export function registerMouseHandlers(
       const hit = await probeHit(tid, x, y);
       throwIfOutOfViewport(hit, x, y);
 
-      await debuggerMgr.attach(tid);
+      try {
+        await debuggerMgr.attach(tid);
+      } catch (err) {
+        throw rehintBusyAttach(err);
+      }
       await dispatchMouse(debuggerMgr, tid, "mouseMoved", x, y, button);
       await dispatchMouse(debuggerMgr, tid, "mousePressed", x, y, button, 1);
       await dispatchMouse(debuggerMgr, tid, "mouseReleased", x, y, button, 1);

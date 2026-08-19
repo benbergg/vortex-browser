@@ -62,6 +62,17 @@ describe("RPC_TIMEOUT_HINT", () => {
     expect(RPC_TIMEOUT_HINT).not.toContain("mode='idle'");
     expect(RPC_TIMEOUT_HINT).not.toBe(DEFAULT_ERROR_META[VtxErrorCode.TIMEOUT].hint);
   });
+
+  // 内层就位后走到 hub 兜底 = 扩展侧连自己的超时都没报出来，不是"页面可能没问题"
+  it("不再声称页面可能没问题", () => {
+    expect(RPC_TIMEOUT_HINT).not.toMatch(/page itself may be fine/i);
+  });
+  it("不再把加大 timeout 当首选动作", () => {
+    expect(RPC_TIMEOUT_HINT).not.toMatch(/Retry with a larger timeout/i);
+  });
+  it("指向扩展侧无应答这一真实含义", () => {
+    expect(RPC_TIMEOUT_HINT).toMatch(/extension/i);
+  });
 });
 
 describe("hub 端到端：错误 payload 带对症 hint", () => {
