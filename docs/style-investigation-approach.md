@@ -142,10 +142,10 @@ flowchart TD
 **判据 3（不说假话）达成且超出预期**：`h1` 现在返回 `background: "rgb(255,255,255)"`
 （`bgFromAncestor: true`，上溯到第 10 层 body）、`contrastRatio: 15.51`、`wcagAAA: true`
 ——**修复前这里是 `contrastRatio: null` + `wcagAA: false`，对一个 AAA 通过的标题谎报不合格**。
-更重要的是 `mode=style pattern=div maxResults=50` 的真实分布：**16/50 是 `translucent`**
+更重要的是 `mode=style pattern=div maxResults=50` 的真实分布：**18/50 是 `translucent`**
 （gamma 吸顶栏 `rgba(255,255,255,0.8)`）、**5/50 是 `background-image`**（hero 渐变）。
-修复前这 21 个会被一律报成 `contrastRatio: 11.67 / wcagAA: true` ——凭空捏造的数字，
-占样本四成。评审提出的半透明问题不是理论风险。
+修复前这 23 个（占样本 46%）会被一律报成 `contrastRatio: 11.67 / wcagAA: true` ——全是
+凭空捏造的数字。评审提出的半透明问题不是理论风险。
 
 **路线 D 达成**：`mode=tokens` 在 gamma.app 返回 `total: 676`，九个分组
 （color / gradient / fontFamily / fontSize / fontWeight / motion / shadow / spacing / other），
