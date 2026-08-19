@@ -15,6 +15,8 @@ export interface StepTrace {
   error?: string;
   drift?: { classes: string[] } | null;
   effect?: StepEffect;
+  /** 该步工具的降级/空结果自陈。单调 vortex_act 时经渲染层单独成块,序列里只能挂在步上 */
+  diagnosis?: string;
 }
 
 /** confirmed=有证据生效;unconfirmed=有证据未生效;unknown=无可用信号。三值不可合成布尔。 */
@@ -92,6 +94,7 @@ export interface SequenceStepInput { action: string; target: string; value?: unk
 export interface SequenceOutcome {
   ok: boolean;
   error?: string;
+  diagnosis?: string;
   result?: Record<string, unknown>;
   fp?: FingerprintOut;
 }
@@ -122,7 +125,11 @@ export async function runSequence(
       ? verifyStepEffect(steps[i].action, steps[i].value, out.result)
       : undefined;
     const c = classifyStep({ ok: out.ok, error: out.error, fp: out.fp ?? {}, effect });
-    traces[i] = { ...traces[i], state: c.state, drift: c.drift, effect: c.effect, error: out.error };
+    traces[i] = {
+      ...traces[i], state: c.state, drift: c.drift, effect: c.effect, error: out.error,
+      // 条件展开:没有自陈就不该多出这个键,否则每步都为一个罕见信道付 token
+      ...(out.diagnosis ? { diagnosis: out.diagnosis } : {}),
+    };
     if (!shouldContinue(c.state, onFailure)) break;
   }
   return { summary: summarizeTrace(traces), steps: traces };

@@ -753,8 +753,12 @@ export async function handleCallTool(
       const resp = await sendRequest(d.action, d.params, PORT, tabId, DEFAULT_TIMEOUT);
       if (resp.error) return { ok: false, error: formatDispatchError(resp.error) };
       // 降级的 click 结果包在自陈信封里,不拆包单步自证就读不到 effect,恒退化成 unknown
-      const { value: stepResult } = splitDiagnosis(resp.result);
-      return { ok: true, result: (stepResult ?? {}) as Record<string, unknown> };
+      const { value: stepResult, diagnosis } = splitDiagnosis(resp.result);
+      return {
+        ok: true,
+        result: (stepResult ?? {}) as Record<string, unknown>,
+        ...(diagnosis ? { diagnosis } : {}),
+      };
     });
 
     return withEvents([{

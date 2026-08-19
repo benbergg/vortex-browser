@@ -41,8 +41,25 @@ async function runClickSequence(result: unknown) {
     },
   });
   return JSON.parse((resp.content[0] as { text: string }).text) as {
-    steps: Array<{ state: string; effect?: string }>;
+    steps: Array<{ state: string; effect?: string; diagnosis?: string }>;
   };
+}
+
+async function rawClickSequence(result: unknown) {
+  const { sendRequest } = await import("../src/client.js");
+  vi.mocked(sendRequest).mockResolvedValue({
+    action: "dom.click",
+    id: "mcp-1-1780000000000",
+    result,
+  } as never);
+  const { handleCallTool } = await import("../src/server.js");
+  const resp = await handleCallTool({
+    params: {
+      name: "vortex_sequence",
+      arguments: { steps: [{ action: "click", target: "#go" }] },
+    },
+  });
+  return (resp.content[0] as { text: string }).text;
 }
 
 describe("sequence 单步自证遇上降级自陈", () => {
@@ -65,5 +82,30 @@ describe("sequence 单步自证遇上降级自陈", () => {
     });
     expect(report.steps[0].state).toBe("executed_verified");
     expect(report.steps[0].effect).toBe("confirmed");
+  });
+});
+
+describe("sequence 报告承载单步自陈", () => {
+  beforeEach(async () => {
+    const { sendRequest } = await import("../src/client.js");
+    vi.mocked(sendRequest).mockReset();
+  });
+
+  it("降级步的自陈出现在最终报告里,不只在单调 vortex_act 时可见", async () => {
+    const { DIAGNOSIS_KEY } = await import("@vortex-browser/shared");
+    const report = await runClickSequence({
+      [DIAGNOSIS_KEY]: "Degraded to a synthetic click: this dispatch had isTrusted=false.",
+      value: { success: true, degraded: "cdp-busy-synthetic", effect: EFFECT },
+    });
+    expect(report.steps[0].diagnosis).toBe(
+      "Degraded to a synthetic click: this dispatch had isTrusted=false.",
+    );
+  });
+
+  it("无自陈时报告形状逐字节不变:既不多 diagnosis 键,键序也不变", async () => {
+    const text = await rawClickSequence({ success: true, effect: EFFECT });
+    expect(text).not.toContain("diagnosis");
+    const step = JSON.parse(text).steps[0] as Record<string, unknown>;
+    expect(Object.keys(step)).toEqual(["index", "action", "target", "state", "effect"]);
   });
 });
