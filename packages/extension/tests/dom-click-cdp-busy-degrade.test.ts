@@ -44,12 +44,19 @@ describe("CLICK useRealMouse 在 CDP 被占时降级为合成路径", () => {
   let executeScript: ReturnType<typeof vi.fn>;
   let cdpClickElement: ReturnType<typeof vi.fn>;
   let loadPageSideModule: ReturnType<typeof vi.fn>;
+  let deferWhenCdpAvailable = false;
 
   beforeEach(async () => {
     vi.clearAllMocks();
-    // 合成 click 的 page-side 契约:effect 仅在注入参数 observeEffect=true 时回传
+    deferWhenCdpAvailable = false;
+    // 复刻 page-side 两条契约:effect 仅在 observeEffect=true 时回传;
+    // submit-intent/react-clickable 只在 cdpAvailable=true 时才 deferToCdp。
     executeScript = vi.fn(async (injection: { args: unknown[] }) => {
+      const cdpAvailable = injection.args[1] === true;
       const observeEffect = injection.args[2] === true;
+      if (deferWhenCdpAvailable && cdpAvailable) {
+        return [{ result: { result: { deferToCdp: true, element: { tag: "button", id: "go" } } } }];
+      }
       return [{
         result: {
           result: {
@@ -160,5 +167,43 @@ describe("CLICK useRealMouse 在 CDP 被占时降级为合成路径", () => {
     expect(diagnosis).toBeNull();
     expect(value).toEqual({ success: true, element: { tag: "button", id: "go" } });
     expect(cdpClickElement).not.toHaveBeenCalled();
+  });
+  it("非「被占」的 attach 失败:自陈不谎称是谁占着,degraded 与 effect 照旧", async () => {
+    cdpClickElement.mockRejectedValue(
+      vtxError(VtxErrorCode.CDP_NOT_ATTACHED, "Cannot access a chrome:// URL", { tabId: 42 }),
+    );
+    const resp = await router.dispatch(
+      mkReq({ selector: "button#go", action: "click", useRealMouse: true, tabId: 42 }),
+    );
+    const { value, diagnosis } = splitDiagnosis(resp.result);
+    expect(diagnosis).not.toMatch(/DevTools/i);
+    expect(diagnosis).not.toMatch(/held by another client/i);
+    expect(diagnosis).toMatch(/isTrusted/);
+    expect(diagnosis).toContain("Cannot access a chrome:// URL");
+    expect(value).toMatchObject({ degraded: "cdp-busy-synthetic" });
+    expect((value as { effect?: unknown }).effect).toEqual({ domMutations: 2, urlChanged: false });
+  });
+
+  it("deferToCdp 回退合成同样自陈:这条路才是 sequence/默认 click 的常走路", async () => {
+    deferWhenCdpAvailable = true;
+    cdpClickElement.mockRejectedValue(BUSY);
+    const resp = await router.dispatch(mkReq({ selector: "button#go", action: "click", tabId: 42 }));
+    const { value, diagnosis } = splitDiagnosis(resp.result);
+    expect(diagnosis).toBeTruthy();
+    expect(diagnosis).toMatch(/isTrusted/);
+    expect(diagnosis).toMatch(/DevTools/i);
+    expect(value).toMatchObject({ success: true, degraded: "cdp-busy-synthetic" });
+    expect((value as { effect?: unknown }).effect).toEqual({ domMutations: 2, urlChanged: false });
+  });
+
+  it("deferToCdp 回退的失败不是 attach 类时不贴降级标签,不谎报", async () => {
+    deferWhenCdpAvailable = true;
+    cdpClickElement.mockRejectedValue(
+      vtxError(VtxErrorCode.ELEMENT_OCCLUDED, "Element button#go is covered by <div>", { tabId: 42 }),
+    );
+    const resp = await router.dispatch(mkReq({ selector: "button#go", action: "click", tabId: 42 }));
+    const { value, diagnosis } = splitDiagnosis(resp.result);
+    expect(diagnosis).toBeNull();
+    expect(value).toEqual({ success: true, element: { tag: "button", id: "go" } });
   });
 });

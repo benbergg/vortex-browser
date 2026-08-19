@@ -1,6 +1,6 @@
 import { DomActions, VtxError, VtxErrorCode, vtxError, withDiagnosis } from "@vortex-browser/shared";
 import type { ActionRouter } from "../lib/router.js";
-import type { DebuggerManager } from "../lib/debugger-manager.js";
+import { isDebuggerBusyMessage, type DebuggerManager } from "../lib/debugger-manager.js";
 import { getActiveTabId, buildExecuteTarget, ensureFrameAttached } from "../lib/tab-utils.js";
 import { resolveTarget, resolveTargetOptional } from "../lib/resolve-target.js";
 import { pageQuery as nativePageQuery, mapPageError } from "../adapter/native.js";
@@ -29,14 +29,26 @@ import {
 import { buildNoMatchMessage, rankCandidates } from "../action/candidate-suggest.js";
 
 /**
- * CDP 被占 → 合成降级的自陈。useRealMouse 的用途就是要 isTrusted=true,
+ * CDP 不可用 → 合成降级的自陈。useRealMouse 的用途就是要 isTrusted=true,
  * 只在 result 里塞 degraded 字段等于用一个可能是假的 success 换掉真失败。
+ * 分两句是因为 rawAttach 把所有 attach 失败都归成 CDP_NOT_ATTACHED:只有
+ * isDebuggerBusyMessage 命中才敢说「被谁占着」,否则照搬 Chrome 原文不替它编因。
  */
 const CDP_BUSY_SYNTHETIC_DIAGNOSIS =
   "Degraded to a synthetic click: chrome.debugger is held by another client (DevTools open on this tab, " +
   "or another extension attached), so this dispatch had isTrusted=false and a site that gates on trusted " +
   "events may have ignored it — read the returned effect signals to judge, then close DevTools on this tab " +
   "and retry if you need a real mouse click.";
+
+function cdpUnavailableDiagnosis(message: string): string {
+  return (
+    "Degraded to a synthetic click: chrome.debugger could not attach to this tab " +
+    `(${message}) — cause undetermined beyond that message, so this is not necessarily another ` +
+    "client holding it. The dispatch had isTrusted=false and a site that gates on trusted events " +
+    "may have ignored it — read the returned effect signals to judge, and resolve that attach " +
+    "failure if you need a real mouse click."
+  );
+}
 
 /**
  * 判断元素是否为"瞬态覆盖层"(react-virtuoso 动画层 / popper 浮层 / 滚动视口
@@ -306,26 +318,32 @@ export function registerDomHandlers(
         return __heal.healed ? { ...(cdpResult as object), healed: true } : cdpResult;
       };
 
-      // 别的 debugger(常驻 DevTools)占着 CDP 时,合成路径就在本 handler 内,
-      // 降级好过让调用方弃 tab 重来(2026-08-18 使用日志实证)。
-      let cdpDegraded = false;
+      // CDP 拿不到也别让调用方弃 tab:合成路径就在本 handler 内(2026-08-18 日志)
+      let degradeNote: string | null = null;
+      const isCdpAttachFailure = (err: unknown): err is VtxError =>
+        err instanceof VtxError && err.code === VtxErrorCode.CDP_NOT_ATTACHED;
+      const noteFor = (err: VtxError): string =>
+        isDebuggerBusyMessage(err.message)
+          ? CDP_BUSY_SYNTHETIC_DIAGNOSIS
+          : cdpUnavailableDiagnosis(err.message);
+
       if (useRealMouse || trustedMode) {
         try {
           return await cdpClickPath();
         } catch (err) {
-          if (!(err instanceof VtxError) || err.code !== VtxErrorCode.CDP_NOT_ATTACHED) throw err;
-          cdpDegraded = true;
+          if (!isCdpAttachFailure(err)) throw err;
+          degradeNote = noteFor(err);
         }
       }
 
       // 降级换了不等价做法,不给证据模型只能信一个可能是假的 success,故强制采效果信号
-      const effectOn = observeEffect || cdpDegraded;
+      let effectOn = observeEffect || degradeNote !== null;
       const finishSynthetic = (r: unknown): unknown => {
         const healed = __heal.healed ? { ...(r as object), healed: true } : r;
-        if (!cdpDegraded) return healed;
+        if (!degradeNote) return healed;
         return withDiagnosis(
           { ...(healed as object), degraded: "cdp-busy-synthetic" as const },
-          CDP_BUSY_SYNTHETIC_DIAGNOSIS,
+          degradeNote,
         );
       };
 
@@ -335,7 +353,7 @@ export function registerDomHandlers(
       if (effectOn) await loadPageSideModule(tid, frameId, "click-effect");
       // 方案 A:可重跑闭包。cdpAvailable=true 时页内 func 对 submit-intent 元素返回
       // deferToCdp(不合成点击)→ handler 改走 CDP trusted;CDP 失败时用 false 重跑合成。
-      const runSyntheticClick = async (cdpAvailable: boolean) => {
+      const runSyntheticClick = async (cdpAvailable: boolean, withEffect: boolean) => {
       const results = await chrome.scripting.executeScript({
         target: buildExecuteTarget(tid, frameId),
         func: async (sel: string, cdpAvailable: boolean, observeEffect: boolean, windowMs: number | undefined, dialogAnswer: string, dialogPromptText: string | null, force: boolean) => {
@@ -601,7 +619,7 @@ export function registerDomHandlers(
         // ——observeEffect=false 时该值不被使用(begin 不调),observeEffect=true 且未传时给回正确
         // 的 300ms 窗口(用 ?? 0 会因 0 非 nullish 把窗口塌成 0ms,故不可用 0)。observeEffect
         // 恒为 boolean(args.observeEffect === true),无需兜底。
-        args: [selector, cdpAvailable, effectOn, windowMs ?? 300, (args.onDialog as string) ?? "dismiss", (args.promptText as string | undefined) ?? null, args.force === true],
+        args: [selector, cdpAvailable, withEffect, windowMs ?? 300, (args.onDialog as string) ?? "dismiss", (args.promptText as string | undefined) ?? null, args.force === true],
         world: "MAIN",
       });
       return results[0]?.result as {
@@ -616,7 +634,7 @@ export function registerDomHandlers(
         if (r?.error) mapPageError(r, selector);
       };
       // 首跑:cdpAvailable=!!debuggerMgr。submit-intent 会返回 deferToCdp(未点击)。
-      let res = await runSyntheticClick(!cdpDegraded && !!debuggerMgr);
+      let res = await runSyntheticClick(!degradeNote && !!debuggerMgr, effectOn);
       throwIfClickError(res);
       const inner = res?.result as { deferToCdp?: boolean } | undefined;
       // observeEffect 透传:reactClickable 元素(如京东"加入购物车" div)走此 defer 分支,
@@ -632,9 +650,15 @@ export function registerDomHandlers(
             promptText: (args.promptText as string | undefined) ?? null,
           }));
           return finishSynthetic(deferResult);
-        } catch {
+        } catch (err) {
+          // 页内判定该元素要可信派发,却回落合成——不自陈就正是要堵的那种假成功
+          if (isCdpAttachFailure(err)) {
+            degradeNote = noteFor(err);
+            effectOn = true;
+            await loadPageSideModule(tid, frameId, "click-effect");
+          }
           // CDP 探测/attach 失败 → 回退合成(cdpAvailable=false 强制不再 defer,本次真点击)。
-          res = await runSyntheticClick(false);
+          res = await runSyntheticClick(false, effectOn);
           throwIfClickError(res);
           return finishSynthetic(attachDialogHandled(res?.result));
         }
