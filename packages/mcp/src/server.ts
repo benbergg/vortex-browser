@@ -752,7 +752,9 @@ export async function handleCallTool(
       if (!d) return { ok: false, error: "Error [INVALID_PARAMS]: unsupported action" };
       const resp = await sendRequest(d.action, d.params, PORT, tabId, DEFAULT_TIMEOUT);
       if (resp.error) return { ok: false, error: formatDispatchError(resp.error) };
-      return { ok: true, result: (resp.result ?? {}) as Record<string, unknown> };
+      // 降级的 click 结果包在自陈信封里,不拆包单步自证就读不到 effect,恒退化成 unknown
+      const { value: stepResult } = splitDiagnosis(resp.result);
+      return { ok: true, result: (stepResult ?? {}) as Record<string, unknown> };
     });
 
     return withEvents([{
