@@ -741,6 +741,14 @@ export const geometryProbeFunc = (
   }
 };
 
+/** 对比度为何可判定/不可判定的唯一判据。wcagAA/AAA 只是它的派生。 */
+type ContrastStatus =
+  | "ok"
+  | "no-painted-background"
+  | "background-image"
+  | "translucent"
+  | "unsupported-color";
+
 /**
  * page-side 配色/视觉态探测函数体。mode=style 注入 MAIN world。
  * 回答「配色/对比度对不对」(⑦ 实证:observe 完全不给颜色;getComputedStyle 可读但 agent 难自算——
@@ -751,7 +759,7 @@ export const geometryProbeFunc = (
 export const styleProbeFunc = (
   selector: string,
   maxResults: number,
-  groups: string[],
+  groups?: string[],
 ):
   | {
       elements: Array<{
@@ -764,9 +772,9 @@ export const styleProbeFunc = (
         fontWeight: string;
         fontSize: string;
         contrastRatio: number | null;
-        contrastStatus: "ok" | "no-painted-background" | "background-image";
-        wcagAA: boolean | "unknown";
-        wcagAAA: boolean | "unknown";
+        contrastStatus: ContrastStatus;
+        wcagAA: boolean | null;
+        wcagAAA: boolean | null;
         typography?: Record<string, string>;
         box?: Record<string, string>;
         paint?: Record<string, string>;
@@ -796,6 +804,9 @@ export const styleProbeFunc = (
       const n = m.map(Number);
       return [n[0], n[1], n[2], n.length >= 4 ? n[3] : 1];
     };
+    // 只认 rgb/rgba:oklch/lab/color() 抓数字会算出胡说八道的亮度
+    const parseStrict = (c: string): [number, number, number, number] | null =>
+      /^rgba?\(/i.test((c || "").trim()) ? parse(c) : null;
     // 透明判定:无背景 / transparent / alpha=0。
     const isTransparent = (c: string): boolean => {
       if (!c || c === "transparent") return true;
@@ -828,14 +839,17 @@ export const styleProbeFunc = (
       let background = cs.backgroundColor;
       let backgroundImage = cs.backgroundImage;
       let bgFromAncestor = false;
-      let contrastStatus: "ok" | "no-painted-background" | "background-image" =
+      let contrastStatus: ContrastStatus =
         backgroundImage !== "none" ? "background-image" : "ok";
+      // 自身半透明时文字与背景各自与更底层合成,原始色算出的比值是假的
+      if (contrastStatus === "ok" && Number(cs.opacity) < 1) contrastStatus = "translucent";
 
       // 自身已绘制就不上溯:再往上的层被它盖住,不是实际背景
       if (contrastStatus === "ok" && isTransparent(background)) {
         // 不设层数上限:真站 painted 背景可在第 10 层,任何魔数都会漏
         for (let a: HTMLElement | null = el.parentElement; a; a = a.parentElement) {
           const acs = getComputedStyle(a);
+          if (Number(acs.opacity) < 1) contrastStatus = "translucent";
           // 第一层产生绘制的祖先就是背景层,图和色都在这层取,取完即停
           if (acs.backgroundImage !== "none") {
             backgroundImage = acs.backgroundImage;
@@ -854,21 +868,29 @@ export const styleProbeFunc = (
 
       let contrastRatio: number | null = null;
       if (contrastStatus === "ok") {
-        const fg = parse(color);
-        const bg = parse(background);
-        if (fg && bg && !isTransparent(background)) {
+        const fg = parseStrict(color);
+        const bg = parseStrict(background);
+        if (!fg || !bg) {
+          // 认不出的颜色格式宁可说不知道,也不抓数字硬算
+          contrastStatus = isTransparent(background) ? "no-painted-background" : "unsupported-color";
+        } else if (isTransparent(background)) {
+          contrastStatus = "no-painted-background";
+        } else if (fg[3] < 1 || bg[3] < 1) {
+          // alpha<1 的真实观感取决于更底层,按原始色算等于撒谎
+          contrastStatus = "translucent";
+        } else {
           const L1 = lum(fg) + 0.05;
           const L2 = lum(bg) + 0.05;
           contrastRatio = Math.round((Math.max(L1, L2) / Math.min(L1, L2)) * 100) / 100;
-        } else {
-          // 背景没找到就是没找到,不能折叠成"不合格"
-          contrastStatus = "no-painted-background";
         }
       }
-      const verdict = (min: number): boolean | "unknown" =>
-        contrastRatio == null ? "unknown" : contrastRatio >= min;
+      // null 而非 "unknown":JSON 里字符串是 truthy,外部 if(wcagAA) 会误读成通过
+      const verdict = (min: number): boolean | null =>
+        contrastRatio == null ? null : contrastRatio >= min;
 
-      const want = (g: string): boolean => groups.indexOf(g) !== -1;
+      // 缺省=全开,空数组=一组都不要;两者不能混为一谈
+      const active = groups ?? ["typography", "box", "paint", "motion"];
+      const want = (g: string): boolean => active.indexOf(g) !== -1;
       const pick = (props: string[]): Record<string, string> => {
         const o: Record<string, string> = {};
         for (const prop of props) {

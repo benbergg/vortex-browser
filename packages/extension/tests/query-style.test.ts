@@ -87,8 +87,8 @@ describe("styleProbeFunc", () => {
     const r = styleProbeFunc(".nobg", 10, []) as any;
     expect(r.elements[0].contrastRatio).toBeNull();
     expect(r.elements[0].contrastStatus).toBe("no-painted-background");
-    expect(r.elements[0].wcagAA).toBe("unknown");
-    expect(r.elements[0].wcagAAA).toBe("unknown");
+    expect(r.elements[0].wcagAA).toBeNull();
+    expect(r.elements[0].wcagAAA).toBeNull();
   });
 
   it("背景是渐变 → 对比度不可判定,不拿 backgroundColor 硬算", () => {
@@ -104,7 +104,7 @@ describe("styleProbeFunc", () => {
     const r = styleProbeFunc(".grad", 10, []) as any;
     expect(r.elements[0].contrastStatus).toBe("background-image");
     expect(r.elements[0].contrastRatio).toBeNull();
-    expect(r.elements[0].wcagAA).toBe("unknown");
+    expect(r.elements[0].wcagAA).toBeNull();
   });
 
   it("近祖先渐变 + 远祖先纯白 → 背景取渐变那层,不能穿过去拿远处的白", () => {
@@ -138,7 +138,7 @@ describe("styleProbeFunc", () => {
     const r = styleProbeFunc(".selfimg", 10, []) as any;
     expect(r.elements[0].contrastStatus).toBe("background-image");
     expect(r.elements[0].bgFromAncestor).toBe(false);
-    expect(r.elements[0].wcagAA).toBe("unknown");
+    expect(r.elements[0].wcagAA).toBeNull();
   });
 
   it("真低对比仍然判 false（不能因为改三态就一律 unknown）", () => {
@@ -254,6 +254,111 @@ describe("styleProbeFunc", () => {
     el.className = "iso";
     document.body.appendChild(el);
     expect(() => detached(".iso", 1, ["typography", "box", "paint", "motion"])).not.toThrow();
+  });
+
+  it("背景色带 alpha → 不拿原始色硬算,状态为 translucent", () => {
+    const el = document.createElement("div");
+    el.className = "alpha";
+    el.style.color = "rgb(0, 0, 0)";
+    el.style.backgroundColor = "rgba(255, 255, 255, 0.5)";
+    document.body.appendChild(el);
+    const r = styleProbeFunc(".alpha", 10, []) as any;
+    // 按纯白算会报 21:1,真实观感取决于更底层
+    expect(r.elements[0].contrastStatus).toBe("translucent");
+    expect(r.elements[0].contrastRatio).toBeNull();
+    expect(r.elements[0].wcagAA).toBeNull();
+  });
+
+  it("元素自身 opacity<1 → translucent", () => {
+    const el = document.createElement("div");
+    el.className = "op";
+    el.style.color = "rgb(0, 0, 0)";
+    el.style.backgroundColor = "rgb(255, 255, 255)";
+    el.style.opacity = "0.5";
+    document.body.appendChild(el);
+    const r = styleProbeFunc(".op", 10, []) as any;
+    expect(r.elements[0].contrastStatus).toBe("translucent");
+    expect(r.elements[0].contrastRatio).toBeNull();
+  });
+
+  it("认不出的颜色格式(oklch) → unsupported-color,不抓数字硬算", () => {
+    const el = document.createElement("div");
+    el.className = "p3";
+    document.body.appendChild(el);
+    // jsdom 不解析 oklch,直接喂 computed 替身覆盖 color/background-color
+    const real = window.getComputedStyle.bind(window);
+    const spy = vi.spyOn(window, "getComputedStyle").mockImplementation(((e: Element) => {
+      const cs = real(e as Element);
+      return new Proxy(cs, {
+        get(t, k) {
+          if (k === "color") return "oklch(0.7 0.1 200)";
+          if (k === "backgroundColor") return "rgb(255, 255, 255)";
+          const v = (t as never as Record<string | symbol, unknown>)[k];
+          return typeof v === "function" ? v.bind(t) : v;
+        },
+      });
+    }) as never);
+    const r = styleProbeFunc(".p3", 10, []) as any;
+    spy.mockRestore();
+    expect(r.elements[0].contrastStatus).toBe("unsupported-color");
+    expect(r.elements[0].wcagAAA).toBeNull();
+  });
+
+  it("wcag 判定是 null 而不是字符串(JSON 里字符串 truthy 会被误读成通过)", () => {
+    const el = document.createElement("div");
+    el.className = "ser";
+    el.style.color = "rgb(0, 0, 0)";
+    document.documentElement.style.backgroundColor = "transparent";
+    document.body.style.backgroundColor = "transparent";
+    document.body.appendChild(el);
+    const r = styleProbeFunc(".ser", 10, []) as any;
+    const round = JSON.parse(JSON.stringify(r.elements[0]));
+    expect(round.wcagAA).toBeNull();
+    expect(Boolean(round.wcagAA)).toBe(false);
+    expect(round.contrastStatus).toBe("no-painted-background");
+  });
+
+  it("22 个属性逐项按短横线名去问 computed style(拼错/漏项都转红)", () => {
+    const el = document.createElement("div");
+    el.className = "all22";
+    document.body.appendChild(el);
+    const asked: string[] = [];
+    const real = window.getComputedStyle.bind(window);
+    const spy = vi.spyOn(window, "getComputedStyle").mockImplementation(((e: Element) => {
+      const cs = real(e as Element);
+      return new Proxy(cs, {
+        get(t, k) {
+          if (k === "getPropertyValue") {
+            return (prop: string) => { asked.push(prop); return cs.getPropertyValue(prop); };
+          }
+          const v = (t as never as Record<string | symbol, unknown>)[k];
+          return typeof v === "function" ? v.bind(t) : v;
+        },
+      });
+    }) as never);
+    styleProbeFunc(".all22", 10, ["typography", "box", "paint", "motion"]);
+    spy.mockRestore();
+
+    expect(asked).toEqual([
+      "font-family", "font-size", "font-weight", "line-height",
+      "letter-spacing", "text-align", "text-transform",
+      "display", "padding", "margin", "border-radius", "border-width",
+      "border-style", "border-color", "width", "height",
+      "background-color", "background-image", "box-shadow", "opacity", "outline", "filter",
+      "transition", "transform", "animation",
+    ]);
+  });
+
+  it("groups 缺省 = 四组全开;空数组 = 一组都不要", () => {
+    const el = document.createElement("div");
+    el.className = "defg";
+    document.body.appendChild(el);
+    const withDefault = (styleProbeFunc(".defg", 10) as any).elements[0];
+    const withEmpty = (styleProbeFunc(".defg", 10, []) as any).elements[0];
+    for (const g of ["typography", "box", "paint", "motion"]) {
+      expect(withDefault[g], `缺省应含 ${g}`).toBeTypeOf("object");
+      expect(withEmpty[g], `空数组不应含 ${g}`).toBeUndefined();
+    }
   });
 
   it("无命中 → total=0", () => {

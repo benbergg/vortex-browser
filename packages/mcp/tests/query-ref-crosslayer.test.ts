@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-// 跨层接线锁(评审 Task 1 H-1)。liftQueryRefToTarget 的纯函数测试 + extension 侧
-// 手工 index/snapshotId 测试各自全绿,也证明不了 helper 真的挂在 handleCallTool
-// 这条活路径上、翻译结果真的作为 dispatch 参数发出去。这里走 handleCallTool 端到端:
+// 跨层接线锁(评审 Task 1 H-1)。
+// 两侧纯函数测试全绿,也证明不了 helper 挂在 handleCallTool 这条活路径上。
+// 这里走 handleCallTool 端到端:
 // observe 建立 activeSnapshotId → vortex_query 传 @ref → 断言发往 extension 的
 // 参数是 index/snapshotId/frameId 且不带 pattern/target。
 
