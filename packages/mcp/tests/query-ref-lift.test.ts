@@ -29,11 +29,21 @@ describe("liftQueryRefToTarget", () => {
     expect("target" in params).toBe(false);
   });
 
-  it("已显式带 target 时不抢 pattern", () => {
+  it("target 与 pattern 同时出现 → 抛 INVALID_PARAMS", () => {
+    // 「不抢、两者并存」是缺陷行为:server 把 target 译成 selector,extension 却用
+    // pattern,调用方拿到的是它没要的那个元素(评审 Task 1 H-2)。
     const params: Record<string, unknown> = { mode: "style", pattern: "@a1b2:e7", target: "#explicit" };
-    liftQueryRefToTarget("vortex_query", params);
-    expect(params.target).toBe("#explicit");
-    expect(params.pattern).toBe("@a1b2:e7");
+    expect(() => liftQueryRefToTarget("vortex_query", params)).toThrow(/remove `target`/);
+  });
+
+  it("CSS 形态的 pattern 与 target 并存同样拒绝(不是只挡 @ref)", () => {
+    const params: Record<string, unknown> = { mode: "style", pattern: "h1", target: "#explicit" };
+    expect(() => liftQueryRefToTarget("vortex_query", params)).toThrow(/remove `target`/);
+  });
+
+  it("只有 target 没有 pattern → 不拦(非 query 语义,交给下游校验)", () => {
+    const params: Record<string, unknown> = { mode: "style", target: "#explicit" };
+    expect(() => liftQueryRefToTarget("vortex_query", params)).not.toThrow();
   });
 
   it("别的工具不受影响", () => {

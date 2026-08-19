@@ -771,7 +771,11 @@ export async function handleCallTool(
   // BUG-002 (N0063): wait_for(mode=element) 的 @ref 经 value 字段传入,这里抬成 target,
   // 复用下方同一条翻译链 + STALE/tab 校验(dispatch 拿不到 snapshot 状态无法自译)。
   liftWaitForRefToTarget(toolDef.name, params);
-  liftQueryRefToTarget(toolDef.name, params);
+  try {
+    liftQueryRefToTarget(toolDef.name, params);
+  } catch (err) {
+    return { isError: true, content: [{ type: "text" as const, text: formatError(err) }] };
+  }
 
   // target 翻译：@eN / @fNeM → { index, snapshotId, frameId }
   const target = params.target as string | undefined;

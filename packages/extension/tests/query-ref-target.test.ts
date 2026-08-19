@@ -2,6 +2,7 @@
 // 纯函数测试证明不了接线,这里全部走 router.dispatch 断言真实注入实参。
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { NmRequest } from "@vortex-browser/shared";
+import { VtxErrorCode } from "@vortex-browser/shared";
 import { ActionRouter } from "../src/lib/router.js";
 import { registerQueryHandlers } from "../src/handlers/query.js";
 import { newSnapshotId, setSnapshot } from "../src/lib/snapshot-store.js";
@@ -78,5 +79,31 @@ describe("query 经 index+snapshotId 定位（@ref 翻译后的形态）", () =>
   it("非法组名 → 报错而不是静默返回空分组", async () => {
     const resp = await router.dispatch(mkReq({ mode: "style", pattern: "h1", attr: "colours" }, "r6"));
     expect(String(resp.error?.message)).toMatch(/attr must be one or more of/);
+  });
+  it("pattern 为空串 + 有效 ref → 空串按没给算,回退到 ref", async () => {
+    const snapshotId = putSnap(0, 5, ".from-ref");
+    const resp = await router.dispatch(mkReq({ mode: "style", pattern: "   ", index: 5, snapshotId }, "r9"));
+    expect(resp.error).toBeUndefined();
+    expect(executeScript.mock.calls[0][0].args[0]).toBe(".from-ref");
+  });
+
+  it("非空 pattern 与 index 并存 → INVALID_PARAMS,不注入", async () => {
+    const snapshotId = putSnap(0, 5, ".from-ref");
+    const resp = await router.dispatch(mkReq({ mode: "style", pattern: "h1", index: 5, snapshotId }, "r10"));
+    expect(String(resp.error?.message)).toMatch(/not both/);
+    expect(executeScript).not.toHaveBeenCalled();
+  });
+
+  it("快照过期 → STALE_SNAPSHOT 传播给调用方,不注入", async () => {
+    const resp = await router.dispatch(mkReq({ mode: "style", index: 1, snapshotId: "snap_gone" }, "r11"));
+    expect(resp.error?.code).toBe(VtxErrorCode.STALE_SNAPSHOT);
+    expect(executeScript).not.toHaveBeenCalled();
+  });
+
+  it("index 不在快照里 → INVALID_INDEX 传播给调用方,不注入", async () => {
+    const snapshotId = putSnap(0, 5, ".from-ref");
+    const resp = await router.dispatch(mkReq({ mode: "style", index: 99, snapshotId }, "r12"));
+    expect(resp.error?.code).toBe(VtxErrorCode.INVALID_INDEX);
+    expect(executeScript).not.toHaveBeenCalled();
   });
 });

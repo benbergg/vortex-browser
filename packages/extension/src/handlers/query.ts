@@ -3,7 +3,7 @@
 // 移植自 browser-use service.py 的 _SEARCH_PAGE_JS_BODY 和 _FIND_ELEMENTS_JS_BODY,
 // 按 vortex 风格重写:TypeScript + chrome.scripting.executeScript 注入。
 
-import { QueryActions, VtxErrorCode, vtxError, withDiagnosis } from "@vortex-browser/shared";
+import { QUERY_SELECTOR_MODES, QueryActions, VtxErrorCode, vtxError, withDiagnosis } from "@vortex-browser/shared";
 import type { ActionRouter } from "../lib/router.js";
 import { getActiveTabId, buildExecuteTarget, ensureFrameAttached } from "../lib/tab-utils.js";
 import { diagnoseEmptyQueryText, diagnoseEmptyQueryCss, diagnoseEmptySchema } from "../lib/empty-diagnosis.js";
@@ -1525,13 +1525,21 @@ export function registerQueryHandlers(router: ActionRouter): void {
     [QueryActions.QUERY_PAGE]: async (args, tabId) => {
       const mode = args.mode as string | undefined;
 
-      // query 曾是唯一没接 @ref 的元素类 handler,选择器类 mode 复用 resolveTarget 反查
-      const SELECTOR_MODES = new Set(["css", "component", "geometry", "style"]);
+      // 空串按没给算,否则调用方拿着有效 @ref 也会被判 pattern 缺失
+      const rawPattern = args.pattern as string | undefined;
+      const explicitPattern =
+        typeof rawPattern === "string" && rawPattern.trim() !== "" ? rawPattern : undefined;
+      const selectorMode = mode != null && QUERY_SELECTOR_MODES.has(mode);
+      if (explicitPattern != null && args.index != null) {
+        throw vtxError(
+          VtxErrorCode.INVALID_PARAMS,
+          "vortex_query: provide either `pattern` or an @ref, not both",
+        );
+      }
+      // 选择器类 mode 复用 resolveTarget 反查,与 dom.* 同一条寻址链
       const resolved =
-        args.pattern == null && mode != null && SELECTOR_MODES.has(mode)
-          ? resolveTargetOptional(args)
-          : undefined;
-      const pattern = (args.pattern as string | undefined) ?? resolved?.selector;
+        explicitPattern == null && selectorMode ? resolveTargetOptional(args) : undefined;
+      const pattern = explicitPattern ?? resolved?.selector;
 
       // 参数校验
       if (
