@@ -49,7 +49,8 @@ function parseArgs(argv) {
 // ---------- git helpers ----------
 
 function git(cmd) {
-  return execSync(`git ${cmd}`, { cwd: ROOT, encoding: "utf8" }).trim();
+  // 默认 1MB buffer 在跨多轮任务的 release range 上会 ENOBUFS,闸门直接崩掉不跑
+  return execSync(`git ${cmd}`, { cwd: ROOT, encoding: "utf8", maxBuffer: 256 * 1024 * 1024 }).trim();
 }
 
 function latestTag() {

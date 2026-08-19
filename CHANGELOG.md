@@ -6,6 +6,8 @@
 
 ## [Unreleased]
 
+## [3.0.0] - 2026-08-19
+
 ### Added
 
 - **`vortex_query` 新增 `mode=schema`:读页面作者声明的结构化数据**(新增 `packages/extension/src/page-side/schema-readback.ts`;`packages/extension/src/handlers/query.ts`、`packages/extension/src/lib/empty-diagnosis.ts`、`packages/mcp/src/tools/schemas-public.ts`)。一次调用合并三源 —— JSON-LD(`application/ld+json`,展开 `@graph`,`@type` 取数组首项,提 `@id`)、WHATWG Microdata(`itemscope`/`itemtype`/`itemprop`/`itemid`)、OGP(`og:` meta)。`pattern` 即类型过滤(`"*"` 取全部,匹配容忍 `schema.org/Product` 这类带前缀的 `@type`),`attr=json` 出结构化载荷、缺省出摘要。预算封顶 20 个实体、单值 500 字符。每个实体带 `untrusted: true`,摘要末尾恒附「可能与页面可见内容不一致」—— 这是页面作者**声明**的数据,不是渲染结果,商品页标价与 `offers.price` 不一致是常态。**Why**:此前拿一条商品价格要么 `vortex_extract` 抓文本再让模型解析(贵且脆),要么 `vortex_evaluate` 手写 JS;而这类数据本就以机器可读形式躺在页面里。**live 实测**:bilibili 出 3 个 JSON-LD 实体、GitHub 出 Microdata、京东 0(自身无声明)—— 说明覆盖面取决于站点是否做 SEO,**内部管理后台 SPA 恒为空**,这是能力边界不是缺陷,故空结果必须自陈(见下)。

@@ -3,7 +3,7 @@
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA0wijfzapykLl0xW3UwODRo8a2vPY2VyDEHpnntwr36tfMt6OvSBeaglAWQefJ4BAU6JLD1ydVqOPCvApW28rFrCTstFIFAXBKjmoGuG3N/HRMiFEuMMYD+MMoUEqde65RKXSv5ZnkX7FUsCi06awlhrMy75+kDKwEBl3wuIRaRJVy3FbCk+YTPDOQ6wUG92xxsoQK6toyAG79Xyk/ibKrivH2ImiUWrEFj640GwicYgP7IyL0o3ggIp0FrzlrE+QXZ0Q0BZw0vvEcgpo4YfKsC3hllLmxvSw5QiCBePZ6/hUJ/e+Mt3ZsS4wi3vMl+Bc+GAXVfbzZUpJVvkFZrfOtQIDAQAB",
   "name": "Vortex",
   "description": "Let your AI agent drive your real, logged-in Chrome — browser automation for LLMs via MCP.",
-  "version": "2.0.1",
+  "version": "3.0.0",
   "permissions": [
     "nativeMessaging",
     "debugger",
@@ -16,7 +16,9 @@
     "activeTab",
     "alarms"
   ],
-  "host_permissions": ["<all_urls>"],
+  "host_permissions": [
+    "<all_urls>"
+  ],
   "icons": {
     "16": "icons/icon-16.png",
     "32": "icons/icon-32.png",
@@ -37,15 +39,23 @@
   },
   "content_scripts": [
     {
-      "matches": ["<all_urls>"],
-      "js": ["src/content-main.ts"],
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "src/content-main.ts"
+      ],
       "world": "MAIN",
       "run_at": "document_start",
       "all_frames": true
     },
     {
-      "matches": ["<all_urls>"],
-      "js": ["src/content-isolated.ts"],
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "src/content-isolated.ts"
+      ],
       "run_at": "document_start",
       "all_frames": true
     }
