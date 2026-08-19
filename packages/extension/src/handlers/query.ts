@@ -808,7 +808,7 @@ export const styleProbeFunc = (
     const pathOf = (start: Element): string => {
       const parts: string[] = [];
       let n: Node | null = start;
-      while (n && n.nodeType === 1 && parts.length < 24) {
+      while (n && n.nodeType === 1 && parts.length < 64) {
         const p: Node | null = n.parentNode;
         let i = 0;
         if (p) {
@@ -822,10 +822,10 @@ export const styleProbeFunc = (
     };
 
     // @font-face 只能从 CSSOM 读,跨域样式表访问 cssRules 抛 SecurityError → 标 partial 而非当没有
-    const collectFontFaces = (): { rules: Array<Record<string, string>>; partial: boolean } => {
+    const collectFontFaces = (): { rules: Array<Record<string, string>>; partial: boolean; partialReasons: string[] } => {
       const FACE_PROPS = ["font-family", "src", "font-weight", "font-style", "font-display", "unicode-range"];
       const rules: Array<Record<string, string>> = [];
-      let partial = false;
+      const reasons = new Set<string>();
       // @layer / @media / @supports 里的 @font-face 不递归就会漏,还照样报 partial=false
       // 白名单是性能项不是防线:@keyframes 有几十条子规则,递归进去纯浪费。
       // 真正兜住异常的是下面每条规则的 try/catch。
@@ -834,8 +834,8 @@ export const styleProbeFunc = (
       function walk(list: CSSRuleList | null, depth: number): void {
         if (!list) return;
         if (depth > 5) {
-          // 停在这里就是没扫完,不标 partial 等于把"没看"说成"页面没有"
-          partial = true;
+          // 停在这里就是没扫完,不自陈等于把"没看"说成"页面没有"
+          reasons.add("nesting-depth");
           return;
         }
         for (const rule of Array.from(list)) {
@@ -854,7 +854,7 @@ export const styleProbeFunc = (
             if (o["font-family"]) rules.push(o);
           } catch {
             // 单条规则读不了不该让同一张表后面的规则一起丢
-            partial = true;
+            reasons.add("rule-unreadable");
           }
         }
       }
@@ -862,10 +862,10 @@ export const styleProbeFunc = (
         try {
           walk(sheet.cssRules, 0);
         } catch {
-          partial = true;
+          reasons.add("cross-origin");
         }
       }
-      return { rules, partial };
+      return { rules, partial: reasons.size > 0, partialReasons: Array.from(reasons).sort() };
     };
 
     // 解析 rgb/rgba → [r,g,b,a];无法解析返 null。
@@ -1045,7 +1045,11 @@ export const styleProbeFunc = (
       elements,
       total,
       showing: limit,
-      ...(faces ? { fontFaces: faces.rules, fontFacesPartial: faces.partial } : {}),
+      ...(faces ? {
+        fontFaces: faces.rules,
+        fontFacesPartial: faces.partial,
+        ...(faces.partial ? { fontFacesPartialReasons: faces.partialReasons } : {}),
+      } : {}),
     };
   } catch (e) {
     return { error: "style probe error: " + (e instanceof Error ? e.message : String(e)) };

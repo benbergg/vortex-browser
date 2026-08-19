@@ -521,7 +521,7 @@ describe("styleProbeFunc 的 @font-face 收集", () => {
       .some((f) => f["font-family"] === '"InSupports"')).toBe(true);
   });
 
-  const probe = (css: string): { fontFaces: Array<Record<string, string>>; fontFacesPartial: boolean } => {
+  const probe = (css: string): { fontFaces: Array<Record<string, string>>; fontFacesPartial: boolean; fontFacesPartialReasons?: string[] } => {
     // partial 是整页级的,上一条测试留下的 style 会让后面的用例互相污染
     document.head.querySelectorAll("style").forEach((n) => n.remove());
     const st = document.createElement("style");
@@ -538,6 +538,7 @@ describe("styleProbeFunc 的 @font-face 收集", () => {
     const r = probe(deep);
     expect(r.fontFaces.some((f) => f["font-family"] === '"TooDeep"')).toBe(false);
     expect(r.fontFacesPartial).toBe(true);
+    expect(r.fontFacesPartialReasons).toEqual(["nesting-depth"]);
   });
 
   it("浅层嵌套不误报 partial", () => {
@@ -596,7 +597,7 @@ describe("styleProbeFunc 的伪元素粗筛", () => {
 });
 
 describe("styleProbeFunc 对坏样式表的容错", () => {
-  const withSheets = (sheets: unknown[]): { fontFaces: Array<Record<string, string>>; fontFacesPartial: boolean } => {
+  const withSheets = (sheets: unknown[]): { fontFaces: Array<Record<string, string>>; fontFacesPartial: boolean; fontFacesPartialReasons?: string[] } => {
     document.head.querySelectorAll("style").forEach((n) => n.remove());
     Object.defineProperty(document, "styleSheets", { configurable: true, get: () => sheets });
     const el = document.createElement("div");
@@ -618,6 +619,7 @@ describe("styleProbeFunc 对坏样式表的容错", () => {
     const r = withSheets([{ cssRules: [faceRule("Before"), bad, faceRule("After")] }]);
     expect(r.fontFaces.map((f) => f["font-family"])).toEqual(["Before", "After"]);
     expect(r.fontFacesPartial).toBe(true);
+    expect(r.fontFacesPartialReasons).toEqual(["rule-unreadable"]);
   });
 
   it("整张表读不了(跨域) → partial,其余表照收", () => {
@@ -625,9 +627,28 @@ describe("styleProbeFunc 对坏样式表的容错", () => {
     const r = withSheets([crossOrigin, { cssRules: [faceRule("Local")] }]);
     expect(r.fontFaces.map((f) => f["font-family"])).toEqual(["Local"]);
     expect(r.fontFacesPartial).toBe(true);
+    // 三种缺失原因不能混成一个 boolean,调用方分不出是跨域、规则坏还是没扫完
+    expect(r.fontFacesPartialReasons).toEqual(["cross-origin"]);
   });
 
-  it("全部正常 → partial=false", () => {
-    expect(withSheets([{ cssRules: [faceRule("A")] }]).fontFacesPartial).toBe(false);
+  it("全部正常 → partial=false 且不带 reasons 字段", () => {
+    const r = withSheets([{ cssRules: [faceRule("A")] }]);
+    expect(r.fontFacesPartial).toBe(false);
+    expect(r.fontFacesPartialReasons).toBeUndefined();
+  });
+
+  it("多种原因同时发生 → 都要列出来", () => {
+    const crossOrigin = { get cssRules(): never { throw new Error("SecurityError"); } };
+    const bad = { get constructor(): never { throw new Error("boom"); } };
+    const r = withSheets([crossOrigin, { cssRules: [bad, faceRule("Ok")] }]);
+    expect(r.fontFacesPartialReasons).toEqual(["cross-origin", "rule-unreadable"]);
+  });
+
+  it("原因顺序不跟着页面里样式表的先后走 —— 同一种缺失要给同一个值", () => {
+    const crossOrigin = { get cssRules(): never { throw new Error("SecurityError"); } };
+    const bad = { get constructor(): never { throw new Error("boom"); } };
+    // 发现顺序是 rule-unreadable 在前,与字母序相反
+    const r = withSheets([{ cssRules: [bad] }, crossOrigin]);
+    expect(r.fontFacesPartialReasons).toEqual(["cross-origin", "rule-unreadable"]);
   });
 });

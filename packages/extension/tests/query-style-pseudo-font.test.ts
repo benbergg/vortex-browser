@@ -177,3 +177,50 @@ describe("box 组的布局属性裁剪", () => {
     });
   });
 });
+
+describe("box 返回 shape 的四种形态(布局裁剪改了旧形状,锁住)", () => {
+  const withBox = async (box: Record<string, string>) => {
+    const router = new ActionRouter();
+    vi.stubGlobal("chrome", {
+      tabs: { query: vi.fn().mockResolvedValue([{ id: 42 }]) },
+      webNavigation: { getAllFrames: vi.fn().mockResolvedValue([{ frameId: 0, parentFrameId: -1, url: "https://x/" }]) },
+      scripting: { executeScript: vi.fn(async () => [{ result: {
+        elements: [{ index: 0, tag: "div", box }], total: 1, showing: 1,
+      } }]) },
+      runtime: { getManifest: vi.fn().mockReturnValue({ host_permissions: ["<all_urls>"] }) },
+    });
+    registerQueryHandlers(router);
+    const r = (await router.dispatch(mkReq({ mode: "style", pattern: "div", attr: "box" }))) as any;
+    return r.result.elements[0].box;
+  };
+
+  /** 真 Chrome 实测:未设 gap 的 block/flex/grid/inline-block 一律 normal,只有显式 gap:0 才 0px */
+  const INITIAL = {
+    flexDirection: "row", flexWrap: "nowrap", justifyContent: "normal",
+    alignItems: "normal", gap: "normal", gridTemplateColumns: "none", gridTemplateRows: "none",
+  };
+
+  it("普通 block:布局字段一个不留,但 box 本身还在", async () => {
+    expect(await withBox({ display: "block", padding: "0px", ...INITIAL })).toEqual({
+      display: "block", padding: "0px",
+    });
+  });
+
+  it("真 flex 容器:设过的留下,没设的不留", async () => {
+    expect(await withBox({ display: "flex", ...INITIAL, flexDirection: "column", gap: "12px" })).toEqual({
+      display: "flex", flexDirection: "column", gap: "12px",
+    });
+  });
+
+  it("grid 容器:模板留下", async () => {
+    expect(await withBox({ display: "grid", ...INITIAL, gridTemplateColumns: "1fr 2fr" })).toEqual({
+      display: "grid", gridTemplateColumns: "1fr 2fr",
+    });
+  });
+
+  it("block 上显式 gap:0 → 留下(computed 只有显式设过才是 0px,未设是 normal)", async () => {
+    expect(await withBox({ display: "block", ...INITIAL, gap: "0px" })).toEqual({
+      display: "block", gap: "0px",
+    });
+  });
+});

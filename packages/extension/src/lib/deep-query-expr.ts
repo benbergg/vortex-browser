@@ -15,7 +15,7 @@ export const SHADOW_WALK_MAX_DEPTH = 8;
 export function elementFingerprint(el: Element): string {
   const parts: string[] = [];
   let n: Node | null = el;
-  while (n && n.nodeType === 1 && parts.length < 24) {
+  while (n && n.nodeType === 1 && parts.length < 64) {
     const p: Node | null = n.parentNode;
     let i = 0;
     if (p) {
@@ -32,7 +32,7 @@ export function elementFingerprint(el: Element): string {
 export const FINGERPRINT_ON_ARRAY_FN = `function(){
   return Array.prototype.map.call(this, function(el){
     var parts = [], n = el;
-    while (n && n.nodeType === 1 && parts.length < 24) {
+    while (n && n.nodeType === 1 && parts.length < 64) {
       var p = n.parentNode, i = 0;
       if (p) { var c = p.children; if (c) for (var k = 0; k < c.length; k++) if (c[k] === n) { i = k; break; } }
       parts.push(n.nodeName + ":" + i);

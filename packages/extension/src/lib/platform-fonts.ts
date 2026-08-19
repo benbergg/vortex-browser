@@ -33,6 +33,9 @@ export async function fetchPlatformFonts(
       throw vtxError(VtxErrorCode.JS_EXECUTION_ERROR,
         "could not read element fingerprints from the page", { extras: { selector } });
     }
+    // 两个元素身份相同就分不出谁是谁,重排照样通过逐项比对 —— 宁可不给
+    const dup = fingerprints.length !== new Set(fingerprints).size;
+    if (dup) return { reason: "element identities are not unique; cannot prove alignment" };
     // 数量相同、顺序不同时按下标对齐会把字体挂到别的元素上,只比 count 抓不到
     if (seen.length !== fingerprints.length || seen.some((f, i) => f !== fingerprints[i])) {
       return { reason: `element fingerprint mismatch: CDP saw ${seen.length}, probe saw ${fingerprints.length}` };
@@ -84,7 +87,8 @@ async function elementObjectIds(mgr: DebuggerManager, tabId: number, arrayId: st
 
 /**
  * font 组默认开启,不释放远程对象会一直堆在 renderer 的 object table 里。
- * 带 deadline:某条 releaseObject 永不 settle 时不能把已经拿到的结果一起挂住。
+ * deadline 只保证调用方不被挂住,**不取消**底层命令(chrome.debugger 没有取消能力),
+ * 超时的那条仍在后台 pending。
  */
 const RELEASE_DEADLINE_MS = 1000;
 
