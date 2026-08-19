@@ -178,3 +178,19 @@ transport = hub + STEP
 
 如此对任意 action 与任意调用方取值，`inner < hub < transport` 恒成立，且没有任何当前能成功的
 调用会被新界砍掉。实施计划见 `docs/superpowers/plans/2026-08-18-inner-timeout-budget.md`。
+
+**订正四（Task 1 评审裁决）：调用方入参要钳，推导结果不钳。**
+订正三的公式让 `caller` 无上限地抬高内层界。而 `schemas-public.ts` 三处 `timeout` 字段只有一处
+（`:375`）设了 `maximum`，另两处（`:70`/`:261`）不设上限——调用方传 `timeout: 3600000`，内层界就是
+一小时，router 等于没有界，本次要消灭的 bug 原样复活。
+
+评审建议对结果取 `min(inner, MAX_INNER_TIMEOUT_MS)`，**已否决**：调用方合法要 60s 时把内层界钳成
+60s 即零 margin，内层与 handler 自身预算同时到点，正好砍掉订正三要保住的那类长调用。
+
+`MAX_INNER_TIMEOUT_MS` 的既有语义是「**调用方可指定的**上限」（`timeout.ts:19`），约束入参。故：
+
+```
+inner = max(ACTION_BUDGET[action], caller > 0 ? min(caller, MAX_INNER) + STEP : 0)
+```
+
+推论：`inner ≤ MAX_INNER + STEP = 65000`，`hub ≤ 70000`，`transport ≤ 75000`，全部有界。
