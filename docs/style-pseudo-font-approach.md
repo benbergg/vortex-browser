@@ -226,16 +226,45 @@ Brand 确实在渲染，但 ASCII 哨兵按 monospace 回落 → 宽度相同 �
 - 【推】debugger 被别的扩展真占住时的表现。降级路径有单测(共享 fake + attachError),
   未在真机复现过占用。
 
-## 8. 辩论记录（Luna，opencode GPT-5.6）
+## 8. 辩论与评审记录（Luna，opencode GPT-5.6）
 
-派发 brief `reports/_review/BRIEF-pseudo-font-debate.md`，报告
+**选型辩论**：brief `reports/_review/BRIEF-pseudo-font-debate.md`，报告
 `reports/_review/luna-pseudo-font-debate.md`。**双方独立到达同一结论**：Luna 把
 `CSS.getPlatformFontsForNode` 判为 Critical 并要求在 spike 前不得认定丙最优；
 我同期在 gamma.app 上跑通全链，实测证实。
 
-采纳：伪元素四条件（§2/§6）、总量上限 + 截断自陈、`@font-face` src 与渲染字体拆成两个
-evidence 字段、预算成本来自 evidence 语义而非组名。
+不采纳：CDP 不可用时降级到测量法（理由见 §4）。Luna 的哨兵设计一节（样本、排版属性
+复制、`white-space:pre`、宽度有限性校验）随丙一起作废——它恰好量化了丙的补丁数量。
 
-不采纳：CDP 不可用时降级到测量法（理由见 §4）。Luna 的 §3 整节（哨兵样本设计、
-排版属性复制、`white-space:pre`、宽度有限性校验）随丙一起作废——它恰好量化了丙的补丁数量，
-是选丁的证据之一。
+**实现评审三轮**，报告 `luna-pseudo-font-{impl-review,recheck,final,final2}.md`。
+抓到 11 条真问题，其中三条我原本会直接发出去：
+
+- 元素对齐只比数量 → 数量相同、顺序不同时字体静默挂到别的元素上
+- `@font-face` 只遍历顶层规则，`@media`/`@layer` 里的全漏且报 `partial: false`
+- CDP 远程对象一直不释放，`font` 组默认开启会持续堆积
+
+**两条经实测反驳**（Luna 在终审第二轮确认反驳成立）：
+
+- 「路径不穿 open shadow」——循环条件检查的是当前 `n`，`n = p.host` 直接跳到宿主元素，
+  ShadowRoot 从未被赋给 `n`。jsdom / 真 Chrome / 端到端查询三处实测穿透正常；
+  删掉 `p.host` 那行两处测试转红，它不是死代码。
+- 「`gap: 0px` 该当初始值裁掉」——真 Chrome 五例实测：未设 gap 的
+  block/flex/grid/inline-block 一律 `normal`，只有显式 `gap:0` 才 `0px`。
+
+**顺带修掉一条 v3.0.0 起的既有回归**：`f7ecb25` 给 tokens 补 `maxResults` 约束时把
+`maximum: 200` 写在共享字段上，`mode=chart`（内部上限 2000）与 `sheet`（1000）传大值
+会在进 handler 前被 schema 拒。
+
+## 9. 这一轮的方法论账
+
+- **变异验证 40+ 条，抓到 6 条死条件**（改坏了测试不红的分支）：`hasImage`、长度 `>0`、
+  下标过滤（靠补 `__proto__` 假数据才锁住）、显式指纹判断（行为等价、只是 reason 变难懂，
+  补断言锁消息）、原因排序（补插入序与字母序相反的用例）、grouping 白名单（真等价，
+  降级为性能项并注明不是防线）。
+- **jsdom 保真度第三次咬人**：伪元素 `content` 恒为 `normal`。处方不是源码字符串匹配
+  （那是假覆盖），是**探针只读原始值、判据抽成模块级纯函数**——判据能真断言，且没有重复源。
+- **真站验收抓到 3 个单测抓不到的缺陷**：知乎 `body` 无字形却报「首选没用上」、
+  `-apple-system` 硬比名字、`@font-face` 302 个分片撑到 81KB。
+- **三处一致性测试的盲区**：三份实现同样错时，一致性测试全绿。Luna 正是据此提的
+  Critical——虽然那一条最终被实测证伪，但盲区本身是真的，所以指纹 fixture 扩到了
+  碰撞 / shadow / 嵌套 / 空文本 / 多元素逐项。
