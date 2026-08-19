@@ -95,8 +95,7 @@ export class HubRouter {
     this.browsers = options.browsers;
     this.pending = options.pending ?? new PendingTable();
     this.now = options.now ?? Date.now;
-    // 记住"部署方是否显式配了"，与"回落到常量"区分开——这是唯一能让下面
-    // hubFallbackMs 既尊重显式 kill switch(0) 又不对缺省值 action-blind 的办法
+    // 与"回落到常量"分开记,否则 0 这个 kill switch 无法与缺省值区分
     this.requestTimeoutExplicit = options.requestTimeoutMs != null;
     this.requestTimeoutMs = options.requestTimeoutMs ?? REQUEST_TIMEOUT_MS;
     this.onWarn = options.onWarn ?? ((message, details) => {
@@ -221,10 +220,7 @@ export class HubRouter {
     sessionId: string,
     request: VtxRequest,
     retryCount = 0,
-    // 调用方的预算随请求上线（VtxRequest.timeoutMs）。写死 requestTimeoutMs 会让
-    // 设了 45s 的调用在 30s 被砍，且报的是 hub 的错而非 handler 说得清的原因。
-    // 显式值（caller timeoutMs / 部署方 requestTimeoutMs，含 0 这个 kill switch）
-    // 一律照办；只有两者都缺席时才用 hubFallbackMs 的 action-aware 缺省值兜底。
+    // 显式值(caller timeoutMs / 部署方 requestTimeoutMs,含 0)一律照办
     deadline = this.now() + clampHubTimeout(request.timeoutMs, this.hubFallbackMs(request.action)),
   ): Promise<void> {
     const session = this.sessions.get(sessionId);
@@ -743,8 +739,7 @@ export class HubRouter {
     return typeof request.params?.tabId === "number" ? request.params.tabId : undefined;
   }
 
-  // 缺省兜底按 action 预算推导；写死常量会让 dom.click(35s 内层) 被 30s 的 hub 抢先 fire。
-  // 部署方显式配了 requestTimeoutMs（含 0 这个 kill switch）则原样照办，不做 action 改写。
+  // 写死常量会让 dom.click(内层 35s)被 30s 的 hub 抢先 fire
   private hubFallbackMs(action: string): number {
     return this.requestTimeoutExplicit ? this.requestTimeoutMs : hubDeadlineFor(action, undefined);
   }

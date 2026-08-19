@@ -70,8 +70,7 @@ describe("hub 缺省 deadline 按 action 推导，显式取值一律照办", () 
       };
       agent.ws.on("message", listener);
     });
-    // 只假 setTimeout/Date，留 setImmediate 真实——响应经真实 socket 送达客户端，
-    // 需要真事件循环的 IO 轮询阶段才能被 flush，纯微任务 await 打不到它。
+    // 留 setImmediate 真实:响应经真实 socket 回来,微任务 flush 打不到
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
     client.ws.send(JSON.stringify({ ...request, type: "request" }));
     const response = client.waitFor<VtxResponse>(
