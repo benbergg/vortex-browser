@@ -221,7 +221,11 @@ export class HubRouter {
     request: VtxRequest,
     retryCount = 0,
     // 显式值(caller timeoutMs / 部署方 requestTimeoutMs,含 0)一律照办
-    deadline = this.now() + clampHubTimeout(request.timeoutMs, this.hubFallbackMs(request.action)),
+    deadline = this.now() +
+      clampHubTimeout(
+        request.timeoutMs,
+        this.hubFallbackMs(request.action, request.params?.timeout as number | undefined),
+      ),
   ): Promise<void> {
     const session = this.sessions.get(sessionId);
     if (!session) return;
@@ -740,8 +744,11 @@ export class HubRouter {
   }
 
   // 写死常量会让 dom.click(内层 35s)被 30s 的 hub 抢先 fire
-  private hubFallbackMs(action: string): number {
-    return this.requestTimeoutExplicit ? this.requestTimeoutMs : hubDeadlineFor(action, undefined);
+  // callerTimeoutMs 不可省:HTTP/CLI 路径不写 timeoutMs,漏了它大 timeout 又倒挂
+  private hubFallbackMs(action: string, callerTimeoutMs?: number): number {
+    return this.requestTimeoutExplicit
+      ? this.requestTimeoutMs
+      : hubDeadlineFor(action, callerTimeoutMs);
   }
 
   private isBoundToBrowser(session: SessionEntry, browserId: string, browser: BrowserEntry): boolean {

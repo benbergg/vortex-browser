@@ -28,13 +28,13 @@ async function attributeTimeout(tabId: number | undefined, frameId?: number): Pr
   }
 }
 
-// inFlight:raceTimeout 只是不再等,handler 还在跑,非幂等动作可能已经生效
+// inFlight:raceTimeout 只是不再等,handler 还在跑;tab 没了则不可能再生效
 function timeoutPayload(action: string, budgetMs: number, liveness: Liveness) {
   const meta = TIMEOUT_LIVENESS_META[liveness];
   return vtxError(
     VtxErrorCode.TIMEOUT,
     `Action ${action} exceeded its ${budgetMs}ms budget`,
-    { extras: { action, budgetMs, liveness, inFlight: true } },
+    { extras: { action, budgetMs, liveness, inFlight: liveness !== "tab-gone" } },
     meta,
   );
 }

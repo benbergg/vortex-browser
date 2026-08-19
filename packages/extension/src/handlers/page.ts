@@ -1,9 +1,16 @@
-import { MAX_INNER_TIMEOUT_MS, PageActions, VtxErrorCode, vtxError } from "@vortex-browser/shared";
+import {
+  MAX_INNER_TIMEOUT_MS,
+  PAGE_HANDLER_MARGIN_MS,
+  PageActions,
+  VtxErrorCode,
+  vtxError,
+} from "@vortex-browser/shared";
 import type { ActionRouter } from "../lib/router.js";
 import type { DebuggerManager } from "../lib/debugger-manager.js";
 import { buildExecuteTarget, ensureFrameAttached, getActiveTabId } from "../lib/tab-utils.js";
 import { resolveTargetOptional } from "../lib/resolve-target.js";
 import { pageQuery, PageQueryTimeoutError } from "../adapter/native.js";
+import { raceTimeout, TIMED_OUT } from "../lib/race-timeout.js";
 
 // 探一次目标 tab 的 document.readyState（仅主 frame）。executeScript 异常时返回
 // 空串，调用方按"未就绪"处理。
@@ -299,9 +306,11 @@ export function registerPageHandlers(router: ActionRouter, debuggerMgr: Debugger
       if (selector) {
         const frameId = __t?.boundFrameId ?? (args.frameId as number | undefined);
         if (frameId != null) await ensureFrameAttached(tid, frameId);
-        let found: boolean | undefined;
-        try {
-          found = await pageQuery(tid, frameId, (sel: string, ms: number) => {
+        // 用 raceTimeout 而非 pageQuery:后者硬编码 world:MAIN,会把 observer
+        // 暴露给站点改写过的全局;这里只需要 SW 侧的界,world 保持 ISOLATED
+        const injected = chrome.scripting.executeScript({
+          target: buildExecuteTarget(tid, frameId),
+          func: (sel: string, ms: number) => {
             return new Promise<boolean>((resolve) => {
               if (document.querySelector(sel)) { resolve(true); return; }
               const observer = new MutationObserver(() => {
@@ -314,17 +323,19 @@ export function registerPageHandlers(router: ActionRouter, debuggerMgr: Debugger
               observer.observe(document.body, { childList: true, subtree: true, attributes: true });
               setTimeout(() => { observer.disconnect(); resolve(false); }, ms);
             });
-          }, [selector, timeout],
-          // SW 侧兜底,+500ms margin 让页面还活着时 page-side 结果优先胜出
-          timeout + 500);
-        } catch (err) {
-          if (!(err instanceof PageQueryTimeoutError)) throw err;
+          },
+          args: [selector, timeout],
+        });
+        // +margin 让页面还活着时 page-side 结果优先胜出
+        const raced = await raceTimeout(injected, timeout + PAGE_HANDLER_MARGIN_MS);
+        if (raced === TIMED_OUT) {
           throw vtxError(
             VtxErrorCode.TIMEOUT,
             `Selector "${selector}" not found within ${timeout}ms (page-side observer did not report back)`,
             { tabId: tid, frameId, selector },
           );
         }
+        const found = raced[0]?.result;
         if (!found) throw vtxError(VtxErrorCode.TIMEOUT, `Selector "${selector}" not found within ${timeout}ms`, { selector });
         return { found: true, selector };
       }
@@ -446,8 +457,8 @@ export function registerPageHandlers(router: ActionRouter, debuggerMgr: Debugger
             );
           },
           [expression, timeout, pollInterval],
-          // SW 侧兜底,+500ms margin 让页面还活着时 page-side 语义化结果优先胜出
-          timeout + 500,
+          // SW 侧兜底,+margin 让页面还活着时 page-side 语义化结果优先胜出
+          timeout + PAGE_HANDLER_MARGIN_MS,
         );
       } catch (err) {
         if (!(err instanceof PageQueryTimeoutError)) throw err;

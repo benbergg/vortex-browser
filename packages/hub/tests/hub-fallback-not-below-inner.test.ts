@@ -33,14 +33,18 @@ describe("hub 缺省兜底 deadline 晚于内层预算（跨层不变量）", ()
   }
 
   // 部署方未显式配置 requestTimeoutMs（未落 REQUEST_TIMEOUT_MS 常量分支）
-  async function expectStillPendingAtInnerMark(action: string): Promise<void> {
+  // callerTimeoutMs 走 params.timeout：HTTP/CLI 路径不写 timeoutMs，兜底漏看它就又倒挂
+  async function expectStillPendingAtInnerMark(
+    action: string,
+    callerTimeoutMs?: number,
+  ): Promise<void> {
     const started = await startTestHub({});
     closeHub = started.close;
     // 永不应答的 agent：只有 hub 自己的 deadline 能结束这次请求
     agent = await connectFakeAgent(started.port, { browserId: "browser-a", handle: () => new Promise(() => {}) });
     client = await connectClient(started.port, { sessionId: "session-a" });
 
-    const inner = innerDeadlineFor(action, undefined);
+    const inner = innerDeadlineFor(action, callerTimeoutMs);
     const id = `r-${action}`;
     const arrived = new Promise<void>((resolve) => {
       const listener = (data: Buffer) => {
@@ -53,7 +57,13 @@ describe("hub 缺省兜底 deadline 晚于内层预算（跨层不变量）", ()
     });
 
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
-    client.ws.send(JSON.stringify({ action, id, tabId: 1, type: "request" }));
+    client.ws.send(JSON.stringify({
+      action,
+      id,
+      tabId: 1,
+      type: "request",
+      ...(callerTimeoutMs != null ? { params: { timeout: callerTimeoutMs } } : {}),
+    }));
     const response = client.waitFor<VtxResponse>(
       (message): message is VtxResponse =>
         typeof message === "object" && message !== null &&
@@ -69,7 +79,10 @@ describe("hub 缺省兜底 deadline 晚于内层预算（跨层不变量）", ()
     void response.then(() => { settled = true; }, () => { settled = true; });
     await flushRealIO();
     vi.useRealTimers();
-    expect(settled, `${action}: hub 兜底未晚于内层预算 ${inner}ms（疑似 action-blind 常量回归）`).toBe(false);
+    expect(
+      settled,
+      `${action} caller=${callerTimeoutMs}: hub 兜底未晚于内层预算 ${inner}ms`,
+    ).toBe(false);
   }
 
   const actions = Object.keys(ACTION_BUDGET_MS);
@@ -82,4 +95,10 @@ describe("hub 缺省兜底 deadline 晚于内层预算（跨层不变量）", ()
   it.each(actions)("hub 兜底 deadline 晚于内层预算：%s", async (action) => {
     await expectStillPendingAtInnerMark(action);
   });
+
+  // caller 传 60s 时内层是 65000，而漏看 params.timeout 的兜底最多只有 65000（navigate），
+  // 其余 action 更低 —— 只有把 caller 算进去才可能晚于内层。
+  it.each(actions)("caller timeout=60000 时兜底仍晚于内层预算：%s", async (action) => {
+    await expectStillPendingAtInnerMark(action, 60_000);
+  }, 30_000);
 });

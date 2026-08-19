@@ -56,6 +56,12 @@ export function clampHubTimeout(requested: number | undefined, fallback: number)
 }
 
 /** 未登记 action 的缺省内层预算 */
+/**
+ * handler 自带的 SW 侧兜底比调用方 timeout 多留的余量。页面还活着时让 page-side
+ * 的语义化结果先胜出，卡死时又先于 router 的通用归因 fire。
+ */
+export const PAGE_HANDLER_MARGIN_MS = 500;
+
 export const DEFAULT_ACTION_BUDGET_MS = 30_000;
 
 // 取值来自 30 天真实调用中「未传 timeout 的成功调用」耗时上限，向上留 margin。
