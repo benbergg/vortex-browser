@@ -4,17 +4,27 @@ import { tokensProbeFunc } from "../src/handlers/query.js";
 
 // jsdom 的 getComputedStyle 不枚举自定义属性,按真实 Chrome 的行为造替身:
 // 可迭代出属性名 + getPropertyValue 取值(gamma.app 实测 Array.from 可枚举 675 条)。
-function stubComputedStyle(entries: Array<[string, string]>) {
-  const names = entries.map(([n]) => n);
+function makeFake(entries: Array<[string, string]>) {
+  const names = entries.map((e) => e[0]);
   const map = new Map(entries);
-  const fake = {
+  return {
     length: names.length,
+    opacity: "1",
     getPropertyValue: (p: string) => map.get(p) ?? "",
     [Symbol.iterator]: function* () {
       yield* names;
     },
   };
-  vi.spyOn(window, "getComputedStyle").mockReturnValue(fake as never);
+}
+
+// 自定义属性会继承,真实页面里 body 通常枚举出与 :root 相同的条目。
+// 替身必须能分别配置两个 host,否则 roots 断言是重言(评审 Task 4 M-2)。
+function stubComputedStyle(
+  rootEntries: Array<[string, string]>,
+  bodyEntries: Array<[string, string]> = rootEntries,
+) {
+  vi.spyOn(window, "getComputedStyle").mockImplementation(((el: Element) =>
+    (el === document.documentElement ? makeFake(rootEntries) : makeFake(bodyEntries)) as never) as never);
 }
 
 afterEach(() => vi.restoreAllMocks());
@@ -116,10 +126,68 @@ describe("tokensProbeFunc", () => {
     expect(r.groups.color.length).toBe(2);
   });
 
-  it("roots 如实报告扫了哪些根(召回边界要说出来,不能装作全站)", () => {
+  it("body 只是继承 :root → roots 不谎报 body 有贡献", () => {
+    // 两个 host 枚举出同样的条目,body 没有任何新增或改写
     stubComputedStyle([["--c1", "#111111"]]);
     const r = tokensProbeFunc("*", 50) as any;
+    expect(r.roots).toEqual([":root"]);
+  });
+
+  it("body 改写了 :root 的值 → roots 记上 body,取 body 的值", () => {
+    stubComputedStyle([["--c1", "#111111"]], [["--c1", "#222222"]]);
+    const r = tokensProbeFunc("*", 50) as any;
     expect(r.roots).toEqual([":root", "body"]);
+    expect(r.groups.color[0].value).toBe("#222222");
+  });
+
+  it("body 上新增的主题 token 会被收进来", () => {
+    stubComputedStyle([["--c1", "#111111"]], [["--c1", "#111111"], ["--c2", "#333333"]]);
+    const r = tokensProbeFunc("*", 50) as any;
+    expect(r.roots).toEqual([":root", "body"]);
+    expect(r.total).toBe(2);
+  });
+
+  it("截断逐组自陈丢了多少", () => {
+    stubComputedStyle([
+      ["--c1", "#111111"], ["--c2", "#222222"], ["--c3", "#333333"], ["--c4", "#444444"],
+    ]);
+    const r = tokensProbeFunc("*", 2) as any;
+    expect(r.truncatedGroups).toEqual({ color: 2 });
+    expect(r.showing).toBe(2);
+    expect(r.total).toBe(4);
+  });
+
+  it("pattern 是字面子串不是通配符:'*color*' 命中 0", () => {
+    stubComputedStyle([["--chakra-colors-a", "#111111"]]);
+    const r = tokensProbeFunc("*color*", 50) as any;
+    expect(r.total).toBe(0);
+  });
+
+  it("pattern 缺省按全量,不因 undefined 抛错", () => {
+    stubComputedStyle([["--c1", "#111111"]]);
+    const r = tokensProbeFunc(undefined as never, 50) as any;
+    expect(r.total).toBe(1);
+  });
+
+  it("分类边界二:border 简写不被吞成 shadow,easing 关键字归 motion", () => {
+    stubComputedStyle([
+      ["--border-1px", "1px solid #000000"],
+      ["--ease", "ease-in-out"],
+      ["--ease-linear", "linear"],
+      ["--font-weight-bold", "700"],
+      ["--z-index-modal", "1400"],
+      ["--size-full", "100%"],
+      ["--shadow-2", "0 1px 2px 0 rgba(0, 0, 0, 0.1)"],
+    ]);
+    const r = tokensProbeFunc("*", 50) as any;
+    expect(groupOf(r, "--border-1px")).not.toBe("shadow");
+    expect(groupOf(r, "--ease")).toBe("motion");
+    expect(groupOf(r, "--ease-linear")).toBe("motion");
+    expect(groupOf(r, "--font-weight-bold")).toBe("fontWeight");
+    expect(groupOf(r, "--z-index-modal")).toBe("other");
+    expect(groupOf(r, "--size-full")).toBe("spacing");
+    // 真 box-shadow 不能被收紧规则误伤
+    expect(groupOf(r, "--shadow-2")).toBe("shadow");
   });
 
   it("一个 token 都没有 → total=0 且 groups 为空对象", () => {
@@ -128,6 +196,7 @@ describe("tokensProbeFunc", () => {
     expect(r.total).toBe(0);
     expect(r.groups).toEqual({});
     expect(r.roots).toEqual([]);
+    expect(r.truncatedGroups).toEqual({});
   });
 
   it("注入自包含:剥离模块作用域后仍可运行", () => {

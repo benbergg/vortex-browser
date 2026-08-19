@@ -361,6 +361,76 @@ describe("styleProbeFunc", () => {
     }
   });
 
+  it("自身同时有背景图与 opacity<1 → 报 translucent(合成优先于图)", () => {
+    const el = document.createElement("div");
+    el.className = "imgop";
+    el.style.color = "rgb(0, 0, 0)";
+    el.style.backgroundImage = "linear-gradient(90deg, #000, #fff)";
+    el.style.opacity = "0.5";
+    document.body.appendChild(el);
+    const r = styleProbeFunc(".imgop", 10, []) as any;
+    // 旧实现里 background-image 会把 opacity 这个原因整个盖掉
+    expect(r.elements[0].contrastStatus).toBe("translucent");
+    expect(r.elements[0].wcagAA).toBeNull();
+  });
+
+  it("祖先同时有 opacity<1 与背景图 → 仍报 translucent", () => {
+    const anc = document.createElement("div");
+    anc.style.opacity = "0.5";
+    anc.style.backgroundImage = "linear-gradient(90deg, #000, #fff)";
+    const el = document.createElement("span");
+    el.className = "ancimgop";
+    el.style.color = "rgb(0, 0, 0)";
+    anc.appendChild(el);
+    document.body.appendChild(anc);
+    const r = styleProbeFunc(".ancimgop", 10, []) as any;
+    expect(r.elements[0].contrastStatus).toBe("translucent");
+  });
+
+  it("前景色认不出 + 背景是纯色 → unsupported-color(不被 no-painted 掩盖)", () => {
+    const el = document.createElement("div");
+    el.className = "fgbad";
+    document.body.appendChild(el);
+    const real = window.getComputedStyle.bind(window);
+    const spy = vi.spyOn(window, "getComputedStyle").mockImplementation(((e: Element) => {
+      const cs = real(e as Element);
+      return new Proxy(cs, {
+        get(t, k) {
+          if (k === "color") return "color(display-p3 1 0 0)";
+          if (k === "backgroundColor") return "rgb(255, 255, 255)";
+          const v = (t as never as Record<string | symbol, unknown>)[k];
+          return typeof v === "function" ? v.bind(t) : v;
+        },
+      });
+    }) as never);
+    const r = styleProbeFunc(".fgbad", 10, []) as any;
+    spy.mockRestore();
+    expect(r.elements[0].contrastStatus).toBe("unsupported-color");
+  });
+
+  it("百分比 rgb 不按 0-255 硬算 → unsupported-color", () => {
+    const el = document.createElement("div");
+    el.className = "pct";
+    document.body.appendChild(el);
+    const real = window.getComputedStyle.bind(window);
+    const spy = vi.spyOn(window, "getComputedStyle").mockImplementation(((e: Element) => {
+      const cs = real(e as Element);
+      return new Proxy(cs, {
+        get(t, k) {
+          if (k === "color") return "rgb(100% 0% 0%)";
+          if (k === "backgroundColor") return "rgb(255, 255, 255)";
+          const v = (t as never as Record<string | symbol, unknown>)[k];
+          return typeof v === "function" ? v.bind(t) : v;
+        },
+      });
+    }) as never);
+    const r = styleProbeFunc(".pct", 10, []) as any;
+    spy.mockRestore();
+    // 旧 parse 会读成 [100,0,0],按 100/255 算出错误亮度
+    expect(r.elements[0].contrastStatus).toBe("unsupported-color");
+    expect(r.elements[0].contrastRatio).toBeNull();
+  });
+
   it("无命中 → total=0", () => {
     const r = styleProbeFunc(".none", 10, []) as any;
     expect(r.total).toBe(0);

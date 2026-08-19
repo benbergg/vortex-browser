@@ -804,9 +804,21 @@ export const styleProbeFunc = (
       const n = m.map(Number);
       return [n[0], n[1], n[2], n.length >= 4 ? n[3] : 1];
     };
-    // 只认 rgb/rgba:oklch/lab/color() 抓数字会算出胡说八道的亮度
-    const parseStrict = (c: string): [number, number, number, number] | null =>
-      /^rgba?\(/i.test((c || "").trim()) ? parse(c) : null;
+    // 取不到 opacity 时按 1:Number("") 是 0,会把所有元素误判成半透明
+    const opacityOf = (d: CSSStyleDeclaration): number => {
+      const v = parseFloat(d.opacity);
+      return Number.isFinite(v) ? v : 1;
+    };
+    // 只认完整的 rgb/rgba 数值形态:百分比与 oklch/lab 抓数字会算出胡说八道的亮度
+    const RGB_RE =
+      /^rgba?\(\s*(\d{1,3})\s*[,\s]\s*(\d{1,3})\s*[,\s]\s*(\d{1,3})\s*(?:[,/]\s*([\d.]+)\s*)?\)$/i;
+    const parseStrict = (c: string): [number, number, number, number] | null => {
+      const m = RGB_RE.exec((c || "").trim());
+      if (!m) return null;
+      const ch = [Number(m[1]), Number(m[2]), Number(m[3])];
+      if (ch.some((v) => v > 255)) return null;
+      return [ch[0], ch[1], ch[2], m[4] === undefined ? 1 : Number(m[4])];
+    };
     // 透明判定:无背景 / transparent / alpha=0。
     const isTransparent = (c: string): boolean => {
       if (!c || c === "transparent") return true;
@@ -839,23 +851,22 @@ export const styleProbeFunc = (
       let background = cs.backgroundColor;
       let backgroundImage = cs.backgroundImage;
       let bgFromAncestor = false;
-      let contrastStatus: ContrastStatus =
-        backgroundImage !== "none" ? "background-image" : "ok";
-      // 自身半透明时文字与背景各自与更底层合成,原始色算出的比值是假的
-      if (contrastStatus === "ok" && Number(cs.opacity) < 1) contrastStatus = "translucent";
+      let hasImage = backgroundImage !== "none";
+      // 独立累计:被背景图分支覆盖掉就说不清真正的不可判定原因
+      let translucent = opacityOf(cs) < 1;
 
       // 自身已绘制就不上溯:再往上的层被它盖住,不是实际背景
-      if (contrastStatus === "ok" && isTransparent(background)) {
+      if (!hasImage && isTransparent(background)) {
         // 不设层数上限:真站 painted 背景可在第 10 层,任何魔数都会漏
         for (let a: HTMLElement | null = el.parentElement; a; a = a.parentElement) {
           const acs = getComputedStyle(a);
-          if (Number(acs.opacity) < 1) contrastStatus = "translucent";
+          if (opacityOf(acs) < 1) translucent = true;
           // 第一层产生绘制的祖先就是背景层,图和色都在这层取,取完即停
           if (acs.backgroundImage !== "none") {
             backgroundImage = acs.backgroundImage;
             background = acs.backgroundColor;
             bgFromAncestor = true;
-            contrastStatus = "background-image";
+            hasImage = true;
             break;
           }
           if (!isTransparent(acs.backgroundColor)) {
@@ -866,23 +877,25 @@ export const styleProbeFunc = (
         }
       }
 
+      const fg = parseStrict(color);
+      const bg = parseStrict(background);
+      const bgTransparent = isTransparent(background);
+      // alpha=0 是"没有背景"而不是"半透明",只有 0<alpha<1 才算合成
+      if (fg && fg[3] > 0 && fg[3] < 1) translucent = true;
+      if (bg && !bgTransparent && bg[3] < 1) translucent = true;
+
+      let contrastStatus: ContrastStatus;
       let contrastRatio: number | null = null;
-      if (contrastStatus === "ok") {
-        const fg = parseStrict(color);
-        const bg = parseStrict(background);
-        if (!fg || !bg) {
-          // 认不出的颜色格式宁可说不知道,也不抓数字硬算
-          contrastStatus = isTransparent(background) ? "no-painted-background" : "unsupported-color";
-        } else if (isTransparent(background)) {
-          contrastStatus = "no-painted-background";
-        } else if (fg[3] < 1 || bg[3] < 1) {
-          // alpha<1 的真实观感取决于更底层,按原始色算等于撒谎
-          contrastStatus = "translucent";
-        } else {
-          const L1 = lum(fg) + 0.05;
-          const L2 = lum(bg) + 0.05;
-          contrastRatio = Math.round((Math.max(L1, L2) / Math.min(L1, L2)) * 100) / 100;
-        }
+      // 优先级固定:合成 > 背景图 > 无背景 > 认不出的颜色
+      if (bgTransparent && !hasImage) contrastStatus = "no-painted-background";
+      else if (translucent) contrastStatus = "translucent";
+      else if (hasImage) contrastStatus = "background-image";
+      else if (!fg || !bg) contrastStatus = "unsupported-color";
+      else {
+        const L1 = lum(fg) + 0.05;
+        const L2 = lum(bg) + 0.05;
+        contrastRatio = Math.round((Math.max(L1, L2) / Math.min(L1, L2)) * 100) / 100;
+        contrastStatus = "ok";
       }
       // null 而非 "unknown":JSON 里字符串是 truthy,外部 if(wcagAA) 会误读成通过
       const verdict = (min: number): boolean | null =>
@@ -1542,11 +1555,14 @@ export const tokensProbeFunc = (
       total: number;
       showing: number;
       groups: Record<string, Array<{ name: string; value: string; alias?: string }>>;
+      /** 逐组截断丢弃的条数;showing 是各组 cap 后之和,不是全局前 N 条 */
+      truncatedGroups: Record<string, number>;
     }
   | { error: string } => {
   try {
     const byName = (n: string): string => {
       if (/font-?famil|typeface/.test(n)) return "fontFamily";
+      if (/font-?weight|(^|-)weight(-|$)/.test(n)) return "fontWeight";
       if (/font-?size|text-?size|leading|line-?height/.test(n)) return "fontSize";
       if (/radius|rounded/.test(n)) return "radius";
       if (/shadow/.test(n)) return "shadow";
@@ -1562,7 +1578,14 @@ export const tokensProbeFunc = (
       if (/gradient\(/i.test(v)) return "gradient";
       if (/^(#|rgba?\(|hsla?\(|oklch\(|oklab\(|lab\(|lch\(|color\()/i.test(v)) return "color";
       if (/cubic-bezier\(|steps\(|^-?\d+(\.\d+)?m?s$/i.test(v)) return "motion";
-      if (/\d(px|rem|em)\b[\s\S]*(rgba?\(|#[0-9a-f]{3,8})/i.test(v)) return "shadow";
+      if (/^(linear|ease|ease-in|ease-out|ease-in-out|step-start|step-end)$/i.test(v)) return "motion";
+      // 至少两个长度(offset-x/offset-y)才是 shadow;border 简写只有一个,被这条挡住
+      if (
+        /\d\s*(px|rem|em)\b[\s\S]*\d\s*(px|rem|em)\b/i.test(v) &&
+        /(rgba?\(|#[0-9a-f]{3,8})/i.test(v)
+      ) {
+        return "shadow";
+      }
       if (/^-?\d+(\.\d+)?(px|rem|em|%|vh|vw)$/.test(v)) {
         const g = byName(n);
         return g === "color" || g === "other" ? "spacing" : g;
@@ -1582,35 +1605,42 @@ export const tokensProbeFunc = (
     for (const host of hosts) {
       if (!host[1]) continue;
       const cs = getComputedStyle(host[1]);
-      let hit = false;
+      let contributed = false;
       for (const prop of Array.from(cs as unknown as Iterable<string>)) {
         if (typeof prop !== "string" || prop.slice(0, 2) !== "--") continue;
-        hit = true;
-        // body 上的主题覆盖优先于 :root,后写胜出
-        seen.set(prop, cs.getPropertyValue(prop).trim());
+        const value = cs.getPropertyValue(prop).trim();
+        // 自定义属性会继承,body 多半只是把 :root 的值重念一遍;
+        // 只有新增或改写才算这一层的贡献,否则 roots 会谎报覆盖面
+        if (!seen.has(prop) || seen.get(prop) !== value) contributed = true;
+        seen.set(prop, value);
       }
-      if (hit) roots.push(host[0]);
+      if (contributed) roots.push(host[0]);
     }
 
-    const needle = pattern.toLowerCase();
+    const needle = (pattern || "*").toLowerCase();
     const all =
-      pattern === "*"
+      needle === "*"
         ? Array.from(seen)
         : Array.from(seen).filter((e) => e[0].toLowerCase().indexOf(needle) !== -1);
 
     const groups: Record<string, Array<{ name: string; value: string; alias?: string }>> = {};
+    const truncatedGroups: Record<string, number> = {};
     let showing = 0;
     for (const entry of all.sort((a, b) => (a[0] < b[0] ? -1 : 1))) {
       const name = entry[0];
       const value = entry[1];
       const g = classify(name, value);
       if (!groups[g]) groups[g] = [];
-      if (groups[g].length >= maxPerGroup) continue;
+      // 截断是逐组的,不记下丢了多少调用方无从从 total/showing 反推
+      if (groups[g].length >= maxPerGroup) {
+        truncatedGroups[g] = (truncatedGroups[g] ?? 0) + 1;
+        continue;
+      }
       const m = value.trim().match(/^var\(\s*(--[^,)\s]+)/);
       groups[g].push(m ? { name, value, alias: m[1] } : { name, value });
       showing++;
     }
-    return { roots, total: all.length, showing, groups };
+    return { roots, total: all.length, showing, groups, truncatedGroups };
   } catch (e) {
     return { error: "tokens probe error: " + (e instanceof Error ? e.message : String(e)) };
   }
