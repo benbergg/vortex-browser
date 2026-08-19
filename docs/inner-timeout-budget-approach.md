@@ -123,12 +123,15 @@ CDP 命令排队 / executeScript 不 settle）在跨进程边界处被丢弃，�
 
 ## 7. 待验证假设
 
-| 假设 | 状态 | 如何验 |
+（Task 9 live 于 2026-08-19 在 Chrome 151 复核，构建戳 `2.0.1+mszn6kc9`）
+
+| 假设 | 状态 | 依据 |
 |---|---|---|
-| `mouse.click` 30s 挂住是 CDP 命令排队而非 `debugger.attach` 卡住 | 推断 | live 复现：主线程长任务页面上打 `mouse_click`，分别在 attach 与 dispatch 前后打点 |
-| 页面主线程卡死时 300ms 探针 `executeScript` 确实超时 | 推断（`PROBE_TIMEOUT_MS` 同族已实证） | live spike，禁止用 mock 断言 |
-| `navigate` 那次 42413ms 超过 hub 30s 默认 | **机制未查明** | 查 `hub/router.ts:253` 的 `InternalRequestTimeoutError` 重试是否延长 deadline |
-| 默认预算不会砍掉慢但成功的调用 | 待实测 | 用当日 events 全量耗时分布回放校准，而非拍脑袋定值 |
+| `mouse.click` 30s 挂住是 CDP 命令排队而非 `debugger.attach` 卡住 | **已证实** | 主线程 90s 长任务页面上 `mouse_click` 30s 超时，同一时刻探活判定 page-unresponsive；DevTools 对照组里 attach 每次都秒成，卡的是等渲染进程应答的 dispatch |
+| 页面主线程卡死时 300ms 探针 `executeScript` 确实超时 | **已证实** | 同一次 live：page-unresponsive 这一态只可能来自探针超时，hint 确为长任务那条 |
+| `navigate` 那次 42413ms 超过 hub 30s 默认 | **仍未查明** | 本轮未查 `hub/router.ts` 的 `InternalRequestTimeoutError` 重试是否延长 deadline；hub 缺省兜底已改由 action 预算推导，但这不解释旧值如何被突破 |
+| 默认预算不会砍掉慢但成功的调用 | **部分证实** | juejin.cn 抽查 navigate/observe/extract/screenshot/act 均未被砍；样本小，真正验收看一周窗口 |
+| 打开 DevTools 会占住 `chrome.debugger`（计划里当作降级路径的复现手段） | **已证伪** | Chrome 151 上 DevTools 先于扩展 attach（docked 853px 实测），`chrome.debugger.attach` 仍成功、`act useRealMouse` 照走 `mode:"realMouse"`。真实占用方是另一个 attach 在先的扩展；相关 hint 文案已按此改写 |
 
 ## 8. 数据校准与两处订正（勘察后补）
 
