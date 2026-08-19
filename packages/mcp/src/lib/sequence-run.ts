@@ -127,7 +127,7 @@ export async function runSequence(
     const c = classifyStep({ ok: out.ok, error: out.error, fp: out.fp ?? {}, effect });
     traces[i] = {
       ...traces[i], state: c.state, drift: c.drift, effect: c.effect, error: out.error,
-      // 条件展开:没有自陈就不该多出这个键,否则每步都为一个罕见信道付 token
+      // 条件展开:JSON 之外的 in-memory 消费者靠键存在性判断有没有自陈
       ...(out.diagnosis ? { diagnosis: out.diagnosis } : {}),
     };
     if (!shouldContinue(c.state, onFailure)) break;

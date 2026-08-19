@@ -102,6 +102,18 @@ describe("sequence 报告承载单步自陈", () => {
     );
   });
 
+  it("无自陈时轨迹对象上压根没有 diagnosis 键", async () => {
+    // 断言下沉到 runSequence 的返回对象:JSON.stringify 本就丢 undefined 值的键,
+    // 只看输出文本证明不了实现真做了条件展开。
+    const { runSequence } = await import("../src/lib/sequence-run.js");
+    const out = await runSequence(
+      [{ action: "click", target: "#go" }],
+      "stop",
+      async () => ({ ok: true, result: { success: true, effect: EFFECT } }),
+    );
+    expect("diagnosis" in out.steps[0]).toBe(false);
+  });
+
   it("无自陈时报告形状逐字节不变:既不多 diagnosis 键,键序也不变", async () => {
     const text = await rawClickSequence({ success: true, effect: EFFECT });
     expect(text).not.toContain("diagnosis");
