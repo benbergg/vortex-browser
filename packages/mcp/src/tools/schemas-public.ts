@@ -474,21 +474,22 @@ export const PUBLIC_TOOLS: ToolDef[] = [
     // 零 LLM 探测:text grep 可见文本 / css 计数+取属性。一次 executeScript 即时返回。
     name: "vortex_query",
     action: "query.queryPage",
-    description: "Zero-LLM probe: text=grep; css=find elems; component=Vue/React state; geometry=bbox/clip/occlude; style=color/bg+WCAG; sheet=Lake Sheet→md/csv/json; flow=流程图→mermaid; chart=echarts→数据(series/axis/legend,attr=summary|json).",
+    description: "Zero-LLM probe: text=grep; css=find elems; component=Vue/React state; geometry=bbox/clip/occlude; style=排版/盒/绘制/动效+WCAG(attr 选组); sheet=Lake Sheet→md/csv/json; flow=流程图→mermaid; chart=echarts→数据(attr=summary|json); tokens=CSS 变量→调色板/字阶(pattern=*,只扫 :root/body).",
     schema: {
       type: "object",
       properties: {
         mode: {
-          enum: ["text", "css", "component", "geometry", "style", "sheet", "flow", "chart", "schema"],
+          enum: ["text", "css", "component", "geometry", "style", "sheet", "flow", "chart", "schema", "tokens"],
           description:
             "component reads Vue/React instance state; sheet only reads Yuque Lake Sheet, NOT DOM tables (use extract for those); " +
-            "schema=author-declared JSON-LD/Microdata/OGP (pattern=@type or '*'), may differ from visible content",
+            "schema=author-declared JSON-LD/Microdata/OGP (pattern=@type or '*'), may differ from visible content; " +
+            "css/component/geometry/style 的 pattern 也接受 vortex_observe 给的 @ref",
         },
         pattern: { type: "string" },
         isRegex: { type: "boolean" },
         caseSensitive: { type: "boolean" },
         contextChars: { type: "number" },
-        attr: { type: "string", description: "css: 属性名, 多个用 , 或 | 分隔(如 'class|title'); chart/sheet/flow: 输出格式" },
+        attr: { type: "string", description: "css: 属性名, 多个用 , 或 | 分隔(如 'class|title'); style: 分组 typography|box|paint|motion(默认全开); chart/sheet/flow: 输出格式" },
         includeText: { type: "boolean" },
         maxResults: { type: "number" },
         ...tabFields,

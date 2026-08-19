@@ -156,7 +156,10 @@ describe("I15: tools/list budget + count + internalized grep", () => {
     // (handler mouse.click 早已实现,含 frame→viewport 换算,此前只暴露坐标版 mouse.drag;
     // canvas/地图/无 ref 场景刚需,补齐"坐标 click"能力缺口)。schema 块 +~366B,payload
     // 实测 8378B,cap +400 至 8500 留 ~122B 余量。沿用"加能力调 cap 不压字符"惯例。
-    expect(toolsListPayload.length).toBeLessThanOrEqual(11100);
+    // mode=tokens + @ref: 11100 → 11300。vortex_query mode 枚举新增 tokens(站点 CSS
+    // 变量→调色板/字阶),description 同步追加,attr 补 style 分组说明,mode 说明补 @ref。
+    // payload 实测 11197B,cap +200 留 ~103B 余量。沿用"加能力调 cap 不压字符"惯例。
+    expect(toolsListPayload.length).toBeLessThanOrEqual(11300);
   });
 
   it("公开工具数量 = 24（23 + vortex_sequence 多步序列）", () => {
@@ -226,13 +229,17 @@ describe("I15: tools/list budget + count + internalized grep", () => {
     }
   });
 
-  it("description 长度 ≤ 230 char", () => {
+  it("description 长度:query 单独放宽,其余锁在实测最大值", () => {
     // 120 → 180: vortex_act description 恢复原始 hint + 追加 onDialog clause = 174 char。
     // 174 = 120 原始 + 54 onDialog 子句，是真新增能力驱动的增长。
-    // 180 → 230: 仅 vortex_query 超(222)，是 8 个 mode 各一段真能力说明累加的结果；
-    // 其余工具最长 174(vortex_act)，阈值放宽不会掩盖别处膨胀。
-    for (const d of defs) {
-      expect(d.description.length).toBeLessThanOrEqual(230);
+    // 180 → 230: 仅 vortex_query 超(222)，是 8 个 mode 各一段真能力说明累加的结果。
+    // 230 → query 280: 新增 tokens mode 一段说明,实测 261。
+    // 整体放宽会给别的工具留白涨空间——事实上已经发生过:上一条注释写"其余最长
+    // 174(vortex_act)",而 act 实测已 215,是在 230 的统一上限下悄悄涨的。故拆两条锁。
+    const q = defs.find((d) => d.name === "vortex_query")!;
+    expect(q.description.length).toBeLessThanOrEqual(280);
+    for (const d of defs.filter((d) => d.name !== "vortex_query")) {
+      expect(d.description.length, `${d.name} description 变长了`).toBeLessThanOrEqual(215);
     }
   });
 
