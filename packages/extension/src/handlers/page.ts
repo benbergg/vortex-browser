@@ -1,4 +1,4 @@
-import { PageActions, VtxErrorCode, vtxError } from "@vortex-browser/shared";
+import { MAX_INNER_TIMEOUT_MS, PageActions, VtxErrorCode, vtxError } from "@vortex-browser/shared";
 import type { ActionRouter } from "../lib/router.js";
 import type { DebuggerManager } from "../lib/debugger-manager.js";
 import { buildExecuteTarget, ensureFrameAttached, getActiveTabId } from "../lib/tab-utils.js";
@@ -362,6 +362,11 @@ export function registerPageHandlers(router: ActionRouter, debuggerMgr: Debugger
       if (!expression) throw vtxError(VtxErrorCode.INVALID_PARAMS, "Missing required param: expression");
       const tid = await getActiveTabId(tabId);
       const timeout = (args.timeout as number) ?? 10_000;
+      // 超界会让 handler 的界晚于 router 的,语义化消息被通用归因抢走
+      if (!Number.isInteger(timeout) || timeout < 1 || timeout > MAX_INNER_TIMEOUT_MS) {
+        throw vtxError(VtxErrorCode.INVALID_PARAMS,
+          `timeout must be an integer in [1, ${MAX_INNER_TIMEOUT_MS}]; got ${timeout}`);
+      }
       const pollInterval = (args.pollInterval as number) ?? 100;
       const frameId = args.frameId as number | undefined;
       if (frameId != null) await ensureFrameAttached(tid, frameId);

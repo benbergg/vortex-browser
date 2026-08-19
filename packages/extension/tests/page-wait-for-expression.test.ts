@@ -132,6 +132,15 @@ describe("page.waitForExpression (@since 0.8.x)", () => {
     expect(call.args).toEqual(["true", 10_000, 100]);
   });
 
+  it("超出内层硬上限的 timeout 直接拒绝，不让 router 抢走语义化消息", async () => {
+    const resp: any = await router.dispatch(
+      mkReq("page.waitForExpression", { expression: "true", timeout: 100_000 }, 42),
+    );
+    expect(resp.error?.code).toBe(VtxErrorCode.INVALID_PARAMS);
+    expect(String(resp.error?.message)).toMatch(/timeout must be an integer in \[1, 60000\]; got 100000/);
+    expect(executeScript).not.toHaveBeenCalled();
+  });
+
   it("页面主线程卡死时由 SW 侧计时器在调用方 timeout 到点返回", async () => {
     vi.useFakeTimers();
     try {
