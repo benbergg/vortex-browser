@@ -54,7 +54,7 @@ export function noHitMessage(target: string): string {
 }
 
 export const TIMEOUT_PAGE_ALIVE_HINT =
-  "The page's main thread still responds, so the stall is in this action's own path (a CDP command queued, or chrome.debugger held by another client). Close DevTools on this tabId, then retry; raising the timeout argument only helps if the path is merely slow.";
+  "The page's main thread still responds, so the stall is in this action's own path (a CDP command queued, or chrome.debugger held by another extension). Detach that debugger client, or retry this tabId later; raising the timeout argument only helps if the path is merely slow.";
 
 export const TIMEOUT_PAGE_UNRESPONSIVE_HINT =
   "The page's main thread is blocked by a long task, so it never answered within the action budget — waiting longer and a bigger timeout argument are both useless. Call vortex_navigate to reload and reset this tab, or call vortex_tab_list and retry on another live tabId.";
@@ -73,9 +73,9 @@ export const TIMEOUT_TAB_GONE_HINT =
  * 只在有合成替代路径的地方成立,归 CDP_BUSY_MOUSE_CLICK_HINT 那类专用文案。
  */
 export const CDP_BUSY_ATTACH_HINT =
-  "Another debugger owns this tab — usually DevTools is open on it, or another extension attached " +
-  "first. No argument change will get through while it is held: close DevTools on that tabId (or " +
-  "detach the other debugger client), then retry.";
+  "Another debugger owns this tab — normally a second extension that attached first; DevTools " +
+  "shares chrome.debugger on current Chrome, so closing it rarely frees the tab. Detach that " +
+  "extension, or retry on another tabId from vortex_tab_list.";
 
 /**
  * CDP 被别的 debugger 占住时 mouse.click 的提示。它靠真实坐标派发,没有 act 那样的
@@ -83,8 +83,8 @@ export const CDP_BUSY_ATTACH_HINT =
  */
 export const CDP_BUSY_MOUSE_CLICK_HINT =
   "Another debugger owns this tab, so vortex_mouse_click cannot dispatch a trusted event at those " +
-  "coordinates. Close DevTools on this tab (or detach the other debugger) and retry; if you only need the " +
-  "click and not a trusted event, call vortex_act with action='click' instead.";
+  "coordinates. Detach that debugger client and retry; if you only need the click and not a trusted " +
+  "event, call vortex_act with action='click' instead.";
 
 /** 超时归因的四态。扩态时 TIMEOUT_LIVENESS_META 少一条即编译失败,不静默回落默认 hint */
 export type TimeoutLiveness = "page-alive" | "page-unresponsive" | "probe-failed" | "tab-gone";
@@ -277,7 +277,7 @@ export const DEFAULT_ERROR_META: Record<VtxErrorCode, VtxErrorMeta> = {
     recoverable: false,
   },
   DRAG_REQUIRES_CDP: {
-    hint: "Drag operation requires CDP, but CDP is unavailable (DevTools may be open, or chrome.debugger attach was denied). Close DevTools and retry; drag is exposed via vortex_act with action='drag' once CDP attaches.",
+    hint: "Drag operation requires CDP, but CDP is unavailable (another extension holds chrome.debugger, or attach was denied). Detach that debugger client and retry; drag is exposed via vortex_act with action='drag' once CDP attaches.",
     recoverable: false,
   },
 

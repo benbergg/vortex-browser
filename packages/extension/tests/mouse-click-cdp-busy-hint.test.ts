@@ -1,9 +1,8 @@
 /**
- * Author: qingwa
  * Description: mouse.click 在 CDP 被占时无等价降级,只能把提示换成能走通的下一步。
  *
  * act 的合成路径在同一 handler 内可降级,mouse.click 靠真实坐标派发没有等价替代。
- * 通用 attach 提示只说「关 DevTools」,没告诉调用方还有 vortex_act 这条路 —— 当日
+ * 通用 attach 提示只说怎么腾出 debugger,没告诉调用方还有 vortex_act 这条路 —— 当日
  * 日志里模型的选择是 tab_create 弃 tab(2026-08-18)。
  */
 
@@ -49,7 +48,7 @@ describe("mouse.click 在 CDP 被占时的提示", () => {
     const resp = await routerWith(BUSY).dispatch(mkReq({ x: 10, y: 20 }));
     expect(resp.error?.code).toBe("CDP_NOT_ATTACHED");
     expect(resp.error?.hint).toMatch(/vortex_act/);
-    expect(resp.error?.hint).toMatch(/DevTools/i);
+    expect(resp.error?.hint).toMatch(/detach/i);
     expect(resp.error?.recoverable).toBe(true);
   });
 

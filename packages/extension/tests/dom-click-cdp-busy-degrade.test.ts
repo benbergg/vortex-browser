@@ -3,7 +3,7 @@
  * Description: CDP 被别的 debugger 占住时,act useRealMouse 降级为合成路径并自陈。
  *
  * 背景(2026-08-18 使用日志):同一 tab 上 200+ 次 evaluate 正常,只有需要 CDP 的
- * act useRealMouse 与 mouse_click 报 CDP_NOT_ATTACHED(常驻 DevTools 占着 debugger),
+ * act useRealMouse 与 mouse_click 报 CDP_NOT_ATTACHED(别的扩展占着 debugger),
  * 模型最后只能 tab_create 弃掉这个 tab 重来。合成路径就在同一 handler 内。
  *
  * 降级不能只在 result 里塞个字段:useRealMouse 的存在理由就是要 isTrusted=true 的
@@ -98,7 +98,7 @@ describe("CLICK useRealMouse 在 CDP 被占时降级为合成路径", () => {
     expect(value).toMatchObject({ success: true, degraded: "cdp-busy-synthetic" });
   });
 
-  it("降级必须自陈:诊断里点明 isTrusted=false 与 DevTools 占用", async () => {
+  it("降级必须自陈:诊断里点明 isTrusted=false 与 debugger 被占", async () => {
     cdpClickElement.mockRejectedValue(BUSY);
     const resp = await router.dispatch(
       mkReq({ selector: "button#go", action: "click", useRealMouse: true, tabId: 42 }),
@@ -106,7 +106,7 @@ describe("CLICK useRealMouse 在 CDP 被占时降级为合成路径", () => {
     const { diagnosis } = splitDiagnosis(resp.result);
     expect(diagnosis).toBeTruthy();
     expect(diagnosis).toMatch(/isTrusted/);
-    expect(diagnosis).toMatch(/DevTools/i);
+    expect(diagnosis).toMatch(/held by another client/i);
   });
 
   it("降级路径强制采效果信号:调用方没开 observeEffect 也带回 effect", async () => {
@@ -176,8 +176,8 @@ describe("CLICK useRealMouse 在 CDP 被占时降级为合成路径", () => {
       mkReq({ selector: "button#go", action: "click", useRealMouse: true, tabId: 42 }),
     );
     const { value, diagnosis } = splitDiagnosis(resp.result);
-    expect(diagnosis).not.toMatch(/DevTools/i);
     expect(diagnosis).not.toMatch(/held by another client/i);
+    expect(diagnosis).not.toMatch(/attached first/i);
     expect(diagnosis).toMatch(/isTrusted/);
     expect(diagnosis).toContain("Cannot access a chrome:// URL");
     expect(value).toMatchObject({ degraded: "cdp-busy-synthetic" });
@@ -191,7 +191,7 @@ describe("CLICK useRealMouse 在 CDP 被占时降级为合成路径", () => {
     const { value, diagnosis } = splitDiagnosis(resp.result);
     expect(diagnosis).toBeTruthy();
     expect(diagnosis).toMatch(/isTrusted/);
-    expect(diagnosis).toMatch(/DevTools/i);
+    expect(diagnosis).toMatch(/held by another client/i);
     expect(value).toMatchObject({ success: true, degraded: "cdp-busy-synthetic" });
     expect((value as { effect?: unknown }).effect).toEqual({ domMutations: 2, urlChanged: false });
   });

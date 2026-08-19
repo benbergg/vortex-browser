@@ -35,10 +35,10 @@ import { buildNoMatchMessage, rankCandidates } from "../action/candidate-suggest
  * isDebuggerBusyMessage 命中才敢说「被谁占着」,否则照搬 Chrome 原文不替它编因。
  */
 const CDP_BUSY_SYNTHETIC_DIAGNOSIS =
-  "Degraded to a synthetic click: chrome.debugger is held by another client (DevTools open on this tab, " +
-  "or another extension attached), so this dispatch had isTrusted=false and a site that gates on trusted " +
-  "events may have ignored it — read the returned effect signals to judge, then close DevTools on this tab " +
-  "and retry if you need a real mouse click.";
+  "Degraded to a synthetic click: chrome.debugger is held by another client (normally a second " +
+  "extension that attached first), so this dispatch had isTrusted=false and a site that gates on " +
+  "trusted events may have ignored it — read the returned effect signals to judge, then detach that " +
+  "debugger client and retry if you need a real mouse click.";
 
 function cdpUnavailableDiagnosis(message: string): string {
   return (
