@@ -431,6 +431,28 @@ describe("styleProbeFunc", () => {
     expect(r.elements[0].contrastRatio).toBeNull();
   });
 
+  it("alpha 越界(rgba(...,1.5)) → unsupported-color,不按不透明算", () => {
+    const el = document.createElement("div");
+    el.className = "abad";
+    document.body.appendChild(el);
+    const real = window.getComputedStyle.bind(window);
+    const spy = vi.spyOn(window, "getComputedStyle").mockImplementation(((e: Element) => {
+      const cs = real(e as Element);
+      return new Proxy(cs, {
+        get(t, k) {
+          if (k === "color") return "rgba(0, 0, 0, 1.5)";
+          if (k === "backgroundColor") return "rgb(255, 255, 255)";
+          const v = (t as never as Record<string | symbol, unknown>)[k];
+          return typeof v === "function" ? v.bind(t) : v;
+        },
+      });
+    }) as never);
+    const r = styleProbeFunc(".abad", 10, []) as any;
+    spy.mockRestore();
+    expect(r.elements[0].contrastStatus).toBe("unsupported-color");
+    expect(r.elements[0].contrastRatio).toBeNull();
+  });
+
   it("无命中 → total=0", () => {
     const r = styleProbeFunc(".none", 10, []) as any;
     expect(r.total).toBe(0);

@@ -817,7 +817,9 @@ export const styleProbeFunc = (
       if (!m) return null;
       const ch = [Number(m[1]), Number(m[2]), Number(m[3])];
       if (ch.some((v) => v > 255)) return null;
-      return [ch[0], ch[1], ch[2], m[4] === undefined ? 1 : Number(m[4])];
+      const a = m[4] === undefined ? 1 : Number(m[4]);
+      if (!(a >= 0 && a <= 1)) return null;
+      return [ch[0], ch[1], ch[2], a];
     };
     // 透明判定:无背景 / transparent / alpha=0。
     const isTransparent = (c: string): boolean => {
@@ -1547,6 +1549,8 @@ export const schemaProbeFunc = (
  * 「body 继承」与「body 重复声明同值」，要那个得读 CSSOM 规则来源。
  * shadow 判定是启发式（两个以上长度 + 颜色），只保证常见形态，不解析完整语法。
  * 参数 args: [pattern, maxPerGroup]；pattern="*" 取全量，否则按名字子串过滤。
+ * 探针对空/缺省 pattern 兜底成 "*"，但 handler 那层会先按「pattern 必填」拒掉——
+ * 兜底是防直接调用，不是对外契约。
  * ⚠ 自包含:注入丢模块作用域,一切辅助函数必须内联。
  */
 export const tokensProbeFunc = (
@@ -1917,7 +1921,13 @@ export function registerQueryHandlers(router: ActionRouter): void {
         });
 
         const res = results[0]?.result as
-          | { roots: string[]; total: number; showing: number; groups: Record<string, unknown[]> }
+          | {
+              roots: string[];
+              total: number;
+              showing: number;
+              groups: Record<string, unknown[]>;
+              truncatedGroups: Record<string, number>;
+            }
           | { error: string }
           | undefined;
 
