@@ -106,4 +106,26 @@ describe("query 经 index+snapshotId 定位（@ref 翻译后的形态）", () =>
     expect(resp.error?.code).toBe(VtxErrorCode.INVALID_INDEX);
     expect(executeScript).not.toHaveBeenCalled();
   });
+  it("mode=tokens 注入的是 tokensProbeFunc,实参是 [pattern, maxPerGroup]", async () => {
+    const { tokensProbeFunc } = await import("../src/handlers/query.js");
+    executeScript.mockResolvedValue([{ result: { roots: [":root"], total: 0, showing: 0, groups: {} } }]);
+    await router.dispatch(mkReq({ mode: "tokens", pattern: "colors", maxResults: 12 }, "r13"));
+    const call = executeScript.mock.calls[0][0];
+    // 注错探针 / 把 maxResults 当别的用 / pattern 传丢,这三种都在这里转红
+    expect(call.func).toBe(tokensProbeFunc);
+    expect(call.args).toEqual(["colors", 12]);
+  });
+
+  it("mode=tokens 不传 maxResults → 每组默认 40", async () => {
+    executeScript.mockResolvedValue([{ result: { roots: [":root"], total: 0, showing: 0, groups: {} } }]);
+    await router.dispatch(mkReq({ mode: "tokens", pattern: "*" }, "r14"));
+    expect(executeScript.mock.calls[0][0].args[1]).toBe(40);
+  });
+
+  it("mode=tokens 零命中 → 带自陈说明为什么空", async () => {
+    executeScript.mockResolvedValue([{ result: { roots: [], total: 0, showing: 0, groups: {} } }]);
+    const resp = await router.dispatch(mkReq({ mode: "tokens", pattern: "*" }, "r15"));
+    expect(resp.error).toBeUndefined();
+    expect(JSON.stringify(resp.result)).toMatch(/compile design tokens away at build time/);
+  });
 });

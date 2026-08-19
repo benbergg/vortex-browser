@@ -1504,6 +1504,97 @@ export const schemaProbeFunc = (
 };
 
 /**
+ * page-side 设计 token 探测函数体。mode=tokens 注入 MAIN world。
+ * 回答「这个站的设计系统长什么样」——调色板、字阶、间距阶、圆角、阴影、动效。
+ * 分类优先看值形态（跨框架稳定），值看不出类型时才回落到名字启发式。
+ * 覆盖面只有 :root 与 body，挂在中间主题容器上的变量不在内，由 roots 如实报告。
+ * 参数 args: [pattern, maxPerGroup]；pattern="*" 取全量，否则按名字子串过滤。
+ * ⚠ 自包含:注入丢模块作用域,一切辅助函数必须内联。
+ */
+export const tokensProbeFunc = (
+  pattern: string,
+  maxPerGroup: number,
+):
+  | {
+      roots: string[];
+      total: number;
+      showing: number;
+      groups: Record<string, Array<{ name: string; value: string; alias?: string }>>;
+    }
+  | { error: string } => {
+  try {
+    const byName = (n: string): string => {
+      if (/font-?famil|typeface/.test(n)) return "fontFamily";
+      if (/font-?size|text-?size|leading|line-?height/.test(n)) return "fontSize";
+      if (/radius|rounded/.test(n)) return "radius";
+      if (/shadow/.test(n)) return "shadow";
+      if (/duration|delay|easing|transition|animation/.test(n)) return "motion";
+      if (/colou?r|(^|-)bg(-|$)|background|(^|-)fg(-|$)|foreground/.test(n)) return "color";
+      if (/space|spacing|gap|size|inset|margin|padding/.test(n)) return "spacing";
+      return "other";
+    };
+    const classify = (name: string, value: string): string => {
+      const n = name.toLowerCase();
+      const v = value.trim();
+      if (/^var\(/.test(v)) return byName(n);
+      if (/gradient\(/i.test(v)) return "gradient";
+      if (/^(#|rgba?\(|hsla?\(|oklch\(|oklab\(|lab\(|lch\(|color\()/i.test(v)) return "color";
+      if (/cubic-bezier\(|steps\(|^-?\d+(\.\d+)?m?s$/i.test(v)) return "motion";
+      if (/\d(px|rem|em)\b[\s\S]*(rgba?\(|#[0-9a-f]{3,8})/i.test(v)) return "shadow";
+      if (/^-?\d+(\.\d+)?(px|rem|em|%|vh|vw)$/.test(v)) {
+        const g = byName(n);
+        return g === "color" || g === "other" ? "spacing" : g;
+      }
+      if (/,/.test(v) && /(sans-serif|serif|monospace|system-ui|cursive|fantasy)/i.test(v)) {
+        return "fontFamily";
+      }
+      return byName(n);
+    };
+
+    const roots: string[] = [];
+    const seen = new Map<string, string>();
+    const hosts: Array<[string, Element | null]> = [
+      [":root", document.documentElement],
+      ["body", document.body],
+    ];
+    for (const host of hosts) {
+      if (!host[1]) continue;
+      const cs = getComputedStyle(host[1]);
+      let hit = false;
+      for (const prop of Array.from(cs as unknown as Iterable<string>)) {
+        if (typeof prop !== "string" || prop.slice(0, 2) !== "--") continue;
+        hit = true;
+        // body 上的主题覆盖优先于 :root,后写胜出
+        seen.set(prop, cs.getPropertyValue(prop).trim());
+      }
+      if (hit) roots.push(host[0]);
+    }
+
+    const needle = pattern.toLowerCase();
+    const all =
+      pattern === "*"
+        ? Array.from(seen)
+        : Array.from(seen).filter((e) => e[0].toLowerCase().indexOf(needle) !== -1);
+
+    const groups: Record<string, Array<{ name: string; value: string; alias?: string }>> = {};
+    let showing = 0;
+    for (const entry of all.sort((a, b) => (a[0] < b[0] ? -1 : 1))) {
+      const name = entry[0];
+      const value = entry[1];
+      const g = classify(name, value);
+      if (!groups[g]) groups[g] = [];
+      if (groups[g].length >= maxPerGroup) continue;
+      const m = value.trim().match(/^var\(\s*(--[^,)\s]+)/);
+      groups[g].push(m ? { name, value, alias: m[1] } : { name, value });
+      showing++;
+    }
+    return { roots, total: all.length, showing, groups };
+  } catch (e) {
+    return { error: "tokens probe error: " + (e instanceof Error ? e.message : String(e)) };
+  }
+};
+
+/**
  * 归一化 vortex_query mode=css 的 `attr` 参数为属性名数组(去空)。
  *
  * 接受: 单属性("class") / 分隔符拼接的多属性("class|title" 或 "class,title") /
@@ -1546,11 +1637,11 @@ export function registerQueryHandlers(router: ActionRouter): void {
         !mode ||
         (mode !== "text" && mode !== "css" && mode !== "component" &&
          mode !== "geometry" && mode !== "style" && mode !== "sheet" && mode !== "flow" &&
-         mode !== "chart" && mode !== "schema")
+         mode !== "chart" && mode !== "schema" && mode !== "tokens")
       ) {
         throw vtxError(
           VtxErrorCode.INVALID_PARAMS,
-          `vortex_query: mode must be 'text', 'css', 'component', 'geometry', 'style', 'sheet', 'flow', 'chart' or 'schema', got ${String(mode)}`,
+          `vortex_query: mode must be 'text', 'css', 'component', 'geometry', 'style', 'sheet', 'flow', 'chart', 'schema' or 'tokens', got ${String(mode)}`,
         );
       }
       if (!pattern || typeof pattern !== "string" || !pattern.trim()) {
@@ -1754,6 +1845,34 @@ export function registerQueryHandlers(router: ActionRouter): void {
                 frameScoped: frameId != null,
                 typeFilter: pattern === "*" ? null : pattern,
               })
+            : null,
+        );
+      } else if (mode === "tokens") {
+        // tokens 模式:抽站点 CSS 自定义属性,给调色板/字阶/间距阶。
+        const maxPerGroup = Math.min((args.maxResults as number | undefined) ?? 40, 200);
+
+        const results = await chrome.scripting.executeScript({
+          target: buildExecuteTarget(tid, frameId),
+          func: tokensProbeFunc,
+          args: [pattern, maxPerGroup],
+          world: "MAIN",
+        });
+
+        const res = results[0]?.result as
+          | { roots: string[]; total: number; showing: number; groups: Record<string, unknown[]> }
+          | { error: string }
+          | undefined;
+
+        if (!res) {
+          throw vtxError(VtxErrorCode.JS_EXECUTION_ERROR, "query.queryPage tokens: executeScript returned no result");
+        }
+        if ("error" in res && res.error) {
+          throw vtxError(VtxErrorCode.JS_EXECUTION_ERROR, `query.queryPage tokens error: ${res.error}`);
+        }
+        return withDiagnosis(
+          res,
+          res.total === 0
+            ? "no CSS custom properties matched on :root/body; the site may compile design tokens away at build time (SCSS/Less variables leave no runtime trace) — use mode=style on a representative element instead"
             : null,
         );
       } else if (mode === "style") {
