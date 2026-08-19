@@ -131,4 +131,48 @@ describe("page.waitForExpression (@since 0.8.x)", () => {
     const call = executeScript.mock.calls[0][0];
     expect(call.args).toEqual(["true", 10_000, 100]);
   });
+
+  it("页面主线程卡死时由 SW 侧计时器在调用方 timeout 到点返回", async () => {
+    vi.useFakeTimers();
+    try {
+      // executeScript 永不 settle：page-side poll 排不上队（当日 wait_for 20147ms 的形态）
+      executeScript.mockImplementation(() => new Promise(() => {}));
+      let resp: any;
+      const p = router
+        .dispatch(mkReq("page.waitForExpression", { expression: "window.__never === true", timeout: 15_000 }, 42))
+        .then((r) => { resp = r; });
+      await vi.advanceTimersByTimeAsync(15_500);
+      await p;
+
+      expect(resp.error?.code).toBe(VtxErrorCode.TIMEOUT);
+      expect(String(resp.error?.message)).toMatch(/within 15000ms/);
+      expect(String(resp.error?.message)).toMatch(/page-side polling did not report back/);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("page-side 在自身 timeout 到点报活着的语义化结果时，SW margin 让其先手", async () => {
+    vi.useFakeTimers();
+    try {
+      // 模拟页面仍活着：page-side poll 在自身 15000ms timeoutMs 到点报 ok:false（非卡死）
+      executeScript.mockImplementation(
+        () => new Promise((resolve) => {
+          setTimeout(() => resolve([{ result: { ok: false, waitedMs: 15_000, error: "boom" } }]), 15_000);
+        }),
+      );
+      let resp: any;
+      const p = router
+        .dispatch(mkReq("page.waitForExpression", { expression: "window.__x", timeout: 15_000 }, 42))
+        .then((r) => { resp = r; });
+      await vi.advanceTimersByTimeAsync(15_000);
+      await p;
+
+      expect(resp.error?.code).toBe(VtxErrorCode.TIMEOUT);
+      expect(String(resp.error?.message)).toMatch(/last evaluation threw: boom/);
+      expect(String(resp.error?.message)).not.toMatch(/page-side polling did not report back/);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

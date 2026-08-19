@@ -3,6 +3,7 @@ import type { ActionRouter } from "../lib/router.js";
 import type { DebuggerManager } from "../lib/debugger-manager.js";
 import { buildExecuteTarget, ensureFrameAttached, getActiveTabId } from "../lib/tab-utils.js";
 import { resolveTargetOptional } from "../lib/resolve-target.js";
+import { pageQuery, PageQueryTimeoutError } from "../adapter/native.js";
 
 // 探一次目标 tab 的 document.readyState（仅主 frame）。executeScript 异常时返回
 // 空串，调用方按"未就绪"处理。
@@ -380,56 +381,65 @@ export function registerPageHandlers(router: ActionRouter, debuggerMgr: Debugger
         );
       }
 
-      const results = await chrome.scripting.executeScript({
-        target: buildExecuteTarget(tid, frameId),
-        // page-side polling: 纯 setTimeout 调度(不用 requestAnimationFrame)。
-        // rAF 在隐藏 tab(active:false / 后台 tab,document.visibilityState='hidden')
-        // 被浏览器冻结不回调 → poll 体(含超时判定)永不执行 → promise 挂死到传输超时
-        // (2026-06-20 白盒+DAST 双证)。setTimeout 在隐藏 tab 仍触发(虽节流),与
-        // page.wait / dom.waitSettled 一致。Stops on first truthy value or on
-        // timeout. Returns { ok, value, waitedMs, error? } so the caller can
-        // distinguish "expr threw" from "expr never went truthy".
-        func: (expr: string, timeoutMs: number, intervalMs: number) => {
-          return new Promise<{ ok: boolean; value?: unknown; waitedMs: number; error?: string }>(
-            (resolve) => {
-              const start = Date.now();
-              let lastError: string | undefined;
-              // BUG-004: detect IIFE forms and auto-invoke. Without this,
-              // `() => false` is `eval`-ed to an arrow function (truthy!) and
-              // `if (v)` immediately resolves, defeating "wait until X" semantics.
-              const isIIFE = /^\s*(?:async\s+)?(?:\([^)]*\)|[A-Za-z_$][\w$]*)\s*=>/.test(expr)
-                || /^\s*(?:async\s+)?function\s*[*(]/.test(expr);
-              const tryOnce = () => {
-                try {
-                  const v = isIIFE ? eval('(' + expr + ')()') : eval(expr);
-                  if (v) {
-                    resolve({ ok: true, value: v as unknown, waitedMs: Date.now() - start });
-                    return true;
+      let res: { ok: boolean; value?: unknown; waitedMs: number; error?: string } | undefined;
+      try {
+        res = await pageQuery(
+          tid,
+          frameId,
+          // page-side polling: 纯 setTimeout 调度(不用 requestAnimationFrame)。
+          // rAF 在隐藏 tab(active:false / 后台 tab,document.visibilityState='hidden')
+          // 被浏览器冻结不回调 → poll 体(含超时判定)永不执行 → promise 挂死到传输超时
+          // (2026-06-20 白盒+DAST 双证)。setTimeout 在隐藏 tab 仍触发(虽节流),与
+          // page.wait / dom.waitSettled 一致。Stops on first truthy value or on
+          // timeout. Returns { ok, value, waitedMs, error? } so the caller can
+          // distinguish "expr threw" from "expr never went truthy".
+          (expr: string, timeoutMs: number, intervalMs: number) => {
+            return new Promise<{ ok: boolean; value?: unknown; waitedMs: number; error?: string }>(
+              (resolve) => {
+                const start = Date.now();
+                let lastError: string | undefined;
+                // BUG-004: detect IIFE forms and auto-invoke. Without this,
+                // `() => false` is `eval`-ed to an arrow function (truthy!) and
+                // `if (v)` immediately resolves, defeating "wait until X" semantics.
+                const isIIFE = /^\s*(?:async\s+)?(?:\([^)]*\)|[A-Za-z_$][\w$]*)\s*=>/.test(expr)
+                  || /^\s*(?:async\s+)?function\s*[*(]/.test(expr);
+                const tryOnce = () => {
+                  try {
+                    const v = isIIFE ? eval('(' + expr + ')()') : eval(expr);
+                    if (v) {
+                      resolve({ ok: true, value: v as unknown, waitedMs: Date.now() - start });
+                      return true;
+                    }
+                  } catch (err) {
+                    lastError = err instanceof Error ? err.message : String(err);
                   }
-                } catch (err) {
-                  lastError = err instanceof Error ? err.message : String(err);
-                }
-                return false;
-              };
-              if (tryOnce()) return;
-              const poll = () => {
+                  return false;
+                };
                 if (tryOnce()) return;
-                if (Date.now() - start >= timeoutMs) {
-                  resolve({ ok: false, waitedMs: Date.now() - start, error: lastError });
-                  return;
-                }
+                const poll = () => {
+                  if (tryOnce()) return;
+                  if (Date.now() - start >= timeoutMs) {
+                    resolve({ ok: false, waitedMs: Date.now() - start, error: lastError });
+                    return;
+                  }
+                  setTimeout(poll, intervalMs);
+                };
                 setTimeout(poll, intervalMs);
-              };
-              setTimeout(poll, intervalMs);
-            },
-          );
-        },
-        args: [expression, timeout, pollInterval],
-        world: "MAIN",
-      });
-      const res = results[0]?.result as
-        | { ok: boolean; value?: unknown; waitedMs: number; error?: string }
-        | undefined;
+              },
+            );
+          },
+          [expression, timeout, pollInterval],
+          // SW 侧兜底,+500ms margin 让页面还活着时 page-side 语义化结果优先胜出
+          timeout + 500,
+        );
+      } catch (err) {
+        if (!(err instanceof PageQueryTimeoutError)) throw err;
+        throw vtxError(
+          VtxErrorCode.TIMEOUT,
+          `Expression never resolved truthy within ${timeout}ms (page-side polling did not report back)`,
+          { tabId: tid, frameId, extras: { expression } },
+        );
+      }
       if (!res) throw vtxError(VtxErrorCode.INTERNAL_ERROR, "waitForExpression returned no result", { tabId: tid, frameId });
       if (!res.ok) {
         throw vtxError(
