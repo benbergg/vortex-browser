@@ -751,6 +751,7 @@ export const geometryProbeFunc = (
 export const styleProbeFunc = (
   selector: string,
   maxResults: number,
+  groups: string[],
 ):
   | {
       elements: Array<{
@@ -758,12 +759,18 @@ export const styleProbeFunc = (
         tag: string;
         color: string;
         background: string;
+        backgroundImage: string;
         bgFromAncestor: boolean;
         fontWeight: string;
         fontSize: string;
         contrastRatio: number | null;
-        wcagAA: boolean;
-        wcagAAA: boolean;
+        contrastStatus: "ok" | "no-painted-background" | "background-image";
+        wcagAA: boolean | "unknown";
+        wcagAAA: boolean | "unknown";
+        typography?: Record<string, string>;
+        box?: Record<string, string>;
+        paint?: Record<string, string>;
+        motion?: Record<string, string>;
       }>;
       total: number;
       showing: number;
@@ -818,27 +825,48 @@ export const styleProbeFunc = (
       const el = matched[i] as HTMLElement;
       const cs = getComputedStyle(el);
       const color = cs.color;
-      // 上溯找 painted 背景(⑦:徽章背景常在祖先;自身透明时找最近非透明祖先)。
       let background = cs.backgroundColor;
+      let backgroundImage = cs.backgroundImage;
       let bgFromAncestor = false;
-      if (isTransparent(background)) {
-        for (let a: HTMLElement | null = el.parentElement, j = 0; a && j < 8; j++, a = a.parentElement) {
-          const abg = getComputedStyle(a).backgroundColor;
-          if (!isTransparent(abg)) {
-            background = abg;
+      let contrastStatus: "ok" | "no-painted-background" | "background-image" =
+        backgroundImage !== "none" ? "background-image" : "ok";
+
+      // 自身已绘制就不上溯:再往上的层被它盖住,不是实际背景
+      if (contrastStatus === "ok" && isTransparent(background)) {
+        // 不设层数上限:真站 painted 背景可在第 10 层,任何魔数都会漏
+        for (let a: HTMLElement | null = el.parentElement; a; a = a.parentElement) {
+          const acs = getComputedStyle(a);
+          // 第一层产生绘制的祖先就是背景层,图和色都在这层取,取完即停
+          if (acs.backgroundImage !== "none") {
+            backgroundImage = acs.backgroundImage;
+            background = acs.backgroundColor;
+            bgFromAncestor = true;
+            contrastStatus = "background-image";
+            break;
+          }
+          if (!isTransparent(acs.backgroundColor)) {
+            background = acs.backgroundColor;
             bgFromAncestor = true;
             break;
           }
         }
       }
+
       let contrastRatio: number | null = null;
-      const fg = parse(color);
-      const bg = parse(background);
-      if (fg && bg && !isTransparent(background)) {
-        const L1 = lum(fg) + 0.05;
-        const L2 = lum(bg) + 0.05;
-        contrastRatio = Math.round((Math.max(L1, L2) / Math.min(L1, L2)) * 100) / 100;
+      if (contrastStatus === "ok") {
+        const fg = parse(color);
+        const bg = parse(background);
+        if (fg && bg && !isTransparent(background)) {
+          const L1 = lum(fg) + 0.05;
+          const L2 = lum(bg) + 0.05;
+          contrastRatio = Math.round((Math.max(L1, L2) / Math.min(L1, L2)) * 100) / 100;
+        } else {
+          // 背景没找到就是没找到,不能折叠成"不合格"
+          contrastStatus = "no-painted-background";
+        }
       }
+      const verdict = (min: number): boolean | "unknown" =>
+        contrastRatio == null ? "unknown" : contrastRatio >= min;
       elements.push({
         index: i,
         tag: el.tagName.toLowerCase(),
@@ -848,8 +876,10 @@ export const styleProbeFunc = (
         fontWeight: cs.fontWeight,
         fontSize: cs.fontSize,
         contrastRatio,
-        wcagAA: contrastRatio != null && contrastRatio >= 4.5,
-        wcagAAA: contrastRatio != null && contrastRatio >= 7,
+        backgroundImage,
+        contrastStatus,
+        wcagAA: verdict(4.5),
+        wcagAAA: verdict(7),
       });
     }
     return { elements, total, showing: limit };
@@ -1701,7 +1731,7 @@ export function registerQueryHandlers(router: ActionRouter): void {
         const results = await chrome.scripting.executeScript({
           target: buildExecuteTarget(tid, frameId),
           func: styleProbeFunc,
-          args: [pattern, maxResults],
+          args: [pattern, maxResults, []],
           world: "MAIN",
         });
 
