@@ -4,7 +4,7 @@
 
 ---
 
-## [Unreleased]
+## [3.1.0] - 2026-08-20
 
 ### Added
 
@@ -65,6 +65,26 @@
 - `vortex_query` 的 `maxResults` 公开 schema 上限从 200 放宽到 2000：`f7ecb25` 给
   `tokens` 补约束时把上限写在了共享字段上，导致 `mode=chart`（内部上限 2000）和
   `mode=sheet`（1000）传大值会在进 handler 前被 schema 拒——v3.0.0 起的回归。
+
+### 涉及文件
+
+新增 `packages/extension/src/lib/style-evidence.ts`（伪元素渲染判据、字体证据、
+`@font-face` 聚合、布局初始值裁剪四个纯函数）、
+`packages/extension/src/lib/platform-fonts.ts`（CDP 取实际渲染字体 + 身份对齐 + 对象释放）、
+`packages/extension/src/lib/deep-query-expr.ts`（穿 open shadow 的选择器表达式与元素身份，
+与探针内联实现行为对拍）。
+
+改动 `packages/extension/src/handlers/query.ts`（`styleProbeFunc` 加 pseudo/font/布局读取、
+新增 `finalizeStyleResult` 判定层）、`packages/extension/src/background.ts`（接线
+`DebuggerManager`）、`packages/extension/src/lib/cdp-domains.ts`（`CSS` 域）、
+`packages/mcp/src/tools/schemas-public.ts`（`attr` 组名、`maxResults` 上限）。
+
+测试 `packages/extension/tests/style-evidence.test.ts`、`platform-fonts.test.ts`、
+`deep-query-expr.test.ts`、`query-style-pseudo-font.test.ts`、`query-style.test.ts`、
+`query-ref-target.test.ts`、`helpers/fake-debugger.ts`、
+`packages/mcp/tests/vortex-query.test.ts`。
+
+设计文档 `docs/style-pseudo-font-approach.md`（含路线辩论与三轮评审记录）。
 
 ## [3.0.0] - 2026-08-19
 
