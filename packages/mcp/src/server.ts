@@ -19,6 +19,7 @@ import { getToolDefs, getToolDef, setEnabledCaps } from "./tools/registry.js";
 import { dispatchNewTool } from "./tools/dispatch.js";
 import { timeoutLadder, splitDiagnosis, hubDeadlineFor } from "@vortex-browser/shared";
 import { liftWaitForRefToTarget } from "./lib/wait-for-ref.js";
+import { liftQueryRefToTarget } from "./lib/query-ref.js";
 import { applyFingerprint, extractSignals, shouldRecover, type FingerprintOpt } from "./lib/fingerprint-apply.js";
 import { runSequence, type SequenceStepInput, type OnFailure } from "./lib/sequence-run.js";
 import { formatDispatchError } from "./lib/dispatch-error.js";
@@ -770,6 +771,11 @@ export async function handleCallTool(
   // BUG-002 (N0063): wait_for(mode=element) 的 @ref 经 value 字段传入,这里抬成 target,
   // 复用下方同一条翻译链 + STALE/tab 校验(dispatch 拿不到 snapshot 状态无法自译)。
   liftWaitForRefToTarget(toolDef.name, params);
+  try {
+    liftQueryRefToTarget(toolDef.name, params);
+  } catch (err) {
+    return { isError: true, content: [{ type: "text" as const, text: formatError(err) }] };
+  }
 
   // target 翻译：@eN / @fNeM → { index, snapshotId, frameId }
   const target = params.target as string | undefined;

@@ -156,7 +156,12 @@ describe("I15: tools/list budget + count + internalized grep", () => {
     // (handler mouse.click 早已实现,含 frame→viewport 换算,此前只暴露坐标版 mouse.drag;
     // canvas/地图/无 ref 场景刚需,补齐"坐标 click"能力缺口)。schema 块 +~366B,payload
     // 实测 8378B,cap +400 至 8500 留 ~122B 余量。沿用"加能力调 cap 不压字符"惯例。
-    expect(toolsListPayload.length).toBeLessThanOrEqual(11100);
+    // mode=tokens + @ref: 11100 → 11300。vortex_query mode 枚举新增 tokens(站点 CSS
+    // 变量→调色板/字阶),description 同步追加,attr 补 style 分组说明,mode 说明补 @ref。
+    // payload 实测 11197B,cap +200 留 ~103B 余量。沿用"加能力调 cap 不压字符"惯例。
+    // 11300 → 11400:终审要求给 maxResults 补 minimum/maximum 与「tokens 下是每组
+    // 上限」的说明(会被误读成全局 40)。实测 11280B,余量只剩 20B 太紧,再 +100。
+    expect(toolsListPayload.length).toBeLessThanOrEqual(11400);
   });
 
   it("公开工具数量 = 24（23 + vortex_sequence 多步序列）", () => {
@@ -226,14 +231,23 @@ describe("I15: tools/list budget + count + internalized grep", () => {
     }
   });
 
-  it("description 长度 ≤ 230 char", () => {
+  it("description 长度:query 单独放宽,其余锁在实测最大值", () => {
     // 120 → 180: vortex_act description 恢复原始 hint + 追加 onDialog clause = 174 char。
     // 174 = 120 原始 + 54 onDialog 子句，是真新增能力驱动的增长。
-    // 180 → 230: 仅 vortex_query 超(222)，是 8 个 mode 各一段真能力说明累加的结果；
-    // 其余工具最长 174(vortex_act)，阈值放宽不会掩盖别处膨胀。
-    for (const d of defs) {
-      expect(d.description.length).toBeLessThanOrEqual(230);
+    // 180 → 230: 仅 vortex_query 超(222)，是 8 个 mode 各一段真能力说明累加的结果。
+    // 230 → query 280: 新增 tokens mode 一段说明,实测 261。
+    // 整体放宽会给别的工具留白涨空间——事实上已经发生过:上一条注释写"其余最长
+    // 174(vortex_act)",而 act 实测已 215,是在 230 的统一上限下悄悄涨的。故拆两条锁。
+    const q = defs.find((d) => d.name === "vortex_query")!;
+    expect(q.description.length).toBeLessThanOrEqual(280);
+    const nonQuery = defs.filter((d) => d.name !== "vortex_query");
+    for (const d of nonQuery) {
+      expect(d.description.length, `${d.name} description 变长了`).toBeLessThanOrEqual(215);
     }
+    // 215 是实测基线不是能力预算,把"它来自 act"也锁住,否则注释会随时间失真
+    const longest = nonQuery.reduce((a, b) => (b.description.length > a.description.length ? b : a));
+    expect(longest.name).toBe("vortex_act");
+    expect(longest.description.length).toBe(215);
   });
 
   it("参数 description 必须在精选白名单内（防滥写）", () => {
@@ -257,6 +271,7 @@ describe("I15: tools/list budget + count + internalized grep", () => {
       "vortex_query.mode": "评测实测: sheet 只认语雀表格,模型误用于 DOM table",
       "vortex_extract.maxLength": "超长静默截断,不提示会让模型误以为读全了",
       "vortex_query.attr": "attr 支持 , / | 分隔多属性(daddd2b),不写会复发 R11 静默失败",
+      "vortex_query.maxResults": "tokens 下是每组上限不是总数,评审实测会被误读成全局 40",
       "vortex_debug_read.filter": "子字段是 handler 真能力(D16); 盲测复测实测模型把 pattern 嵌进 filter.network,故点明是平铺键",
       "vortex_act.options.fingerprint": "record/verify 契约必须文档化",
       "vortex_sequence.steps[].target": "序列步骤复用 vortex_act 的 target 语义",

@@ -152,6 +152,18 @@ export const QueryActions = {
   QUERY_PAGE: "query.queryPage",
 } as const;
 
+/**
+ * vortex_query 中 pattern 语义为「CSS 选择器」的 mode。
+ * 只有这些 mode 接受 @ref —— MCP 的 lift 与 extension 的 resolveTarget 两侧
+ * 必须同名单，各自硬编码会在新增 mode 时只改一侧（评审 Task 1 M-2）。
+ */
+export const QUERY_SELECTOR_MODES: ReadonlySet<string> = new Set([
+  "css",
+  "component",
+  "geometry",
+  "style",
+]);
+
 export const VerifyActions = {
   /** 走 observe AX 树比对的断言工具(testing cap opt-in)。@since tool-horizontal-opt */
   ASSERT: "verify.assert",
