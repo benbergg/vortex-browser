@@ -256,6 +256,33 @@ describe("styleProbeFunc", () => {
     expect(() => detached(".iso", 1, ["typography", "box", "paint", "motion"])).not.toThrow();
   });
 
+  it("注入自包含:六组全开(含 pseudo/font)剥离模块作用域后仍可运行", () => {
+    // 四组那条覆盖不到 collectFontFaces 与伪元素读取,这两段引用模块标识符会真站崩
+    const detached = new Function("return " + styleProbeFunc.toString())();
+    const st = document.createElement("style");
+    st.textContent = '@font-face{font-family:"X";src:url(x.woff2)}';
+    document.head.appendChild(st);
+    const el = document.createElement("div");
+    el.className = "iso6";
+    document.body.appendChild(el);
+    let out: unknown;
+    expect(() => {
+      out = detached(".iso6", 1, ["typography", "box", "paint", "motion", "pseudo", "font"]);
+    }).not.toThrow();
+    expect((out as { error?: string }).error).toBeUndefined();
+    expect((out as { fontFaces?: unknown[] }).fontFaces).toBeDefined();
+  });
+
+  it("groups 缺省(不传)也要能剥离作用域跑 —— 缺省是六组全开", () => {
+    const detached = new Function("return " + styleProbeFunc.toString())();
+    const el = document.createElement("div");
+    el.className = "iso7";
+    document.body.appendChild(el);
+    const out = detached(".iso7", 1) as { error?: string; elements: Array<{ declaredFont?: string }> };
+    expect(out.error).toBeUndefined();
+    expect(out.elements[0].declaredFont).toBeDefined();
+  });
+
   it("背景色带 alpha → 不拿原始色硬算,状态为 translucent", () => {
     const el = document.createElement("div");
     el.className = "alpha";
