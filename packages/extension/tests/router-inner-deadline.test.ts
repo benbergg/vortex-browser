@@ -173,6 +173,8 @@ describe("ActionRouter 内层 deadline", () => {
     expect(resp.error?.context?.extras?.liveness).toBe("tab-gone");
     expect(String(resp.error?.hint)).toContain("vortex_tab_create");
     expect(resp.error?.recoverable).toBe(false);
+    // tab 没了就不可能再生效，声称在途会与 hint 自相矛盾
+    expect(resp.error?.context?.extras?.inFlight).toBe(false);
   });
 
   // TABLESS_ACTIONS / hub GLOBAL_ACTIONS / verify.ts 的嵌套 dispatch 都不带 tabId,

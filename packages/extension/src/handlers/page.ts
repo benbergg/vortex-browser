@@ -306,8 +306,7 @@ export function registerPageHandlers(router: ActionRouter, debuggerMgr: Debugger
       if (selector) {
         const frameId = __t?.boundFrameId ?? (args.frameId as number | undefined);
         if (frameId != null) await ensureFrameAttached(tid, frameId);
-        // 用 raceTimeout 而非 pageQuery:后者硬编码 world:MAIN,会把 observer
-        // 暴露给站点改写过的全局;这里只需要 SW 侧的界,world 保持 ISOLATED
+        // 不走 pageQuery:它硬编码 world:MAIN,会把 observer 暴露给站点全局
         const injected = chrome.scripting.executeScript({
           target: buildExecuteTarget(tid, frameId),
           func: (sel: string, ms: number) => {

@@ -28,4 +28,9 @@ describe("HTTP waiter 按 action 推导", () => {
   it("调用方 timeout 一并进推导：dom.click timeout=45000 → 60000", () => {
     expect(httpWaiterMsFor("dom.click", 45_000)).toBe(60_000);
   });
+
+  // 未登记 action 走 DEFAULT_ACTION_BUDGET_MS，上面按 ACTION_BUDGET_MS 的遍历覆盖不到
+  it("未登记 action 也随 caller 抬高：page.wait 40000 → 55000", () => {
+    expect(httpWaiterMsFor("page.wait", 40_000)).toBe(55_000);
+  });
 });

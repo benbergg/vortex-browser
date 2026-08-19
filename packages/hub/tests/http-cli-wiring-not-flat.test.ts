@@ -18,12 +18,15 @@ const HTTP_SRC = read("../src/http-routes.ts");
 const CLI_SRC = read("../../cli/src/client.ts");
 
 describe("阶梯接线不得退回扁平常量", () => {
-  it("HTTP waiter 由 httpWaiterMsFor 推导", () => {
-    expect(HTTP_SRC).toMatch(/virtualSessionRequestTimeoutMs\s*\?\?\s*\n?\s*httpWaiterMsFor\(/);
+  // 第二实参必须锚住：漏传 params.timeout 就是 hubFallbackMs 那个 High 搬到本层
+  it("HTTP waiter 由 httpWaiterMsFor 推导，且把调用方 timeout 传进去", () => {
+    expect(HTTP_SRC).toMatch(
+      /virtualSessionRequestTimeoutMs\s*\?\?\s*httpWaiterMsFor\(\s*action,\s*params\.timeout\b/,
+    );
   });
 
-  it("CLI fetch abort 由 cliAbortMsFor 推导", () => {
-    expect(CLI_SRC).toMatch(/const abortMs = cliAbortMsFor\(/);
+  it("CLI fetch abort 由 cliAbortMsFor 推导，且把调用方 timeout 传进去", () => {
+    expect(CLI_SRC).toMatch(/cliAbortMsFor\(\s*action,\s*params\.timeout\b/);
     expect(CLI_SRC).toMatch(/AbortSignal\.timeout\(abortMs\)/);
   });
 

@@ -135,14 +135,6 @@ CDP 命令排队 / executeScript 不 settle）在跨进程边界处被丢弃，�
 
 ## 8. 数据校准与两处订正（勘察后补）
 
-### 8.1 `page.navigate` 取 60s 而非 69861ms（Task 10 评审补记）
-
-零回归判据的字面读法要求预算 ≥ 该 action 的成功耗时 max，`navigate waitUntil=networkidle`
-那条 max 是 69861ms，表里却取 60_000。这不是漏掉：handler 自身的等待上限是
-`NAVIGATE_LOAD_TIMEOUT_MS = 25_000`（`extension/src/handlers/page.ts`），handler 本体
-不可能跑出 69861ms，那条样本来自 hub 侧缓冲/重试而非 handler。抬到 70_000 只会让 router
-的界比 hub 兜底还晚，反而破坏阶梯。故判据在此 action 上按「handler 可达上限」解读。
-
 用 30 天 transcript 重算**未传 timeout 的成功调用**耗时分布（传了 timeout 的样本会污染缺省值校准）：
 
 | action 对应工具（变体） | n | P50 | P95 | P99 | max |
@@ -205,3 +197,12 @@ inner = max(ACTION_BUDGET[action], caller > 0 ? min(caller, MAX_INNER) + STEP : 
 ```
 
 推论：`inner ≤ MAX_INNER + STEP = 65000`，`hub ≤ 70000`，`transport ≤ 75000`，全部有界。
+
+### 8.1 `page.navigate` 取 60s 而非 69861ms（Task 10 评审补记）
+
+零回归判据的字面读法要求预算 ≥ 该 action 的成功耗时 max，`navigate waitUntil=networkidle`
+那条 max 是 69861ms，表里却取 60_000。这不是漏掉：handler 自身的等待上限是
+`NAVIGATE_LOAD_TIMEOUT_MS = 25_000`（`extension/src/handlers/page.ts`），handler 本体
+不可能跑出 69861ms，那条样本来自 hub 侧缓冲/重试而非 handler。抬到 70_000 只会让 router
+的界比 hub 兜底还晚，反而破坏阶梯。故判据在此 action 上按「handler 可达上限」解读。
+
