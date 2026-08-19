@@ -159,7 +159,9 @@ describe("I15: tools/list budget + count + internalized grep", () => {
     // mode=tokens + @ref: 11100 → 11300。vortex_query mode 枚举新增 tokens(站点 CSS
     // 变量→调色板/字阶),description 同步追加,attr 补 style 分组说明,mode 说明补 @ref。
     // payload 实测 11197B,cap +200 留 ~103B 余量。沿用"加能力调 cap 不压字符"惯例。
-    expect(toolsListPayload.length).toBeLessThanOrEqual(11300);
+    // 11300 → 11400:终审要求给 maxResults 补 minimum/maximum 与「tokens 下是每组
+    // 上限」的说明(会被误读成全局 40)。实测 11280B,余量只剩 20B 太紧,再 +100。
+    expect(toolsListPayload.length).toBeLessThanOrEqual(11400);
   });
 
   it("公开工具数量 = 24（23 + vortex_sequence 多步序列）", () => {
@@ -269,6 +271,7 @@ describe("I15: tools/list budget + count + internalized grep", () => {
       "vortex_query.mode": "评测实测: sheet 只认语雀表格,模型误用于 DOM table",
       "vortex_extract.maxLength": "超长静默截断,不提示会让模型误以为读全了",
       "vortex_query.attr": "attr 支持 , / | 分隔多属性(daddd2b),不写会复发 R11 静默失败",
+      "vortex_query.maxResults": "tokens 下是每组上限不是总数,评审实测会被误读成全局 40",
       "vortex_debug_read.filter": "子字段是 handler 真能力(D16); 盲测复测实测模型把 pattern 嵌进 filter.network,故点明是平铺键",
       "vortex_act.options.fingerprint": "record/verify 契约必须文档化",
       "vortex_sequence.steps[].target": "序列步骤复用 vortex_act 的 target 语义",

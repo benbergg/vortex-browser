@@ -491,7 +491,12 @@ export const PUBLIC_TOOLS: ToolDef[] = [
         contextChars: { type: "number" },
         attr: { type: "string", description: "css: 属性名, 多个用 , 或 | 分隔(如 'class|title'); style: 分组 typography|box|paint|motion(默认全开); chart/sheet/flow: 输出格式" },
         includeText: { type: "boolean" },
-        maxResults: { type: "number" },
+        maxResults: {
+          type: "number",
+          minimum: 1,
+          maximum: 200,
+          description: "tokens: 每组上限(默认40); 其他 mode: 元素数上限(默认10)",
+        },
         ...tabFields,
       },
       required: ["mode", "pattern"],
