@@ -1,5 +1,4 @@
 /**
- * Author: qingwa
  * Description: CDP 被别的 debugger 占住时,act useRealMouse 降级为合成路径并自陈。
  *
  * 背景(2026-08-18 使用日志):同一 tab 上 200+ 次 evaluate 正常,只有需要 CDP 的

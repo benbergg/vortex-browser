@@ -17,22 +17,24 @@ type StrictTabRequest = NmRequest & { strictTab?: boolean };
 export { TABLESS_ACTIONS };
 
 /** 探活自身抛错时不能把 TIMEOUT 降级成 JS_EXECUTION_ERROR，归因反而更差 */
-async function attributeTimeout(tabId: number | undefined): Promise<Liveness> {
+async function attributeTimeout(tabId: number | undefined, frameId?: number): Promise<Liveness> {
   // tabless action 压根没探过，唯一诚实的说法是「原因未判定」而非页面活着
   if (tabId == null) return "probe-failed";
   try {
-    return await probeLiveness(tabId);
+    // 必须探被超时那个 frame:只探主 frame 会把 OOPIF 卡死误判成 page-alive
+    return await probeLiveness(tabId, undefined, frameId);
   } catch {
     return "probe-failed";
   }
 }
 
+// inFlight:raceTimeout 只是不再等,handler 还在跑,非幂等动作可能已经生效
 function timeoutPayload(action: string, budgetMs: number, liveness: Liveness) {
   const meta = TIMEOUT_LIVENESS_META[liveness];
   return vtxError(
     VtxErrorCode.TIMEOUT,
     `Action ${action} exceeded its ${budgetMs}ms budget`,
-    { extras: { action, budgetMs, liveness } },
+    { extras: { action, budgetMs, liveness, inFlight: true } },
     meta,
   );
 }
@@ -81,7 +83,10 @@ export class ActionRouter {
       const result = await raceTimeout(handler(request.args, request.tabId), budgetMs);
       if (result === TIMED_OUT) {
         // 超时后才探活：正常路径零开销
-        const liveness = await attributeTimeout(request.tabId);
+        const liveness = await attributeTimeout(
+          request.tabId,
+          request.args?.frameId as number | undefined,
+        );
         return {
           type: "tool_response",
           requestId: request.requestId,

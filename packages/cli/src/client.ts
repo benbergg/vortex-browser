@@ -1,10 +1,11 @@
 /**
- * Author: qingwa
  * Description: Provides HTTP action requests and WebSocket subscriptions for the CLI.
  */
 import WebSocket from "ws";
 import {
   VTX_WIRE_VERSION,
+  hubDeadlineFor,
+  transportTimeoutFor,
   type VtxEvent,
   type VtxRequest,
   type VtxResponse,
@@ -85,6 +86,13 @@ function toVtxResponse(action: string, id: string, body: unknown): VtxResponse {
 }
 
 /**
+ * CLI 是最外层：hub → HTTP waiter → 这里，每层各加一档，少一档就抢在内层归因之前。
+ */
+export function cliAbortMsFor(action: string, callerTimeoutMs?: number): number {
+  return transportTimeoutFor(transportTimeoutFor(hubDeadlineFor(action, callerTimeoutMs)));
+}
+
+/**
  * Sends one action over the Hub HTTP API and returns the existing CLI response shape.
  */
 export async function sendRequest(
@@ -94,6 +102,7 @@ export async function sendRequest(
 ): Promise<VtxResponse> {
   const { namespace, method } = splitAction(action);
   const id = nextRequestId();
+  const abortMs = cliAbortMsFor(action, params.timeout as number | undefined);
   const response = await fetch(`${resolveBaseUrl(opts)}/api/${namespace}/${method}`, {
     method: "POST",
     headers: {
@@ -102,7 +111,7 @@ export async function sendRequest(
       ...(opts.tabId != null ? { "x-vortex-tab": String(opts.tabId) } : {}),
     },
     body: JSON.stringify(params),
-    signal: AbortSignal.timeout(35_000),
+    signal: AbortSignal.timeout(abortMs),
   });
   const body = await parseResponseBody(response);
   if (!response.ok) throw new Error(httpErrorMessage(body, response.status, response.statusText));

@@ -1,7 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 /**
- * Author: qingwa
  * Description: vortex_sequence 里的 click 步遇到降级自陈时,自证信道不能被包裹层吞掉。
  *
  * CDP 被占时 dom.click 降级为合成路径,结果经 withDiagnosis 包成 {__vtxDiagnosis,value}。

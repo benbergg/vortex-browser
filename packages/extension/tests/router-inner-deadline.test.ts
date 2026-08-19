@@ -50,6 +50,44 @@ describe("ActionRouter 内层 deadline", () => {
     expect(resp.error?.context?.extras?.budgetMs).toBe(30_000);
   });
 
+  it("探活打在被超时那个 frame 上：OOPIF 卡死不会被主 frame 的秒答盖成 page-alive", async () => {
+    vi.useFakeTimers();
+    vi.resetModules();
+    // 主 frame 秒答、frameId=7 永不答：只探主 frame 就会误判 page-alive
+    const executeScript = vi.fn((opts: any) =>
+      opts.target?.frameIds?.includes(7) ? new Promise(() => {}) : Promise.resolve([{ result: 1 }]),
+    );
+    chromeAlive(executeScript as any);
+    const { ActionRouter } = await import("../src/lib/router.js");
+    const router = new ActionRouter();
+    router.register("mouse.click", () => new Promise(() => {}));
+
+    let resp: any;
+    const p = router.dispatch(mkReq("mouse.click", { frameId: 7 }, 1)).then((r) => { resp = r; });
+    await vi.advanceTimersByTimeAsync(31_000);
+    await p;
+
+    expect(executeScript.mock.calls.some((c: any[]) => c[0]?.target?.frameIds?.includes(7))).toBe(true);
+    expect(resp.error?.context?.extras?.liveness).toBe("page-unresponsive");
+  });
+
+  it("超时 payload 带 inFlight：raceTimeout 只是不再等，非幂等动作可能已经生效", async () => {
+    vi.useFakeTimers();
+    vi.resetModules();
+    chromeAlive();
+    const { ActionRouter } = await import("../src/lib/router.js");
+    const router = new ActionRouter();
+    router.register("mouse.click", () => new Promise(() => {}));
+
+    let resp: any;
+    const p = router.dispatch(mkReq("mouse.click", {}, 1)).then((r) => { resp = r; });
+    await vi.advanceTimersByTimeAsync(31_000);
+    await p;
+
+    expect(resp.error?.context?.extras?.inFlight).toBe(true);
+    expect(String(resp.error?.hint)).toMatch(/in flight|already took effect/);
+  });
+
   it("🔴 页面主线程卡死时归因为 page-unresponsive，hint 明说加大 timeout 无用", async () => {
     vi.useFakeTimers();
     vi.resetModules();

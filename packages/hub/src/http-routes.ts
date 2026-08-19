@@ -7,6 +7,8 @@ import {
   VtxErrorCode,
   type VtxAgentResult,
   type VtxErrorPayload,
+  hubDeadlineFor,
+  transportTimeoutFor,
   type VtxRequest,
   type VtxResponse,
 } from "@vortex-browser/shared";
@@ -17,7 +19,14 @@ import { RPC_TIMEOUT_HINT } from "./error-hints.js";
 import { sweepIdleVirtualSessions } from "./virtual-session.js";
 
 const DEFAULT_VIRTUAL_SESSION_IDLE_MS = 10 * 60_000;
-const DEFAULT_VIRTUAL_SESSION_REQUEST_TIMEOUT_MS = 35_000;
+
+/**
+ * HTTP 面自己就是一层界：扁平常量会比内层预算先 fire，四态归因永远送不到 CLI。
+ * 比 hub deadline 再高一档，与 inner < hub < transport 同一阶梯。
+ */
+export function httpWaiterMsFor(action: string, callerTimeoutMs?: number): number {
+  return transportTimeoutFor(hubDeadlineFor(action, callerTimeoutMs));
+}
 let httpRequestCounter = 0;
 
 interface HttpWaiter {
@@ -112,8 +121,10 @@ export function createHttpRoutes(options: HubRouteOptions): Router {
     const preferredBrowser = req.get("x-vortex-browser") || undefined;
     // 不带 browser 头 = 本次无偏好，须解除既有偏好
     const session = options.getVirtualSession(sessionName, preferredBrowser);
+    const action = `${req.params.ns}.${req.params.method}`;
+    // 不写 timeoutMs:hub 自己按 action 兜底,写死会盖掉部署方显式配置的 requestTimeoutMs
     const request: VtxRequest = {
-      action: `${req.params.ns}.${req.params.method}`,
+      action,
       params,
       id: `http-${++httpRequestCounter}`,
       ...(tabId !== undefined ? { tabId } : {}),
@@ -125,7 +136,8 @@ export function createHttpRoutes(options: HubRouteOptions): Router {
         waitersBySession,
         session,
         request,
-        options.virtualSessionRequestTimeoutMs ?? DEFAULT_VIRTUAL_SESSION_REQUEST_TIMEOUT_MS,
+        options.virtualSessionRequestTimeoutMs ??
+          httpWaiterMsFor(action, params.timeout as number | undefined),
       );
       sendHttpResponse(res, response);
     } catch (error: unknown) {

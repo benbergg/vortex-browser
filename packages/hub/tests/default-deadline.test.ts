@@ -1,5 +1,4 @@
 /**
- * Author: qingwa
  * Description: hub 转发路径的缺省 deadline 按 action 预算推导，但从不覆盖任何显式取值。
  *
  * CLI 路径（packages/cli/src/client.ts）不下发 timeoutMs，走 forwardRequest 的兜底。

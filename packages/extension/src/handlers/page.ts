@@ -290,13 +290,18 @@ export function registerPageHandlers(router: ActionRouter, debuggerMgr: Debugger
       const selector = __t?.selector;
       const tid = await getActiveTabId(__t?.boundTabId ?? tabId);
       const timeout = (args.timeout as number) ?? 10_000;
+      // 超界会让 handler 的界晚于 router 的,语义化消息被通用归因抢走
+      if (!Number.isInteger(timeout) || timeout < 1 || timeout > MAX_INNER_TIMEOUT_MS) {
+        throw vtxError(VtxErrorCode.INVALID_PARAMS,
+          `timeout must be an integer in [1, ${MAX_INNER_TIMEOUT_MS}]; got ${timeout}`);
+      }
 
       if (selector) {
         const frameId = __t?.boundFrameId ?? (args.frameId as number | undefined);
         if (frameId != null) await ensureFrameAttached(tid, frameId);
-        const result = await chrome.scripting.executeScript({
-          target: buildExecuteTarget(tid, frameId),
-          func: (sel: string, ms: number) => {
+        let found: boolean | undefined;
+        try {
+          found = await pageQuery(tid, frameId, (sel: string, ms: number) => {
             return new Promise<boolean>((resolve) => {
               if (document.querySelector(sel)) { resolve(true); return; }
               const observer = new MutationObserver(() => {
@@ -309,10 +314,17 @@ export function registerPageHandlers(router: ActionRouter, debuggerMgr: Debugger
               observer.observe(document.body, { childList: true, subtree: true, attributes: true });
               setTimeout(() => { observer.disconnect(); resolve(false); }, ms);
             });
-          },
-          args: [selector, timeout],
-        });
-        const found = result[0]?.result;
+          }, [selector, timeout],
+          // SW 侧兜底,+500ms margin 让页面还活着时 page-side 结果优先胜出
+          timeout + 500);
+        } catch (err) {
+          if (!(err instanceof PageQueryTimeoutError)) throw err;
+          throw vtxError(
+            VtxErrorCode.TIMEOUT,
+            `Selector "${selector}" not found within ${timeout}ms (page-side observer did not report back)`,
+            { tabId: tid, frameId, selector },
+          );
+        }
         if (!found) throw vtxError(VtxErrorCode.TIMEOUT, `Selector "${selector}" not found within ${timeout}ms`, { selector });
         return { found: true, selector };
       }

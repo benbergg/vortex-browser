@@ -39,7 +39,7 @@ function makeDebuggerMock() {
   } as any;
 }
 
-describe("内层预算恒先于 router 预算：page.waitForExpression（跨层不变量）", () => {
+describe("内层预算恒先于 router 预算：page 侧等待类 action（跨层不变量）", () => {
   let router: ActionRouter;
   let executeScript: ReturnType<typeof vi.fn>;
 
@@ -82,6 +82,30 @@ describe("内层预算恒先于 router 预算：page.waitForExpression（跨层�
       // handler 先手：消息带页面轮询语义；router 抢先只会给 "exceeded its Xms budget"
       expect(String(resp.error?.message), `T=${timeoutArg}: router 抢在 handler 前 fire（budgetMs=${budgetMs}）`)
         .toMatch(/\(page-side polling did not report back\)/);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // page.wait 与 waitForExpression 同族:计时器留在页面线程等于没有界,
+  // 主线程卡死时只能由 router 的通用归因收场，语义化消息永远抢不到。
+  it.each(legalTimeouts)("T=%s 时 page.wait 也由 handler 先手，消息为语义化 TIMEOUT", async (timeoutArg) => {
+    vi.useFakeTimers();
+    try {
+      executeScript.mockImplementation(() => new Promise(() => {}));
+      const args: Record<string, unknown> = { selector: "#never" };
+      if (timeoutArg !== undefined) args.timeout = timeoutArg;
+
+      const budgetMs = innerDeadlineFor("page.wait", timeoutArg);
+      let resp: any;
+      const p = router.dispatch(mkReq("page.wait", args, 42)).then((r) => { resp = r; });
+
+      await vi.advanceTimersByTimeAsync(budgetMs);
+      await p;
+
+      expect(resp.error?.code).toBe(VtxErrorCode.TIMEOUT);
+      expect(String(resp.error?.message), `T=${timeoutArg}: router 抢在 handler 前 fire（budgetMs=${budgetMs}）`)
+        .toMatch(/\(page-side observer did not report back\)/);
     } finally {
       vi.useRealTimers();
     }

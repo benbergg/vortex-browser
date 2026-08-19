@@ -54,14 +54,14 @@ export function noHitMessage(target: string): string {
 }
 
 export const TIMEOUT_PAGE_ALIVE_HINT =
-  "The page's main thread still responds, so the stall is in this action's own path (a CDP command queued, or chrome.debugger held by another extension). Detach that debugger client, or retry this tabId later; raising the timeout argument only helps if the path is merely slow.";
+  "The page's main thread still responds, so the stall is inside this action's own path — for CDP-backed actions typically a queued command or a debugger another extension holds. The action may still be in flight: call vortex_observe to check state before retrying anything non-idempotent.";
 
 export const TIMEOUT_PAGE_UNRESPONSIVE_HINT =
   "The page's main thread is blocked by a long task, so it never answered within the action budget — waiting longer and a bigger timeout argument are both useless. Call vortex_navigate to reload and reset this tab, or call vortex_tab_list and retry on another live tabId.";
 
 /** 探活没做成时只能说「原因未判定」。声称页面死活正是本次要消灭的假信号。 */
 export const TIMEOUT_PROBE_FAILED_HINT =
-  "The liveness probe itself could not run on this tab (no host permission, a chrome:// page, or a discarded tab), so the timeout cause is undetermined. Call vortex_observe on this tabId to check whether the page is reachable at all before retrying.";
+  "The liveness probe itself could not run on this tab (no host permission, a chrome:// page, or a discarded tab), so the timeout cause is undetermined. Call vortex_observe on this tabId to check reachability — and whether the action already took effect — before retrying.";
 
 export const TIMEOUT_TAB_GONE_HINT =
   "The target tab no longer exists or cannot be accessed, so this action can never complete on that tabId. Call vortex_tab_list to see which tabs are still open and retry with a live tabId, or vortex_tab_create if none of them fits.";

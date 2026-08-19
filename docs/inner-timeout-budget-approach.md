@@ -133,6 +133,14 @@ CDP 命令排队 / executeScript 不 settle）在跨进程边界处被丢弃，�
 | 默认预算不会砍掉慢但成功的调用 | **部分证实** | juejin.cn 抽查 navigate/observe/extract/screenshot/act 均未被砍；样本小，真正验收看一周窗口 |
 | 打开 DevTools 会占住 `chrome.debugger`（计划里当作降级路径的复现手段） | **已证伪** | Chrome 151 上 DevTools 先于扩展 attach（docked 853px 实测），`chrome.debugger.attach` 仍成功、`act useRealMouse` 照走 `mode:"realMouse"`。真实占用方是另一个 attach 在先的扩展；相关 hint 文案已按此改写 |
 
+### 8.1 `page.navigate` 取 60s 而非 69861ms（Task 10 评审补记）
+
+零回归判据的字面读法要求预算 ≥ 该 action 的成功耗时 max，`navigate waitUntil=networkidle`
+那条 max 是 69861ms，表里却取 60_000。这不是漏掉：handler 自身的等待上限是
+`NAVIGATE_LOAD_TIMEOUT_MS = 25_000`（`extension/src/handlers/page.ts`），handler 本体
+不可能跑出 69861ms，那条样本来自 hub 侧缓冲/重试而非 handler。抬到 70_000 只会让 router
+的界比 hub 兜底还晚，反而破坏阶梯。故判据在此 action 上按「handler 可达上限」解读。
+
 ## 8. 数据校准与两处订正（勘察后补）
 
 用 30 天 transcript 重算**未传 timeout 的成功调用**耗时分布（传了 timeout 的样本会污染缺省值校准）：
