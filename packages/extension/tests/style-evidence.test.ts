@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { aggregateFontFaces, buildFontEvidence, isPseudoRendered } from "../src/lib/style-evidence.js";
+import { aggregateFontFaces, buildFontEvidence, dropInitialLayoutValues, isPseudoRendered } from "../src/lib/style-evidence.js";
 
 /** 真站实测的七种形态(gamma.app spike),每条都是真 Chrome 上量到的 computed 值 */
 const base = {
@@ -257,5 +257,47 @@ describe("aggregateFontFaces", () => {
     const r = aggregateFontFaces([{ src: "url(x)" }, { "font-family": "A", src: "url(y)" }]);
     expect(r.faces).toHaveLength(1);
     expect(r.faces[0].family).toBe("A");
+  });
+});
+
+describe("dropInitialLayoutValues", () => {
+  it("非 flex/grid 容器上的布局属性全是初始值 → 一个都不留", () => {
+    expect(dropInitialLayoutValues({
+      display: "block", padding: "8px",
+      flexDirection: "row", flexWrap: "nowrap", justifyContent: "normal",
+      alignItems: "normal", gap: "normal",
+      gridTemplateColumns: "none", gridTemplateRows: "none",
+    })).toEqual({ display: "block", padding: "8px" });
+  });
+
+  it("站点真设过的值留下", () => {
+    expect(dropInitialLayoutValues({
+      display: "flex", flexDirection: "column", gap: "12px", justifyContent: "normal",
+    })).toEqual({ display: "flex", flexDirection: "column", gap: "12px" });
+  });
+
+  it("display:block 上真设了 gap(多列布局) → 仍然留下,判据不看 display", () => {
+    expect(dropInitialLayoutValues({ display: "block", gap: "20px" })).toEqual({
+      display: "block", gap: "20px",
+    });
+  });
+
+  it("grid 模板留下", () => {
+    const r = dropInitialLayoutValues({ display: "grid", gridTemplateColumns: "repeat(3, 1fr)" });
+    expect(r.gridTemplateColumns).toBe("repeat(3, 1fr)");
+  });
+
+  it("不碰非布局属性 —— padding:0px 这类不是初始值判定的对象", () => {
+    expect(dropInitialLayoutValues({ padding: "0px", margin: "0px", borderStyle: "none" })).toEqual({
+      padding: "0px", margin: "0px", borderStyle: "none",
+    });
+  });
+
+  it("gap 的另一种初始表示 normal normal 也要认出来", () => {
+    expect(dropInitialLayoutValues({ gap: "normal normal" })).toEqual({});
+  });
+
+  it("空对象进空对象出", () => {
+    expect(dropInitialLayoutValues({})).toEqual({});
   });
 });

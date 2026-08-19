@@ -153,3 +153,27 @@ describe("mode=style 伪元素与字体接线", () => {
     expect(r.result.elements[0].font.reason).toMatch(/fingerprint/i);
   });
 });
+
+describe("box 组的布局属性裁剪", () => {
+  it("非容器上的布局初始值不出现在返回里,真设过的留下", async () => {
+    const router = new ActionRouter();
+    vi.stubGlobal("chrome", {
+      tabs: { query: vi.fn().mockResolvedValue([{ id: 42 }]) },
+      webNavigation: { getAllFrames: vi.fn().mockResolvedValue([{ frameId: 0, parentFrameId: -1, url: "https://x/" }]) },
+      scripting: { executeScript: vi.fn(async () => [{ result: {
+        elements: [{ index: 0, tag: "nav", box: {
+          display: "flex", gap: "12px", flexDirection: "row",
+          justifyContent: "space-between", alignItems: "normal",
+          gridTemplateColumns: "none", padding: "8px",
+        } }],
+        total: 1, showing: 1,
+      } }]) },
+      runtime: { getManifest: vi.fn().mockReturnValue({ host_permissions: ["<all_urls>"] }) },
+    });
+    registerQueryHandlers(router);
+    const r = (await router.dispatch(mkReq({ mode: "style", pattern: "nav", attr: "box" }))) as any;
+    expect(r.result.elements[0].box).toEqual({
+      display: "flex", gap: "12px", justifyContent: "space-between", padding: "8px",
+    });
+  });
+});

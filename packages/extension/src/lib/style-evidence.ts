@@ -180,3 +180,27 @@ function summarize(family: string, list: Array<Record<string, string>>): FontFac
     ...(display ? { display } : {}),
   };
 }
+
+/**
+ * 布局属性在非容器元素上全是初始值,给出来是误导——`justify-content: normal`
+ * 出现在 block 元素上会让人以为它是 flex 容器。按初始值裁,比看 display 准:
+ * 多列布局在 display:block 上真设了 gap,那条该留。
+ */
+const LAYOUT_INITIALS: Readonly<Record<string, ReadonlySet<string>>> = {
+  flexDirection: new Set(["row"]),
+  flexWrap: new Set(["nowrap"]),
+  justifyContent: new Set(["normal"]),
+  alignItems: new Set(["normal"]),
+  gap: new Set(["normal", "normal normal"]),
+  gridTemplateColumns: new Set(["none"]),
+  gridTemplateRows: new Set(["none"]),
+};
+
+export function dropInitialLayoutValues(box: Record<string, string>): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(box)) {
+    if (LAYOUT_INITIALS[k]?.has(v)) continue;
+    out[k] = v;
+  }
+  return out;
+}

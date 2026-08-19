@@ -198,7 +198,12 @@ describe("styleProbeFunc", () => {
     expect(Object.keys(r.elements[0].box)).toEqual([
       "display", "padding", "margin", "borderRadius", "borderWidth",
       "borderStyle", "borderColor", "width", "height",
+      "flexDirection", "flexWrap", "justifyContent", "alignItems", "gap",
+      "gridTemplateColumns", "gridTemplateRows",
     ]);
+    // 探针原样给,初始值由 handler 侧 dropInitialLayoutValues 裁 —— 判定不放注入代码里
+    expect(asked).toContain("grid-template-columns");
+    expect(asked).not.toContain("gridTemplateColumns");
     // 驼峰必须转成 CSS 的短横线写法,否则真浏览器一律返回空串
     expect(asked).toContain("border-radius");
     expect(asked).toContain("padding");
@@ -345,9 +350,9 @@ describe("styleProbeFunc", () => {
     expect(round.contrastStatus).toBe("no-painted-background");
   });
 
-  it("22 个属性逐项按短横线名去问 computed style(拼错/漏项都转红)", () => {
+  it("32 个属性逐项按短横线名去问 computed style(拼错/漏项都转红)", () => {
     const el = document.createElement("div");
-    el.className = "all22";
+    el.className = "all32";
     document.body.appendChild(el);
     const asked: string[] = [];
     const real = window.getComputedStyle.bind(window);
@@ -363,7 +368,7 @@ describe("styleProbeFunc", () => {
         },
       });
     }) as never);
-    styleProbeFunc(".all22", 10, ["typography", "box", "paint", "motion"]);
+    styleProbeFunc(".all32", 10, ["typography", "box", "paint", "motion"]);
     spy.mockRestore();
 
     expect(asked).toEqual([
@@ -371,6 +376,8 @@ describe("styleProbeFunc", () => {
       "letter-spacing", "text-align", "text-transform",
       "display", "padding", "margin", "border-radius", "border-width",
       "border-style", "border-color", "width", "height",
+      "flex-direction", "flex-wrap", "justify-content", "align-items", "gap",
+      "grid-template-columns", "grid-template-rows",
       "background-color", "background-image", "box-shadow", "opacity", "outline", "filter",
       "transition", "transform", "animation",
     ]);

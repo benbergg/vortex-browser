@@ -18,6 +18,11 @@
   - **实际渲染字体**：走 CDP `CSS.getPlatformFontsForNode`，报的是浏览器实际用了什么，
     不是声明栈。带 `glyphCount` / `postScriptName` / `isWebFont`，中英混排会拆成多条
     （gamma.app 实测：`ES Build` 7 字形 + `PingFang SC` 7 字形）。
+  - **布局参数**：`box` 组补 `flexDirection` / `flexWrap` / `justifyContent` /
+    `alignItems` / `gap` / `gridTemplateColumns` / `gridTemplateRows`——过去只给
+    `display`，「这排是 flex 还是 grid、gap 多少、怎么对齐」完全拿不到。
+    按**初始值**裁剪而不是看 `display`：非容器元素上这些全是初始值，一条都不出现
+    （零噪声），而多列布局在 `display:block` 上真设过的 `gap` 仍会保留。
   - **`@font-face` 来源**：按 family 聚合，给 `variants` / `subsetted` / 代表 src。
     递归 `@media` / `@supports` / `@layer`，不漏嵌套声明。
 

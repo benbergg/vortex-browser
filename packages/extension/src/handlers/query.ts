@@ -10,7 +10,7 @@ import { diagnoseEmptyQueryText, diagnoseEmptyQueryCss, diagnoseEmptySchema } fr
 import { resolveTargetOptional } from "../lib/resolve-target.js";
 import type { DebuggerManager } from "../lib/debugger-manager.js";
 import { fetchPlatformFonts } from "../lib/platform-fonts.js";
-import { aggregateFontFaces, buildFontEvidence, isPseudoRendered } from "../lib/style-evidence.js";
+import { aggregateFontFaces, buildFontEvidence, dropInitialLayoutValues, isPseudoRendered } from "../lib/style-evidence.js";
 
 type TextScan = { chars: number; nodes: number; shadowRoots: number; iframes: number };
 type CssScan = { elements: number; shadowRoots: number; iframes: number };
@@ -959,7 +959,9 @@ export const styleProbeFunc = (
         ? pick(["fontFamily", "fontSize", "fontWeight", "lineHeight", "letterSpacing", "textAlign", "textTransform"])
         : undefined;
       const box = want("box")
-        ? pick(["display", "padding", "margin", "borderRadius", "borderWidth", "borderStyle", "borderColor", "width", "height"])
+        ? pick(["display", "padding", "margin", "borderRadius", "borderWidth", "borderStyle",
+          "borderColor", "width", "height", "flexDirection", "flexWrap", "justifyContent",
+          "alignItems", "gap", "gridTemplateColumns", "gridTemplateRows"])
         : undefined;
       const paint = want("paint")
         ? pick(["backgroundColor", "backgroundImage", "boxShadow", "opacity", "outline", "filter"])
@@ -1795,15 +1797,16 @@ async function finalizeStyleResult(
     : null;
 
   const elements = res.elements.map((el, i) => {
-    const { pseudoRaw, declaredFont, fp, ...rest } = el;
+    const { pseudoRaw, declaredFont, fp, box, ...rest } = el;
     void fp;
+    const trimmedBox = box ? dropInitialLayoutValues(box as Record<string, string>) : undefined;
     const pseudo = opt.wantPseudo && pseudoRaw ? renderedPseudos(pseudoRaw) : undefined;
     const font = !opt.wantFont || declaredFont === undefined
       ? undefined
       : fonts && "fonts" in fonts
         ? buildFontEvidence(declaredFont, fonts.fonts[i] ?? null, fonts.fonts[i] === null ? "node lookup failed" : undefined)
         : buildFontEvidence(declaredFont, null, fonts ? fonts.reason : undefined);
-    return { ...rest, ...(pseudo ? { pseudo } : {}), ...(font ? { font } : {}) };
+    return { ...rest, ...(trimmedBox ? { box: trimmedBox } : {}), ...(pseudo ? { pseudo } : {}), ...(font ? { font } : {}) };
   });
 
   const { fontFaces, ...restRes } = res;
