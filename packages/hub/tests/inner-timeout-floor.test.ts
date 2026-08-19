@@ -1,21 +1,24 @@
 /**
  * Author: qingwa
- * Description: hub deadline 不得低于 hubDeadlineFor(action, timeoutMs) 的内层预算地板。
+ * Description: hub 转发路径的缺省 deadline 按 action 预算推导，但从不覆盖任何显式取值。
  *
- * CLI 路径（packages/cli/src/client.ts）不下发 timeoutMs，走 forwardRequest 的兜底
- * this.requestTimeoutMs。若兜底低于内层预算，hub 先于扩展内层 fire，内层按探活
- * 归因的 hint（page-unresponsive/probe-failed/tab-gone）就到不了调用方。
+ * CLI 路径（packages/cli/src/client.ts）不下发 timeoutMs，走 forwardRequest 的兜底。
+ * 兜底原先是 action-blind 的 REQUEST_TIMEOUT_MS 常量，改为按 hubDeadlineFor(action)
+ * 推导——但这只管"没人指定"的那个缺省值。调用方的 timeoutMs、部署方的
+ * requestTimeoutMs（含 0 这个 kill switch）都是深思熟虑的显式选择，必须原样照办，
+ * 不受 action 预算影响。
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { VtxErrorCode, type VtxRequest, type VtxResponse } from "@vortex-browser/shared";
 import { connectClient, connectFakeAgent, startTestHub, type FakeAgent, type TestClient } from "./helpers/harness.js";
 
-describe("hub deadline 地板 = hubDeadlineFor(action, timeoutMs)", () => {
+describe("hub 缺省 deadline 按 action 推导，显式取值一律照办", () => {
   let closeHub: (() => Promise<void>) | undefined;
   let agent: FakeAgent;
   let client: TestClient;
   let port: number;
 
+  // 不传 requestTimeoutMs = 部署方未显式配置（落到 REQUEST_TIMEOUT_MS 常量分支之前）
   const startWith = async (requestTimeoutMs?: number) => {
     const started = await startTestHub(requestTimeoutMs == null ? {} : { requestTimeoutMs });
     port = started.port;
@@ -35,6 +38,13 @@ describe("hub deadline 地板 = hubDeadlineFor(action, timeoutMs)", () => {
     await closeHub?.();
     closeHub = undefined;
   });
+
+  function forwarded(action: string): unknown[] {
+    return agent.messages.filter((message) =>
+      typeof message === "object" && message !== null &&
+      (message as { type?: unknown }).type === "request" &&
+      (message as { action?: unknown }).action === action);
+  }
 
   // 多轮真实 setImmediate 让待送达的 WS 消息走完真事件循环的 poll 阶段
   function flushRealIO(): Promise<void> {
@@ -85,28 +95,41 @@ describe("hub deadline 地板 = hubDeadlineFor(action, timeoutMs)", () => {
   }
 
   // tabId 显式给出以跳过内部 tab.list 解析，否则解析先超时会报 TAB_NOT_FOUND 而非 TIMEOUT
-  it("CLI 形态（无 timeoutMs）+ dom.click：地板 = 35s 内层 + 5s = 40_000ms", async () => {
+  it("CLI 形态（无 timeoutMs，无显式 option）+ dom.click：缺省 = 35s 内层 + 5s = 40_000ms", async () => {
     await startWith();
     await expectTimeoutAt({ action: "dom.click", id: "r-1", tabId: 1 }, 40_000);
   });
 
-  it("CLI 形态（无 timeoutMs）+ page.navigate：地板 = 60s 内层 + 5s = 65_000ms", async () => {
+  it("CLI 形态（无 timeoutMs，无显式 option）+ page.navigate：缺省 = 60s 内层 + 5s = 65_000ms", async () => {
     await startWith();
     await expectTimeoutAt({ action: "page.navigate", id: "r-2", tabId: 1 }, 65_000);
   });
 
-  it("调用方给更大值（90s）+ dom.click：尊重显式大值，不被地板压低", async () => {
+  it("调用方给更大值（90s）+ dom.click：显式大值照办", async () => {
     await startWith();
     await expectTimeoutAt({ action: "dom.click", id: "r-3", tabId: 1, timeoutMs: 90_000 }, 90_000);
   });
 
-  it("调用方给更小值（5s）+ dom.click：不被挤到内层地板之下，仍是 40_000ms", async () => {
+  it("调用方给更小值（5s）+ dom.click：显式小值也照办，不被 action 缺省值抬高", async () => {
     await startWith();
-    await expectTimeoutAt({ action: "dom.click", id: "r-4", tabId: 1, timeoutMs: 5_000 }, 40_000);
+    // 调用方主动选择"少信息量的快失败"是他的权利，缺省值推导不该覆盖显式选择
+    await expectTimeoutAt({ action: "dom.click", id: "r-4", tabId: 1, timeoutMs: 5_000 }, 5_000);
   });
 
-  it("未登记 action，无 timeoutMs：缺省 30s + 5s = 35_000ms", async () => {
+  it("未登记 action，无 timeoutMs，无显式 option：缺省 30s + 5s = 35_000ms", async () => {
     await startWith();
     await expectTimeoutAt({ action: "foo.bar", id: "r-5", tabId: 1 }, 35_000);
+  });
+
+  it("部署方显式 requestTimeoutMs: 0（kill switch）：立即 fail closed，不转发", async () => {
+    await startWith(0);
+    const response = await client.request({ action: "dom.click", id: "r-6", tabId: 1 });
+    expect(response.error?.code).toBe(VtxErrorCode.TIMEOUT);
+    expect(forwarded("dom.click")).toHaveLength(0);
+  });
+
+  it("部署方显式 requestTimeoutMs: 50：照办 50，不被 action 缺省值（40_000）抬高", async () => {
+    await startWith(50);
+    await expectTimeoutAt({ action: "dom.click", id: "r-7", tabId: 1 }, 50);
   });
 });

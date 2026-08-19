@@ -76,6 +76,7 @@ export class HubRouter {
   private readonly browsers: BrowserRegistry;
   private readonly now: () => number;
   private readonly requestTimeoutMs: number;
+  private readonly requestTimeoutExplicit: boolean;
   private readonly onWarn: NonNullable<RouterOptions["onWarn"]>;
   private readonly sendToSession: RouterOptions["sendToSession"];
   private readonly sendToBrowser: RouterOptions["sendToBrowser"];
@@ -94,6 +95,9 @@ export class HubRouter {
     this.browsers = options.browsers;
     this.pending = options.pending ?? new PendingTable();
     this.now = options.now ?? Date.now;
+    // 记住"部署方是否显式配了"，与"回落到常量"区分开——这是唯一能让下面
+    // hubFallbackMs 既尊重显式 kill switch(0) 又不对缺省值 action-blind 的办法
+    this.requestTimeoutExplicit = options.requestTimeoutMs != null;
     this.requestTimeoutMs = options.requestTimeoutMs ?? REQUEST_TIMEOUT_MS;
     this.onWarn = options.onWarn ?? ((message, details) => {
       console.warn(`[hub] ${message}`, details);
@@ -219,12 +223,9 @@ export class HubRouter {
     retryCount = 0,
     // 调用方的预算随请求上线（VtxRequest.timeoutMs）。写死 requestTimeoutMs 会让
     // 设了 45s 的调用在 30s 被砍，且报的是 hub 的错而非 handler 说得清的原因。
-    // CLI 路径不下发 timeoutMs，兜底不能低于内层预算，否则 hub 先于内层 fire，
-    // 内层按探活归因的 hint 就永远到不了调用方（见 hubDeadlineFor 调用方）。
-    deadline = this.now() + Math.max(
-      clampHubTimeout(request.timeoutMs, this.requestTimeoutMs),
-      hubDeadlineFor(request.action, request.timeoutMs),
-    ),
+    // 显式值（caller timeoutMs / 部署方 requestTimeoutMs，含 0 这个 kill switch）
+    // 一律照办；只有两者都缺席时才用 hubFallbackMs 的 action-aware 缺省值兜底。
+    deadline = this.now() + clampHubTimeout(request.timeoutMs, this.hubFallbackMs(request.action)),
   ): Promise<void> {
     const session = this.sessions.get(sessionId);
     if (!session) return;
@@ -740,6 +741,12 @@ export class HubRouter {
   private requestTabId(request: VtxRequest): number | undefined {
     if (typeof request.tabId === "number") return request.tabId;
     return typeof request.params?.tabId === "number" ? request.params.tabId : undefined;
+  }
+
+  // 缺省兜底按 action 预算推导；写死常量会让 dom.click(35s 内层) 被 30s 的 hub 抢先 fire。
+  // 部署方显式配了 requestTimeoutMs（含 0 这个 kill switch）则原样照办，不做 action 改写。
+  private hubFallbackMs(action: string): number {
+    return this.requestTimeoutExplicit ? this.requestTimeoutMs : hubDeadlineFor(action, undefined);
   }
 
   private isBoundToBrowser(session: SessionEntry, browserId: string, browser: BrowserEntry): boolean {
