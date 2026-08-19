@@ -32,7 +32,7 @@ describe("hub 缺省兜底 deadline 晚于内层预算（跨层不变量）", ()
     });
   }
 
-  // 部署方未显式配置 requestTimeoutMs（不传 option，落在 REQUEST_TIMEOUT_MS 常量分支之前）
+  // 部署方未显式配置 requestTimeoutMs（未落 REQUEST_TIMEOUT_MS 常量分支）
   async function expectStillPendingAtInnerMark(action: string): Promise<void> {
     const started = await startTestHub({});
     closeHub = started.close;

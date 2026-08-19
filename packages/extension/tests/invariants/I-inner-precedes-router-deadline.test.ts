@@ -14,7 +14,7 @@
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { NmRequest } from "@vortex-browser/shared";
-import { VtxErrorCode, innerDeadlineFor } from "@vortex-browser/shared";
+import { VtxErrorCode, innerDeadlineFor, MAX_INNER_TIMEOUT_MS } from "@vortex-browser/shared";
 import { ActionRouter } from "../../src/lib/router.js";
 import { registerPageHandlers } from "../../src/handlers/page.js";
 
@@ -56,8 +56,8 @@ describe("内层预算恒先于 router 预算：page.waitForExpression（跨层�
     registerPageHandlers(router, makeDebuggerMock());
   });
 
-  // 合法区间 [1, 60_000] 的代表点：下边界 / 默认(不传) / 15_000 分界附近 / 上边界
-  const legalTimeouts: Array<number | undefined> = [1, undefined, 19_500, 60_000];
+  // 合法区间代表点：下边界 / 默认(不传) / 15_000 分界附近 / 上边界
+  const legalTimeouts: Array<number | undefined> = [1, undefined, 19_500, MAX_INNER_TIMEOUT_MS];
 
   it("覆盖到代表性 T 值（防空集假绿）", () => {
     expect(legalTimeouts.length).toBe(4);
