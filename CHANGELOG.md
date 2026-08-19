@@ -6,6 +6,36 @@
 
 ## [Unreleased]
 
+## [Unreleased]
+
+### Added
+
+- `vortex_query mode=style` 新增 `pseudo` 与 `font` 两组（`attr` 可选，缺省全开）：
+  - **伪元素**：`::before` / `::after` 的 content / font-family / color / display / 尺寸。
+    只返回**真的在渲染**的那些——`content !== none` 只是必要条件，`display:none`、
+    `visibility:hidden`、`opacity:0` 的伪元素 content 照样有值；空 `content` 要有背景图
+    或撑开的尺寸才算画得出东西。
+  - **实际渲染字体**：走 CDP `CSS.getPlatformFontsForNode`，报的是浏览器实际用了什么，
+    不是声明栈。带 `glyphCount` / `postScriptName` / `isWebFont`，中英混排会拆成多条
+    （gamma.app 实测：`ES Build` 7 字形 + `PingFang SC` 7 字形）。
+  - **`@font-face` 来源**：按 family 聚合，给 `variants` / `subsetted` / 代表 src。
+
+### Changed
+
+- ⚠️ `mode=style` 缺省从四组变六组。显式传 `attr` 时行为不变；缺省查询会 attach
+  debugger 取字体（`attr` 不含 `font` 则一次 CDP 都不发）。
+- `CSS` 加入 `DOMAINS_WITH_ENABLE`；`registerQueryHandlers` 接受 `DebuggerManager`。
+
+### Fixed
+
+- `mode=style` 过去只报声明的 `font-family`：字体没加载成功、或 webfont 只覆盖拉丁而
+  中文回落系统字体，工具都照样报声明栈，不报错也不自陈。知乎实测链接实际渲染
+  `PingFang SC`（声明栈第 4 位），旧版只给整串声明栈。
+- 拿不到就说拿不到：debugger 被占 → `evidence: "unavailable"` + 原因；元素没渲染任何
+  字形、或首选是通用族 / `-apple-system` 这类系统关键字 → `firstChoiceInUse: null`，
+  不谎报 `false`。
+- CDP 侧元素集合与探针不一致时不返回会错位的字体数据，自陈原因。
+
 ## [3.0.0] - 2026-08-19
 
 ### Added

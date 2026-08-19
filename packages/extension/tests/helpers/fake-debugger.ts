@@ -16,11 +16,13 @@ import { DOMAINS_WITH_ENABLE } from "../../src/lib/cdp-domains.js";
 /** 生产代码实际发出的 CDP 命令。新增命令时同步加,漏加会在测试里立刻报错 */
 const KNOWN_COMMANDS = new Set([
   "Accessibility.getFullAXTree",
+  "CSS.getPlatformFontsForNode",
   "DOM.describeNode",
   "DOM.getBoxModel",
   "DOM.getDocument",
   "DOM.pushNodesByBackendIdsToFrontend",
   "DOM.querySelector",
+  "DOM.requestNode",
   "DOM.resolveNode",
   "DOM.setAttributeValue",
   "DOMDebugger.getEventListeners",
@@ -36,6 +38,7 @@ const KNOWN_COMMANDS = new Set([
   "Page.getNavigationHistory",
   "Page.navigateToHistoryEntry",
   "Runtime.evaluate",
+  "Runtime.getProperties",
   "Runtime.releaseObject",
 ]);
 

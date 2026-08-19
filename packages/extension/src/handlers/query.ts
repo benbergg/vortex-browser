@@ -8,6 +8,9 @@ import type { ActionRouter } from "../lib/router.js";
 import { getActiveTabId, buildExecuteTarget, ensureFrameAttached } from "../lib/tab-utils.js";
 import { diagnoseEmptyQueryText, diagnoseEmptyQueryCss, diagnoseEmptySchema } from "../lib/empty-diagnosis.js";
 import { resolveTargetOptional } from "../lib/resolve-target.js";
+import type { DebuggerManager } from "../lib/debugger-manager.js";
+import { fetchPlatformFonts } from "../lib/platform-fonts.js";
+import { aggregateFontFaces, buildFontEvidence, isPseudoRendered } from "../lib/style-evidence.js";
 
 type TextScan = { chars: number; nodes: number; shadowRoots: number; iframes: number };
 type CssScan = { elements: number; shadowRoots: number; iframes: number };
@@ -779,9 +782,13 @@ export const styleProbeFunc = (
         box?: Record<string, string>;
         paint?: Record<string, string>;
         motion?: Record<string, string>;
+        pseudoRaw?: Record<string, Record<string, string>>;
+        declaredFont?: string;
       }>;
       total: number;
       showing: number;
+      fontFaces?: Array<Record<string, string>>;
+      fontFacesPartial?: boolean;
     }
   | { error: string } => {
   try {
@@ -794,6 +801,33 @@ export const styleProbeFunc = (
         if (sr) acc.push(...queryAllDeep(sel, sr, depth + 1));
       }
       return acc;
+    };
+
+    // @font-face 只能从 CSSOM 读,跨域样式表访问 cssRules 抛 SecurityError → 标 partial 而非当没有
+    const collectFontFaces = (): { rules: Array<Record<string, string>>; partial: boolean } => {
+      const FACE_PROPS = ["font-family", "src", "font-weight", "font-style", "font-display", "unicode-range"];
+      const rules: Array<Record<string, string>> = [];
+      let partial = false;
+      for (const sheet of Array.from(document.styleSheets)) {
+        let list: CSSRuleList | null = null;
+        try {
+          list = sheet.cssRules;
+        } catch {
+          partial = true;
+          continue;
+        }
+        for (const rule of Array.from(list ?? [])) {
+          if (rule.constructor.name !== "CSSFontFaceRule" && (rule as CSSRule).type !== 5) continue;
+          const st = (rule as unknown as { style: CSSStyleDeclaration }).style;
+          const o: Record<string, string> = {};
+          for (const prop of FACE_PROPS) {
+            const v = st.getPropertyValue(prop);
+            if (v) o[prop] = v;
+          }
+          if (o["font-family"]) rules.push(o);
+        }
+      }
+      return { rules, partial };
     };
 
     // 解析 rgb/rgba → [r,g,b,a];无法解析返 null。
@@ -904,7 +938,7 @@ export const styleProbeFunc = (
         contrastRatio == null ? null : contrastRatio >= min;
 
       // 缺省=全开,空数组=一组都不要;两者不能混为一谈
-      const active = groups ?? ["typography", "box", "paint", "motion"];
+      const active = groups ?? ["typography", "box", "paint", "motion", "pseudo", "font"];
       const want = (g: string): boolean => active.indexOf(g) !== -1;
       const pick = (props: string[]): Record<string, string> => {
         const o: Record<string, string> = {};
@@ -924,6 +958,22 @@ export const styleProbeFunc = (
         : undefined;
       const motion = want("motion") ? pick(["transition", "transform", "animation"]) : undefined;
 
+      // 只按 content 粗筛(能砍掉 ~98%),渲染判定在 handler 侧纯函数里,别在注入代码里分裂
+      const PSEUDO_PROPS = ["content", "font-family", "color", "display", "visibility",
+        "opacity", "background-image", "width", "height"];
+      let pseudoRaw: Record<string, Record<string, string>> | undefined;
+      if (want("pseudo")) {
+        for (const which of ["::before", "::after"]) {
+          const pcs = getComputedStyle(el, which);
+          const c = pcs.getPropertyValue("content");
+          if (c === "none" || c === "normal" || c === "") continue;
+          const o: Record<string, string> = {};
+          for (const prop of PSEUDO_PROPS) o[prop] = pcs.getPropertyValue(prop);
+          (pseudoRaw ??= {})[which.slice(2)] = o;
+        }
+      }
+      const declaredFont = want("font") ? cs.getPropertyValue("font-family") : undefined;
+
       elements.push({
         index: i,
         tag: el.tagName.toLowerCase(),
@@ -941,9 +991,19 @@ export const styleProbeFunc = (
         ...(box ? { box } : {}),
         ...(paint ? { paint } : {}),
         ...(motion ? { motion } : {}),
+        ...(pseudoRaw ? { pseudoRaw } : {}),
+        ...(declaredFont !== undefined ? { declaredFont } : {}),
       });
     }
-    return { elements, total, showing: limit };
+
+    const wantFont = (groups ?? ["typography", "box", "paint", "motion", "pseudo", "font"]).indexOf("font") !== -1;
+    const faces = wantFont ? collectFontFaces() : undefined;
+    return {
+      elements,
+      total,
+      showing: limit,
+      ...(faces ? { fontFaces: faces.rules, fontFacesPartial: faces.partial } : {}),
+    };
   } catch (e) {
     return { error: "style probe error: " + (e instanceof Error ? e.message : String(e)) };
   }
@@ -1672,7 +1732,75 @@ export function normalizeCssAttrParam(attr: string | string[] | undefined): stri
   return out.length > 0 ? out : null;
 }
 
-export function registerQueryHandlers(router: ActionRouter): void {
+type StyleProbeElement = Record<string, unknown> & {
+  pseudoRaw?: Record<string, Record<string, string>>;
+  declaredFont?: string;
+};
+type StyleProbeResult = {
+  elements: StyleProbeElement[];
+  total: number;
+  showing: number;
+  fontFaces?: Array<Record<string, string>>;
+  fontFacesPartial?: boolean;
+};
+
+/** 探针读回的短横线属性名 → isPseudoRendered 要的驼峰形状。 */
+function toPseudoComputed(raw: Record<string, string>): Parameters<typeof isPseudoRendered>[0] {
+  return {
+    content: raw.content ?? "",
+    display: raw.display ?? "",
+    visibility: raw.visibility ?? "",
+    opacity: raw.opacity ?? "",
+    backgroundImage: raw["background-image"] ?? "",
+    width: raw.width ?? "",
+    height: raw.height ?? "",
+  };
+}
+
+function renderedPseudos(raw: Record<string, Record<string, string>>): Record<string, Record<string, string>> | undefined {
+  const out: Record<string, Record<string, string>> = {};
+  for (const [which, cs] of Object.entries(raw)) {
+    if (isPseudoRendered(toPseudoComputed(cs))) out[which] = cs;
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
+/**
+ * 把探针的中间态(pseudoRaw / declaredFont)换成判定后的 pseudo / font 字段。
+ * 字体走 CDP;拿不到时 evidence=unavailable 并带原因——不回落到会答错的宽度测量。
+ */
+async function finalizeStyleResult(
+  res: StyleProbeResult,
+  opt: { wantPseudo: boolean; wantFont: boolean; debuggerMgr?: DebuggerManager; tabId: number; selector: string; maxResults: number },
+): Promise<StyleProbeResult> {
+  const fonts = opt.wantFont
+    ? opt.debuggerMgr
+      ? await fetchPlatformFonts(opt.debuggerMgr, opt.tabId, opt.selector, opt.maxResults, res.elements.length)
+      : { reason: "no debugger session available in this build" }
+    : null;
+
+  const elements = res.elements.map((el, i) => {
+    const { pseudoRaw, declaredFont, ...rest } = el;
+    const pseudo = opt.wantPseudo && pseudoRaw ? renderedPseudos(pseudoRaw) : undefined;
+    const font = !opt.wantFont || declaredFont === undefined
+      ? undefined
+      : fonts && "fonts" in fonts
+        ? buildFontEvidence(declaredFont, fonts.fonts[i] ?? null, fonts.fonts[i] === null ? "node lookup failed" : undefined)
+        : buildFontEvidence(declaredFont, null, fonts ? fonts.reason : undefined);
+    return { ...rest, ...(pseudo ? { pseudo } : {}), ...(font ? { font } : {}) };
+  });
+
+  const { fontFaces, ...restRes } = res;
+  // 知乎把一个 family 按 unicode-range 切了 302 片,原样返回是 81KB
+  const faces = fontFaces ? aggregateFontFaces(fontFaces) : undefined;
+  return {
+    ...restRes,
+    elements,
+    ...(faces ? { fontFaces: faces.faces, fontFamiliesTotal: faces.totalFamilies, fontFacesTruncated: faces.truncated } : {}),
+  } as StyleProbeResult;
+}
+
+export function registerQueryHandlers(router: ActionRouter, debuggerMgr?: DebuggerManager): void {
   router.registerAll({
     [QueryActions.QUERY_PAGE]: async (args, tabId) => {
       const mode = args.mode as string | undefined;
@@ -1948,7 +2076,7 @@ export function registerQueryHandlers(router: ActionRouter): void {
         const maxResults = Math.min((args.maxResults as number | undefined) ?? 10, 50);
 
         // attr 选组,不传给全四组;组名非法直接报错,别静默返回空对象
-        const ALL_GROUPS = ["typography", "box", "paint", "motion"];
+        const ALL_GROUPS = ["typography", "box", "paint", "motion", "pseudo", "font"];
         const requested = normalizeCssAttrParam(args.attr as string | undefined);
         const groups = requested ?? ALL_GROUPS;
         const bad = groups.filter((g) => ALL_GROUPS.indexOf(g) === -1);
@@ -1977,7 +2105,14 @@ export function registerQueryHandlers(router: ActionRouter): void {
         if ("error" in res && res.error) {
           throw vtxError(VtxErrorCode.JS_EXECUTION_ERROR, `query.queryPage style error: ${res.error}`);
         }
-        return res;
+        return finalizeStyleResult(res as StyleProbeResult, {
+          wantPseudo: groups.indexOf("pseudo") !== -1,
+          wantFont: groups.indexOf("font") !== -1,
+          debuggerMgr,
+          tabId: tid,
+          selector: pattern,
+          maxResults,
+        });
       } else {
         // component 模式:注入 componentInspectFunc 取 Vue/React 组件链 + 行数据。
         // 默认低(5/depth3):组件实例数据比 css/text 重,且全局预算硬兜底防输出爆炸。

@@ -71,9 +71,11 @@ describe("query 经 index+snapshotId 定位（@ref 翻译后的形态）", () =>
     expect(executeScript.mock.calls[0][0].args[2]).toEqual(["typography"]);
   });
 
-  it("不传 attr → 四组全开", async () => {
+  it("不传 attr → 六组全开(pseudo/font 也在缺省里,不然盲区还在)", async () => {
     await router.dispatch(mkReq({ mode: "style", pattern: "h1" }, "r5"));
-    expect(executeScript.mock.calls[0][0].args[2]).toEqual(["typography", "box", "paint", "motion"]);
+    expect(executeScript.mock.calls[0][0].args[2]).toEqual([
+      "typography", "box", "paint", "motion", "pseudo", "font",
+    ]);
   });
 
   it("非法组名 → 报错而不是静默返回空分组", async () => {
