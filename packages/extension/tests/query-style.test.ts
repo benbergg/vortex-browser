@@ -198,7 +198,12 @@ describe("styleProbeFunc", () => {
     expect(Object.keys(r.elements[0].box)).toEqual([
       "display", "padding", "margin", "borderRadius", "borderWidth",
       "borderStyle", "borderColor", "width", "height",
+      "flexDirection", "flexWrap", "justifyContent", "alignItems", "gap",
+      "gridTemplateColumns", "gridTemplateRows",
     ]);
+    // 探针原样给,初始值由 handler 侧 dropInitialLayoutValues 裁 —— 判定不放注入代码里
+    expect(asked).toContain("grid-template-columns");
+    expect(asked).not.toContain("gridTemplateColumns");
     // 驼峰必须转成 CSS 的短横线写法,否则真浏览器一律返回空串
     expect(asked).toContain("border-radius");
     expect(asked).toContain("padding");
@@ -254,6 +259,33 @@ describe("styleProbeFunc", () => {
     el.className = "iso";
     document.body.appendChild(el);
     expect(() => detached(".iso", 1, ["typography", "box", "paint", "motion"])).not.toThrow();
+  });
+
+  it("注入自包含:六组全开(含 pseudo/font)剥离模块作用域后仍可运行", () => {
+    // 四组那条覆盖不到 collectFontFaces 与伪元素读取,这两段引用模块标识符会真站崩
+    const detached = new Function("return " + styleProbeFunc.toString())();
+    const st = document.createElement("style");
+    st.textContent = '@font-face{font-family:"X";src:url(x.woff2)}';
+    document.head.appendChild(st);
+    const el = document.createElement("div");
+    el.className = "iso6";
+    document.body.appendChild(el);
+    let out: unknown;
+    expect(() => {
+      out = detached(".iso6", 1, ["typography", "box", "paint", "motion", "pseudo", "font"]);
+    }).not.toThrow();
+    expect((out as { error?: string }).error).toBeUndefined();
+    expect((out as { fontFaces?: unknown[] }).fontFaces).toBeDefined();
+  });
+
+  it("groups 缺省(不传)也要能剥离作用域跑 —— 缺省是六组全开", () => {
+    const detached = new Function("return " + styleProbeFunc.toString())();
+    const el = document.createElement("div");
+    el.className = "iso7";
+    document.body.appendChild(el);
+    const out = detached(".iso7", 1) as { error?: string; elements: Array<{ declaredFont?: string }> };
+    expect(out.error).toBeUndefined();
+    expect(out.elements[0].declaredFont).toBeDefined();
   });
 
   it("背景色带 alpha → 不拿原始色硬算,状态为 translucent", () => {
@@ -318,9 +350,9 @@ describe("styleProbeFunc", () => {
     expect(round.contrastStatus).toBe("no-painted-background");
   });
 
-  it("22 个属性逐项按短横线名去问 computed style(拼错/漏项都转红)", () => {
+  it("32 个属性逐项按短横线名去问 computed style(拼错/漏项都转红)", () => {
     const el = document.createElement("div");
-    el.className = "all22";
+    el.className = "all32";
     document.body.appendChild(el);
     const asked: string[] = [];
     const real = window.getComputedStyle.bind(window);
@@ -336,7 +368,7 @@ describe("styleProbeFunc", () => {
         },
       });
     }) as never);
-    styleProbeFunc(".all22", 10, ["typography", "box", "paint", "motion"]);
+    styleProbeFunc(".all32", 10, ["typography", "box", "paint", "motion"]);
     spy.mockRestore();
 
     expect(asked).toEqual([
@@ -344,6 +376,8 @@ describe("styleProbeFunc", () => {
       "letter-spacing", "text-align", "text-transform",
       "display", "padding", "margin", "border-radius", "border-width",
       "border-style", "border-color", "width", "height",
+      "flex-direction", "flex-wrap", "justify-content", "align-items", "gap",
+      "grid-template-columns", "grid-template-rows",
       "background-color", "background-image", "box-shadow", "opacity", "outline", "filter",
       "transition", "transform", "animation",
     ]);
@@ -457,5 +491,164 @@ describe("styleProbeFunc", () => {
     const r = styleProbeFunc(".none", 10, []) as any;
     expect(r.total).toBe(0);
     expect(r.elements).toEqual([]);
+  });
+});
+
+describe("styleProbeFunc 的 @font-face 收集", () => {
+  const faces = (css: string): Array<Record<string, string>> => {
+    document.head.querySelectorAll("style").forEach((n) => n.remove());
+    const st = document.createElement("style");
+    st.textContent = css;
+    document.head.appendChild(st);
+    const el = document.createElement("div");
+    el.className = "ff";
+    document.body.appendChild(el);
+    return (styleProbeFunc(".ff", 1, ["font"]) as any).fontFaces;
+  };
+
+  it("顶层 @font-face 收得到", () => {
+    expect(faces('@font-face{font-family:"A";src:url(a.woff2)}')
+      .some((f) => f["font-family"] === '"A"')).toBe(true);
+  });
+
+  it("@media 里的 @font-face 也要收 —— 不递归就会漏,还照样报 partial=false", () => {
+    expect(faces('@media screen{@font-face{font-family:"InMedia";src:url(m.woff2)}}')
+      .some((f) => f["font-family"] === '"InMedia"')).toBe(true);
+  });
+
+  it("@supports 里的也要收", () => {
+    expect(faces('@supports (display:grid){@font-face{font-family:"InSupports";src:url(s.woff2)}}')
+      .some((f) => f["font-family"] === '"InSupports"')).toBe(true);
+  });
+
+  const probe = (css: string): { fontFaces: Array<Record<string, string>>; fontFacesPartial: boolean; fontFacesPartialReasons?: string[] } => {
+    // partial 是整页级的,上一条测试留下的 style 会让后面的用例互相污染
+    document.head.querySelectorAll("style").forEach((n) => n.remove());
+    const st = document.createElement("style");
+    st.textContent = css;
+    document.head.appendChild(st);
+    const el = document.createElement("div");
+    el.className = "ff2";
+    document.body.appendChild(el);
+    return styleProbeFunc(".ff2", 1, ["font"]) as never;
+  };
+
+  it("嵌套超过深度上限 → partial=true,不能把'没扫完'说成'页面没有'", () => {
+    const deep = "@media screen{".repeat(8) + '@font-face{font-family:"TooDeep";src:url(d.woff2)}' + "}".repeat(8);
+    const r = probe(deep);
+    expect(r.fontFaces.some((f) => f["font-family"] === '"TooDeep"')).toBe(false);
+    expect(r.fontFacesPartial).toBe(true);
+    expect(r.fontFacesPartialReasons).toEqual(["nesting-depth"]);
+  });
+
+  it("浅层嵌套不误报 partial", () => {
+    expect(probe('@media screen{@font-face{font-family:"Shallow";src:url(x.woff2)}}').fontFacesPartial).toBe(false);
+  });
+
+  it("keyframes 不被当成 grouping rule 递归", () => {
+    const r = probe("@keyframes spin{from{opacity:0}to{opacity:1}}");
+    expect(r.fontFacesPartial).toBe(false);
+    expect(r.fontFaces).toEqual([]);
+  });
+});
+
+describe("styleProbeFunc 的伪元素粗筛", () => {
+  // jsdom 的伪元素 content 恒为 normal,真实形态只能靠替身喂进去;
+  // 替身转发真实实现,只接管带第二参的调用
+  const withPseudo = (before: Record<string, string>): unknown => {
+    const real = window.getComputedStyle.bind(window);
+    vi.stubGlobal("getComputedStyle", (el: Element, which?: string | null) => {
+      if (!which) return real(el);
+      return {
+        getPropertyValue: (p: string) => (which === "::before" ? (before[p] ?? "") : "none"),
+      } as unknown as CSSStyleDeclaration;
+    });
+    const el = document.createElement("i");
+    el.className = "pe";
+    document.body.appendChild(el);
+    const r = styleProbeFunc(".pe", 1, ["pseudo"]) as any;
+    vi.unstubAllGlobals();
+    return r.elements[0].pseudoRaw;
+  };
+
+  it("空 content + 背景图 → 粗筛不能丢,渲染判定归 isPseudoRendered 一处管", () => {
+    const raw = withPseudo({
+      content: '""', "background-image": 'url("i.png")', width: "20px", height: "20px",
+      display: "inline-block", visibility: "visible", opacity: "1",
+    }) as Record<string, Record<string, string>>;
+    expect(raw?.before).toBeDefined();
+    expect(raw.before["background-image"]).toContain("i.png");
+  });
+
+  it("content 是 none → 粗筛就跳过,不白传数据", () => {
+    expect(withPseudo({ content: "none" })).toBeUndefined();
+  });
+
+  it("content 是 normal → 同样跳过(伪元素上 normal 等价 none)", () => {
+    expect(withPseudo({ content: "normal" })).toBeUndefined();
+  });
+
+  it("content 读回空串(拿不到) → 仍然带上来,由判定层决定,不在注入侧提前定生死", () => {
+    const raw = withPseudo({
+      content: "", "background-image": 'url("i.png")', width: "9px", height: "9px",
+    }) as Record<string, Record<string, string>> | undefined;
+    expect(raw?.before).toBeDefined();
+  });
+});
+
+describe("styleProbeFunc 对坏样式表的容错", () => {
+  const withSheets = (sheets: unknown[]): { fontFaces: Array<Record<string, string>>; fontFacesPartial: boolean; fontFacesPartialReasons?: string[] } => {
+    document.head.querySelectorAll("style").forEach((n) => n.remove());
+    Object.defineProperty(document, "styleSheets", { configurable: true, get: () => sheets });
+    const el = document.createElement("div");
+    el.className = "bad";
+    document.body.appendChild(el);
+    const r = styleProbeFunc(".bad", 1, ["font"]) as never;
+    Reflect.deleteProperty(document, "styleSheets");
+    return r;
+  };
+
+  const faceRule = (family: string) => ({
+    constructor: { name: "CSSFontFaceRule" },
+    type: 5,
+    style: { getPropertyValue: (p: string) => (p === "font-family" ? family : "") },
+  });
+
+  it("同一张表里坏掉一条规则 → 标 partial,但后面的规则照收", () => {
+    const bad = { get constructor(): never { throw new Error("boom"); } };
+    const r = withSheets([{ cssRules: [faceRule("Before"), bad, faceRule("After")] }]);
+    expect(r.fontFaces.map((f) => f["font-family"])).toEqual(["Before", "After"]);
+    expect(r.fontFacesPartial).toBe(true);
+    expect(r.fontFacesPartialReasons).toEqual(["rule-unreadable"]);
+  });
+
+  it("整张表读不了(跨域) → partial,其余表照收", () => {
+    const crossOrigin = { get cssRules(): never { throw new Error("SecurityError"); } };
+    const r = withSheets([crossOrigin, { cssRules: [faceRule("Local")] }]);
+    expect(r.fontFaces.map((f) => f["font-family"])).toEqual(["Local"]);
+    expect(r.fontFacesPartial).toBe(true);
+    // 三种缺失原因不能混成一个 boolean,调用方分不出是跨域、规则坏还是没扫完
+    expect(r.fontFacesPartialReasons).toEqual(["cross-origin"]);
+  });
+
+  it("全部正常 → partial=false 且不带 reasons 字段", () => {
+    const r = withSheets([{ cssRules: [faceRule("A")] }]);
+    expect(r.fontFacesPartial).toBe(false);
+    expect(r.fontFacesPartialReasons).toBeUndefined();
+  });
+
+  it("多种原因同时发生 → 都要列出来", () => {
+    const crossOrigin = { get cssRules(): never { throw new Error("SecurityError"); } };
+    const bad = { get constructor(): never { throw new Error("boom"); } };
+    const r = withSheets([crossOrigin, { cssRules: [bad, faceRule("Ok")] }]);
+    expect(r.fontFacesPartialReasons).toEqual(["cross-origin", "rule-unreadable"]);
+  });
+
+  it("原因顺序不跟着页面里样式表的先后走 —— 同一种缺失要给同一个值", () => {
+    const crossOrigin = { get cssRules(): never { throw new Error("SecurityError"); } };
+    const bad = { get constructor(): never { throw new Error("boom"); } };
+    // 发现顺序是 rule-unreadable 在前,与字母序相反
+    const r = withSheets([{ cssRules: [bad] }, crossOrigin]);
+    expect(r.fontFacesPartialReasons).toEqual(["cross-origin", "rule-unreadable"]);
   });
 });

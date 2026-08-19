@@ -6,6 +6,66 @@
 
 ## [Unreleased]
 
+### Added
+
+- `vortex_query mode=style` 新增 `pseudo` 与 `font` 两组（`attr` 可选，缺省全开）：
+  - **伪元素**：`::before` / `::after` 的 content / font-family / color / display / 尺寸。
+    只返回**真的在渲染**的那些——`content !== none` 只是必要条件，`display:none`、
+    `visibility:hidden`、`opacity:0` 的伪元素 content 照样有值；空 `content` 要有背景图
+    或撑开的尺寸才算画得出东西。
+  - **实际渲染字体**：走 CDP `CSS.getPlatformFontsForNode`，报的是浏览器实际用了什么，
+    不是声明栈。带 `glyphCount` / `postScriptName` / `isWebFont`，中英混排会拆成多条
+    （gamma.app 实测：`ES Build` 7 字形 + `PingFang SC` 7 字形）。
+  - **布局参数**：`box` 组补 `flexDirection` / `flexWrap` / `justifyContent` /
+    `alignItems` / `gap` / `gridTemplateColumns` / `gridTemplateRows`——过去只给
+    `display`，「这排是 flex 还是 grid、gap 多少、怎么对齐」完全拿不到。
+    按**初始值**裁剪而不是看 `display`：非容器元素上这些全是初始值，一条都不出现
+    （零噪声），而 `display:block` 上真设过的 `gap` 仍会保留。裁剪基于 computed
+    value——真 Chrome 实测未设 `gap` 的 block/flex/grid/inline-block 一律是 `normal`，
+    只有显式写过才是 `0px`；代价是作者显式声明的与初始值同值时无法区分，这是
+    computed style 本身的限制。当前覆盖这七项，不是完整布局模型。
+  - **`@font-face` 来源**：按 family 聚合，给 `variants` / `subsetted` / 代表 src。
+    递归 `@media` / `@supports` / `@layer`，不漏嵌套声明。
+
+  返回里的三个字段各答一件事，别混：`font.evidence` 说这次字体结论是实测还是没拿到；
+  `font.firstChoiceInUse` 只答**声明栈第一个 family 有没有贡献字形**（混排时多个字体
+  都会列在 `rendered` 里，要判主导字体请比 `glyphCount`）；`fontFacesPartial` 说来源不全
+  （具体哪种见 `fontFacesPartialReasons`），`fontFacesTruncated` 说 family 数超过 20
+  被截断——两者是不同的不完整原因，`fontFamiliesTotal` 给出真实总数。
+
+### Changed
+
+- ⚠️ `mode=style` 缺省从四组变六组。显式传 `attr` 时行为不变；缺省查询会 attach
+  debugger 取字体（`attr` 不含 `font` 则一次 CDP 都不发）。
+- `CSS` 加入 `DOMAINS_WITH_ENABLE`；`registerQueryHandlers` 接受 `DebuggerManager`。
+
+### Fixed
+
+- `mode=style` 过去只报声明的 `font-family`：字体没加载成功、或 webfont 只覆盖拉丁而
+  中文回落系统字体，工具都照样报声明栈，不报错也不自陈。知乎实测链接实际渲染
+  `PingFang SC`（声明栈第 4 位），旧版只给整串声明栈。
+- 拿不到就说拿不到：debugger 被占 → `evidence: "unavailable"` + 原因；元素没渲染任何
+  字形、或首选是通用族 / `-apple-system` 这类系统关键字 → `firstChoiceInUse: null`，
+  不谎报 `false`。
+- CDP 侧与探针的元素集合按**树中路径逐项核对**，不只比数量——数量相同、顺序不同时
+  按下标对齐会把字体静默挂到别的元素上。用路径而不是 tag+文本长度：两个
+  `<button>` 文本都 4 个字就同指纹，碰撞时重排检测不出来。
+- `@font-face` 扫描的每一种「没扫完」都置 `fontFacesPartial`，并在
+  `fontFacesPartialReasons` 里列出具体原因（`cross-origin` / `rule-unreadable` /
+  `nesting-depth`，顺序稳定）——三种缺失挤在一个 boolean 里，调用方分不出该怎么办。
+  跨域整表读不到、单条规则读取抛异常（同表后续规则照收）、嵌套超过深度上限，各算一种。
+- 元素身份重复时（超深对称结构导致路径在 64 段截断后相撞）**拒绝返回字体**而不是赌
+  顺序没变，reason 区分「截断相撞」与「结构本身重复」——两者调用方的处置不一样。
+- `box` 里 `display` 永远保留：布局裁剪把 box 掏空成 `{}` 的话，空对象是 truthy，
+  调用方分不出「没请求 box」和「请求了但全是初始值」。
+- CDP 远程对象用完即 `Runtime.releaseObject`（含异常路径），`font` 组默认开启，
+  不释放会一直堆在 renderer 的 object table 里。释放带 1s deadline 并发发出，
+  某条命令永不返回时不会把已经拿到的结果一起挂住——deadline 只保证调用方不被挂住，
+  `chrome.debugger` 没有取消能力，超时那条仍在后台 pending。
+- `vortex_query` 的 `maxResults` 公开 schema 上限从 200 放宽到 2000：`f7ecb25` 给
+  `tokens` 补约束时把上限写在了共享字段上，导致 `mode=chart`（内部上限 2000）和
+  `mode=sheet`（1000）传大值会在进 handler 前被 schema 拒——v3.0.0 起的回归。
+
 ## [3.0.0] - 2026-08-19
 
 ### Added

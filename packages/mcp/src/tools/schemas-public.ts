@@ -474,7 +474,7 @@ export const PUBLIC_TOOLS: ToolDef[] = [
     // 零 LLM 探测:text grep 可见文本 / css 计数+取属性。一次 executeScript 即时返回。
     name: "vortex_query",
     action: "query.queryPage",
-    description: "Zero-LLM probe: text=grep; css=find elems; component=Vue/React state; geometry=bbox/clip/occlude; style=排版/盒/绘制/动效+WCAG(attr 选组); sheet=Lake Sheet→md/csv/json; flow=流程图→mermaid; chart=echarts→数据(attr=summary|json); tokens=CSS 变量→调色板/字阶(pattern=*,只扫 :root/body).",
+    description: "Zero-LLM probe: text=grep; css=find elems; component=Vue/React state; geometry=bbox/clip/occlude; style=排版/盒/绘制/动效/伪元素/实际渲染字体+WCAG(attr 选组); sheet=Lake Sheet→md/csv/json; flow=流程图→mermaid; chart=echarts→数据(attr=summary|json); tokens=CSS 变量→调色板/字阶(pattern=*,只扫 :root/body).",
     schema: {
       type: "object",
       properties: {
@@ -489,13 +489,13 @@ export const PUBLIC_TOOLS: ToolDef[] = [
         isRegex: { type: "boolean" },
         caseSensitive: { type: "boolean" },
         contextChars: { type: "number" },
-        attr: { type: "string", description: "css: 属性名, 多个用 , 或 | 分隔(如 'class|title'); style: 分组 typography|box|paint|motion(默认全开); chart/sheet/flow: 输出格式" },
+        attr: { type: "string", description: "css: 属性名, 多个用 , 或 | 分隔(如 'class|title'); style: 分组 typography|box|paint|motion|pseudo|font(默认全开;font 用 CDP 报实际渲染字体,需 debugger); chart/sheet/flow: 输出格式" },
         includeText: { type: "boolean" },
         maxResults: {
           type: "number",
           minimum: 1,
-          maximum: 200,
-          description: "tokens: 每组上限(默认40); 其他 mode: 元素数上限(默认10)",
+          maximum: 2000,
+          description: "各 mode 上限不同(chart 2000/sheet 1000/tokens 200/元素类 50),超出按 mode 截断; tokens 是每组上限(默认40),其他是元素数上限(默认10)",
         },
         ...tabFields,
       },

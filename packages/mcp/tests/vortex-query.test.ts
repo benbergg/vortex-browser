@@ -69,3 +69,20 @@ describe("vortex_query dispatch 路由", () => {
     }
   });
 });
+
+describe("maxResults schema 范围要覆盖所有 mode 的内部上限", () => {
+  const field = () => {
+    const def = getToolDef("vortex_query")!;
+    return (def.schema as { properties: Record<string, { maximum?: number; minimum?: number }> })
+      .properties.maxResults;
+  };
+
+  it("chart 内部上限 2000,schema 不能把它卡在更小的值上", () => {
+    // f7ecb25 给 tokens 补约束时写了 maximum:200,chart 传 1000 会在进 handler 前被拒
+    expect(field().maximum).toBeGreaterThanOrEqual(2000);
+  });
+
+  it("下界仍锁在 1", () => {
+    expect(field().minimum).toBe(1);
+  });
+});

@@ -42,7 +42,7 @@ registerViewportHandlers(router, debuggerMgr);
 registerObserveHandlers(router, debuggerMgr);
 registerMutationHandlers(router);
 registerDiagnosticsHandlers(router);
-registerQueryHandlers(router);
+registerQueryHandlers(router, debuggerMgr);
 // testing cap opt-in 工具：verify handler 通过 router.dispatch 复用 observe AX 管线
 registerVerifyHandlers(router);
 

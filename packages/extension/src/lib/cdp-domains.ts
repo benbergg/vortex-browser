@@ -13,6 +13,7 @@ import { VtxErrorCode, vtxError } from "@vortex-browser/shared";
 // 加错一个,守卫就放行一条注定 -32601 的调用,等于白做。新增前查 CDP 协议文档。
 export const DOMAINS_WITH_ENABLE: ReadonlySet<string> = new Set([
   "Accessibility",
+  "CSS",
   "DOM",
   "Network",
   "Page",
