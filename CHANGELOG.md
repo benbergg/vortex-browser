@@ -53,7 +53,8 @@
   单条规则读取抛异常（同表后续规则照收）、嵌套超过深度上限。
 - CDP 远程对象用完即 `Runtime.releaseObject`（含异常路径），`font` 组默认开启，
   不释放会一直堆在 renderer 的 object table 里。释放带 1s deadline 并发发出，
-  某条命令永不返回时不会把已经拿到的结果一起挂住。
+  某条命令永不返回时不会把已经拿到的结果一起挂住——deadline 只保证调用方不被挂住，
+  `chrome.debugger` 没有取消能力，超时那条仍在后台 pending。
 - `vortex_query` 的 `maxResults` 公开 schema 上限从 200 放宽到 2000：`f7ecb25` 给
   `tokens` 补约束时把上限写在了共享字段上，导致 `mode=chart`（内部上限 2000）和
   `mode=sheet`（1000）传大值会在进 handler 前被 schema 拒——v3.0.0 起的回归。
