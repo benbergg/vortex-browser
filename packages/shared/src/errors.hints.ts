@@ -69,11 +69,13 @@ export const TIMEOUT_TAB_GONE_HINT =
 /**
  * chrome.debugger.attach 撞上「别的 debugger 占着」时的提示。CDP 被占是可恢复的,
  * 与缺权限 / chrome:// 那类不同,故不能沿用 CDP_NOT_ATTACHED 的默认文案。
+ * 这条服务所有 CDP 消费者(抓包/截图/鼠标),故只说对谁都成立的事——「改用 vortex_act」
+ * 只在有合成替代路径的地方成立,归 CDP_BUSY_MOUSE_CLICK_HINT 那类专用文案。
  */
 export const CDP_BUSY_ATTACH_HINT =
   "Another debugger owns this tab — usually DevTools is open on it, or another extension attached " +
-  "first. Close DevTools on that tabId (or detach the other debugger) and retry; if you only need a " +
-  "click and not a trusted event, call vortex_act with action='click' instead.";
+  "first. No argument change will get through while it is held: close DevTools on that tabId (or " +
+  "detach the other debugger client), then retry.";
 
 /**
  * CDP 被别的 debugger 占住时 mouse.click 的提示。它靠真实坐标派发,没有 act 那样的
