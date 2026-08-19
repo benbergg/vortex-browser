@@ -494,8 +494,8 @@ export const PUBLIC_TOOLS: ToolDef[] = [
         maxResults: {
           type: "number",
           minimum: 1,
-          maximum: 200,
-          description: "tokens: 每组上限(默认40); 其他 mode: 元素数上限(默认10)",
+          maximum: 2000,
+          description: "各 mode 上限不同(chart 2000/sheet 1000/tokens 200/元素类 50),超出按 mode 截断; tokens 是每组上限(默认40),其他是元素数上限(默认10)",
         },
         ...tabFields,
       },

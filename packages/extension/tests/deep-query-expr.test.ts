@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeEach } from "vitest";
-import { deepQuerySelectorAllExpr } from "../src/lib/deep-query-expr.js";
+import { FINGERPRINT_ON_ARRAY_FN, deepQuerySelectorAllExpr, elementFingerprint } from "../src/lib/deep-query-expr.js";
 import { styleProbeFunc } from "../src/handlers/query.js";
 
 beforeEach(() => {
@@ -98,5 +98,28 @@ describe("deepQuerySelectorAllExpr ↔ styleProbeFunc 集合对齐", () => {
       document.body.appendChild(d);
     }
     expect(run(deepQuerySelectorAllExpr(".t", 2))).toHaveLength(2);
+  });
+});
+
+describe("elementFingerprint ↔ 注入侧 / CDP 侧三处一致", () => {
+  it("指纹函数与 callFunctionOn 表达式在同一 DOM 上给同一结果", () => {
+    document.body.innerHTML = '<div id="a" class="t">hello</div><div class="t">xy</div>';
+    const els = Array.from(document.querySelectorAll<HTMLElement>(".t"));
+    const viaFn = els.map(elementFingerprint);
+    const viaExpr = eval(`(${FINGERPRINT_ON_ARRAY_FN})`).call(els) as string[];
+    expect(viaExpr).toEqual(viaFn);
+  });
+
+  it("探针内联的指纹与真源一致(改一处漏一处会静默错位)", () => {
+    document.body.innerHTML = '<div id="z" class="t">abc</div>';
+    const probe = styleProbeFunc(".t", 5, ["font"]) as any;
+    const el = document.querySelector<HTMLElement>(".t")!;
+    expect(probe.elements[0].fp).toBe(elementFingerprint(el));
+  });
+
+  it("顺序不同 → 指纹序列不同(这正是 count 校验抓不到的那类)", () => {
+    document.body.innerHTML = '<div id="a" class="t">x</div><div id="b" class="t">yy</div>';
+    const els = Array.from(document.querySelectorAll<HTMLElement>(".t"));
+    expect(els.map(elementFingerprint)).not.toEqual([...els].reverse().map(elementFingerprint));
   });
 });

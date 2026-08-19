@@ -6,7 +6,7 @@
 
 import { VtxErrorCode, vtxError } from "@vortex-browser/shared";
 import type { DebuggerManager } from "./debugger-manager.js";
-import { deepQuerySelectorAllExpr } from "./deep-query-expr.js";
+import { FINGERPRINT_ON_ARRAY_FN, deepQuerySelectorAllExpr } from "./deep-query-expr.js";
 import type { PlatformFontUsage } from "./style-evidence.js";
 
 /** 每项对应探针元素数组的同一下标;该元素单独失败时为 null。 */
@@ -21,25 +21,35 @@ export async function fetchPlatformFonts(
   tabId: number,
   selector: string,
   limit: number,
-  expectedCount: number,
+  fingerprints: string[],
 ): Promise<PlatformFontsResult> {
-  if (expectedCount === 0) return { fonts: [] };
+  if (fingerprints.length === 0) return { fonts: [] };
+  let arrayId: string | undefined;
+  const objectIds: string[] = [];
   try {
-    const objectIds = await resolveElementObjectIds(mgr, tabId, selector, limit);
-    if (objectIds.length !== expectedCount) {
-      // 数量对不上就没法按下标对齐,错位地挂到别的元素上比缺失更糟
-      return { reason: `element count mismatch: CDP saw ${objectIds.length}, probe saw ${expectedCount}` };
+    arrayId = await evaluateElementArray(mgr, tabId, selector, limit);
+    const seen = (await callOnArray(mgr, tabId, arrayId, FINGERPRINT_ON_ARRAY_FN)) as unknown;
+    if (!Array.isArray(seen)) {
+      throw vtxError(VtxErrorCode.JS_EXECUTION_ERROR,
+        "could not read element fingerprints from the page", { extras: { selector } });
     }
+    // 数量相同、顺序不同时按下标对齐会把字体挂到别的元素上,只比 count 抓不到
+    if (seen.length !== fingerprints.length || seen.some((f, i) => f !== fingerprints[i])) {
+      return { reason: `element fingerprint mismatch: CDP saw ${seen.length}, probe saw ${fingerprints.length}` };
+    }
+    objectIds.push(...(await elementObjectIds(mgr, tabId, arrayId)));
     return { fonts: await Promise.all(objectIds.map((oid) => fontsOf(mgr, tabId, oid))) };
   } catch (e) {
     return { reason: errText(e) };
+  } finally {
+    await release(mgr, tabId, [...(arrayId ? [arrayId] : []), ...objectIds]);
   }
 }
 
 /** requestNode 之前必须 DOM.getDocument,否则 CSS 域报 Could not find node with given id(真站实测)。 */
-async function resolveElementObjectIds(
+async function evaluateElementArray(
   mgr: DebuggerManager, tabId: number, selector: string, limit: number,
-): Promise<string[]> {
+): Promise<string> {
   for (const domain of ["DOM", "CSS", "Runtime"]) await mgr.enableDomain(tabId, domain);
   await mgr.sendCommand(tabId, "DOM.getDocument", { depth: 0 });
 
@@ -52,13 +62,35 @@ async function resolveElementObjectIds(
     throw vtxError(VtxErrorCode.JS_EXECUTION_ERROR,
       "Runtime.evaluate returned no objectId for the element array", { extras: { selector } });
   }
+  return arrayId;
+}
 
+async function callOnArray(mgr: DebuggerManager, tabId: number, arrayId: string, fn: string): Promise<unknown> {
+  const r = (await mgr.sendCommand(tabId, "Runtime.callFunctionOn", {
+    objectId: arrayId, functionDeclaration: fn, returnByValue: true,
+  })) as { result?: { value?: unknown } };
+  return r.result?.value;
+}
+
+async function elementObjectIds(mgr: DebuggerManager, tabId: number, arrayId: string): Promise<string[]> {
   const props = (await mgr.sendCommand(tabId, "Runtime.getProperties", {
     objectId: arrayId, ownProperties: true,
   })) as { result?: Array<{ name: string; value?: { objectId?: string } }> };
+  // __proto__ 也带 objectId,只看 objectId 会多出一个幽灵元素
   return (props.result ?? [])
     .filter((p) => /^\d+$/.test(p.name) && p.value?.objectId)
     .map((p) => p.value!.objectId!);
+}
+
+/** font 组默认开启,不释放远程对象会一直堆在 renderer 的 object table 里。 */
+async function release(mgr: DebuggerManager, tabId: number, ids: string[]): Promise<void> {
+  for (const objectId of ids) {
+    try {
+      await mgr.sendCommand(tabId, "Runtime.releaseObject", { objectId });
+    } catch {
+      // 页面可能已导航,释放失败不影响已取到的结果
+    }
+  }
 }
 
 async function fontsOf(mgr: DebuggerManager, tabId: number, objectId: string): Promise<PlatformFontUsage[] | null> {

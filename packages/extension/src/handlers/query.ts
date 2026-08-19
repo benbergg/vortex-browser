@@ -784,6 +784,7 @@ export const styleProbeFunc = (
         motion?: Record<string, string>;
         pseudoRaw?: Record<string, Record<string, string>>;
         declaredFont?: string;
+        fp?: string;
       }>;
       total: number;
       showing: number;
@@ -808,15 +809,15 @@ export const styleProbeFunc = (
       const FACE_PROPS = ["font-family", "src", "font-weight", "font-style", "font-display", "unicode-range"];
       const rules: Array<Record<string, string>> = [];
       let partial = false;
-      for (const sheet of Array.from(document.styleSheets)) {
-        let list: CSSRuleList | null = null;
-        try {
-          list = sheet.cssRules;
-        } catch {
-          partial = true;
-          continue;
-        }
-        for (const rule of Array.from(list ?? [])) {
+      // @layer / @media / @supports 里的 @font-face 不递归就会漏,还照样报 partial=false
+      function walk(list: CSSRuleList | null, depth = 0): void {
+        if (!list || depth > 5) return;
+        for (const rule of Array.from(list)) {
+          const nested = (rule as unknown as { cssRules?: CSSRuleList }).cssRules;
+          if (nested) {
+            walk(nested, depth + 1);
+            continue;
+          }
           if (rule.constructor.name !== "CSSFontFaceRule" && (rule as CSSRule).type !== 5) continue;
           const st = (rule as unknown as { style: CSSStyleDeclaration }).style;
           const o: Record<string, string> = {};
@@ -825,6 +826,13 @@ export const styleProbeFunc = (
             if (v) o[prop] = v;
           }
           if (o["font-family"]) rules.push(o);
+        }
+      }
+      for (const sheet of Array.from(document.styleSheets)) {
+        try {
+          walk(sheet.cssRules);
+        } catch {
+          partial = true;
         }
       }
       return { rules, partial };
@@ -966,13 +974,17 @@ export const styleProbeFunc = (
         for (const which of ["::before", "::after"]) {
           const pcs = getComputedStyle(el, which);
           const c = pcs.getPropertyValue("content");
-          if (c === "none" || c === "normal" || c === "") continue;
+          if (c === "none" || c === "normal") continue;
           const o: Record<string, string> = {};
           for (const prop of PSEUDO_PROPS) o[prop] = pcs.getPropertyValue(prop);
           (pseudoRaw ??= {})[which.slice(2)] = o;
         }
       }
       const declaredFont = want("font") ? cs.getPropertyValue("font-family") : undefined;
+      // 与 deep-query-expr.ts 的 elementFingerprint 必须一字不差,否则对齐校验形同虚设
+      const fp = want("font")
+        ? el.tagName + "|" + (el.id || "") + "|" + (el.textContent || "").length
+        : undefined;
 
       elements.push({
         index: i,
@@ -993,6 +1005,7 @@ export const styleProbeFunc = (
         ...(motion ? { motion } : {}),
         ...(pseudoRaw ? { pseudoRaw } : {}),
         ...(declaredFont !== undefined ? { declaredFont } : {}),
+        ...(fp !== undefined ? { fp } : {}),
       });
     }
 
@@ -1735,6 +1748,7 @@ export function normalizeCssAttrParam(attr: string | string[] | undefined): stri
 type StyleProbeElement = Record<string, unknown> & {
   pseudoRaw?: Record<string, Record<string, string>>;
   declaredFont?: string;
+  fp?: string;
 };
 type StyleProbeResult = {
   elements: StyleProbeElement[];
@@ -1773,14 +1787,16 @@ async function finalizeStyleResult(
   res: StyleProbeResult,
   opt: { wantPseudo: boolean; wantFont: boolean; debuggerMgr?: DebuggerManager; tabId: number; selector: string; maxResults: number },
 ): Promise<StyleProbeResult> {
+  const fingerprints = res.elements.map((el) => el.fp ?? "");
   const fonts = opt.wantFont
     ? opt.debuggerMgr
-      ? await fetchPlatformFonts(opt.debuggerMgr, opt.tabId, opt.selector, opt.maxResults, res.elements.length)
+      ? await fetchPlatformFonts(opt.debuggerMgr, opt.tabId, opt.selector, opt.maxResults, fingerprints)
       : { reason: "no debugger session available in this build" }
     : null;
 
   const elements = res.elements.map((el, i) => {
-    const { pseudoRaw, declaredFont, ...rest } = el;
+    const { pseudoRaw, declaredFont, fp, ...rest } = el;
+    void fp;
     const pseudo = opt.wantPseudo && pseudoRaw ? renderedPseudos(pseudoRaw) : undefined;
     const font = !opt.wantFont || declaredFont === undefined
       ? undefined

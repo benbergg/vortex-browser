@@ -8,6 +8,21 @@
 export const SHADOW_WALK_MAX_DEPTH = 8;
 
 /**
+ * 元素指纹:两侧数量相同但顺序不同时,只校验 count 会把字体静默挂到别的元素上。
+ * 必须与 styleProbeFunc 内联的那份一致,deep-query-expr.test.ts 行为对拍。
+ */
+export function elementFingerprint(el: Element): string {
+  return el.tagName + "|" + (el.id || "") + "|" + (el.textContent || "").length;
+}
+
+/** 在一个元素数组上求指纹数组,供 Runtime.callFunctionOn 用(与取 objectId 同源)。 */
+export const FINGERPRINT_ON_ARRAY_FN = `function(){
+  return Array.prototype.map.call(this, function(el){
+    return el.tagName + "|" + (el.id || "") + "|" + (el.textContent || "").length;
+  });
+}`;
+
+/**
  * 生成一段自包含表达式,求值得到匹配元素数组。
  * @param limit 只取前 N 个,对应探针的 maxResults
  */

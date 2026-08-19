@@ -13,14 +13,14 @@ function mkReq(args: Record<string, unknown>): NmRequest {
 const PROBE_RESULT = {
   elements: [
     {
-      index: 0, tag: "i",
+      index: 0, tag: "i", fp: "I||0",
       declaredFont: "ESBuild, sans-serif",
       pseudoRaw: {
         before: { content: '"\\f0c9"', display: "inline", visibility: "visible", opacity: "1", "background-image": "none", width: "auto", height: "auto" },
         after: { content: '"x"', display: "none", visibility: "visible", opacity: "1", "background-image": "none", width: "auto", height: "auto" },
       },
     },
-    { index: 1, tag: "p", declaredFont: "PPMori, sans-serif" },
+    { index: 1, tag: "p", fp: "P||3", declaredFont: "PPMori, sans-serif" },
   ],
   total: 2, showing: 2,
   fontFaces: [{ "font-family": "ESBuild", src: 'url("/f/ESBuild.woff2")' }],
@@ -45,6 +45,8 @@ describe("mode=style 伪元素与字体接线", () => {
       sendCommand: vi.fn(async (_t: number, m: string) => {
         if (m === "DOM.getDocument") return { root: { nodeId: 1 } };
         if (m === "Runtime.evaluate") return { result: { objectId: "arr" } };
+        if (m === "Runtime.callFunctionOn") return { result: { value: ["I||0", "P||3"] } };
+        if (m === "Runtime.releaseObject") return {};
         if (m === "Runtime.getProperties") return { result: [
           { name: "0", value: { objectId: "o0" } }, { name: "1", value: { objectId: "o1" } },
         ] };
@@ -82,6 +84,7 @@ describe("mode=style 伪元素与字体接线", () => {
     expect(r.result.elements[0].font.firstChoiceInUse).toBe(true);
     expect(r.result.elements[0].font.rendered[0].family).toBe("ES Build");
     expect(r.result.elements[0].declaredFont).toBeUndefined();
+    expect(r.result.elements[0].fp).toBeUndefined();
   });
 
   it("CDP 不可用 → font.evidence=unavailable 且带原因,不谎报没用上", async () => {
@@ -136,5 +139,17 @@ describe("mode=style 伪元素与字体接线", () => {
     registerQueryHandlers(r2);
     const r = (await r2.dispatch(mkReq({ mode: "style", pattern: ".t" }))) as any;
     expect(r.result.elements[0].font.evidence).toBe("unavailable");
+  });
+
+  it("探针指纹与 CDP 侧不一致 → font 自陈不可用,不把字体挂到别的元素上", async () => {
+    mgr.sendCommand = vi.fn(async (_t: number, m: string) => {
+      if (m === "DOM.getDocument") return { root: { nodeId: 1 } };
+      if (m === "Runtime.evaluate") return { result: { objectId: "arr" } };
+      if (m === "Runtime.callFunctionOn") return { result: { value: ["P||3", "I||0"] } };
+      return {};
+    });
+    const r = await call();
+    expect(r.result.elements[0].font.evidence).toBe("unavailable");
+    expect(r.result.elements[0].font.reason).toMatch(/fingerprint/i);
   });
 });

@@ -486,3 +486,74 @@ describe("styleProbeFunc", () => {
     expect(r.elements).toEqual([]);
   });
 });
+
+describe("styleProbeFunc 的 @font-face 收集", () => {
+  const faces = (css: string): Array<Record<string, string>> => {
+    const st = document.createElement("style");
+    st.textContent = css;
+    document.head.appendChild(st);
+    const el = document.createElement("div");
+    el.className = "ff";
+    document.body.appendChild(el);
+    return (styleProbeFunc(".ff", 1, ["font"]) as any).fontFaces;
+  };
+
+  it("顶层 @font-face 收得到", () => {
+    expect(faces('@font-face{font-family:"A";src:url(a.woff2)}')
+      .some((f) => f["font-family"] === '"A"')).toBe(true);
+  });
+
+  it("@media 里的 @font-face 也要收 —— 不递归就会漏,还照样报 partial=false", () => {
+    expect(faces('@media screen{@font-face{font-family:"InMedia";src:url(m.woff2)}}')
+      .some((f) => f["font-family"] === '"InMedia"')).toBe(true);
+  });
+
+  it("@supports 里的也要收", () => {
+    expect(faces('@supports (display:grid){@font-face{font-family:"InSupports";src:url(s.woff2)}}')
+      .some((f) => f["font-family"] === '"InSupports"')).toBe(true);
+  });
+});
+
+describe("styleProbeFunc 的伪元素粗筛", () => {
+  // jsdom 的伪元素 content 恒为 normal,真实形态只能靠替身喂进去;
+  // 替身转发真实实现,只接管带第二参的调用
+  const withPseudo = (before: Record<string, string>): unknown => {
+    const real = window.getComputedStyle.bind(window);
+    vi.stubGlobal("getComputedStyle", (el: Element, which?: string | null) => {
+      if (!which) return real(el);
+      return {
+        getPropertyValue: (p: string) => (which === "::before" ? (before[p] ?? "") : "none"),
+      } as unknown as CSSStyleDeclaration;
+    });
+    const el = document.createElement("i");
+    el.className = "pe";
+    document.body.appendChild(el);
+    const r = styleProbeFunc(".pe", 1, ["pseudo"]) as any;
+    vi.unstubAllGlobals();
+    return r.elements[0].pseudoRaw;
+  };
+
+  it("空 content + 背景图 → 粗筛不能丢,渲染判定归 isPseudoRendered 一处管", () => {
+    const raw = withPseudo({
+      content: '""', "background-image": 'url("i.png")', width: "20px", height: "20px",
+      display: "inline-block", visibility: "visible", opacity: "1",
+    }) as Record<string, Record<string, string>>;
+    expect(raw?.before).toBeDefined();
+    expect(raw.before["background-image"]).toContain("i.png");
+  });
+
+  it("content 是 none → 粗筛就跳过,不白传数据", () => {
+    expect(withPseudo({ content: "none" })).toBeUndefined();
+  });
+
+  it("content 是 normal → 同样跳过(伪元素上 normal 等价 none)", () => {
+    expect(withPseudo({ content: "normal" })).toBeUndefined();
+  });
+
+  it("content 读回空串(拿不到) → 仍然带上来,由判定层决定,不在注入侧提前定生死", () => {
+    const raw = withPseudo({
+      content: "", "background-image": 'url("i.png")', width: "9px", height: "9px",
+    }) as Record<string, Record<string, string>> | undefined;
+    expect(raw?.before).toBeDefined();
+  });
+});

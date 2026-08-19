@@ -19,6 +19,13 @@
     不是声明栈。带 `glyphCount` / `postScriptName` / `isWebFont`，中英混排会拆成多条
     （gamma.app 实测：`ES Build` 7 字形 + `PingFang SC` 7 字形）。
   - **`@font-face` 来源**：按 family 聚合，给 `variants` / `subsetted` / 代表 src。
+    递归 `@media` / `@supports` / `@layer`，不漏嵌套声明。
+
+  返回里的三个字段各答一件事，别混：`font.evidence` 说这次字体结论是实测还是没拿到；
+  `font.firstChoiceInUse` 只答**声明栈第一个 family 有没有贡献字形**（混排时多个字体
+  都会列在 `rendered` 里，要判主导字体请比 `glyphCount`）；`fontFacesPartial` 说有跨域
+  样式表读不到（来源不全），`fontFacesTruncated` 说 family 数超过 20 被截断——两者是
+  不同的不完整原因，`fontFamiliesTotal` 给出真实总数。
 
 ### Changed
 
@@ -34,7 +41,13 @@
 - 拿不到就说拿不到：debugger 被占 → `evidence: "unavailable"` + 原因；元素没渲染任何
   字形、或首选是通用族 / `-apple-system` 这类系统关键字 → `firstChoiceInUse: null`，
   不谎报 `false`。
-- CDP 侧元素集合与探针不一致时不返回会错位的字体数据，自陈原因。
+- CDP 侧与探针的元素集合按**指纹逐项核对**（tag + id + 文本长度），不只比数量——
+  数量相同、顺序不同时按下标对齐会把字体静默挂到别的元素上。
+- CDP 远程对象用完即 `Runtime.releaseObject`（含异常路径），`font` 组默认开启，
+  不释放会一直堆在 renderer 的 object table 里。
+- `vortex_query` 的 `maxResults` 公开 schema 上限从 200 放宽到 2000：`f7ecb25` 给
+  `tokens` 补约束时把上限写在了共享字段上，导致 `mode=chart`（内部上限 2000）和
+  `mode=sheet`（1000）传大值会在进 handler 前被 schema 拒——v3.0.0 起的回归。
 
 ## [3.0.0] - 2026-08-19
 

@@ -37,6 +37,7 @@ const KNOWN_COMMANDS = new Set([
   "Page.getLayoutMetrics",
   "Page.getNavigationHistory",
   "Page.navigateToHistoryEntry",
+  "Runtime.callFunctionOn",
   "Runtime.evaluate",
   "Runtime.getProperties",
   "Runtime.releaseObject",
