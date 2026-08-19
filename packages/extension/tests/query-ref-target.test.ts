@@ -65,4 +65,18 @@ describe("query 经 index+snapshotId 定位（@ref 翻译后的形态）", () =>
     const resp = await router.dispatch(mkReq({ mode: "style" }, "r2"));
     expect(String(resp.error?.message)).toMatch(/pattern is required/);
   });
+  it("attr 选组真的传到了页面侧探针的第三个实参", async () => {
+    await router.dispatch(mkReq({ mode: "style", pattern: "h1", attr: "typography" }, "r4"));
+    expect(executeScript.mock.calls[0][0].args[2]).toEqual(["typography"]);
+  });
+
+  it("不传 attr → 四组全开", async () => {
+    await router.dispatch(mkReq({ mode: "style", pattern: "h1" }, "r5"));
+    expect(executeScript.mock.calls[0][0].args[2]).toEqual(["typography", "box", "paint", "motion"]);
+  });
+
+  it("非法组名 → 报错而不是静默返回空分组", async () => {
+    const resp = await router.dispatch(mkReq({ mode: "style", pattern: "h1", attr: "colours" }, "r6"));
+    expect(String(resp.error?.message)).toMatch(/attr must be one or more of/);
+  });
 });

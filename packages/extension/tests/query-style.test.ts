@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { styleProbeFunc } from "../src/handlers/query.js";
 
 beforeEach(() => {
@@ -150,6 +150,110 @@ describe("styleProbeFunc", () => {
     const r = styleProbeFunc(".low2", 10, []) as any;
     expect(r.elements[0].wcagAA).toBe(false);
     expect(r.elements[0].contrastStatus).toBe("ok");
+  });
+
+  it("groups 含 typography → 给 fontFamily/lineHeight/letterSpacing", () => {
+    const el = document.createElement("h1");
+    el.className = "g1";
+    el.style.fontFamily = "ESBuild, sans-serif";
+    el.style.lineHeight = "60px";
+    el.style.letterSpacing = "-1.2px";
+    document.body.appendChild(el);
+    const r = styleProbeFunc(".g1", 10, ["typography"]) as any;
+    expect(r.elements[0].typography.fontFamily).toBe("ESBuild, sans-serif");
+    expect(r.elements[0].typography.lineHeight).toBe("60px");
+    expect(r.elements[0].typography.letterSpacing).toBe("-1.2px");
+    expect(r.elements[0].box).toBeUndefined();
+    expect(r.elements[0].motion).toBeUndefined();
+  });
+
+  it("groups 含 box → 键齐全,且按短横线属性名去问 computed style", () => {
+    // jsdom 不解析 border-radius 这类简写的 computed 值,断言解析结果会锁不住真实行为;
+    // 这里锁的是"驼峰转短横线后拿去问 getComputedStyle"这条契约(真值由 Task 6 真站验收)。
+    const el = document.createElement("a");
+    el.className = "g2";
+    document.body.appendChild(el);
+
+    const asked: string[] = [];
+    const real = window.getComputedStyle.bind(window);
+    const spy = vi.spyOn(window, "getComputedStyle").mockImplementation(((e: Element) => {
+      const cs = real(e as Element);
+      return new Proxy(cs, {
+        get(t, k) {
+          if (k === "getPropertyValue") {
+            return (prop: string) => {
+              asked.push(prop);
+              return cs.getPropertyValue(prop);
+            };
+          }
+          const v = (t as never as Record<string | symbol, unknown>)[k];
+          return typeof v === "function" ? v.bind(t) : v;
+        },
+      });
+    }) as never);
+
+    const r = styleProbeFunc(".g2", 10, ["box"]) as any;
+    spy.mockRestore();
+
+    expect(Object.keys(r.elements[0].box)).toEqual([
+      "display", "padding", "margin", "borderRadius", "borderWidth",
+      "borderStyle", "borderColor", "width", "height",
+    ]);
+    // 驼峰必须转成 CSS 的短横线写法,否则真浏览器一律返回空串
+    expect(asked).toContain("border-radius");
+    expect(asked).toContain("padding");
+    expect(asked).not.toContain("borderRadius");
+  });
+
+  it("paint 组问的是 background-image 而非 backgroundImage", () => {
+    const el = document.createElement("div");
+    el.className = "g2b";
+    document.body.appendChild(el);
+    const asked: string[] = [];
+    const real = window.getComputedStyle.bind(window);
+    const spy = vi.spyOn(window, "getComputedStyle").mockImplementation(((e: Element) => {
+      const cs = real(e as Element);
+      return new Proxy(cs, {
+        get(t, k) {
+          if (k === "getPropertyValue") {
+            return (prop: string) => { asked.push(prop); return cs.getPropertyValue(prop); };
+          }
+          const v = (t as never as Record<string | symbol, unknown>)[k];
+          return typeof v === "function" ? v.bind(t) : v;
+        },
+      });
+    }) as never);
+    styleProbeFunc(".g2b", 10, ["paint"]);
+    spy.mockRestore();
+    expect(asked).toContain("background-image");
+    expect(asked).toContain("box-shadow");
+  });
+
+  it("groups 含 motion → 给 transition", () => {
+    const el = document.createElement("div");
+    el.className = "g3";
+    el.style.transition = "background-color 0.2s ease-out";
+    document.body.appendChild(el);
+    const r = styleProbeFunc(".g3", 10, ["motion"]) as any;
+    expect(r.elements[0].motion.transition).toContain("background-color");
+  });
+
+  it("四组全开 → 四个字段都在", () => {
+    const el = document.createElement("div");
+    el.className = "g4";
+    document.body.appendChild(el);
+    const r = styleProbeFunc(".g4", 10, ["typography", "box", "paint", "motion"]) as any;
+    for (const g of ["typography", "box", "paint", "motion"]) {
+      expect(r.elements[0][g], `缺分组 ${g}`).toBeTypeOf("object");
+    }
+  });
+
+  it("注入自包含:剥离模块作用域后仍可运行", () => {
+    const detached = new Function("return " + styleProbeFunc.toString())();
+    const el = document.createElement("div");
+    el.className = "iso";
+    document.body.appendChild(el);
+    expect(() => detached(".iso", 1, ["typography", "box", "paint", "motion"])).not.toThrow();
   });
 
   it("无命中 → total=0", () => {

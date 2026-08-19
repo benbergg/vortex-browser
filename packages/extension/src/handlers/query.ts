@@ -867,6 +867,26 @@ export const styleProbeFunc = (
       }
       const verdict = (min: number): boolean | "unknown" =>
         contrastRatio == null ? "unknown" : contrastRatio >= min;
+
+      const want = (g: string): boolean => groups.indexOf(g) !== -1;
+      const pick = (props: string[]): Record<string, string> => {
+        const o: Record<string, string> = {};
+        for (const prop of props) {
+          o[prop] = cs.getPropertyValue(prop.replace(/[A-Z]/g, (c) => "-" + c.toLowerCase()));
+        }
+        return o;
+      };
+      const typography = want("typography")
+        ? pick(["fontFamily", "fontSize", "fontWeight", "lineHeight", "letterSpacing", "textAlign", "textTransform"])
+        : undefined;
+      const box = want("box")
+        ? pick(["display", "padding", "margin", "borderRadius", "borderWidth", "borderStyle", "borderColor", "width", "height"])
+        : undefined;
+      const paint = want("paint")
+        ? pick(["backgroundColor", "backgroundImage", "boxShadow", "opacity", "outline", "filter"])
+        : undefined;
+      const motion = want("motion") ? pick(["transition", "transform", "animation"]) : undefined;
+
       elements.push({
         index: i,
         tag: el.tagName.toLowerCase(),
@@ -880,6 +900,10 @@ export const styleProbeFunc = (
         contrastStatus,
         wcagAA: verdict(4.5),
         wcagAAA: verdict(7),
+        ...(typography ? { typography } : {}),
+        ...(box ? { box } : {}),
+        ...(paint ? { paint } : {}),
+        ...(motion ? { motion } : {}),
       });
     }
     return { elements, total, showing: limit };
@@ -1728,10 +1752,22 @@ export function registerQueryHandlers(router: ActionRouter): void {
         // style 模式:注入 styleProbeFunc 取 computed color/background(上溯 painted bg)+ WCAG 对比度。
         const maxResults = Math.min((args.maxResults as number | undefined) ?? 10, 50);
 
+        // attr 选组,不传给全四组;组名非法直接报错,别静默返回空对象
+        const ALL_GROUPS = ["typography", "box", "paint", "motion"];
+        const requested = normalizeCssAttrParam(args.attr as string | undefined);
+        const groups = requested ?? ALL_GROUPS;
+        const bad = groups.filter((g) => ALL_GROUPS.indexOf(g) === -1);
+        if (bad.length > 0) {
+          throw vtxError(
+            VtxErrorCode.INVALID_PARAMS,
+            `vortex_query mode=style: attr must be one or more of ${ALL_GROUPS.join("|")}; got ${bad.join(",")}`,
+          );
+        }
+
         const results = await chrome.scripting.executeScript({
           target: buildExecuteTarget(tid, frameId),
           func: styleProbeFunc,
-          args: [pattern, maxResults, []],
+          args: [pattern, maxResults, groups],
           world: "MAIN",
         });
 
