@@ -23,11 +23,20 @@ describe("vortex_query schema 注册", () => {
     expect(def!.description.toLowerCase()).toMatch(/css|find/);
   });
 
-  // 与 I15 的 description 上限保持一致(180 → 230)。8 个 mode 各一段真能力说明
-  // 累加到 222,压缩必须删掉某个 mode 的说明 → 该 mode 对 LLM 不可发现。
-  it("vortex_query description 长度 ≤ 230 char", () => {
+  // 长度上限只由 I15.tools-list-budget 一处断言。这里曾抄了一份 230,加 mode=tokens
+  // 时只改了 I15,单文件跑全绿、全量跑才红 —— 同一不变量抄两份就是这个下场。
+  // 换成不重叠的那半:每个 enum 里的 mode 都得在 description 里出现,否则新增 mode
+  // 对 LLM 不可发现(这正是压缩 description 时最容易丢的东西)。
+  it("每个 mode 都在 tools/list 文本里被提到", () => {
     const def = getToolDef("vortex_query");
-    expect(def!.description.length).toBeLessThanOrEqual(230);
+    const schema = def!.schema as {
+      properties: { mode: { enum: string[]; description?: string } };
+    };
+    // 工具 description 与 mode 字段 description 都进 tools/list,合起来算可发现面
+    const visible = def!.description + " " + (schema.properties.mode.description ?? "");
+    for (const mode of schema.properties.mode.enum) {
+      expect(visible, `mode=${mode} 在 tools/list 里没有任何说明`).toContain(mode);
+    }
   });
 
   it("vortex_query schema 有 mode 和 pattern 字段", () => {
