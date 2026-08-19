@@ -496,6 +496,7 @@ describe("styleProbeFunc", () => {
 
 describe("styleProbeFunc 的 @font-face 收集", () => {
   const faces = (css: string): Array<Record<string, string>> => {
+    document.head.querySelectorAll("style").forEach((n) => n.remove());
     const st = document.createElement("style");
     st.textContent = css;
     document.head.appendChild(st);
@@ -518,6 +519,35 @@ describe("styleProbeFunc 的 @font-face 收集", () => {
   it("@supports 里的也要收", () => {
     expect(faces('@supports (display:grid){@font-face{font-family:"InSupports";src:url(s.woff2)}}')
       .some((f) => f["font-family"] === '"InSupports"')).toBe(true);
+  });
+
+  const probe = (css: string): { fontFaces: Array<Record<string, string>>; fontFacesPartial: boolean } => {
+    // partial 是整页级的,上一条测试留下的 style 会让后面的用例互相污染
+    document.head.querySelectorAll("style").forEach((n) => n.remove());
+    const st = document.createElement("style");
+    st.textContent = css;
+    document.head.appendChild(st);
+    const el = document.createElement("div");
+    el.className = "ff2";
+    document.body.appendChild(el);
+    return styleProbeFunc(".ff2", 1, ["font"]) as never;
+  };
+
+  it("嵌套超过深度上限 → partial=true,不能把'没扫完'说成'页面没有'", () => {
+    const deep = "@media screen{".repeat(8) + '@font-face{font-family:"TooDeep";src:url(d.woff2)}' + "}".repeat(8);
+    const r = probe(deep);
+    expect(r.fontFaces.some((f) => f["font-family"] === '"TooDeep"')).toBe(false);
+    expect(r.fontFacesPartial).toBe(true);
+  });
+
+  it("浅层嵌套不误报 partial", () => {
+    expect(probe('@media screen{@font-face{font-family:"Shallow";src:url(x.woff2)}}').fontFacesPartial).toBe(false);
+  });
+
+  it("keyframes 不被当成 grouping rule 递归", () => {
+    const r = probe("@keyframes spin{from{opacity:0}to{opacity:1}}");
+    expect(r.fontFacesPartial).toBe(false);
+    expect(r.fontFaces).toEqual([]);
   });
 });
 
@@ -562,5 +592,42 @@ describe("styleProbeFunc 的伪元素粗筛", () => {
       content: "", "background-image": 'url("i.png")', width: "9px", height: "9px",
     }) as Record<string, Record<string, string>> | undefined;
     expect(raw?.before).toBeDefined();
+  });
+});
+
+describe("styleProbeFunc 对坏样式表的容错", () => {
+  const withSheets = (sheets: unknown[]): { fontFaces: Array<Record<string, string>>; fontFacesPartial: boolean } => {
+    document.head.querySelectorAll("style").forEach((n) => n.remove());
+    Object.defineProperty(document, "styleSheets", { configurable: true, get: () => sheets });
+    const el = document.createElement("div");
+    el.className = "bad";
+    document.body.appendChild(el);
+    const r = styleProbeFunc(".bad", 1, ["font"]) as never;
+    Reflect.deleteProperty(document, "styleSheets");
+    return r;
+  };
+
+  const faceRule = (family: string) => ({
+    constructor: { name: "CSSFontFaceRule" },
+    type: 5,
+    style: { getPropertyValue: (p: string) => (p === "font-family" ? family : "") },
+  });
+
+  it("同一张表里坏掉一条规则 → 标 partial,但后面的规则照收", () => {
+    const bad = { get constructor(): never { throw new Error("boom"); } };
+    const r = withSheets([{ cssRules: [faceRule("Before"), bad, faceRule("After")] }]);
+    expect(r.fontFaces.map((f) => f["font-family"])).toEqual(["Before", "After"]);
+    expect(r.fontFacesPartial).toBe(true);
+  });
+
+  it("整张表读不了(跨域) → partial,其余表照收", () => {
+    const crossOrigin = { get cssRules(): never { throw new Error("SecurityError"); } };
+    const r = withSheets([crossOrigin, { cssRules: [faceRule("Local")] }]);
+    expect(r.fontFaces.map((f) => f["font-family"])).toEqual(["Local"]);
+    expect(r.fontFacesPartial).toBe(true);
+  });
+
+  it("全部正常 → partial=false", () => {
+    expect(withSheets([{ cssRules: [faceRule("A")] }]).fontFacesPartial).toBe(false);
   });
 });

@@ -82,14 +82,23 @@ async function elementObjectIds(mgr: DebuggerManager, tabId: number, arrayId: st
     .map((p) => p.value!.objectId!);
 }
 
-/** font 组默认开启,不释放远程对象会一直堆在 renderer 的 object table 里。 */
+/**
+ * font 组默认开启,不释放远程对象会一直堆在 renderer 的 object table 里。
+ * 带 deadline:某条 releaseObject 永不 settle 时不能把已经拿到的结果一起挂住。
+ */
+const RELEASE_DEADLINE_MS = 1000;
+
 async function release(mgr: DebuggerManager, tabId: number, ids: string[]): Promise<void> {
-  for (const objectId of ids) {
-    try {
-      await mgr.sendCommand(tabId, "Runtime.releaseObject", { objectId });
-    } catch {
-      // 页面可能已导航,释放失败不影响已取到的结果
-    }
+  if (ids.length === 0) return;
+  const all = Promise.all(ids.map((objectId) =>
+    Promise.resolve(mgr.sendCommand(tabId, "Runtime.releaseObject", { objectId })).catch(() => undefined),
+  ));
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<void>((res) => { timer = setTimeout(res, RELEASE_DEADLINE_MS); });
+  try {
+    await Promise.race([all.then(() => undefined), deadline]);
+  } finally {
+    if (timer) clearTimeout(timer);
   }
 }
 

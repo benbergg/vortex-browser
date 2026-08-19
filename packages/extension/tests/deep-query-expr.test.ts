@@ -102,24 +102,62 @@ describe("deepQuerySelectorAllExpr ↔ styleProbeFunc 集合对齐", () => {
 });
 
 describe("elementFingerprint ↔ 注入侧 / CDP 侧三处一致", () => {
-  it("指纹函数与 callFunctionOn 表达式在同一 DOM 上给同一结果", () => {
-    document.body.innerHTML = '<div id="a" class="t">hello</div><div class="t">xy</div>';
-    const els = Array.from(document.querySelectorAll<HTMLElement>(".t"));
-    const viaFn = els.map(elementFingerprint);
-    const viaExpr = eval(`(${FINGERPRINT_ON_ARRAY_FN})`).call(els) as string[];
-    expect(viaExpr).toEqual(viaFn);
+  const viaExpr = (els: Element[]): string[] =>
+    eval(`(${FINGERPRINT_ON_ARRAY_FN})`).call(els) as string[];
+
+  it("两个同 tag、同文本长度、无 id 的元素身份必须不同(tag+len 会碰撞)", () => {
+    document.body.innerHTML = "<div><button>Save</button><button>Next</button></div>";
+    const els = Array.from(document.querySelectorAll("button"));
+    expect(elementFingerprint(els[0])).not.toBe(elementFingerprint(els[1]));
   });
 
-  it("探针内联的指纹与真源一致(改一处漏一处会静默错位)", () => {
-    document.body.innerHTML = '<div id="z" class="t">abc</div>';
+  it("同一个元素被重排后身份必须变 —— 这正是错位检测要抓的", () => {
+    document.body.innerHTML = "<div><button>Save</button><button>Next</button></div>";
+    const save = document.querySelectorAll("button")[0];
+    const before = elementFingerprint(save);
+    save.parentElement!.appendChild(save);
+    expect(elementFingerprint(save)).not.toBe(before);
+  });
+
+  it("多元素集合上,三处实现逐项一致", () => {
+    document.body.innerHTML =
+      '<section><p id="a">x</p><p></p><span><i>deep</i></span><p>x</p></section>';
+    const els = Array.from(document.querySelectorAll("p, i, span"));
+    expect(viaExpr(els)).toEqual(els.map(elementFingerprint));
+  });
+
+  it("穿 open shadow 的元素三处一致(路径要经 host 上溯)", () => {
+    document.body.innerHTML = "<div></div>";
+    const host = document.querySelector("div")!;
+    const sr = host.attachShadow({ mode: "open" });
+    sr.innerHTML = "<b>a</b><b>b</b>";
+    const els = Array.from(sr.querySelectorAll("b"));
+    expect(viaExpr(els)).toEqual(els.map(elementFingerprint));
+    expect(elementFingerprint(els[0])).not.toBe(elementFingerprint(els[1]));
+  });
+
+  it("空文本、深嵌套也一致", () => {
+    document.body.innerHTML = "<div><div><div><em></em></div></div></div>";
+    const els = Array.from(document.querySelectorAll("em, div"));
+    expect(viaExpr(els)).toEqual(els.map(elementFingerprint));
+  });
+
+  it("探针内联的身份与真源一致(改一处漏一处会静默错位)", () => {
+    document.body.innerHTML = '<div id="z" class="t">abc</div><span class="t">q</span>';
     const probe = styleProbeFunc(".t", 5, ["font"]) as any;
-    const el = document.querySelector<HTMLElement>(".t")!;
-    expect(probe.elements[0].fp).toBe(elementFingerprint(el));
+    const els = Array.from(document.querySelectorAll<HTMLElement>(".t"));
+    expect(probe.elements.map((e: { fp: string }) => e.fp)).toEqual(els.map(elementFingerprint));
   });
 
-  it("顺序不同 → 指纹序列不同(这正是 count 校验抓不到的那类)", () => {
-    document.body.innerHTML = '<div id="a" class="t">x</div><div id="b" class="t">yy</div>';
-    const els = Array.from(document.querySelectorAll<HTMLElement>(".t"));
-    expect(els.map(elementFingerprint)).not.toEqual([...els].reverse().map(elementFingerprint));
+  it("探针内联在 shadow 下也与真源一致", () => {
+    document.body.innerHTML = '<p class="t">a</p><div></div>';
+    const sr = document.querySelector("div")!.attachShadow({ mode: "open" });
+    const inner = document.createElement("p");
+    inner.className = "t";
+    sr.appendChild(inner);
+    const probe = styleProbeFunc(".t", 5, ["font"]) as any;
+    const fps = probe.elements.map((e: { fp: string }) => e.fp);
+    expect(new Set(fps).size).toBe(2);
+    expect(fps).toContain(elementFingerprint(inner));
   });
 });

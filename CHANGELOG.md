@@ -46,10 +46,14 @@
 - 拿不到就说拿不到：debugger 被占 → `evidence: "unavailable"` + 原因；元素没渲染任何
   字形、或首选是通用族 / `-apple-system` 这类系统关键字 → `firstChoiceInUse: null`，
   不谎报 `false`。
-- CDP 侧与探针的元素集合按**指纹逐项核对**（tag + id + 文本长度），不只比数量——
-  数量相同、顺序不同时按下标对齐会把字体静默挂到别的元素上。
+- CDP 侧与探针的元素集合按**树中路径逐项核对**，不只比数量——数量相同、顺序不同时
+  按下标对齐会把字体静默挂到别的元素上。用路径而不是 tag+文本长度：两个
+  `<button>` 文本都 4 个字就同指纹，碰撞时重排检测不出来。
+- `@font-face` 扫描的每一种「没扫完」都置 `fontFacesPartial`：跨域整表读不到、
+  单条规则读取抛异常（同表后续规则照收）、嵌套超过深度上限。
 - CDP 远程对象用完即 `Runtime.releaseObject`（含异常路径），`font` 组默认开启，
-  不释放会一直堆在 renderer 的 object table 里。
+  不释放会一直堆在 renderer 的 object table 里。释放带 1s deadline 并发发出，
+  某条命令永不返回时不会把已经拿到的结果一起挂住。
 - `vortex_query` 的 `maxResults` 公开 schema 上限从 200 放宽到 2000：`f7ecb25` 给
   `tokens` 补约束时把上限写在了共享字段上，导致 `mode=chart`（内部上限 2000）和
   `mode=sheet`（1000）传大值会在进 handler 前被 schema 拒——v3.0.0 起的回归。

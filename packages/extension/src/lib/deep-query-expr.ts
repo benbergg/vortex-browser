@@ -8,17 +8,37 @@
 export const SHADOW_WALK_MAX_DEPTH = 8;
 
 /**
- * 元素指纹:两侧数量相同但顺序不同时,只校验 count 会把字体静默挂到别的元素上。
- * 必须与 styleProbeFunc 内联的那份一致,deep-query-expr.test.ts 行为对拍。
+ * 元素身份 = 它在树中的路径。tag+id+文本长度会碰撞(两个 <button> 文本都 4 字就同指纹),
+ * 碰撞时数量校验和逐项比对都通过,字体照样静默挂到别的元素上。
+ * 路径对同一棵树唯一,且重排后必变。必须与 styleProbeFunc 内联的那份一致。
  */
 export function elementFingerprint(el: Element): string {
-  return el.tagName + "|" + (el.id || "") + "|" + (el.textContent || "").length;
+  const parts: string[] = [];
+  let n: Node | null = el;
+  while (n && n.nodeType === 1 && parts.length < 24) {
+    const p: Node | null = n.parentNode;
+    let i = 0;
+    if (p) {
+      const c = (p as Element).children;
+      if (c) for (let k = 0; k < c.length; k++) if (c[k] === n) { i = k; break; }
+    }
+    parts.push(n.nodeName + ":" + i);
+    n = p && (p as ShadowRoot).host ? (p as ShadowRoot).host : p;
+  }
+  return parts.reverse().join(">");
 }
 
-/** 在一个元素数组上求指纹数组,供 Runtime.callFunctionOn 用(与取 objectId 同源)。 */
+/** 在一个元素数组上求身份数组,供 Runtime.callFunctionOn 用(与取 objectId 同源)。 */
 export const FINGERPRINT_ON_ARRAY_FN = `function(){
   return Array.prototype.map.call(this, function(el){
-    return el.tagName + "|" + (el.id || "") + "|" + (el.textContent || "").length;
+    var parts = [], n = el;
+    while (n && n.nodeType === 1 && parts.length < 24) {
+      var p = n.parentNode, i = 0;
+      if (p) { var c = p.children; if (c) for (var k = 0; k < c.length; k++) if (c[k] === n) { i = k; break; } }
+      parts.push(n.nodeName + ":" + i);
+      n = p && p.host ? p.host : p;
+    }
+    return parts.reverse().join(">");
   });
 }`;
 

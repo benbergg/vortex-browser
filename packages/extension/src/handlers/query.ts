@@ -804,33 +804,63 @@ export const styleProbeFunc = (
       return acc;
     };
 
+    // 元素身份取树中路径:tag+文本长度会碰撞,碰撞时重排检测不出来
+    const pathOf = (start: Element): string => {
+      const parts: string[] = [];
+      let n: Node | null = start;
+      while (n && n.nodeType === 1 && parts.length < 24) {
+        const p: Node | null = n.parentNode;
+        let i = 0;
+        if (p) {
+          const c = (p as Element).children;
+          if (c) for (let k = 0; k < c.length; k++) if (c[k] === n) { i = k; break; }
+        }
+        parts.push(n.nodeName + ":" + i);
+        n = p && (p as ShadowRoot).host ? (p as ShadowRoot).host : p;
+      }
+      return parts.reverse().join(">");
+    };
+
     // @font-face 只能从 CSSOM 读,跨域样式表访问 cssRules 抛 SecurityError → 标 partial 而非当没有
     const collectFontFaces = (): { rules: Array<Record<string, string>>; partial: boolean } => {
       const FACE_PROPS = ["font-family", "src", "font-weight", "font-style", "font-display", "unicode-range"];
       const rules: Array<Record<string, string>> = [];
       let partial = false;
       // @layer / @media / @supports 里的 @font-face 不递归就会漏,还照样报 partial=false
-      function walk(list: CSSRuleList | null, depth = 0): void {
-        if (!list || depth > 5) return;
+      // 白名单是性能项不是防线:@keyframes 有几十条子规则,递归进去纯浪费。
+      // 真正兜住异常的是下面每条规则的 try/catch。
+      const GROUPING_TYPES = new Set(["CSSMediaRule", "CSSSupportsRule", "CSSLayerBlockRule",
+        "CSSContainerRule", "CSSScopeRule", "CSSStartingStyleRule"]);
+      function walk(list: CSSRuleList | null, depth: number): void {
+        if (!list) return;
+        if (depth > 5) {
+          // 停在这里就是没扫完,不标 partial 等于把"没看"说成"页面没有"
+          partial = true;
+          return;
+        }
         for (const rule of Array.from(list)) {
-          const nested = (rule as unknown as { cssRules?: CSSRuleList }).cssRules;
-          if (nested) {
-            walk(nested, depth + 1);
-            continue;
+          try {
+            if (GROUPING_TYPES.has(rule.constructor.name)) {
+              walk((rule as unknown as { cssRules?: CSSRuleList }).cssRules ?? null, depth + 1);
+              continue;
+            }
+            if (rule.constructor.name !== "CSSFontFaceRule" && (rule as CSSRule).type !== 5) continue;
+            const st = (rule as unknown as { style: CSSStyleDeclaration }).style;
+            const o: Record<string, string> = {};
+            for (const prop of FACE_PROPS) {
+              const v = st.getPropertyValue(prop);
+              if (v) o[prop] = v;
+            }
+            if (o["font-family"]) rules.push(o);
+          } catch {
+            // 单条规则读不了不该让同一张表后面的规则一起丢
+            partial = true;
           }
-          if (rule.constructor.name !== "CSSFontFaceRule" && (rule as CSSRule).type !== 5) continue;
-          const st = (rule as unknown as { style: CSSStyleDeclaration }).style;
-          const o: Record<string, string> = {};
-          for (const prop of FACE_PROPS) {
-            const v = st.getPropertyValue(prop);
-            if (v) o[prop] = v;
-          }
-          if (o["font-family"]) rules.push(o);
         }
       }
       for (const sheet of Array.from(document.styleSheets)) {
         try {
-          walk(sheet.cssRules);
+          walk(sheet.cssRules, 0);
         } catch {
           partial = true;
         }
@@ -983,10 +1013,8 @@ export const styleProbeFunc = (
         }
       }
       const declaredFont = want("font") ? cs.getPropertyValue("font-family") : undefined;
-      // 与 deep-query-expr.ts 的 elementFingerprint 必须一字不差,否则对齐校验形同虚设
-      const fp = want("font")
-        ? el.tagName + "|" + (el.id || "") + "|" + (el.textContent || "").length
-        : undefined;
+      // 与 deep-query-expr.ts 的 elementFingerprint 必须一致,否则对齐校验形同虚设
+      const fp = want("font") ? pathOf(el) : undefined;
 
       elements.push({
         index: i,

@@ -164,3 +164,31 @@ describe("fetchPlatformFonts", () => {
     expect(released).toContain("arr-1");
   });
 });
+
+describe("释放的 deadline", () => {
+  it("releaseObject 永不 settle 也不能把结果挂住", async () => {
+    const chrome = createFakeChromeDebugger({
+      responses: {
+        "DOM.getDocument": { root: { nodeId: 1 } },
+        "Runtime.evaluate": { result: { objectId: "arr-1" } },
+        "Runtime.callFunctionOn": { result: { value: ["A", "B"] } },
+        "Runtime.getProperties": { result: [
+          { name: "0", value: { objectId: "o0" } }, { name: "1", value: { objectId: "o1" } },
+        ] },
+        "DOM.requestNode": { nodeId: 9 },
+        "CSS.getPlatformFontsForNode": { fonts: [] },
+      },
+    });
+    const orig = chrome.debugger.sendCommand;
+    chrome.debugger.sendCommand = vi.fn((t: unknown, m: string, p?: unknown) =>
+      m === "Runtime.releaseObject" ? new Promise(() => {}) : orig(t as never, m, p as never),
+    ) as never;
+    vi.stubGlobal("chrome", chrome);
+    const { DebuggerManager } = await import("../src/lib/debugger-manager.js");
+    vi.useFakeTimers();
+    const p = fetchPlatformFonts(new DebuggerManager() as DebuggerManager, 1, ".t", 10, ["A", "B"]);
+    await vi.advanceTimersByTimeAsync(1500);
+    vi.useRealTimers();
+    expect("fonts" in (await p)).toBe(true);
+  });
+});
