@@ -224,3 +224,22 @@ describe("box 返回 shape 的四种形态(布局裁剪改了旧形状,锁住)",
     });
   });
 });
+
+describe("box 永远保留 display", () => {
+  it("布局裁剪不能把 box 掏空 —— 空对象是 truthy,调用方分不出'没请求'和'全初始值'", async () => {
+    const router = new ActionRouter();
+    vi.stubGlobal("chrome", {
+      tabs: { query: vi.fn().mockResolvedValue([{ id: 42 }]) },
+      webNavigation: { getAllFrames: vi.fn().mockResolvedValue([{ frameId: 0, parentFrameId: -1, url: "https://x/" }]) },
+      scripting: { executeScript: vi.fn(async () => [{ result: {
+        elements: [{ index: 0, tag: "div", box: {
+          display: "block", flexDirection: "row", gap: "normal", gridTemplateRows: "none",
+        } }], total: 1, showing: 1,
+      } }]) },
+      runtime: { getManifest: vi.fn().mockReturnValue({ host_permissions: ["<all_urls>"] }) },
+    });
+    registerQueryHandlers(router);
+    const r = (await router.dispatch(mkReq({ mode: "style", pattern: "div", attr: "box" }))) as any;
+    expect(r.result.elements[0].box).toEqual({ display: "block" });
+  });
+});

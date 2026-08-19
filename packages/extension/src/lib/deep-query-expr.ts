@@ -7,6 +7,9 @@
 /** 与 styleProbeFunc 里的 SHADOW_WALK_MAX_DEPTH 同值。 */
 export const SHADOW_WALK_MAX_DEPTH = 8;
 
+/** 路径最多收这么多段。到顶意味着身份可能不唯一,碰撞检测据此区分原因。 */
+export const PATH_MAX_SEGMENTS = 64;
+
 /**
  * 元素身份 = 它在树中的路径。tag+id+文本长度会碰撞(两个 <button> 文本都 4 字就同指纹),
  * 碰撞时数量校验和逐项比对都通过,字体照样静默挂到别的元素上。
@@ -15,7 +18,7 @@ export const SHADOW_WALK_MAX_DEPTH = 8;
 export function elementFingerprint(el: Element): string {
   const parts: string[] = [];
   let n: Node | null = el;
-  while (n && n.nodeType === 1 && parts.length < 64) {
+  while (n && n.nodeType === 1 && parts.length < PATH_MAX_SEGMENTS) {
     const p: Node | null = n.parentNode;
     let i = 0;
     if (p) {
@@ -32,7 +35,7 @@ export function elementFingerprint(el: Element): string {
 export const FINGERPRINT_ON_ARRAY_FN = `function(){
   return Array.prototype.map.call(this, function(el){
     var parts = [], n = el;
-    while (n && n.nodeType === 1 && parts.length < 64) {
+    while (n && n.nodeType === 1 && parts.length < ${PATH_MAX_SEGMENTS}) {
       var p = n.parentNode, i = 0;
       if (p) { var c = p.children; if (c) for (var k = 0; k < c.length; k++) if (c[k] === n) { i = k; break; } }
       parts.push(n.nodeName + ":" + i);

@@ -6,7 +6,7 @@
 
 import { VtxErrorCode, vtxError } from "@vortex-browser/shared";
 import type { DebuggerManager } from "./debugger-manager.js";
-import { FINGERPRINT_ON_ARRAY_FN, deepQuerySelectorAllExpr } from "./deep-query-expr.js";
+import { FINGERPRINT_ON_ARRAY_FN, PATH_MAX_SEGMENTS, deepQuerySelectorAllExpr } from "./deep-query-expr.js";
 import type { PlatformFontUsage } from "./style-evidence.js";
 
 /** 每项对应探针元素数组的同一下标;该元素单独失败时为 null。 */
@@ -34,8 +34,13 @@ export async function fetchPlatformFonts(
         "could not read element fingerprints from the page", { extras: { selector } });
     }
     // 两个元素身份相同就分不出谁是谁,重排照样通过逐项比对 —— 宁可不给
-    const dup = fingerprints.length !== new Set(fingerprints).size;
-    if (dup) return { reason: "element identities are not unique; cannot prove alignment" };
+    if (fingerprints.length !== new Set(fingerprints).size) {
+      // 分开说:深度截断致同身份和真的结构重复,调用方处置不一样
+      const truncated = fingerprints.some((f) => f.split(">").length >= PATH_MAX_SEGMENTS);
+      return { reason: truncated
+        ? `element identities collided after path truncation at ${PATH_MAX_SEGMENTS} levels; cannot prove alignment`
+        : "element identities are not unique; cannot prove alignment" };
+    }
     // 数量相同、顺序不同时按下标对齐会把字体挂到别的元素上,只比 count 抓不到
     if (seen.length !== fingerprints.length || seen.some((f, i) => f !== fingerprints[i])) {
       return { reason: `element fingerprint mismatch: CDP saw ${seen.length}, probe saw ${fingerprints.length}` };

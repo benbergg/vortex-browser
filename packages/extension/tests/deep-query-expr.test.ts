@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeEach } from "vitest";
-import { FINGERPRINT_ON_ARRAY_FN, deepQuerySelectorAllExpr, elementFingerprint } from "../src/lib/deep-query-expr.js";
+import { FINGERPRINT_ON_ARRAY_FN, PATH_MAX_SEGMENTS, deepQuerySelectorAllExpr, elementFingerprint } from "../src/lib/deep-query-expr.js";
 import { styleProbeFunc } from "../src/handlers/query.js";
 
 beforeEach(() => {
@@ -159,5 +159,28 @@ describe("elementFingerprint ↔ 注入侧 / CDP 侧三处一致", () => {
     const fps = probe.elements.map((e: { fp: string }) => e.fp);
     expect(new Set(fps).size).toBe(2);
     expect(fps).toContain(elementFingerprint(inner));
+  });
+});
+
+describe("路径深度上限三处一致", () => {
+  it("CDP 表达式里的上限是插值出来的数字,不是标识符(注入后页面里没有这个常量)", () => {
+    expect(FINGERPRINT_ON_ARRAY_FN).toContain(`< ${PATH_MAX_SEGMENTS}`);
+    expect(FINGERPRINT_ON_ARRAY_FN).not.toContain("PATH_MAX_SEGMENTS");
+  });
+
+  it("探针内联的上限与真源同值 —— 一处改了另一处没改,深 DOM 上两侧身份会不同", () => {
+    const src = styleProbeFunc.toString();
+    expect(src).toContain(`parts.length < ${PATH_MAX_SEGMENTS}`);
+  });
+
+  it("超过上限时路径截断到上限段", () => {
+    let cur: HTMLElement = document.body;
+    for (let i = 0; i < PATH_MAX_SEGMENTS + 10; i++) {
+      const d = document.createElement("div");
+      cur.appendChild(d);
+      cur = d;
+    }
+    cur.className = "deep";
+    expect(elementFingerprint(cur).split(">")).toHaveLength(PATH_MAX_SEGMENTS);
   });
 });

@@ -206,3 +206,23 @@ describe("身份不唯一时 fail closed", () => {
     expect("fonts" in (await fetchPlatformFonts(mgr, 1, ".t", 10, ["X", "Y"]))).toBe(true);
   });
 });
+
+describe("碰撞原因要说清是不是深度截断", () => {
+  const deepPath = (tail: string) =>
+    Array.from({ length: 64 }, (_, i) => `DIV:${i}`).join(">") + ">" + tail;
+
+  it("路径到上限后碰撞 → reason 点名 path truncation", async () => {
+    const fps = [deepPath("A:0"), deepPath("A:0")].map((p) => p.split(">").slice(0, 64).join(">"));
+    const { mgr } = await makeMgr({ "Runtime.callFunctionOn": { result: { value: fps } } });
+    const r = await fetchPlatformFonts(mgr, 1, ".t", 10, fps);
+    expect((r as any).reason).toMatch(/truncat/i);
+  });
+
+  it("浅路径重复 → 说身份不唯一,不误报截断", async () => {
+    const fps = ["BODY:0>DIV:0", "BODY:0>DIV:0"];
+    const { mgr } = await makeMgr({ "Runtime.callFunctionOn": { result: { value: fps } } });
+    const r = await fetchPlatformFonts(mgr, 1, ".t", 10, fps);
+    expect((r as any).reason).toMatch(/not unique/i);
+    expect((r as any).reason).not.toMatch(/truncat/i);
+  });
+});
