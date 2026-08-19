@@ -7,6 +7,7 @@ import { QueryActions, VtxErrorCode, vtxError, withDiagnosis } from "@vortex-bro
 import type { ActionRouter } from "../lib/router.js";
 import { getActiveTabId, buildExecuteTarget, ensureFrameAttached } from "../lib/tab-utils.js";
 import { diagnoseEmptyQueryText, diagnoseEmptyQueryCss, diagnoseEmptySchema } from "../lib/empty-diagnosis.js";
+import { resolveTargetOptional } from "../lib/resolve-target.js";
 
 type TextScan = { chars: number; nodes: number; shadowRoots: number; iframes: number };
 type CssScan = { elements: number; shadowRoots: number; iframes: number };
@@ -1469,7 +1470,14 @@ export function registerQueryHandlers(router: ActionRouter): void {
   router.registerAll({
     [QueryActions.QUERY_PAGE]: async (args, tabId) => {
       const mode = args.mode as string | undefined;
-      const pattern = args.pattern as string | undefined;
+
+      // query 曾是唯一没接 @ref 的元素类 handler,选择器类 mode 复用 resolveTarget 反查
+      const SELECTOR_MODES = new Set(["css", "component", "geometry", "style"]);
+      const resolved =
+        args.pattern == null && mode != null && SELECTOR_MODES.has(mode)
+          ? resolveTargetOptional(args)
+          : undefined;
+      const pattern = (args.pattern as string | undefined) ?? resolved?.selector;
 
       // 参数校验
       if (
@@ -1490,8 +1498,11 @@ export function registerQueryHandlers(router: ActionRouter): void {
         );
       }
 
-      const tid = await getActiveTabId((args.tabId as number | undefined) ?? tabId);
-      const frameId = args.frameId as number | undefined;
+      // 快照绑定的 tab/frame 优先,跨 frame ref 才不会打到主 frame
+      const tid = await getActiveTabId(
+        resolved?.boundTabId ?? (args.tabId as number | undefined) ?? tabId,
+      );
+      const frameId = resolved?.boundFrameId ?? (args.frameId as number | undefined);
       if (frameId != null) await ensureFrameAttached(tid, frameId);
 
       if (mode === "text") {
