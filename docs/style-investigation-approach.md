@@ -130,7 +130,50 @@ flowchart TD
 - **「页面侧读不到授权 CSS，必须上 CDP」——错。** 实测 183/186 张样式表 CSSOM 可读，6ms 完成匹配。CDP 的不可替代价值只在**级联排序权威性**与**跨域样式表**，不在「能不能读」。
 - **「mode=style 是设计调研工具」——错。** 它的 docstring 明写是 a11y 对比度审计，属性面按那个问题裁的，用错了岗位。
 
-## 7. 待验证假设
+## 7. 待验证假设 → 实测结论（2026-08-19 gamma.app 真站验收）
+
+**判据 1（@ref 打通）达成**：`vortex_observe` 拿到 `@39df:e8`（hero CTA），直接
+`vortex_query({mode:"style", pattern:"@39df:e8"})` 返回该元素样式，全程未写一个 CSS 选择器。
+
+**判据 2（属性面）达成**：`h1` 返回 `fontFamily: "ESBuild, sans-serif"` / `letterSpacing: "-1.2px"`
+/ `lineHeight: "60px"`；CTA 返回 `borderRadius: "24px"` / `padding: "0px 32px"` /
+`fontFamily: "PPMori, sans-serif"` / `backgroundColor: "rgb(5, 64, 173)"`。
+
+**判据 3（不说假话）达成且超出预期**：`h1` 现在返回 `background: "rgb(255,255,255)"`
+（`bgFromAncestor: true`，上溯到第 10 层 body）、`contrastRatio: 15.51`、`wcagAAA: true`
+——**修复前这里是 `contrastRatio: null` + `wcagAA: false`，对一个 AAA 通过的标题谎报不合格**。
+更重要的是 `mode=style pattern=div maxResults=50` 的真实分布：**16/50 是 `translucent`**
+（gamma 吸顶栏 `rgba(255,255,255,0.8)`）、**5/50 是 `background-image`**（hero 渐变）。
+修复前这 21 个会被一律报成 `contrastRatio: 11.67 / wcagAA: true` ——凭空捏造的数字，
+占样本四成。评审提出的半透明问题不是理论风险。
+
+**路线 D 达成**：`mode=tokens` 在 gamma.app 返回 `total: 676`，九个分组
+（color / gradient / fontFamily / fontSize / fontWeight / motion / shadow / spacing / other），
+`roots: [":root","body"]`（body 确有独立贡献，Chakra 主题挂在 `body.chakra-ui-light`）。
+`--chakra-fonts-heading: 'ESBuild',sans-serif` 与 h1 实测字体对得上；渐变组抓到了
+`--chakra-colors-gradient-*` 全套；`--chakra-borders-1px: "1px solid"` 正确落 `other` 未被
+吞成 shadow。`truncatedGroups` 逐组报告丢弃数（color 423 / spacing 120 / ...），
+没有它 `showing: 27 / total: 676` 无法解读。
+
+**判据 4（evaluate 归零）达成**：判据 1-3 与路线 D 的全部查询未使用 `vortex_evaluate`。
+唯一一次 evaluate 用于**性能计量**（复刻探针最坏成本），不属于调研流程本身。
+
+**性能与体积实测**（替代原先「无上限上溯是否可接受」的推测）：50 元素 × 25 属性 ×
+无上限祖先上溯 = **5ms**，最大祖先深度 **12**（>原先写死的 8，证实那个魔数在真站会漏），
+序列化 **32.5KB**。评审估算的 110-330KB 高了 4-10 倍，1000ms 阈值远未触及。
+**裁决：不加深度上限、不加 payload cap**，理由是实测而非推测；调用方可用 `attr` 选组进一步压。
+
+### 仍未验证 / 已知边界
+
+- `roots` 靠比对 computed value 得出，区分不了「body 继承」与「body 重复声明同值」；
+  要那个得读 CSSOM 规则来源。已写进探针 JSDoc。
+- shadow 分类是启发式（两个以上长度 + 颜色），只保证常见形态，不解析完整 CSS 语法。
+- `mode=tokens` 的 pattern 是字面子串，`@ref` 不在此处 lift；描述里按 mode 点名了哪四个
+  接受 @ref。**裁决：不再加 pattern 级参数说明**——mode 说明已精确列出四个 mode 名，
+  再加会吃掉 tools/list 仅剩的约 100B 余量。
+- 原始「待验证假设」段（下方保留）中关于返回体积与祖先深度的两条已由上述实测取代。
+
+## 7.1 原始待验证假设（保留备查）
 
 - 【推】扩大属性面后的返回体积是否需要 `attr` 分组过滤 —— 需按 gamma.app 实测字节数定。
 - 【推】路线 C 的 `backendDOMNodeId` 是否在 observe 快照里稳定可用于 CSS 域 —— 实施前必须实测。

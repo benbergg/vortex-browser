@@ -238,9 +238,14 @@ describe("I15: tools/list budget + count + internalized grep", () => {
     // 174(vortex_act)",而 act 实测已 215,是在 230 的统一上限下悄悄涨的。故拆两条锁。
     const q = defs.find((d) => d.name === "vortex_query")!;
     expect(q.description.length).toBeLessThanOrEqual(280);
-    for (const d of defs.filter((d) => d.name !== "vortex_query")) {
+    const nonQuery = defs.filter((d) => d.name !== "vortex_query");
+    for (const d of nonQuery) {
       expect(d.description.length, `${d.name} description 变长了`).toBeLessThanOrEqual(215);
     }
+    // 215 是实测基线不是能力预算,把"它来自 act"也锁住,否则注释会随时间失真
+    const longest = nonQuery.reduce((a, b) => (b.description.length > a.description.length ? b : a));
+    expect(longest.name).toBe("vortex_act");
+    expect(longest.description.length).toBe(215);
   });
 
   it("参数 description 必须在精选白名单内（防滥写）", () => {

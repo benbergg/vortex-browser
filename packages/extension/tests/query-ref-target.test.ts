@@ -128,4 +128,9 @@ describe("query 经 index+snapshotId 定位（@ref 翻译后的形态）", () =>
     expect(resp.error).toBeUndefined();
     expect(JSON.stringify(resp.result)).toMatch(/compile design tokens away at build time/);
   });
+  it("mode=tokens maxResults 为负 → handler 归一到 1", async () => {
+    executeScript.mockResolvedValue([{ result: { roots: [], total: 0, showing: 0, groups: {}, truncatedGroups: {} } }]);
+    await router.dispatch(mkReq({ mode: "tokens", pattern: "*", maxResults: -1 }, "r16"));
+    expect(executeScript.mock.calls[0][0].args[1]).toBe(1);
+  });
 });

@@ -199,6 +199,20 @@ describe("tokensProbeFunc", () => {
     expect(r.truncatedGroups).toEqual({});
   });
 
+  it("maxResults 为负 → 归一到 1,不把所有 token 都算成截断", () => {
+    stubComputedStyle([["--c1", "#111111"], ["--c2", "#222222"]]);
+    const r = tokensProbeFunc("*", 1) as any;
+    expect(r.showing).toBe(1);
+    expect(r.truncatedGroups).toEqual({ color: 1 });
+  });
+
+  it("body 枚举到空值 → 不清掉 :root 已有的值", () => {
+    stubComputedStyle([["--c1", "#111111"]], [["--c1", ""]]);
+    const r = tokensProbeFunc("*", 50) as any;
+    expect(r.groups.color[0].value).toBe("#111111");
+    expect(r.roots).toEqual([":root"]);
+  });
+
   it("注入自包含:剥离模块作用域后仍可运行", () => {
     stubComputedStyle([["--c1", "#111111"]]);
     const detached = new Function("return " + tokensProbeFunc.toString())();

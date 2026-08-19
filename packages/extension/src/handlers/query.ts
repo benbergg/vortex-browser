@@ -1542,7 +1542,10 @@ export const schemaProbeFunc = (
  * page-side 设计 token 探测函数体。mode=tokens 注入 MAIN world。
  * 回答「这个站的设计系统长什么样」——调色板、字阶、间距阶、圆角、阴影、动效。
  * 分类优先看值形态（跨框架稳定），值看不出类型时才回落到名字启发式。
- * 覆盖面只有 :root 与 body，挂在中间主题容器上的变量不在内，由 roots 如实报告。
+ * 覆盖面只有 :root 与 body，挂在中间主题容器上的变量不在内。roots 表达的是
+ * 「最终值在哪一层出现或被改写」，靠比对 computed value 得出——区分不了
+ * 「body 继承」与「body 重复声明同值」，要那个得读 CSSOM 规则来源。
+ * shadow 判定是启发式（两个以上长度 + 颜色），只保证常见形态，不解析完整语法。
  * 参数 args: [pattern, maxPerGroup]；pattern="*" 取全量，否则按名字子串过滤。
  * ⚠ 自包含:注入丢模块作用域,一切辅助函数必须内联。
  */
@@ -1609,6 +1612,8 @@ export const tokensProbeFunc = (
       for (const prop of Array.from(cs as unknown as Iterable<string>)) {
         if (typeof prop !== "string" || prop.slice(0, 2) !== "--") continue;
         const value = cs.getPropertyValue(prop).trim();
+        // 空值不覆盖已有值:body 枚举到无效声明会把 :root 的值清掉
+        if (value === "" && seen.has(prop)) continue;
         // 自定义属性会继承,body 多半只是把 :root 的值重念一遍;
         // 只有新增或改写才算这一层的贡献,否则 roots 会谎报覆盖面
         if (!seen.has(prop) || seen.get(prop) !== value) contributed = true;
@@ -1901,7 +1906,8 @@ export function registerQueryHandlers(router: ActionRouter): void {
         );
       } else if (mode === "tokens") {
         // tokens 模式:抽站点 CSS 自定义属性,给调色板/字阶/间距阶。
-        const maxPerGroup = Math.min((args.maxResults as number | undefined) ?? 40, 200);
+        // 负数会让 length >= maxPerGroup 恒真,把每个 token 都算成被截断
+        const maxPerGroup = Math.max(1, Math.min((args.maxResults as number | undefined) ?? 40, 200));
 
         const results = await chrome.scripting.executeScript({
           target: buildExecuteTarget(tid, frameId),
