@@ -67,6 +67,15 @@ export const TIMEOUT_TAB_GONE_HINT =
   "The target tab no longer exists or cannot be accessed, so this action can never complete on that tabId. Call vortex_tab_list to see which tabs are still open and retry with a live tabId, or vortex_tab_create if none of them fits.";
 
 /**
+ * chrome.debugger.attach 撞上「别的 debugger 占着」时的提示。CDP 被占是可恢复的,
+ * 与缺权限 / chrome:// 那类不同,故不能沿用 CDP_NOT_ATTACHED 的默认文案。
+ */
+export const CDP_BUSY_ATTACH_HINT =
+  "Another debugger owns this tab — usually DevTools is open on it, or another extension attached " +
+  "first. Close DevTools on that tabId (or detach the other debugger) and retry; if you only need a " +
+  "click and not a trusted event, call vortex_act with action='click' instead.";
+
+/**
  * CDP 被别的 debugger 占住时 mouse.click 的提示。它靠真实坐标派发,没有 act 那样的
  * 合成降级,故必须把「换 vortex_act」这条能走通的路说出来。
  */
@@ -95,6 +104,7 @@ export const TIMEOUT_LIVENESS_META: Readonly<Record<TimeoutLiveness, VtxErrorMet
  */
 export const OVERRIDE_HINTS: Record<string, string> = {
   ANCESTOR_HIT_HINT,
+  CDP_BUSY_ATTACH_HINT,
   CDP_BUSY_MOUSE_CLICK_HINT,
   NO_HIT_HINT,
   TIMEOUT_PAGE_ALIVE_HINT,

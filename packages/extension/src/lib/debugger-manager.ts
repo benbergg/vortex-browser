@@ -1,6 +1,6 @@
 // packages/extension/src/lib/debugger-manager.ts
 
-import { VtxErrorCode, vtxError } from "@vortex-browser/shared";
+import { CDP_BUSY_ATTACH_HINT, VtxErrorCode, vtxError } from "@vortex-browser/shared";
 import { assertEnableable } from "./cdp-domains.js";
 
 type CdpEventCallback = (tabId: number, method: string, params: unknown) => void;
@@ -92,8 +92,7 @@ export class DebuggerManager {
       // 被占用是可恢复的：关掉 DevTools 就能重试，与缺权限/chrome:// 那类不同
       const busy = isDebuggerBusyMessage(message);
       throw vtxError(VtxErrorCode.CDP_NOT_ATTACHED, message, { tabId }, busy ? {
-        hint: "Another debugger owns this tab — usually DevTools is open on it, or another extension attached first. " +
-          "Close DevTools on that tab (or act on a different tab) and retry.",
+        hint: CDP_BUSY_ATTACH_HINT,
         recoverable: true,
       } : undefined);
     }
