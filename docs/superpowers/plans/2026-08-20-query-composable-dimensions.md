@@ -952,7 +952,7 @@ describe("统一探针 text/attrs 维度", () => {
       },
     }]);
 
-    const res = await router.dispatch(mkReq("query.queryPage", { mode: "css", pattern: ".nope" }));
+    const res = await router.dispatch(mkReq({ mode: "css", pattern: ".nope" }));
 
     expect(res.error).toBeUndefined();
     const result = res.result as Record<string, unknown>;
@@ -976,7 +976,7 @@ describe("统一探针 text/attrs 维度", () => {
       },
     }]);
 
-    const res = await router.dispatch(mkReq("query.queryPage", { mode: "css", pattern: ".item", maxResults: 1 }));
+    const res = await router.dispatch(mkReq({ mode: "css", pattern: ".item", maxResults: 1 }));
     const result = res.result as { total: number; showing: number; elements: unknown[] };
     expect(result.total).toBe(5);
     expect(result.showing).toBe(1);
@@ -1782,55 +1782,69 @@ git commit -m "fix: 统一探针按维度隔离采集错误
 
 - [ ] **Step 1: 写失败的测试**
 
+> **执行前订正**：初稿这段测试骨架有四处跑不起来，已按实跑结果改正（spike 验证过）。
+> 请求体是 `{ type:"tool_request", tool, args, requestId, tabId }`，不是 `{ id, action, params }`
+> ——写错的话每条都返回 `UNKNOWN_ACTION`，看起来像"功能没实现"；chrome stub 少了
+> `webNavigation.getAllFrames` 与 `runtime.getManifest`，`buildExecuteTarget` 取不到帧；
+> `String(res.error)` 是 `[object Object]`，断言正则永远不匹配，要取 `res.error?.message`；
+> 文件顶部缺 `@vitest-environment jsdom`，最后一条用 `document` 的测试会以
+> `document is not defined` 崩掉（本包默认 node 环境，靠 pragma 逐文件开 jsdom）。
+
 ```ts
 // query-elements-mode.test.ts
+// @vitest-environment jsdom
 // 组合模式的 handler 层行为:维度校验、上限、维度自陈。
 // 探针本身的采集行为由 query-contract-shape.test.ts 覆盖,此处不重复。
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import type { NmRequest } from "@vortex-browser/shared";
 import { ActionRouter } from "../src/lib/router.js";
 import { registerQueryHandlers } from "../src/handlers/query.js";
 
-const executeScript = vi.fn();
 let router: ActionRouter;
+let executeScript: ReturnType<typeof vi.fn>;
 
-function mkReq(action: string, params: Record<string, unknown>) {
-  return { id: "1", action, params };
+function mkReq(args: Record<string, unknown>): NmRequest {
+  return { type: "tool_request", tool: "query.queryPage", args, requestId: "r1", tabId: 42 };
 }
 
 beforeEach(() => {
-  executeScript.mockReset();
-  globalThis.chrome = {
-    scripting: { executeScript },
-    tabs: { query: vi.fn().mockResolvedValue([{ id: 1, url: "https://x.test" }]) },
-  } as never;
+  vi.unstubAllGlobals();
   router = new ActionRouter();
+  executeScript = vi.fn();
+  vi.stubGlobal("chrome", {
+    tabs: { query: vi.fn().mockResolvedValue([{ id: 42 }]) },
+    webNavigation: { getAllFrames: vi.fn().mockResolvedValue([{ frameId: 0, parentFrameId: -1, url: "https://x/" }]) },
+    scripting: { executeScript },
+    runtime: { getManifest: vi.fn().mockReturnValue({ host_permissions: ["<all_urls>"] }) },
+  });
   registerQueryHandlers(router);
 });
 
 describe("mode=elements 维度校验", () => {
   it("非法维度名直接报错,不静默忽略", async () => {
-    const res = await router.dispatch(mkReq("query.queryPage", {
+    const res = await router.dispatch(mkReq({
       mode: "elements", pattern: ".x", dimensions: "geometry,nosuch",
     }));
     expect(res.error).toBeDefined();
-    expect(String(res.error)).toMatch(/nosuch/);
+    // error 是 {code,message};String() 出来是 [object Object],正则永远不匹配
+    expect(res.error?.message).toMatch(/nosuch/);
   });
 
   it("不传 dimensions 时默认 geometry+text,不是全维度", async () => {
     executeScript.mockResolvedValueOnce([{ result: { elements: [], total: 0, showing: 0, scanned: { elements: 1, shadowRoots: 0, iframes: 0 } } }]);
-    await router.dispatch(mkReq("query.queryPage", { mode: "elements", pattern: ".x" }));
+    await router.dispatch(mkReq({ mode: "elements", pattern: ".x" }));
     const dims = executeScript.mock.calls[0][0].args[2] as string[];
     expect(dims.sort()).toEqual(["geometry", "text"]);
   });
 
   it("maxResults 默认 20、上限 50,不因维度改变", async () => {
     executeScript.mockResolvedValue([{ result: { elements: [], total: 0, showing: 0, scanned: { elements: 1, shadowRoots: 0, iframes: 0 } } }]);
-    await router.dispatch(mkReq("query.queryPage", { mode: "elements", pattern: ".x" }));
+    await router.dispatch(mkReq({ mode: "elements", pattern: ".x" }));
     expect(executeScript.mock.calls[0][0].args[1]).toBe(20);
 
     executeScript.mockClear();
-    await router.dispatch(mkReq("query.queryPage", {
+    await router.dispatch(mkReq({
       mode: "elements", pattern: ".x", dimensions: "geometry|font|pseudo", maxResults: 999,
     }));
     expect(executeScript.mock.calls[0][0].args[1]).toBe(50);
@@ -1846,7 +1860,7 @@ describe("mode=elements 维度自陈", () => {
         scanned: { elements: 3, shadowRoots: 0, iframes: 0 },
       },
     }]);
-    const res = await router.dispatch(mkReq("query.queryPage", {
+    const res = await router.dispatch(mkReq({
       mode: "elements", pattern: ".x", dimensions: "geometry,text",
     }));
     const r = res.result as { dimensions: Record<string, { available: boolean }> };
@@ -1865,7 +1879,7 @@ describe("mode=elements 维度自陈", () => {
       },
     }]);
     // 不提供 debuggerMgr → finalizeStyleResult 走不可用分支
-    const res = await router.dispatch(mkReq("query.queryPage", {
+    const res = await router.dispatch(mkReq({
       mode: "elements", pattern: ".x", dimensions: "font",
     }));
     const r = res.result as { dimensions: Record<string, { available: boolean; reason?: string }> };
@@ -1882,7 +1896,7 @@ describe("mode=elements 维度自陈", () => {
         scanned: { elements: 100, shadowRoots: 0, iframes: 0 },
       },
     }]);
-    const res = await router.dispatch(mkReq("query.queryPage", {
+    const res = await router.dispatch(mkReq({
       mode: "elements", pattern: ".x", maxResults: 1,
     }));
     const r = res.result as { total: number; showing: number; truncated: boolean };
@@ -1895,7 +1909,7 @@ describe("mode=elements 维度自陈", () => {
     executeScript.mockResolvedValueOnce([{
       result: { elements: [], total: 0, showing: 0, scanned: { elements: 9, shadowRoots: 0, iframes: 0 } },
     }]);
-    const res = await router.dispatch(mkReq("query.queryPage", {
+    const res = await router.dispatch(mkReq({
       mode: "elements", pattern: ".nope", dimensions: "geometry,text",
     }));
     const r = res.result as { dimensions: Record<string, { available: boolean; reason?: string }> };
@@ -1914,7 +1928,7 @@ describe("mode=elements 维度自陈", () => {
         total: 2, showing: 2, scanned: { elements: 9, shadowRoots: 0, iframes: 0 },
       },
     }]);
-    const res = await router.dispatch(mkReq("query.queryPage", {
+    const res = await router.dispatch(mkReq({
       mode: "elements", pattern: ".x", dimensions: "box",
     }));
     const r = res.result as { dimensions: Record<string, { available: boolean; reason?: string }> };
@@ -1931,7 +1945,7 @@ describe("mode=elements 维度自陈", () => {
         total: 2, showing: 2, scanned: { elements: 9, shadowRoots: 0, iframes: 0 },
       },
     }]);
-    const res = await router.dispatch(mkReq("query.queryPage", {
+    const res = await router.dispatch(mkReq({
       mode: "elements", pattern: ".x", dimensions: "box",
     }));
     const r = res.result as { dimensions: Record<string, { available: boolean; reason?: string }> };
@@ -1956,7 +1970,7 @@ describe("mode=elements 维度自陈", () => {
     executeScript.mockResolvedValueOnce([{
       result: { elements: [{ index: 0, tag: "li" }], total: 1, showing: 1, scanned: { elements: 3, shadowRoots: 0, iframes: 0 } },
     }]);
-    const res = await router.dispatch(mkReq("query.queryPage", { mode: "elements", pattern: ".x" }));
+    const res = await router.dispatch(mkReq({ mode: "elements", pattern: ".x" }));
     expect((res.result as { truncated: boolean }).truncated).toBe(false);
   });
 });
@@ -1966,7 +1980,9 @@ describe("mode=elements 维度自陈", () => {
 
 Run: `pnpm --filter @vortex-browser/extension exec vitest run --maxWorkers=2 --minWorkers=1 tests/query-elements-mode.test.ts`
 
-Expected: FAIL，`mode must be 'text', 'css', ...` —— `elements` 尚未被接受
+Expected: FAIL。实跑确认过当前报错原文是
+`vortex_query: mode must be 'text', 'css', 'component', 'geometry', 'style', 'sheet', 'flow', 'chart', 'schema' or 'tokens'`
+—— Step 3 要同步改的就是这句文案。
 
 - [ ] **Step 3: 新增 elements 分派分支**
 
@@ -2091,8 +2107,9 @@ pnpm --filter @vortex-browser/extension exec vitest run --maxWorkers=2 --minWork
 pnpm --filter @vortex-browser/mcp exec vitest run --maxWorkers=2 --minWorkers=1
 ```
 
-Expected: 全绿。此时老探针尚未删除，`queryAllDeep` 定义处为 5 份（4 老 + 1 统一）——
-这是过渡态，Task 7 收敛到 2 份。
+Expected: 全绿。此时老探针尚未删除，`queryAllDeep` 定义处为 5 份（4 老 + 1 统一，
+`grep -c "const queryAllDeep" packages/extension/src/handlers/query.ts` 实测确认）——
+这是过渡态，**Task 9** 收敛到 2 份。
 
 - [ ] **Step 7: 真实浏览器验证（jsdom 无布局，单测证明不了接线）**
 
