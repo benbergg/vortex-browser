@@ -47,6 +47,10 @@ describe("geometry 探针返回形状", () => {
 
   it("命中 1 个时无 pair 键,而不是 pair:undefined", () => {
     const r = geometryProbeFunc("#a", 10) as Record<string, unknown>;
+    // 先证明探针没崩:只断言"某键不存在"时,探针抛错返回 {error} 也会让断言通过 ——
+    // 实测把 pair 门槛从 >=2 改成 >=1,rects[1] 为 undefined 致探针 catch,这条照样绿。
+    expect(r.error).toBeUndefined();
+    expect(Array.isArray(r.elements)).toBe(true);
     expect("pair" in r).toBe(false);
   });
 
