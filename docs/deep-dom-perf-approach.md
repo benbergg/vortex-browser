@@ -232,8 +232,14 @@ open shadow 内自渲染按钮 `true, occludedBy:"host"` → `false`；被同 sh
 
 每嵌一层 shadow，每个元素就多一次命中测试；nest 6 = 7 倍，而一次命中测试在 4 万节点上约 0.85ms。
 上溯步数两条 shadow 语料都是 50（每元素 1 步）—— 因为 `contrast` 走 `el.parentElement`，
-**它不跨 shadow 边界**，shadow 内元素够不到 host 的背景色。这是与遮挡同类、但在另一个维度上的缺口，
-本轮只量不修。
+**它不跨 shadow 边界**，shadow 内元素够不到 host 的背景色。这是与遮挡同类、但在另一个维度上的缺口。
+
+**已修（后续一轮）**：`contrast` 上溯改走 composed tree。背景由渲染树决定，而渲染树就是
+composed tree，拿 light DOM 树去找渲染背景是用错了树。实测 shoelace.style 706 个 shadow 内元素，
+报"无绘制背景"的从 246 个（35%）降到 **0**，原本能算的 460 个一个没变。同时去掉
+`composedContains` 的 `hops < 64` 上限 —— 它在超 64 层的深 DOM 上会把祖先命中退化成别处命中。
+语料真值随之更新：`shadow-nested` 改为不上色，上溯步数由 50 变 **950**（19/元素），
+这次是语料自己把行为变更钉住的。
 
 最后一行印证了终审坚持保留的表述：无上限上溯的病态最坏情况**真实存在**，只是真站走不满
 （github.com 3 步、en.wikipedia.org 10 步，而语料里走满是 25150 步）。

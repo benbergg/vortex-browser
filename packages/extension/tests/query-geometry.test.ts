@@ -298,6 +298,27 @@ describe("遮挡判定穿 open shadow", () => {
     expect("occludedBy" in r.elements[0]).toBe(false);
   });
 
+  // composed 遍历不能设人为跳数上限:深 DOM 上一截断,祖先命中就退化成"别处命中",
+  // 又变回假的 occluded=true。DOM 链天然有限无环,不需要这道保险。
+  it("祖先在 70 层之上时仍认得出是祖先,不因为链长就退化成遮挡", () => {
+    let cur: HTMLElement = document.body;
+    let outermost: HTMLElement | null = null;
+    for (let i = 0; i < 70; i++) {
+      const d = document.createElement("div");
+      d.className = `lv${i}`;
+      cur.appendChild(d);
+      if (i === 0) outermost = d;
+      cur = d;
+    }
+    const el = rect(document.createElement("span"), 100, 100, 200, 50);
+    el.className = "target";
+    cur.appendChild(el);
+    (document as any).elementFromPoint = () => outermost;
+    const r = geometryQuery(".target", 10) as any;
+    expect(r.elements[0].occluded).toBeNull();
+    expect("occludedBy" in r.elements[0]).toBe(false);
+  });
+
   it("light DOM 里命中自己的祖先(如 pointer-events 落到父级)同样是 null", () => {
     const parent = rect(document.createElement("div"), 100, 100, 200, 50);
     parent.className = "parent";

@@ -316,6 +316,47 @@ describe("统一探针样式维度", () => {
       .toEqual([status, ratio, aa, aa, color, bg, bgImg, false]);
   });
 
+  // 背景由渲染树决定,而渲染树是 composed tree —— light DOM 的 parentElement 在
+  // shadow 边界就断了。走错树的后果不是"少走几步",是 shadow 内元素永远报
+  // no-painted-background,即使 host 明明画着底色。
+  describe("contrast 上溯跨 shadow 边界", () => {
+    /** host 带底色,目标是它 shadow 里的直接子元素 —— parentElement 立刻为 null */
+    function seedShadow(hostCss: string, targetCss: string) {
+      document.body.innerHTML = "";
+      const host = document.createElement("div");
+      host.setAttribute("style", hostCss);
+      document.body.appendChild(host);
+      host.attachShadow({ mode: "open" }).innerHTML =
+        `<span class="t" style="${targetCss}">hi</span>`;
+      return host;
+    }
+
+    it("host 的底色算进 shadow 内元素的对比度", () => {
+      seedShadow("background:#fff", "color:#111");
+      const e = (elementsProbeFunc(".t", 10, ["contrast"], null, false) as {
+        elements: Array<Record<string, unknown>>;
+      }).elements[0];
+      expect([e.contrastStatus, e.contrastRatio, e.background, e.bgFromAncestor])
+        .toEqual(["ok", 18.88, "rgb(255, 255, 255)", true]);
+    });
+
+    it("host 半透明 → shadow 内元素判 translucent,不给假的精确比值", () => {
+      seedShadow("background:#fff;opacity:.5", "color:#111");
+      const e = (elementsProbeFunc(".t", 10, ["contrast"], null, false) as {
+        elements: Array<Record<string, unknown>>;
+      }).elements[0];
+      expect([e.contrastStatus, e.contrastRatio]).toEqual(["translucent", null]);
+    });
+
+    it("整条 composed 链都没绘制背景时仍是 no-painted-background", () => {
+      seedShadow("", "color:#111");
+      const e = (elementsProbeFunc(".t", 10, ["contrast"], null, false) as {
+        elements: Array<Record<string, unknown>>;
+      }).elements[0];
+      expect([e.contrastStatus, e.bgFromAncestor]).toEqual(["no-painted-background", false]);
+    });
+  });
+
   it("未请求 contrast 时不做上溯,扁平对比度字段一个都不出现", () => {
     const r = elementsProbeFunc(".t", 10, ["box"], null, false) as {
       elements: Array<Record<string, unknown>>;

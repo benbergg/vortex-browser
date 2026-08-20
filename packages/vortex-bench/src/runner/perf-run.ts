@@ -38,6 +38,12 @@ const COUNTER_SCRIPT = `(function(){
     for (var i = 0; i < all.length; i++) { var s = all[i].shadowRoot; if (s && d < 8) deepAll(sel, s, d + 1, acc); }
     return acc;
   }
+  function composedParent(n) {
+    var p = n.parentNode;
+    if (p && p.nodeType === 1) return p;
+    if (p && p.nodeType === 11) return p.host || null;
+    return null;
+  }
   var els = deepAll(".t", document, 0, []).slice(0, 50);
   var hitTests = 0, steps = 0;
   for (var i = 0; i < els.length; i++) {
@@ -51,7 +57,7 @@ const COUNTER_SCRIPT = `(function(){
         hit = inner;
       }
     }
-    for (var a = els[i].parentElement; a; a = a.parentElement) {
+    for (var a = composedParent(els[i]); a; a = composedParent(a)) {
       steps++;
       var cs = getComputedStyle(a);
       if (cs.backgroundImage !== "none") break;
@@ -73,7 +79,8 @@ async function runShape(
   const built = extractJson(await call("vortex_evaluate", { code: plan.buildScript, timeout: 60000 }));
   const counters = extractJson(await call("vortex_evaluate", { code: COUNTER_SCRIPT, timeout: 60000 }));
   const domNodes = Number(built.domNodes ?? 0);
-  const perTarget = Number(counters.perTarget ?? 0);
+  // 上溯步数取建树脚本量的:同一份走法在 jsdom 里已被离线核过
+  const perTarget = Number(built.ancestorStepsPerTarget ?? 0);
 
   const samples: DimensionSample[] = [];
   let matched = 0;

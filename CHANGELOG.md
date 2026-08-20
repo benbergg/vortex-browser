@@ -31,6 +31,23 @@
   是自相矛盾的组合。判据取 bbox 的零面积这一几何事实，不推断 CSS 可见性——
   `visibility:hidden`、`opacity:0` 仍按原样处理，它们有布局与命中语义。
 
+- **`vortex_query` 的 `contrast` 祖先上溯改走 composed tree**，能跨 shadow 边界了。
+  此前走 `el.parentElement`，它在 shadow 边界就断（card 挂在 shadow root 上，
+  `card.parentElement` 即 `null`），于是 shadow 内元素永远够不到 host 上的底色，
+  一律报 `no-painted-background`、`contrastRatio: null`。
+
+  这不是"少走了几步"：背景由**渲染树**决定，而渲染树就是 composed tree ——
+  拿 light DOM 树去找渲染背景是**用错了树**。
+
+  实测 shoelace.style：706 个 shadow 内元素，改前 246 个（35%）报"无绘制背景"、
+  改后 **0 个**；原本能算的 460 个（自身带背景）一个没变。真站上因此检出了此前完全
+  看不见的 WCAG 失败，例如某个 `[part=base]` 的 3.77 比值（AA 不过）。
+  纯 light DOM 行为逐条不变 —— `composedParent` 在没有 shadow 时与 `parentElement` 等价。
+
+  连带修掉上一处：`composedContains` 原有 `hops < 64` 的跳数上限，在超过 64 层的深
+  DOM 上会把"祖先命中"退化成"别处命中"，又变回假的 `occluded: true`。DOM 链天然有限
+  无环，这道人为保险只会在深页面上制造错误答案，已去掉。
+
 - **`vortex_query` 的遮挡判定改为穿 open shadow root**。此前用裸
   `document.elementFromPoint`，而它会把 shadow-internal 的命中重定向到 host —— 于是
   shadow 里一个**完全没被遮挡**的元素被报成 `occluded: true, occludedBy: <host>`。

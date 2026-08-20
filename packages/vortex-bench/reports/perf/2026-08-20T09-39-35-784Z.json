@@ -1,0 +1,414 @@
+{
+  "generatedAt": "2026-08-20T09:39:35.784Z",
+  "browser": "Chrome/151.0.0.0",
+  "runs": [
+    {
+      "shapeId": "realistic-2k",
+      "domNodes": 2000,
+      "matched": 1485,
+      "samples": [
+        {
+          "dimension": "geometry",
+          "msSamples": [
+            153,
+            143,
+            141
+          ],
+          "hitTests": 50,
+          "ancestorSteps": 0
+        },
+        {
+          "dimension": "text",
+          "msSamples": [
+            150,
+            105,
+            52
+          ],
+          "hitTests": 0,
+          "ancestorSteps": 0
+        },
+        {
+          "dimension": "attrs",
+          "msSamples": [
+            94,
+            101,
+            96
+          ],
+          "hitTests": 0,
+          "ancestorSteps": 0
+        },
+        {
+          "dimension": "contrast",
+          "msSamples": [
+            351,
+            150,
+            61
+          ],
+          "hitTests": 0,
+          "ancestorSteps": 50
+        },
+        {
+          "dimension": "typography",
+          "msSamples": [
+            100,
+            88,
+            59
+          ],
+          "hitTests": 0,
+          "ancestorSteps": 0
+        },
+        {
+          "dimension": "box",
+          "msSamples": [
+            104,
+            88,
+            110
+          ],
+          "hitTests": 0,
+          "ancestorSteps": 0
+        }
+      ],
+      "structuralMismatches": []
+    },
+    {
+      "shapeId": "realistic-10k",
+      "domNodes": 10002,
+      "matched": 7479,
+      "samples": [
+        {
+          "dimension": "geometry",
+          "msSamples": [
+            190,
+            160,
+            200
+          ],
+          "hitTests": 50,
+          "ancestorSteps": 0
+        },
+        {
+          "dimension": "text",
+          "msSamples": [
+            95,
+            97,
+            98
+          ],
+          "hitTests": 0,
+          "ancestorSteps": 0
+        },
+        {
+          "dimension": "attrs",
+          "msSamples": [
+            62,
+            93,
+            103
+          ],
+          "hitTests": 0,
+          "ancestorSteps": 0
+        },
+        {
+          "dimension": "contrast",
+          "msSamples": [
+            102,
+            139,
+            104
+          ],
+          "hitTests": 0,
+          "ancestorSteps": 50
+        },
+        {
+          "dimension": "typography",
+          "msSamples": [
+            102,
+            100,
+            99
+          ],
+          "hitTests": 0,
+          "ancestorSteps": 0
+        },
+        {
+          "dimension": "box",
+          "msSamples": [
+            248,
+            111,
+            102
+          ],
+          "hitTests": 0,
+          "ancestorSteps": 0
+        }
+      ],
+      "structuralMismatches": []
+    },
+    {
+      "shapeId": "stress-40k",
+      "domNodes": 40002,
+      "matched": 29979,
+      "samples": [
+        {
+          "dimension": "geometry",
+          "msSamples": [
+            896,
+            1501,
+            507
+          ],
+          "hitTests": 50,
+          "ancestorSteps": 0
+        },
+        {
+          "dimension": "text",
+          "msSamples": [
+            247,
+            238,
+            211
+          ],
+          "hitTests": 0,
+          "ancestorSteps": 0
+        },
+        {
+          "dimension": "attrs",
+          "msSamples": [
+            240,
+            211,
+            242
+          ],
+          "hitTests": 0,
+          "ancestorSteps": 0
+        },
+        {
+          "dimension": "contrast",
+          "msSamples": [
+            302,
+            260,
+            748
+          ],
+          "hitTests": 0,
+          "ancestorSteps": 1650
+        },
+        {
+          "dimension": "typography",
+          "msSamples": [
+            388,
+            256,
+            250
+          ],
+          "hitTests": 0,
+          "ancestorSteps": 0
+        },
+        {
+          "dimension": "box",
+          "msSamples": [
+            256,
+            251,
+            249
+          ],
+          "hitTests": 0,
+          "ancestorSteps": 0
+        }
+      ],
+      "structuralMismatches": []
+    },
+    {
+      "shapeId": "pathological-deep",
+      "domNodes": 2000,
+      "matched": 1125,
+      "samples": [
+        {
+          "dimension": "geometry",
+          "msSamples": [
+            141,
+            150,
+            153
+          ],
+          "hitTests": 50,
+          "ancestorSteps": 0
+        },
+        {
+          "dimension": "text",
+          "msSamples": [
+            51,
+            51,
+            51
+          ],
+          "hitTests": 0,
+          "ancestorSteps": 0
+        },
+        {
+          "dimension": "attrs",
+          "msSamples": [
+            144,
+            48,
+            48
+          ],
+          "hitTests": 0,
+          "ancestorSteps": 0
+        },
+        {
+          "dimension": "contrast",
+          "msSamples": [
+            597,
+            615,
+            588
+          ],
+          "hitTests": 0,
+          "ancestorSteps": 25150
+        },
+        {
+          "dimension": "typography",
+          "msSamples": [
+            54,
+            50,
+            52
+          ],
+          "hitTests": 0,
+          "ancestorSteps": 0
+        },
+        {
+          "dimension": "box",
+          "msSamples": [
+            90,
+            59,
+            92
+          ],
+          "hitTests": 0,
+          "ancestorSteps": 0
+        }
+      ],
+      "structuralMismatches": []
+    },
+    {
+      "shapeId": "shadow-breadth",
+      "domNodes": 4002,
+      "matched": 2844,
+      "samples": [
+        {
+          "dimension": "geometry",
+          "msSamples": [
+            101,
+            63,
+            90
+          ],
+          "hitTests": 100,
+          "ancestorSteps": 0
+        },
+        {
+          "dimension": "text",
+          "msSamples": [
+            57,
+            52,
+            49
+          ],
+          "hitTests": 0,
+          "ancestorSteps": 0
+        },
+        {
+          "dimension": "attrs",
+          "msSamples": [
+            50,
+            49,
+            51
+          ],
+          "hitTests": 0,
+          "ancestorSteps": 0
+        },
+        {
+          "dimension": "contrast",
+          "msSamples": [
+            90,
+            60,
+            92
+          ],
+          "hitTests": 0,
+          "ancestorSteps": 50
+        },
+        {
+          "dimension": "typography",
+          "msSamples": [
+            59,
+            87,
+            63
+          ],
+          "hitTests": 0,
+          "ancestorSteps": 0
+        },
+        {
+          "dimension": "box",
+          "msSamples": [
+            97,
+            103,
+            93
+          ],
+          "hitTests": 0,
+          "ancestorSteps": 0
+        }
+      ],
+      "structuralMismatches": []
+    },
+    {
+      "shapeId": "shadow-nested",
+      "domNodes": 2002,
+      "matched": 1404,
+      "samples": [
+        {
+          "dimension": "geometry",
+          "msSamples": [
+            100,
+            92,
+            63
+          ],
+          "hitTests": 350,
+          "ancestorSteps": 0
+        },
+        {
+          "dimension": "text",
+          "msSamples": [
+            145,
+            49,
+            50
+          ],
+          "hitTests": 0,
+          "ancestorSteps": 0
+        },
+        {
+          "dimension": "attrs",
+          "msSamples": [
+            50,
+            47,
+            48
+          ],
+          "hitTests": 0,
+          "ancestorSteps": 0
+        },
+        {
+          "dimension": "contrast",
+          "msSamples": [
+            100,
+            97,
+            98
+          ],
+          "hitTests": 0,
+          "ancestorSteps": 950
+        },
+        {
+          "dimension": "typography",
+          "msSamples": [
+            60,
+            55,
+            47
+          ],
+          "hitTests": 0,
+          "ancestorSteps": 0
+        },
+        {
+          "dimension": "box",
+          "msSamples": [
+            97,
+            96,
+            58
+          ],
+          "hitTests": 0,
+          "ancestorSteps": 0
+        }
+      ],
+      "structuralMismatches": []
+    }
+  ]
+}

@@ -6,11 +6,13 @@ import type { CorpusShape } from "../src/perf-types.js";
 // 生成器的节点数学不能只靠比字符串 —— 把建树脚本真跑进 jsdom,拿真实 DOM 对账。
 // new Function 而不是直接 eval:复刻注入时丢模块作用域的环境,脚本必须自包含。
 function runBuild(shape: CorpusShape): {
-  domNodes: number; targets: number; shadowRoots: number; maxNest: number; slotsUsed: number;
+  domNodes: number; targets: number; shadowRoots: number; maxNest: number;
+  slotsUsed: number; ancestorStepsPerTarget: number;
 } {
   const plan = buildCorpus(shape);
   return new Function(`return ${plan.buildScript}`)() as {
-    domNodes: number; targets: number; shadowRoots: number; maxNest: number; slotsUsed: number;
+    domNodes: number; targets: number; shadowRoots: number; maxNest: number;
+    slotsUsed: number; ancestorStepsPerTarget: number;
   };
 }
 
@@ -23,7 +25,8 @@ describe("语料生成器的结构真值", () => {
     ["目标数托底", { id: "c", nodes: 10, depth: 2, targets: 50, painted: false }, 70, 5, 0],
     // 链节点 = depth + hosts*nest;domNodes = 链节点 + cards*4
     ["shadow 广度", { id: "d", nodes: 4000, depth: 10, targets: 50, painted: true, shadow: { hosts: 200, nest: 1 } }, 4002, 1, 200],
-    ["shadow 嵌套", { id: "e", nodes: 2000, depth: 10, targets: 50, painted: true, shadow: { hosts: 20, nest: 6 } }, 2002, 1, 120],
+    // 不上色 → 走完整条 composed 链:card(1) + nest 6 + depth 10 + body + html = 19
+    ["shadow 嵌套不上色", { id: "e", nodes: 2000, depth: 10, targets: 50, painted: false, shadow: { hosts: 20, nest: 6 } }, 2002, 19, 120],
   ])("%s", (_n, shape, domNodes, steps, shadowRoots) => {
     const plan = buildCorpus(shape as CorpusShape);
     expect(plan.expect.domNodes).toBe(domNodes);
@@ -33,13 +36,16 @@ describe("语料生成器的结构真值", () => {
 
   // 上溯走 el.parentElement,它不跨 shadow 边界 —— card 挂在 shadow root 上,
   // card.parentElement 即 null。所以 shadow 内目标的步数与 painted / depth 都无关。
-  it("shadow 内目标的上溯步数恒为 1,不随 painted 或 depth 变", () => {
-    const mk = (painted: boolean, depth: number) =>
-      buildCorpus({ id: "s", nodes: 500, depth, targets: 3, painted, shadow: { hosts: 2, nest: 2 } })
+  // 上溯走 composed 链,跨得过 shadow 边界 —— 所以 nest 会计进步数。
+  // 走 parentElement 的老写法在 shadow 边界就断,这三条会全是 1。
+  it("shadow 内目标的上溯步数把 nest 与 depth 都算进去", () => {
+    const mk = (painted: boolean, depth: number, nest: number) =>
+      buildCorpus({ id: "s", nodes: 500, depth, targets: 3, painted, shadow: { hosts: 2, nest } })
         .expect.ancestorStepsPerTarget;
-    expect(mk(true, 5)).toBe(1);
-    expect(mk(false, 5)).toBe(1);
-    expect(mk(false, 300)).toBe(1);
+    expect(mk(true, 5, 2)).toBe(1); // card 有底色,第一步就 break
+    expect(mk(false, 5, 2)).toBe(1 + 2 + 5 + 2);
+    expect(mk(false, 5, 6)).toBe(1 + 6 + 5 + 2); // 只有 nest 变
+    expect(mk(false, 300, 2)).toBe(1 + 2 + 300 + 2);
   });
 
   it("建树脚本在真实 DOM 上跑出来的节点数与 shadow root 数都与真值一致", () => {
@@ -50,6 +56,9 @@ describe("语料生成器的结构真值", () => {
       expect(actual.shadowRoots, `${shape.id} shadow root 数`).toBe(plan.expect.shadowRoots);
       expect(actual.maxNest, `${shape.id} 嵌套层数`).toBe(plan.expect.maxNest);
       expect(actual.slotsUsed, `${shape.id} 装 card 的容器数`).toBe(plan.expect.slotsUsed);
+      // 上溯步数此前只在真机上量,现在建树脚本自己走一遍 composed 链,离线就能核
+      expect(actual.ancestorStepsPerTarget, `${shape.id} 上溯步数`)
+        .toBe(plan.expect.ancestorStepsPerTarget);
       expect(actual.targets, `${shape.id} 目标数`).toBeGreaterThanOrEqual(shape.targets);
     }
   });

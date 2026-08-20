@@ -20,7 +20,9 @@ export const DEFAULT_SHAPES: readonly CorpusShape[] = [
   // shadow 两条压不同的东西:广度压 queryAllDeep(每个 shadow root 都要 querySelectorAll("*")
   // 找 host),深度压 deepElementFromPoint(每层多一次命中测试)。
   { id: "shadow-breadth", nodes: 4000, depth: 10, targets: 50, painted: true, shadow: { hosts: 200, nest: 1 } },
-  { id: "shadow-nested", nodes: 2000, depth: 10, targets: 50, painted: true, shadow: { hosts: 20, nest: 6 } },
+  // 不上色:让上溯真的走完整条 composed 链(穿 6 层 shadow + 主链 + body/html),
+  // painted 的话 card 第一步就 break,压不到跨 shadow 那段
+  { id: "shadow-nested", nodes: 2000, depth: 10, targets: 50, painted: false, shadow: { hosts: 20, nest: 6 } },
 ];
 
 /**
@@ -48,11 +50,11 @@ function planCounts(shape: CorpusShape): { cards: number; domNodes: number; shad
  * 步数 = card + 主链 depth + body + html。
  */
 function ancestorSteps(shape: CorpusShape): number {
-  // shadow 内目标恒为 1:探针上溯走 el.parentElement,它不跨 shadow 边界 ——
-  // card 挂在 shadow root 上,card.parentElement 即 null,走不到 host。
-  // 真 Chrome 实测确认。这意味着 shadow 内元素的 contrast 够不到 host 的背景色。
-  if (shape.shadow) return 1;
-  return shape.painted ? 1 : 1 + shape.depth + 2;
+  // card 有底色就第一步 break。否则走完整条 composed 链:
+  // card(1) + nest 个 host + depth 条主链 + body + html。
+  // 走 composed 而不是 parentElement —— 后者在 shadow 边界断,够不到 host 的背景。
+  if (shape.painted) return 1;
+  return 1 + (shape.shadow ? shape.shadow.nest : 0) + shape.depth + 2;
 }
 
 /** 形状 → 可在页内直接 eval 的建树脚本 + 结构真值 */
@@ -121,9 +123,28 @@ export function buildCorpus(shape: CorpusShape): CorpusPlan {
     for (var i = 0; i < all.length; i++) { var s = all[i].shadowRoot; if (s && d < 20) deepAll(sel, s, d + 1, acc); }
     return acc;
   }
+  // 上溯步数也在这里量:jsdom 里就能离线核,不必等真机
+  function composedParent(n) {
+    var p = n.parentNode;
+    if (p && p.nodeType === 1) return p;
+    if (p && p.nodeType === 11) return p.host || null;
+    return null;
+  }
+  function stepsFor(el) {
+    var k = 0;
+    for (var a = composedParent(el); a; a = composedParent(a)) {
+      k++;
+      var cs = getComputedStyle(a);
+      if (cs.backgroundImage !== "none") break;
+      if (cs.backgroundColor !== "rgba(0, 0, 0, 0)") break;
+    }
+    return k;
+  }
   var dc = deepCount(root, 0);
+  var firstTarget = deepAll(".t", root, 0, [])[0];
   return { domNodes: dc.n + 1, shadowRoots: dc.roots, maxNest: dc.maxNest,
            slotsUsed: slots.filter(function(sl){ return !!sl.querySelector(".card"); }).length,
+           ancestorStepsPerTarget: firstTarget ? stepsFor(firstTarget) : 0,
            targets: deepAll(".t", root, 0, []).length };
 })()`;
 

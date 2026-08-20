@@ -532,14 +532,18 @@ export const elementsProbeFunc = (
     // contains 不穿 shadow:shadow 内元素对其 host 恒 false,会把"命中自己 shadow
     // 里的叶子"判成被 host 遮挡。与 hit-ownership.ts 的 composedContains 同语义,
     // 这里必须内联 —— executeScript({func}) 注入丢模块作用域,import 不进来。
+    // 渲染树就是 composed tree:元素走 parentNode,shadow 根跨到 host。
+    // 背景归属与命中归属都得按它算,light DOM 的 parentElement 在 shadow 边界会断。
+    const composedParent = (node: Element): Element | null => {
+      const p: Node | null = node.parentNode;
+      if (p && p.nodeType === 1) return p as Element;
+      if (p && p.nodeType === 11) return (p as unknown as { host?: Element }).host ?? null;
+      return null;
+    };
+    // 不设跳数上限:DOM 链天然有限无环,人为截断会让深 DOM 上的祖先退化成"别处命中"
     const composedContains = (ancestor: Element, node: Element): boolean => {
-      let cur: Element | null = node;
-      for (let hops = 0; cur && hops < 64; hops++) {
+      for (let cur: Element | null = node; cur; cur = composedParent(cur)) {
         if (cur === ancestor) return true;
-        const p: Node | null = cur.parentNode;
-        cur = p && p.nodeType === 1 ? (p as Element)
-          : p && p.nodeType === 11 ? ((p as unknown as { host?: Element }).host ?? null)
-          : null;
       }
       return false;
     };
@@ -768,7 +772,7 @@ export const elementsProbeFunc = (
 
         // 自身已绘制就不上溯:再往上的层被它盖住,不是实际背景
         if (!hasImage && isTransparent(background)) {
-          for (let a: HTMLElement | null = el.parentElement; a; a = a.parentElement) {
+          for (let a: Element | null = composedParent(el); a; a = composedParent(a)) {
             const acs = getComputedStyle(a);
             if (opacityOf(acs) < 1) translucent = true;
             if (acs.backgroundImage !== "none") {
