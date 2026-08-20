@@ -11,7 +11,7 @@ import { resolveTargetOptional } from "../lib/resolve-target.js";
 import type { DebuggerManager } from "../lib/debugger-manager.js";
 import { fetchPlatformFonts } from "../lib/platform-fonts.js";
 import { aggregateFontFaces, buildFontEvidence, dropInitialLayoutValues, isPseudoRendered } from "../lib/style-evidence.js";
-import { dimensionsForMode } from "../lib/element-dimensions.js";
+import { dimensionsForMode, normalizeDimensions, ALL_DIMENSIONS } from "../lib/element-dimensions.js";
 import { shapeCssResult, shapeGeometryResult, shapeStyleResult, type RawProbeResult } from "../lib/element-shaping.js";
 
 type TextScan = { chars: number; nodes: number; shadowRoots: number; iframes: number };
@@ -2259,13 +2259,13 @@ export function registerQueryHandlers(router: ActionRouter, debuggerMgr?: Debugg
       // 参数校验
       if (
         !mode ||
-        (mode !== "text" && mode !== "css" && mode !== "component" &&
+        (mode !== "text" && mode !== "css" && mode !== "component" && mode !== "elements" &&
          mode !== "geometry" && mode !== "style" && mode !== "sheet" && mode !== "flow" &&
          mode !== "chart" && mode !== "schema" && mode !== "tokens")
       ) {
         throw vtxError(
           VtxErrorCode.INVALID_PARAMS,
-          `vortex_query: mode must be 'text', 'css', 'component', 'geometry', 'style', 'sheet', 'flow', 'chart', 'schema' or 'tokens', got ${String(mode)}`,
+          `vortex_query: mode must be 'text', 'css', 'component', 'elements', 'geometry', 'style', 'sheet', 'flow', 'chart', 'schema' or 'tokens', got ${String(mode)}`,
         );
       }
       if (!pattern || typeof pattern !== "string" || !pattern.trim()) {
@@ -2343,6 +2343,60 @@ export function registerQueryHandlers(router: ActionRouter, debuggerMgr?: Debugg
           raw.total === 0 && scanned
             ? diagnoseEmptyQueryCss({ ...scanned, selector: pattern, frameScoped: frameId != null })
             : null,
+        );
+      } else if (mode === "elements") {
+        // 默认只给几何+文本:实测负载里这两样最常一起要,全维度会让返回体无谓变重
+        const maxResults = Math.min((args.maxResults as number | undefined) ?? 20, 50);
+        const dims = normalizeDimensions(args.dimensions as string | string[] | undefined) ?? ["geometry", "text"];
+        const bad = dims.filter((d) => ALL_DIMENSIONS.indexOf(d) === -1);
+        if (bad.length > 0) {
+          throw vtxError(
+            VtxErrorCode.INVALID_PARAMS,
+            `vortex_query mode=elements: dimensions must be one or more of ${ALL_DIMENSIONS.join("|")}; got ${bad.join(",")}`,
+          );
+        }
+        const attributes = normalizeCssAttrParam(args.attr as string | string[] | undefined);
+        const includeText = (args.includeText as boolean | undefined) ?? true;
+        const results = await chrome.scripting.executeScript({
+          target: buildExecuteTarget(tid, frameId),
+          func: elementsProbeFunc,
+          args: [pattern, maxResults, dims, attributes, includeText],
+          world: "MAIN",
+        });
+        const res = results[0]?.result as RawProbeResult | { error: string } | undefined;
+        if (!res) throw vtxError(VtxErrorCode.JS_EXECUTION_ERROR, "query.queryPage elements: executeScript returned no result");
+        if ("error" in res && res.error) throw vtxError(VtxErrorCode.JS_EXECUTION_ERROR, `query.queryPage elements error: ${res.error}`);
+        const raw = res as RawProbeResult;
+        const wantFont = dims.indexOf("font") !== -1;
+        const wantPseudo = dims.indexOf("pseudo") !== -1;
+        // font 要的是实际渲染字体,只给声明栈却标 available 会被当成等价于 mode=style
+        let body: Record<string, unknown> = { ...raw };
+        if (wantFont || wantPseudo) {
+          body = await finalizeStyleResult(raw as never, {
+            wantPseudo, wantFont, debuggerMgr, tabId: tid, selector: pattern, maxResults,
+          }) as never;
+        }
+        const els = (body.elements ?? []) as Array<{ errors?: Record<string, string>; font?: { evidence?: string; reason?: string } }>;
+        const dimensions: Record<string, { available: boolean; reason?: string }> = {};
+        for (const d of dims) {
+          if (raw.total === 0) {
+            dimensions[d] = { available: false, reason: "no elements matched" };
+            continue;
+          }
+          // 口径是已返回的元素;截断后说"整体不可用"是越界断言,故 reason 点明 sampled
+          const failed = els.filter((e) => e.errors?.[d]);
+          dimensions[d] = failed.length === els.length && els.length > 0
+            ? { available: false, reason: `${failed[0].errors![d]} (all ${els.length} sampled elements failed; total matched ${raw.total})` }
+            : { available: true, ...(failed.length > 0 ? { reason: `${failed.length}/${els.length} sampled elements failed` } : {}) };
+        }
+        if (wantFont && raw.total > 0) {
+          const badFont = els.find((e) => e.font?.evidence === "unavailable");
+          if (badFont) dimensions.font = { available: false, reason: badFont.font?.reason ?? "platform fonts unavailable" };
+        }
+        const { scanned, ...rest } = body as RawProbeResult;
+        return withDiagnosis(
+          { ...rest, truncated: raw.total > raw.showing, dimensions },
+          raw.total === 0 && scanned ? diagnoseEmptyQueryCss({ ...scanned, selector: pattern, frameScoped: frameId != null }) : null,
         );
       } else if (mode === "geometry") {
         // geometry 模式:转发统一探针,整形层还原老契约。

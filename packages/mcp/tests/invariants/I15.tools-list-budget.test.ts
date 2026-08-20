@@ -161,7 +161,11 @@ describe("I15: tools/list budget + count + internalized grep", () => {
     // payload 实测 11197B,cap +200 留 ~103B 余量。沿用"加能力调 cap 不压字符"惯例。
     // 11300 → 11400:终审要求给 maxResults 补 minimum/maximum 与「tokens 下是每组
     // 上限」的说明(会被误读成全局 40)。实测 11280B,余量只剩 20B 太紧,再 +100。
-    expect(toolsListPayload.length).toBeLessThanOrEqual(11400);
+    // mode=elements: 11400 → 11750。mode 枚举新增 elements(一次命中按 dimensions
+    // 合并返回多维度),description 同步追加,并新增 dimensions 参数(十个维度名单
+    // 只在参数说明里列一次,mode 说明不重复)。实测 11643B,cap +350 留 107B 余量。
+    // 沿用"加能力调 cap 不压字符"惯例。
+    expect(toolsListPayload.length).toBeLessThanOrEqual(11750);
   });
 
   it("公开工具数量 = 24（23 + vortex_sequence 多步序列）", () => {
@@ -236,10 +240,11 @@ describe("I15: tools/list budget + count + internalized grep", () => {
     // 174 = 120 原始 + 54 onDialog 子句，是真新增能力驱动的增长。
     // 180 → 230: 仅 vortex_query 超(222)，是 8 个 mode 各一段真能力说明累加的结果。
     // 230 → query 280: 新增 tokens mode 一段说明,实测 261。
+    // 280 → query 330: 新增 elements mode 一段说明,实测 311(留 19B,与 tokens 那次同档)。
     // 整体放宽会给别的工具留白涨空间——事实上已经发生过:上一条注释写"其余最长
     // 174(vortex_act)",而 act 实测已 215,是在 230 的统一上限下悄悄涨的。故拆两条锁。
     const q = defs.find((d) => d.name === "vortex_query")!;
-    expect(q.description.length).toBeLessThanOrEqual(280);
+    expect(q.description.length).toBeLessThanOrEqual(330);
     const nonQuery = defs.filter((d) => d.name !== "vortex_query");
     for (const d of nonQuery) {
       expect(d.description.length, `${d.name} description 变长了`).toBeLessThanOrEqual(215);
@@ -272,6 +277,7 @@ describe("I15: tools/list budget + count + internalized grep", () => {
       "vortex_extract.maxLength": "超长静默截断,不提示会让模型误以为读全了",
       "vortex_query.attr": "attr 支持 , / | 分隔多属性(daddd2b),不写会复发 R11 静默失败",
       "vortex_query.maxResults": "tokens 下是每组上限不是总数,评审实测会被误读成全局 40",
+      "vortex_query.dimensions": "十个维度名模型无从猜起;且要点明返回体带 available 自陈,否则会把缺席当成页面就是这样",
       "vortex_debug_read.filter": "子字段是 handler 真能力(D16); 盲测复测实测模型把 pattern 嵌进 filter.network,故点明是平铺键",
       "vortex_act.options.fingerprint": "record/verify 契约必须文档化",
       "vortex_sequence.steps[].target": "序列步骤复用 vortex_act 的 target 语义",

@@ -474,18 +474,22 @@ export const PUBLIC_TOOLS: ToolDef[] = [
     // 零 LLM 探测:text grep 可见文本 / css 计数+取属性。一次 executeScript 即时返回。
     name: "vortex_query",
     action: "query.queryPage",
-    description: "Zero-LLM probe: text=grep; css=find elems; component=Vue/React state; geometry=bbox/clip/occlude; style=排版/盒/绘制/动效/伪元素/实际渲染字体+WCAG(attr 选组); sheet=Lake Sheet→md/csv/json; flow=流程图→mermaid; chart=echarts→数据(attr=summary|json); tokens=CSS 变量→调色板/字阶(pattern=*,只扫 :root/body).",
+    description: "Zero-LLM probe: text=grep; css=find elems; component=Vue/React state; elements=几何+文本+样式一次拿全(dimensions 选维度); geometry=bbox/clip/occlude; style=排版/盒/绘制/动效/伪元素/实际渲染字体+WCAG(attr 选组); sheet=Lake Sheet→md/csv/json; flow=流程图→mermaid; chart=echarts→数据(attr=summary|json); tokens=CSS 变量→调色板/字阶(pattern=*,只扫 :root/body).",
     schema: {
       type: "object",
       properties: {
         mode: {
-          enum: ["text", "css", "component", "geometry", "style", "sheet", "flow", "chart", "schema", "tokens"],
+          enum: ["text", "css", "component", "elements", "geometry", "style", "sheet", "flow", "chart", "schema", "tokens"],
           description:
             "component reads Vue/React instance state; sheet only reads Yuque Lake Sheet, NOT DOM tables (use extract for those); " +
             "schema=author-declared JSON-LD/Microdata/OGP (pattern=@type or '*'), may differ from visible content; " +
             "css/component/geometry/style 的 pattern 也接受 vortex_observe 给的 @ref",
         },
         pattern: { type: "string" },
+        dimensions: {
+          type: "string",
+          description: "mode=elements 专用,逗号或竖线分隔,默认 geometry,text: geometry|text|attrs|contrast|typography|box|paint|motion|pseudo|font; 返回体 dimensions.<名>.available 自陈这一维是否真拿到",
+        },
         isRegex: { type: "boolean" },
         caseSensitive: { type: "boolean" },
         contextChars: { type: "number" },

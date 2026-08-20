@@ -52,6 +52,15 @@ describe("vortex_query schema 注册", () => {
     expect(schema.properties.mode.enum).toContain("text");
     expect(schema.properties.mode.enum).toContain("css");
   });
+
+  it("elements mode 在 enum 里,且 dimensions 字段已声明", () => {
+    const def = getToolDef("vortex_query");
+    const schema = def!.schema as {
+      properties: { mode: { enum: string[] }; dimensions?: { type: string } };
+    };
+    expect(schema.properties.mode.enum).toContain("elements");
+    expect(schema.properties.dimensions?.type).toBe("string");
+  });
 });
 
 describe("vortex_query dispatch 路由", () => {
