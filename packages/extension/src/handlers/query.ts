@@ -919,8 +919,8 @@ export const elementsProbeFunc = (
       return o;
     };
 
-    // 只用到六个数值属性;不用 DOMRect 是因为失败占位在 jsdom 下无法构造。
-    // null 表示该元素几何采集失败 —— 与 elements 严格一一对应,不靠长度时机推断。
+    // 失败占位用 null 而非全 0 的假 rect:后者会被 pair 当成真坐标参与比较。
+    // 与 elements 严格一一对应,不靠长度时机推断。
     type RectLike = { left: number; top: number; right: number; bottom: number; width: number; height: number };
     const rects: Array<RectLike | null> = [];
     const elements: Array<Record<string, unknown>> = [];

@@ -723,7 +723,7 @@ export const elementsProbeFunc = (
       return s;
     };
 
-    // 只用到六个数值属性;不用 DOMRect 是因为 Task 7 的失败占位在 jsdom 下无法构造。
+    // 只用到六个数值属性;失败占位用 null 而非全 0 的假 rect,免得被当真坐标参与比较。
     // null 表示该元素几何采集失败 —— 与 elements 严格一一对应,不靠长度时机推断。
     type RectLike = { left: number; top: number; right: number; bottom: number; width: number; height: number };
     const rects: Array<RectLike | null> = [];
@@ -1687,9 +1687,9 @@ Expected: FAIL。前两条会因整体 `try/catch` 返回 `{ error }` 而红。
 
 **两点都不能含糊**：
 
-其一，占位不能用 `new DOMRect(...)`——实测 jsdom 里 `typeof DOMRect !== "function"`，
-这一行会让 Task 7 的全部测试以 `DOMRect is not defined` 崩掉（真实浏览器里有，
-所以只在单测暴露）。
+其一，占位不用 `new DOMRect(...)`，用结构类型 `RectLike` 与 `null`。理由是**语义**：
+失败就是没有 rect，一个全 0 的假 rect 会被下游当成真坐标参与 pair 比较。
+（初稿这里写的理由是「jsdom 无 DOMRect 构造函数」，**那是错的**，见下方订正表。）
 
 其二，不要靠 `rects.length < elements.length + 1` 这类长度时机推断补占位——那是隐式行为，
 循环结构一改就错位。`rects` 与 `elements` 严格一一对应，几何失败即 `null`：
@@ -2125,15 +2125,28 @@ git commit -m "feat: query 新增 elements 组合模式
 而 mock 或直接调用都测不出来）。薄封装救不了：探针要被序列化注入，
 封装体内引用 `elementsProbeFunc` 在注入后同样丢作用域。
 
-**Files:**
+**Files:** 别照抄下面的数字——Task 1-7 一路在加「与老探针逐值对照」的测试，
+初稿写下的引用点数早已过期（`query-contract-shape.test.ts` 从 5 处涨到 17 处）。
+**动手前自己数一遍**，这条命令是唯一真源：
+
+```bash
+grep -c "styleProbeFunc\|geometryProbeFunc\|cssQueryFunc" packages/extension/tests/*.test.ts | grep -v ":0$"
+```
+
 - Modify: `packages/extension/src/handlers/query.ts`（删三个 `export const` 探针）
-- Modify: `packages/extension/tests/query-style.test.ts`（40+ 处，含 3 处 `.toString()`）
-- Modify: `packages/extension/tests/deep-query-expr.test.ts`（8 处，含 `.toString()` 源码比对）
-- Modify: `packages/extension/tests/query-geometry.test.ts`（8 处）
-- Modify: `packages/extension/tests/query-css-form-value.test.ts`（6 处）
-- Modify: `packages/extension/tests/query-shadow-pierce.test.ts`（3 处）
-- Modify: `packages/extension/tests/query-empty-diagnosis.test.ts`（1 处）
-- Modify: `packages/extension/tests/query-contract-shape.test.ts`（5 处「与老探针对照」改为硬编码期望）
+- Modify: `packages/extension/tests/query-style.test.ts`（最大头，含 3 处 `.toString()`）
+- Modify: `packages/extension/tests/deep-query-expr.test.ts`（含 `.toString()` 源码比对）
+- Modify: `packages/extension/tests/query-geometry.test.ts`
+- Modify: `packages/extension/tests/query-css-form-value.test.ts`
+- Modify: `packages/extension/tests/query-shadow-pierce.test.ts`
+- Modify: `packages/extension/tests/query-empty-diagnosis.test.ts`
+- Modify: `packages/extension/tests/query-contract-shape.test.ts`（「与老探针对照」全部改为硬编码期望）
+
+> **硬编码期望必须从老探针实际跑出来的值抄下来，不许手推。** 这批对照测试（尤其
+> contrast 五态那组 `it.each`）的全部价值就在于「新实现与老实现逐值相同」。删掉老探针后
+> 没有参照物，此时若按理解手写期望值，等于把「实现应该是什么」当成「实现曾经是什么」——
+> 一旦搬运时已经错了，硬编码会把错误固化成契约，再也发现不了。
+> 做法：删除前先跑一次，把老探针的实际返回打印出来，照抄进期望。
 
 **Interfaces:**
 - Consumes: `elementsProbeFunc`（Task 3-5 已完备）
@@ -2271,7 +2284,7 @@ queryAllDeep 内联副本从 4 份降到 2 份。"
 | Task 7 承认要补占位 rect 的用例却没写 | Luna 复核 | Step 1 直接给出「首元素 geometry 失败时不产生 pair」 |
 | Task 8 只有 font 做真实判定，其余维度即便元素级全失败仍标 `available:true`；且零命中时因找不到 unavailable 元素而误报可用 | Luna 复核 | 三条来源汇总：零命中、元素级 `errors` 全失败、font 的 CDP 状态；补三条测试 |
 
-| Task 7 占位 rect 用 `new DOMRect(0,0,0,0)`，而 jsdom 无此构造函数 | 我实测（写探针测试跑 vitest 验证 `typeof DOMRect`） | 改用结构类型 `RectLike` 与对象字面量。**这行会让 Task 7 全部测试以 `DOMRect is not defined` 崩掉，且只在单测暴露**——真实浏览器有 DOMRect，光看代码或在浏览器里试都发现不了 |
+| ~~Task 7 占位 rect 用 `new DOMRect(0,0,0,0)`，而 jsdom 无此构造函数~~ **这条结论本身是错的** | 我"实测"过，但 spike 跑在**默认 node 环境**下；`query-contract-shape.test.ts` 顶部有 `// @vitest-environment jsdom`，那里 `new DOMRect(1,2,3,4)` 构造正常。Task 7 收尾时重跑环境清单才发现 | 改用 `RectLike` 的决定保留，但理由换成语义：失败就是没有 rect，全 0 的假 rect 会被下游当真坐标参与 pair 比较。**这条是本次最能说明问题的一例**——我用 spike 得出结论、写进计划当既成事实，之后几轮审核都没人质疑；查不出它的不是审核，是"spike 跑错了环境"这件事只有重跑才现形 |
 
 | Task 7 的 box/motion 用例自相矛盾：注释写「motion 不该跟着挂」，断言却是 motion 也失败。`failStyleOn` 让该元素所有 `getComputedStyle` 抛错，两组必然同时失败——既证明不了隔离生效也证明不了失效 | Luna r7 | 删掉该用例；新增「pseudo 组失败不连带丢 box 与 typography」，注入改为**只在带伪元素参数时抛错**，才造得出「一组失败其余正常」的局面 |
 | 占位 rect 靠 `rects.length < elements.length + 1` 的长度时机推断补入，是隐式行为，循环结构一改就错位 | Luna r7 | 改为 `rects: Array<RectLike \| null>` 与 elements 严格一一对应、无条件 push，失败即 null；pair 前置条件从间接的 `geoOk(errors.geometry)` 改为直接 `if (a && b)` |
