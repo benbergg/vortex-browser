@@ -119,3 +119,95 @@ describe("geometry 维度采集", () => {
     expect(r.pair).toBeUndefined();
   });
 });
+
+// 命中测试拿不到有意义结果时,occluded 必须是 null 而不是 false ——
+// 老实现一个 `!!` 把"没测"和"测了没遮挡"压成同一个值,真站上 github.com
+// 前 50 个元素有 26% 落进来,全部被报成"被左上角那个加载条遮挡"。
+describe("occluded 三态:测不了不得伪装成确定值", () => {
+  const hitSelf = (el: Element) => { (document as any).elementFromPoint = () => el; };
+
+  it.each([
+    ["零宽", 0, 50],
+    ["零高", 200, 0],
+    ["display:none 式全零 bbox", 0, 0],
+  ])("%s 元素无可命中面积 → occluded=null / inViewport=false / 无 occludedBy", (_n, w, h) => {
+    const el = rect(document.createElement("div"), 0, 0, w, h);
+    el.className = "z";
+    const topleft = document.createElement("div");
+    topleft.className = "topleft";
+    document.body.append(topleft, el);
+    // 中心点落在页面左上角,命中的是别的元素 —— 老实现据此报"被 topleft 遮挡"
+    (document as any).elementFromPoint = () => topleft;
+    const r = geometryQuery(".z", 10) as any;
+    expect(r.elements[0].occluded).toBeNull();
+    expect(r.elements[0].inViewport).toBe(false);
+    expect("occludedBy" in r.elements[0]).toBe(false);
+    expect(r.elements[0].bbox).toEqual([0, 0, w, h]);
+  });
+
+  // 代码里没有"中心点在不在视口"的判断:视口外浏览器自己返回 null(Chrome 151 实测
+  // 30/30),再加一道守卫改它也不会有测试转红 —— 那就是死条件,不留。
+  it("中心点在视口外 → occluded=null,但 bbox 仍是真实值", () => {
+    const el = rect(document.createElement("div"), 100, 2000, 200, 50); // cy=2025 > 800
+    el.className = "below";
+    document.body.appendChild(el);
+    (document as any).elementFromPoint = () => null;
+    const r = geometryQuery(".below", 10) as any;
+    expect(r.elements[0].occluded).toBeNull();
+    expect(r.elements[0].inViewport).toBe(false);
+    expect(r.elements[0].bbox).toEqual([100, 2000, 200, 50]);
+  });
+
+  it("elementFromPoint 不存在(能力缺失) → occluded=null 而非 false", () => {
+    const el = rect(document.createElement("div"), 100, 100, 200, 50);
+    el.className = "noapi";
+    document.body.appendChild(el);
+    (document as any).elementFromPoint = undefined;
+    const r = geometryQuery(".noapi", 10) as any;
+    expect(r.elements[0].occluded).toBeNull();
+  });
+
+  it("elementFromPoint 抛异常 → occluded=null,且不连坐 geometry 其余字段", () => {
+    const el = rect(document.createElement("div"), 100, 100, 200, 50);
+    el.className = "boom";
+    document.body.appendChild(el);
+    (document as any).elementFromPoint = () => { throw new Error("hit test failed"); };
+    const r = geometryQuery(".boom", 10) as any;
+    expect(r.elements[0].occluded).toBeNull();
+    expect(r.elements[0].bbox).toEqual([100, 100, 200, 50]); // 同维其余字段仍在
+    expect(r.elements[0].textClipped).toBe(false);
+  });
+
+  // 命中资格是"有面积 + 中心点在视口内",与 inViewport 的"整体在视口内"不是一回事。
+  // 拿 inViewport 当判据会把跨视口边缘、但中心点可测的元素错误降级成 null。
+  it("跨视口边缘但中心点在视口内 → inViewport=false,occluded 仍给真实结论", () => {
+    const el = rect(document.createElement("div"), 850, 100, 200, 50); // right=1050>1000, cx=950
+    el.className = "straddle";
+    document.body.appendChild(el);
+    hitSelf(el);
+    const r = geometryQuery(".straddle", 10) as any;
+    expect(r.elements[0].inViewport).toBe(false);
+    expect(r.elements[0].occluded).toBe(false); // 不是 null —— 这一条测得了
+  });
+
+  it("命中测试返回 null → 仍是 null,不得当成未遮挡", () => {
+    const el = rect(document.createElement("div"), 100, 100, 200, 50);
+    el.className = "nohit";
+    document.body.appendChild(el);
+    (document as any).elementFromPoint = () => null;
+    const r = geometryQuery(".nohit", 10) as any;
+    expect(r.elements[0].occluded).toBeNull();
+  });
+
+  // 整形层的 pick 用 `!== undefined`,理论上 null 会保留 —— 但 errors 曾经被剥过,
+  // 这条锁最终返回体,不接受"读代码得出的结论"。
+  it("null 透传到整形后的返回体,键不得消失", () => {
+    const el = rect(document.createElement("div"), 0, 0, 0, 0);
+    el.className = "out";
+    document.body.appendChild(el);
+    (document as any).elementFromPoint = () => null;
+    const r = geometryQuery(".out", 10) as any;
+    expect("occluded" in r.elements[0]).toBe(true);
+    expect(r.elements[0].occluded).toBeNull();
+  });
+});

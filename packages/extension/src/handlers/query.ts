@@ -649,12 +649,23 @@ export const elementsProbeFunc = (
         rect = el.getBoundingClientRect();
         const r = rect;
         item.bbox = [R(r.left), R(r.top), R(r.width), R(r.height)];
-        item.inViewport = r.left >= -TOL && r.top >= -TOL && r.right <= vw + TOL && r.bottom <= vh + TOL;
+        // 零面积元素中心点落在页面别处,据它下任何几何结论都是噪声
+        const hasArea = r.width > 0 && r.height > 0;
+        item.inViewport =
+          hasArea && r.left >= -TOL && r.top >= -TOL && r.right <= vw + TOL && r.bottom <= vh + TOL;
 
         const cx = r.left + r.width / 2;
         const cy = r.top + r.height / 2;
-        const topEl = typeof document.elementFromPoint === "function" ? document.elementFromPoint(cx, cy) : null;
-        item.occluded = !!(topEl && topEl !== el && !el.contains(topEl));
+        // 拿不到命中元素一律 null:视口外浏览器自己返回 null,不必也不该另判视口
+        let topEl: Element | null = null;
+        if (hasArea) {
+          try {
+            topEl = document.elementFromPoint(cx, cy);
+          } catch {
+            topEl = null;
+          }
+        }
+        item.occluded = topEl ? topEl !== el && !el.contains(topEl) : null;
         if (item.occluded) item.occludedBy = desc(topEl);
 
         item.textClipped = el.scrollWidth > el.clientWidth + TOL;
