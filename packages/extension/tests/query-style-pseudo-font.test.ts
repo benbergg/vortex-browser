@@ -14,6 +14,9 @@ const PROBE_RESULT = {
   elements: [
     {
       index: 0, tag: "i", fp: "I||0",
+      color: "rgb(17, 17, 17)", background: "rgb(255, 255, 255)", backgroundImage: "none",
+      bgFromAncestor: false, fontWeight: "400", fontSize: "16px",
+      contrastRatio: 18.1, contrastStatus: "ok", wcagAA: true, wcagAAA: true,
       declaredFont: "ESBuild, sans-serif",
       pseudoRaw: {
         before: { content: '"\\f0c9"', display: "inline", visibility: "visible", opacity: "1", "background-image": "none", width: "auto", height: "auto" },
@@ -129,9 +132,23 @@ describe("mode=style 伪元素与字体接线", () => {
   });
 
   it("探针请求的组要透传到注入实参 —— 少传一组 handler 侧再怎么判定也是空的", async () => {
+    const { dimensionsForMode } = await import("../src/lib/element-dimensions.js");
     await call({ attr: "pseudo" });
     const args = (chrome.scripting.executeScript as ReturnType<typeof vi.fn>).mock.calls[0][0].args;
-    expect(args[2]).toEqual(["pseudo"]);
+    // 恒带 contrast:老探针无条件返回那批扁平字段,不请求就是静默行为变更
+    expect(args[2]).toEqual(dimensionsForMode("style", ["pseudo"]));
+  });
+
+  // 注入按 dims 取、整形按 groups 剥,是这次重构最容易漏的一处缝:探针照样返回了
+  // 对比度字段,整形层一声不响地全剥掉,返回里少 10 个键而不报任何错。
+  it("对比度那批扁平字段要活着回到调用方,attr 只选一组时也不例外", async () => {
+    for (const args of [{}, { attr: "pseudo" }]) {
+      const r = await call(args);
+      const e = r.result.elements[0];
+      expect([args, e.contrastStatus, e.contrastRatio, e.wcagAA])
+        .toEqual([args, "ok", 18.1, true]);
+      expect(e.color).toBe("rgb(17, 17, 17)");
+    }
   });
 
   it("没接 DebuggerManager(未接线) → font 自陈不可用,而不是静默没有这个字段", async () => {

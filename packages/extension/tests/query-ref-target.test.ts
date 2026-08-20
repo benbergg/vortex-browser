@@ -67,14 +67,17 @@ describe("query 经 index+snapshotId 定位（@ref 翻译后的形态）", () =>
     expect(String(resp.error?.message)).toMatch(/pattern is required/);
   });
   it("attr 选组真的传到了页面侧探针的第三个实参", async () => {
+    const { dimensionsForMode } = await import("../src/lib/element-dimensions.js");
     await router.dispatch(mkReq({ mode: "style", pattern: "h1", attr: "typography" }, "r4"));
-    expect(executeScript.mock.calls[0][0].args[2]).toEqual(["typography"]);
+    // 恒带 contrast:老探针无条件返回那批扁平字段,不请求就是静默行为变更
+    expect(executeScript.mock.calls[0][0].args[2])
+      .toEqual(dimensionsForMode("style", ["typography"]));
   });
 
   it("不传 attr → 六组全开(pseudo/font 也在缺省里,不然盲区还在)", async () => {
     await router.dispatch(mkReq({ mode: "style", pattern: "h1" }, "r5"));
     expect(executeScript.mock.calls[0][0].args[2]).toEqual([
-      "typography", "box", "paint", "motion", "pseudo", "font",
+      "contrast", "typography", "box", "paint", "motion", "pseudo", "font",
     ]);
   });
 

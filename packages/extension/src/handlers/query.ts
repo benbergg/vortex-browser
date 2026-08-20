@@ -12,7 +12,7 @@ import type { DebuggerManager } from "../lib/debugger-manager.js";
 import { fetchPlatformFonts } from "../lib/platform-fonts.js";
 import { aggregateFontFaces, buildFontEvidence, dropInitialLayoutValues, isPseudoRendered } from "../lib/style-evidence.js";
 import { dimensionsForMode } from "../lib/element-dimensions.js";
-import { shapeCssResult, shapeGeometryResult, type RawProbeResult } from "../lib/element-shaping.js";
+import { shapeCssResult, shapeGeometryResult, shapeStyleResult, type RawProbeResult } from "../lib/element-shaping.js";
 
 type TextScan = { chars: number; nodes: number; shadowRoots: number; iframes: number };
 type CssScan = { elements: number; shadowRoots: number; iframes: number };
@@ -2494,7 +2494,7 @@ export function registerQueryHandlers(router: ActionRouter, debuggerMgr?: Debugg
             : null,
         );
       } else if (mode === "style") {
-        // style 模式:注入 styleProbeFunc 取 computed color/background(上溯 painted bg)+ WCAG 对比度。
+        // style 模式:注入统一探针取 computed color/background(上溯 painted bg)+ WCAG 对比度。
         const maxResults = Math.min((args.maxResults as number | undefined) ?? 10, 50);
 
         // attr 选组,不传给全四组;组名非法直接报错,别静默返回空对象
@@ -2509,17 +2509,16 @@ export function registerQueryHandlers(router: ActionRouter, debuggerMgr?: Debugg
           );
         }
 
+        // 注入与整形必须是同一份维度:只给整形传 groups 会把 contrast 那批扁平字段剥掉
+        const dims = dimensionsForMode("style", groups);
         const results = await chrome.scripting.executeScript({
           target: buildExecuteTarget(tid, frameId),
-          func: styleProbeFunc,
-          args: [pattern, maxResults, groups],
+          func: elementsProbeFunc,
+          args: [pattern, maxResults, dims, null, false],
           world: "MAIN",
         });
 
-        const res = results[0]?.result as
-          | { elements: unknown[]; total: number; showing: number }
-          | { error: string }
-          | undefined;
+        const res = results[0]?.result as RawProbeResult | { error: string } | undefined;
 
         if (!res) {
           throw vtxError(VtxErrorCode.JS_EXECUTION_ERROR, "query.queryPage style: executeScript returned no result");
@@ -2527,7 +2526,7 @@ export function registerQueryHandlers(router: ActionRouter, debuggerMgr?: Debugg
         if ("error" in res && res.error) {
           throw vtxError(VtxErrorCode.JS_EXECUTION_ERROR, `query.queryPage style error: ${res.error}`);
         }
-        return finalizeStyleResult(res as StyleProbeResult, {
+        return finalizeStyleResult(shapeStyleResult(res as RawProbeResult, dims) as StyleProbeResult, {
           wantPseudo: groups.indexOf("pseudo") !== -1,
           wantFont: groups.indexOf("font") !== -1,
           debuggerMgr,

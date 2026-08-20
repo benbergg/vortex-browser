@@ -1343,7 +1343,7 @@ git commit -m "feat: 统一探针补样式六组采集
 - Consumes: `elementsProbeFunc`（Task 5 已完备）、`shapeStyleResult`（Task 2）、既有 `finalizeStyleResult`
 - Produces: 无新增导出
 
-- [ ] **Step 1: 写下标不变量的测试**
+- [x] **Step 1: 写下标不变量的测试**
 
 ```ts
 describe("style 转发的下标不变量", () => {
@@ -1373,27 +1373,42 @@ describe("style 转发的下标不变量", () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试确认通过**
+- [x] **Step 2: 跑测试确认通过**
 
 Run: `pnpm --filter @vortex-browser/extension exec vitest run --maxWorkers=2 --minWorkers=1 tests/query-contract-shape.test.ts -t "下标不变量"`
 
 Expected: PASS（Task 2 的整形层已满足）
 
-- [ ] **Step 3: 变异验证下标不变量真的被锁住**
+- [x] **Step 3: 变异验证下标不变量真的被锁住**
 
-把 `shapeStyleResult` 的 `raw.elements.map(...)` 改成 `raw.elements.filter((e) => e.fp).map(...)`。
-Expected: 「整形前后元素数量、顺序、fp 逐位一致」转红。改回后应全绿。
+做两次，各改一处再改回。**不要**用 `filter((e) => e.fp)`——本测试请求了 `font` 组，
+每个元素都有 `fp`，这个条件一个都滤不掉，是死变异（Task 2 已经栽过一次）。
+
+| 变异 | 把 `shapeStyleResult` 的 `raw.elements.map(...)` 改成 | 期望转红的用例 |
+|---|---|---|
+| 掉元素 | `raw.elements.slice(1).map(...)` | 数量、顺序、fp 逐位一致 / maxResults 截断 |
+| 乱顺序 | `raw.elements.slice().reverse().map(...)` | 数量、顺序、fp 逐位一致 |
+
+变异脚本必须带 `assert 命中数 == 1`：`raw.elements.map(` 在本文件里不止一处，
+静默改错地方会让你误判测试是死的（Task 3、Task 4 各栽过一次）。
 若没转红，说明测试没锁住，补强后重做变异。
 
-- [ ] **Step 4: style mode 改为转发**
+- [x] **Step 4: style mode 改为转发**
 
-替换 `query.ts:2125` 起的 style 分支主体（`ALL_GROUPS` 校验与 `finalizeStyleResult` 调用保持不动）：
+> **执行中订正（Task 6 首轮）**：注入用 `dimensionsForMode("style", groups)`、整形却传 `groups`，
+> 是这次重构最容易漏的一处缝——探针照样把对比度字段算出来返回，整形层一声不响全剥掉，
+> `mode=style` 的返回少 10 个键而**不报任何错**，Step 1 的下标不变量测试也照样全绿。
+> 所以先 `const dims = dimensionsForMode("style", groups)`，注入和整形共用这一个变量。
+> 光靠"记得写对"不算数：`query-style-pseudo-font.test.ts` 里补了一条断言那批扁平字段
+> 活着回到调用方的测试，把 `dims` 改回 `groups` 会转红。
+
+替换 style 分支主体（**按内容定位，别按行号**——前几个 Task 已让行号大幅漂移）（`ALL_GROUPS` 校验与 `finalizeStyleResult` 调用保持不动）：
 
 ```ts
         const results = await chrome.scripting.executeScript({
           target: buildExecuteTarget(tid, frameId),
           func: elementsProbeFunc,
-          args: [pattern, maxResults, dimensionsForMode("style", groups), null, false],
+          args: [pattern, maxResults, dims, null, false],
           world: "MAIN",
         });
 
@@ -1405,7 +1420,7 @@ Expected: 「整形前后元素数量、顺序、fp 逐位一致」转红。改�
           throw vtxError(VtxErrorCode.JS_EXECUTION_ERROR, `query.queryPage style error: ${res.error}`);
         }
         // 整形后再交 CDP:两侧必须看同一个已截断数组,否则 fp 下标错位
-        return finalizeStyleResult(shapeStyleResult(res as RawProbeResult, groups) as never, {
+        return finalizeStyleResult(shapeStyleResult(res as RawProbeResult, dims) as never, {
           wantPseudo: groups.indexOf("pseudo") !== -1,
           wantFont: groups.indexOf("font") !== -1,
           debuggerMgr,
@@ -1415,13 +1430,13 @@ Expected: 「整形前后元素数量、顺序、fp 逐位一致」转红。改�
         });
 ```
 
-- [ ] **Step 5: 跑 style 全部相关测试**
+- [x] **Step 5: 跑 style 全部相关测试**
 
 Run: `pnpm --filter @vortex-browser/extension exec vitest run --maxWorkers=2 --minWorkers=1 tests/query-style.test.ts tests/query-style-pseudo-font.test.ts tests/query-contract-shape.test.ts tests/platform-fonts.test.ts`
 
 Expected: PASS
 
-- [ ] **Step 6: 提交**
+- [x] **Step 6: 提交**
 
 ```bash
 git add packages/extension/src/handlers/query.ts packages/extension/tests/query-contract-shape.test.ts

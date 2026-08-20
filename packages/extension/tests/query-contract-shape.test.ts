@@ -298,3 +298,29 @@ describe("统一探针样式维度", () => {
     expect((out as { fontFaces?: unknown[] }).fontFaces).toBeDefined();
   });
 });
+
+describe("style 转发的下标不变量", () => {
+  beforeEach(() => seed(`<p class="t">a</p><p class="t">b</p><p class="t">c</p>`));
+
+  it("整形前后元素数量、顺序、fp 逐位一致", async () => {
+    const { shapeStyleResult } = await import("../src/lib/element-shaping.js");
+    const raw = elementsProbeFunc(".t", 10, ["font"], null, false) as {
+      elements: Array<{ fp?: string }>;
+    };
+    const shaped = shapeStyleResult(raw as never, ["font"]);
+    expect(shaped.elements).toHaveLength(raw.elements.length);
+    expect(shaped.elements.map((e) => e.fp)).toEqual(raw.elements.map((e) => e.fp));
+  });
+
+  it("maxResults 截断后,整形结果与探针看到的是同一批元素", async () => {
+    const { shapeStyleResult } = await import("../src/lib/element-shaping.js");
+    const raw = elementsProbeFunc(".t", 2, ["font"], null, false) as {
+      elements: Array<{ fp?: string }>; total: number; showing: number;
+    };
+    expect(raw.total).toBe(3);
+    expect(raw.showing).toBe(2);
+    const shaped = shapeStyleResult(raw as never, ["font"]);
+    expect(shaped.elements).toHaveLength(2);
+    expect(shaped.total).toBe(3);
+  });
+});
