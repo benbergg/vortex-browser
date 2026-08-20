@@ -181,6 +181,20 @@ flowchart TD
 `typeof document.elementFromPoint === "function"`（有 `try/catch` 时改它不转红）和中心点视口判断
 （视口外浏览器自己返回 `null`，实测 30/30）。
 
+**shadow 下钻（后续一轮，`440e3df`）**：命中测试改用内联 `deepElementFromPoint`，归属改用内联
+`composedContains`（与 `packages/extension/src/page-side/hit-ownership.ts:65` 同语义）。受控 fixture 真浏览器实测：
+open shadow 内自渲染按钮 `true, occludedBy:"host"` → `false`；被同 shadow 浮层盖住的那个
+`occludedBy` 由 host 变为真正的浮层。变异 6/6 转红。
+
+根因不是"没人想到"：`CHANGELOG.md:403` 记的 2026-05-27「读路径穿 open shadow 族 K」
+（`dad3d8e`+`4cdea1c`）扫了 `observe.ts` / `content.ts` / `capture.ts`，**漏了 `query.ts`**。
+
+**但真站上没闭合**：shoelace.style（164 个 open shadow root）上 59 个 shadow 内可测元素，
+修复前后判定**一个都没变**。原因是 **slot 重定向**——组件可见内容来自 `<slot>`，点落在 slotted 的
+light-DOM 内容上时 `shadowRoot.elementFromPoint` 按规范重定向回 host（下钻链呈 `sl-button → sl-button`
+自环），最终命中是目标自己的 composed 祖先，按现行语义算遮挡。「祖先命中该报什么」是独立语义议题，
+已交 Luna 第三轮，本轮未动。
+
 **压测首轮**（`vortex-bench perf --repeats 3`，Chrome 151，结构真值 4/4 全绿）：
 
 | 语料 | 节点 | 成本次序 |
