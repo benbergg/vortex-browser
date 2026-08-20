@@ -2192,7 +2192,7 @@ grep -c "styleProbeFunc\|geometryProbeFunc\|cssQueryFunc" packages/extension/tes
 - Consumes: `elementsProbeFunc`（Task 3-5 已完备）
 - Produces: 无新增导出；`queryAllDeep` 定义处收敛到 2 份
 
-- [ ] **Step 1: 先迁自包含验证（最高风险，先做）**
+- [x] **Step 1: 先迁自包含验证（最高风险，先做）**
 
 `query-style.test.ts` 三处 `.toString()` 测试改为验证统一探针。注意第三处原本测的是
 「`groups` 缺省不传」——`elementsProbeFunc` 五参全必填，缺省语义由 handler 层承担，
@@ -2227,14 +2227,14 @@ grep -c "styleProbeFunc\|geometryProbeFunc\|cssQueryFunc" packages/extension/tes
   });
 ```
 
-- [ ] **Step 2: 跑自包含验证，确认统一探针真的自包含**
+- [x] **Step 2: 跑自包含验证，确认统一探针真的自包含**
 
 Run: `pnpm --filter @vortex-browser/extension exec vitest run --maxWorkers=2 --minWorkers=1 tests/query-style.test.ts -t "注入自包含"`
 
 Expected: PASS。若报 `X is not defined`，说明 Task 3-5 搬运时漏内联了某个标识符——
 **这正是这条测试存在的意义，此时回去补内联，不要改测试**。
 
-- [ ] **Step 3: 机械替换其余五个文件的调用**
+- [x] **Step 3: 机械替换其余五个文件的调用**
 
 按下表逐文件替换，每替换一个文件跑一次该文件的测试：
 
@@ -2247,7 +2247,7 @@ Expected: PASS。若报 `X is not defined`，说明 Task 3-5 搬运时漏内联�
 | `query-shadow-pierce.test.ts` | 同上 |
 | `query-empty-diagnosis.test.ts` | 同上（该条断言 `scanned`，整形层已透传） |
 
-- [ ] **Step 4: 改写契约测试里的对照**
+- [x] **Step 4: 改写契约测试里的对照**
 
 > **执行前订正**：初稿写「五处」，实数是 **19 处**（Task 1-7 一路在加）。分三类，处理方式不同：
 >
@@ -2287,13 +2287,25 @@ Expected: PASS。若报 `X is not defined`，说明 Task 3-5 搬运时漏内联�
 
 顶部 import 去掉 `cssQueryFunc, geometryProbeFunc, styleProbeFunc`，只留 `elementsProbeFunc`。
 
-- [ ] **Step 5: 删除三个老探针定义**
+> **执行中发现（Task 9）**：迁移撞出 **Task 4 丢掉的一个行为**。老 `cssQueryFunc` 对
+> `src`/`href` 取 DOM property 拿绝对 URL、对表单控件读 live `value`（用户输入不反射为
+> attribute，`getAttribute` 常返 null，注释里点名实测 log.bytenew.com 日期框读空），
+> Task 4 的 attrs 端口退化成了纯 `getAttribute`。
+>
+> **为什么五个 Task 都没发现**：css 那条「与老探针形状一致」只比**键集合**——`attrs` 键
+> 两边都在，值一个是绝对 URL 一个是相对、一个有值一个是 null。Task 5 时我把 style 那条
+> 升级成逐值就是为了防这个，**却没同步升级 css 与 geometry 两条**。
+>
+> 教训：只比键集合的对照测试等于没测值。删除老实现前，**三条对照必须全部升到逐值**，
+> 那是最后一次能发现「搬运时悄悄丢了什么」的机会。
+
+- [x] **Step 5: 删除三个老探针定义**
 
 删除 `query.ts` 中 `export const cssQueryFunc`、`export const geometryProbeFunc`、
 `export const styleProbeFunc` 三个完整定义。`deep-query-expr.ts:3/7/16` 与
 `style-evidence.ts:7` 的注释里提到 `styleProbeFunc`，一并改为 `elementsProbeFunc`。
 
-- [ ] **Step 6: 跑 extension 全量并核对副本数**
+- [x] **Step 6: 跑 extension 全量并核对副本数**
 
 ```bash
 pnpm --filter @vortex-browser/extension exec vitest run --maxWorkers=2 --minWorkers=1
@@ -2303,7 +2315,7 @@ grep -rn "cssQueryFunc\|geometryProbeFunc\|styleProbeFunc" packages/extension/sr
 
 Expected: 全绿；副本数 2（统一探针 1 + component 1）；无残留引用。
 
-- [ ] **Step 7: 提交**
+- [x] **Step 7: 提交**
 
 ```bash
 git add packages/extension/src packages/extension/tests
