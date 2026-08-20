@@ -2,7 +2,16 @@
 
 const STYLE_GROUPS = ["typography", "box", "paint", "motion", "pseudo", "font"] as const;
 
-export const ALL_DIMENSIONS: readonly string[] = ["geometry", "text", "attrs", ...STYLE_GROUPS];
+// 老 mode=style 无条件返回这批扁平字段;拆成独立维度才能在 mode=elements 里单点请求,
+// 也才能让只要 box 的调用跳过上溯 painted background 那趟祖先遍历。
+export const CONTRAST_KEYS: readonly string[] = [
+  "color", "background", "backgroundImage", "bgFromAncestor", "fontWeight", "fontSize",
+  "contrastRatio", "contrastStatus", "wcagAA", "wcagAAA",
+];
+
+export const ALL_DIMENSIONS: readonly string[] = [
+  "geometry", "text", "attrs", "contrast", ...STYLE_GROUPS,
+];
 
 // 逗号或竖线分隔,全空白视为未传。
 export function normalizeDimensions(input: string | string[] | undefined): string[] | null {
@@ -18,5 +27,6 @@ export function dimensionsForMode(
 ): string[] {
   if (mode === "css") return ["text", "attrs"];
   if (mode === "geometry") return ["geometry"];
-  return styleGroups ?? [...STYLE_GROUPS];
+  // contrast 恒开:老 style 契约里这批字段与 groups 无关,少给就是行为变更
+  return ["contrast", ...(styleGroups ?? STYLE_GROUPS)];
 }

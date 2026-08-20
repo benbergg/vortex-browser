@@ -200,3 +200,101 @@ describe("统一探针 text/attrs 维度", () => {
       .toEqual(Object.keys((legacy.elements as Array<Record<string, unknown>>)[0]).sort());
   });
 });
+
+describe("统一探针样式维度", () => {
+  beforeEach(() => seed(`<p class="t">hello</p>`));
+
+  it("按组请求,未请求的组不出现", () => {
+    const r = elementsProbeFunc(".t", 10, ["typography"], null, false) as {
+      elements: Array<Record<string, unknown>>;
+    };
+    expect(r.elements[0]).toHaveProperty("typography");
+    expect("box" in r.elements[0]).toBe(false);
+    expect("paint" in r.elements[0]).toBe(false);
+  });
+
+  it("请求 font 组时产出 declaredFont 与 fp,fp 是路径形状供 CDP 对齐", () => {
+    const r = elementsProbeFunc(".t", 10, ["font"], null, false) as {
+      elements: Array<{ declaredFont?: string; fp?: string }>;
+    };
+    expect(typeof r.elements[0].declaredFont).toBe("string");
+    expect(r.elements[0].fp).toMatch(/^[A-Z]+:\d/);
+  });
+
+  it("多个元素的 fp 互不相同,否则 CDP 对齐会误判为碰撞", () => {
+    seed(`<p class="t">a</p><p class="t">b</p>`);
+    const r = elementsProbeFunc(".t", 10, ["font"], null, false) as {
+      elements: Array<{ fp?: string }>;
+    };
+    expect(r.elements[0].fp).not.toBe(r.elements[1].fp);
+  });
+
+  it("geometry 与样式组可同时请求,两者字段共存于同一元素", () => {
+    const r = elementsProbeFunc(".t", 10, ["geometry", "box"], null, false) as {
+      elements: Array<Record<string, unknown>>;
+    };
+    expect(r.elements[0]).toHaveProperty("bbox");
+    expect(r.elements[0]).toHaveProperty("box");
+    expect(r.elements[0].index).toBe(0);
+  });
+
+  it("经整形层还原后与老 style 探针形状一致", async () => {
+    const { shapeStyleResult } = await import("../src/lib/element-shaping.js");
+    const { dimensionsForMode } = await import("../src/lib/element-dimensions.js");
+    const dims = dimensionsForMode("style", ["typography", "box"]);
+    const raw = elementsProbeFunc(".t", 10, dims, null, false);
+    const shaped = shapeStyleResult(raw as never, dims);
+    const legacy = styleProbeFunc(".t", 10, ["typography", "box"]) as Record<string, unknown>;
+    // 逐值而非只比键集合:pickProps 少做一次 camelCase→kebab 转换,键一个不缺、值全是空串
+    expect((shaped.elements as Array<Record<string, unknown>>)[0])
+      .toEqual((legacy.elements as Array<Record<string, unknown>>)[0]);
+  });
+
+  // 只比键集合挡不住"把 parseStrict 换成宽松 parse"这类改写:键一个不少,数字全错。
+  // 对比度五态是真站上纠正过捏造数字的成果,必须逐值对齐老探针。
+  it.each([
+    ["ok", "color:#111;background:#fff"],
+    ["no-painted-background", "color:#111"],
+    ["translucent", "color:#111;background:#fff;opacity:.5"],
+    ["unsupported-color", "color:oklch(.5 .1 200);background:#fff"],
+    ["background-image", "color:#111;background:url(x.png)"],
+  ])("contrast 维度逐值对齐老探针:%s", (_name, css) => {
+    seed(`<p class="t" style="${css}">hello</p>`);
+    const raw = elementsProbeFunc(".t", 10, ["contrast"], null, false) as {
+      elements: Array<Record<string, unknown>>;
+    };
+    const legacy = styleProbeFunc(".t", 10, []) as { elements: Array<Record<string, unknown>> };
+    for (const k of ["contrastStatus", "contrastRatio", "wcagAA", "wcagAAA",
+      "color", "background", "backgroundImage", "bgFromAncestor"]) {
+      expect([k, raw.elements[0][k]]).toEqual([k, legacy.elements[0][k]]);
+    }
+  });
+
+  it("未请求 contrast 时不做上溯,扁平对比度字段一个都不出现", () => {
+    const r = elementsProbeFunc(".t", 10, ["box"], null, false) as {
+      elements: Array<Record<string, unknown>>;
+    };
+    for (const k of ["color", "background", "contrastRatio", "contrastStatus", "wcagAA"]) {
+      expect(k in r.elements[0]).toBe(false);
+    }
+  });
+
+  it("注入自包含:九维度全开剥离模块作用域后仍可运行", () => {
+    const detached = new Function("return " + elementsProbeFunc.toString())();
+    const st = document.createElement("style");
+    st.textContent = '@font-face{font-family:"X";src:url(x.woff2)}';
+    document.head.appendChild(st);
+    const el = document.createElement("div");
+    el.className = "iso-all";
+    document.body.appendChild(el);
+    let out: unknown;
+    expect(() => {
+      out = detached(".iso-all", 1,
+        ["geometry", "text", "attrs", "contrast", "typography", "box", "paint", "motion",
+          "pseudo", "font"],
+        ["id"], true);
+    }).not.toThrow();
+    expect((out as { error?: string }).error).toBeUndefined();
+    expect((out as { fontFaces?: unknown[] }).fontFaces).toBeDefined();
+  });
+});

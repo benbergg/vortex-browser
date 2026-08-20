@@ -1,5 +1,7 @@
 // 探针只产原始值,本模块负责还原三种旧返回形状。
 
+import { CONTRAST_KEYS } from "./element-dimensions.js";
+
 export type RawElement = Record<string, unknown> & { index: number; tag: string };
 
 export type RawProbeResult = {
@@ -84,7 +86,9 @@ export function shapeStyleResult(
     ...(groups.indexOf("font") !== -1 ? ["declaredFont", "fp"] : []),
     ...(groups.indexOf("pseudo") !== -1 ? ["pseudoRaw"] : []),
   ];
-  const keys = ["index", "tag", ...groups, ...extra];
+  // contrast 产的是扁平字段不是同名对象,按维度名去 pick 一个都命不中
+  const expanded = groups.flatMap((g) => (g === "contrast" ? [...CONTRAST_KEYS] : [g]));
+  const keys = ["index", "tag", ...expanded, ...extra];
   return {
     elements: raw.elements.map((e) => pick(e, keys)),
     total: raw.total,

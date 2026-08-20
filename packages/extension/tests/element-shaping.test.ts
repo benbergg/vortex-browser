@@ -50,8 +50,23 @@ describe("dimensionsForMode", () => {
     expect(dimensionsForMode("geometry", null)).toEqual(["geometry"]);
   });
 
-  it("style 原样透传所选样式组", () => {
-    expect(dimensionsForMode("style", ["box", "font"]).sort()).toEqual(["box", "font"]);
+  it("style 透传所选样式组,且恒带 contrast", () => {
+    // 老 style 契约里那 10 个扁平字段与 groups 无关、恒返回;漏掉 contrast 就是静默行为变更
+    expect(dimensionsForMode("style", ["box", "font"]).sort())
+      .toEqual(["box", "contrast", "font"]);
+  });
+
+  it("shapeStyleResult 把 contrast 展开成扁平字段,而不是找同名对象", () => {
+    const withContrast = {
+      ...RAW,
+      elements: RAW.elements.map((e) => ({
+        ...e, color: "rgb(0, 0, 0)", contrastRatio: 21, wcagAA: true,
+      })),
+    };
+    const r = shapeStyleResult(withContrast as never, ["contrast", "box"]);
+    expect(r.elements[0]).toHaveProperty("color");
+    expect(r.elements[0].contrastRatio).toBe(21);
+    expect("contrast" in r.elements[0]).toBe(false);
   });
 
   it("每个 style 组名都在 ALL_DIMENSIONS 里,否则组合模式无法请求它", () => {

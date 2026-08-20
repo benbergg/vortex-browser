@@ -818,6 +818,107 @@ export const elementsProbeFunc = (
       return s;
     };
 
+    // 以下辅助逻辑从 styleProbeFunc 逐字搬运,不重写:对比度五态与 parseStrict
+    // 是真站上纠正过 46% 捏造数字的成果,任何"等价简化"都会把它退回去。
+    const pathOf = (start: Element): string => {
+      const parts: string[] = [];
+      let n: Node | null = start;
+      while (n && n.nodeType === 1 && parts.length < 64) {
+        const p: Node | null = n.parentNode;
+        let i = 0;
+        if (p) {
+          const c = (p as Element).children;
+          if (c) for (let k = 0; k < c.length; k++) if (c[k] === n) { i = k; break; }
+        }
+        parts.push(n.nodeName + ":" + i);
+        n = p && (p as ShadowRoot).host ? (p as ShadowRoot).host : p;
+      }
+      return parts.reverse().join(">");
+    };
+    const collectFontFaces = (): { rules: Array<Record<string, string>>; partial: boolean; partialReasons: string[] } => {
+      const FACE_PROPS = ["font-family", "src", "font-weight", "font-style", "font-display", "unicode-range"];
+      const rules: Array<Record<string, string>> = [];
+      const reasons = new Set<string>();
+      const GROUPING_TYPES = new Set(["CSSMediaRule", "CSSSupportsRule", "CSSLayerBlockRule",
+        "CSSContainerRule", "CSSScopeRule", "CSSStartingStyleRule"]);
+      function walk(list: CSSRuleList | null, depth: number): void {
+        if (!list) return;
+        if (depth > 5) {
+          reasons.add("nesting-depth");
+          return;
+        }
+        for (const rule of Array.from(list)) {
+          try {
+            if (GROUPING_TYPES.has(rule.constructor.name)) {
+              walk((rule as unknown as { cssRules?: CSSRuleList }).cssRules ?? null, depth + 1);
+              continue;
+            }
+            if (rule.constructor.name !== "CSSFontFaceRule" && (rule as CSSRule).type !== 5) continue;
+            const st = (rule as unknown as { style: CSSStyleDeclaration }).style;
+            const o: Record<string, string> = {};
+            for (const prop of FACE_PROPS) {
+              const v = st.getPropertyValue(prop);
+              if (v) o[prop] = v;
+            }
+            if (o["font-family"]) rules.push(o);
+          } catch {
+            reasons.add("rule-unreadable");
+          }
+        }
+      }
+      for (const sheet of Array.from(document.styleSheets)) {
+        try {
+          walk(sheet.cssRules, 0);
+        } catch {
+          reasons.add("cross-origin");
+        }
+      }
+      return { rules, partial: reasons.size > 0, partialReasons: Array.from(reasons).sort() };
+    };
+    const parse = (c: string): [number, number, number, number] | null => {
+      if (!c) return null;
+      const m = c.match(/-?[\d.]+/g);
+      if (!m || m.length < 3) return null;
+      const n = m.map(Number);
+      return [n[0], n[1], n[2], n.length >= 4 ? n[3] : 1];
+    };
+    // 取不到 opacity 时按 1:Number("") 是 0,会把所有元素误判成半透明
+    const opacityOf = (d: CSSStyleDeclaration): number => {
+      const v = parseFloat(d.opacity);
+      return Number.isFinite(v) ? v : 1;
+    };
+    // 只认完整的 rgb/rgba 数值形态:百分比与 oklch/lab 抓数字会算出胡说八道的亮度
+    const RGB_RE =
+      /^rgba?\(\s*(\d{1,3})\s*[,\s]\s*(\d{1,3})\s*[,\s]\s*(\d{1,3})\s*(?:[,/]\s*([\d.]+)\s*)?\)$/i;
+    const parseStrict = (c: string): [number, number, number, number] | null => {
+      const m = RGB_RE.exec((c || "").trim());
+      if (!m) return null;
+      const ch = [Number(m[1]), Number(m[2]), Number(m[3])];
+      if (ch.some((v) => v > 255)) return null;
+      const a = m[4] === undefined ? 1 : Number(m[4]);
+      if (!(a >= 0 && a <= 1)) return null;
+      return [ch[0], ch[1], ch[2], a];
+    };
+    const isTransparent = (c: string): boolean => {
+      if (!c || c === "transparent") return true;
+      const p = parse(c);
+      return p ? p[3] === 0 : true;
+    };
+    const lum = (rgb: [number, number, number, number]): number => {
+      const f = (v: number): number => {
+        const s = v / 255;
+        return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
+      };
+      return 0.2126 * f(rgb[0]) + 0.7152 * f(rgb[1]) + 0.0722 * f(rgb[2]);
+    };
+    const pickProps = (d: CSSStyleDeclaration, props: string[]): Record<string, string> => {
+      const o: Record<string, string> = {};
+      for (const prop of props) {
+        o[prop] = d.getPropertyValue(prop.replace(/[A-Z]/g, (c) => "-" + c.toLowerCase()));
+      }
+      return o;
+    };
+
     // 只用到六个数值属性;不用 DOMRect 是因为失败占位在 jsdom 下无法构造。
     // null 表示该元素几何采集失败 —— 与 elements 严格一一对应,不靠长度时机推断。
     type RectLike = { left: number; top: number; right: number; bottom: number; width: number; height: number };
@@ -876,12 +977,121 @@ export const elementsProbeFunc = (
         }
         item.attrs = attrs;
       }
-      // [Task 5 在此插入样式六组维度采集]
+      if (want("contrast")) {
+        const cs = getComputedStyle(el);
+        const color = cs.color;
+        let background = cs.backgroundColor;
+        let backgroundImage = cs.backgroundImage;
+        let bgFromAncestor = false;
+        let hasImage = backgroundImage !== "none";
+        // 独立累计:被背景图分支覆盖掉就说不清真正的不可判定原因
+        let translucent = opacityOf(cs) < 1;
+
+        // 自身已绘制就不上溯:再往上的层被它盖住,不是实际背景
+        if (!hasImage && isTransparent(background)) {
+          for (let a: HTMLElement | null = el.parentElement; a; a = a.parentElement) {
+            const acs = getComputedStyle(a);
+            if (opacityOf(acs) < 1) translucent = true;
+            if (acs.backgroundImage !== "none") {
+              backgroundImage = acs.backgroundImage;
+              background = acs.backgroundColor;
+              bgFromAncestor = true;
+              hasImage = true;
+              break;
+            }
+            if (!isTransparent(acs.backgroundColor)) {
+              background = acs.backgroundColor;
+              bgFromAncestor = true;
+              break;
+            }
+          }
+        }
+
+        const fg = parseStrict(color);
+        const bg = parseStrict(background);
+        const bgTransparent = isTransparent(background);
+        // alpha=0 是"没有背景"而不是"半透明",只有 0<alpha<1 才算合成
+        if (fg && fg[3] > 0 && fg[3] < 1) translucent = true;
+        if (bg && !bgTransparent && bg[3] < 1) translucent = true;
+
+        let contrastStatus: ContrastStatus;
+        let contrastRatio: number | null = null;
+        // 优先级固定:合成 > 背景图 > 无背景 > 认不出的颜色
+        if (bgTransparent && !hasImage) contrastStatus = "no-painted-background";
+        else if (translucent) contrastStatus = "translucent";
+        else if (hasImage) contrastStatus = "background-image";
+        else if (!fg || !bg) contrastStatus = "unsupported-color";
+        else {
+          const L1 = lum(fg) + 0.05;
+          const L2 = lum(bg) + 0.05;
+          contrastRatio = Math.round((Math.max(L1, L2) / Math.min(L1, L2)) * 100) / 100;
+          contrastStatus = "ok";
+        }
+        // null 而非 "unknown":JSON 里字符串是 truthy,外部 if(wcagAA) 会误读成通过
+        const verdict = (min: number): boolean | null =>
+          contrastRatio == null ? null : contrastRatio >= min;
+
+        item.color = color;
+        item.background = background;
+        item.bgFromAncestor = bgFromAncestor;
+        item.fontWeight = cs.fontWeight;
+        item.fontSize = cs.fontSize;
+        item.contrastRatio = contrastRatio;
+        item.backgroundImage = backgroundImage;
+        item.contrastStatus = contrastStatus;
+        item.wcagAA = verdict(4.5);
+        item.wcagAAA = verdict(7);
+      }
+
+      // 每组各取各的 cs:共用一个会让任一组的取样异常连坐其余组(维度级隔离见 Task 7)
+      if (want("typography")) {
+        item.typography = pickProps(getComputedStyle(el), ["fontFamily", "fontSize", "fontWeight",
+          "lineHeight", "letterSpacing", "textAlign", "textTransform"]);
+      }
+      if (want("box")) {
+        item.box = pickProps(getComputedStyle(el), ["display", "padding", "margin", "borderRadius",
+          "borderWidth", "borderStyle", "borderColor", "width", "height", "flexDirection",
+          "flexWrap", "justifyContent", "alignItems", "gap", "gridTemplateColumns",
+          "gridTemplateRows"]);
+      }
+      if (want("paint")) {
+        item.paint = pickProps(getComputedStyle(el),
+          ["backgroundColor", "backgroundImage", "boxShadow", "opacity", "outline", "filter"]);
+      }
+      if (want("motion")) {
+        item.motion = pickProps(getComputedStyle(el), ["transition", "transform", "animation"]);
+      }
+      if (want("pseudo")) {
+        // 只按 content 粗筛(能砍掉 ~98%),渲染判定在 handler 侧纯函数里
+        const PSEUDO_PROPS = ["content", "font-family", "color", "display", "visibility",
+          "opacity", "background-image", "width", "height"];
+        let pseudoRaw: Record<string, Record<string, string>> | undefined;
+        for (const which of ["::before", "::after"]) {
+          const pcs = getComputedStyle(el, which);
+          const c = pcs.getPropertyValue("content");
+          if (c === "none" || c === "normal") continue;
+          const o: Record<string, string> = {};
+          for (const prop of PSEUDO_PROPS) o[prop] = pcs.getPropertyValue(prop);
+          (pseudoRaw ??= {})[which.slice(2)] = o;
+        }
+        if (pseudoRaw) item.pseudoRaw = pseudoRaw;
+      }
+      if (want("font")) {
+        item.declaredFont = getComputedStyle(el).getPropertyValue("font-family");
+        // 与 deep-query-expr.ts 的 elementFingerprint 必须一致,否则对齐校验形同虚设
+        item.fp = pathOf(el);
+      }
 
       elements.push(item);
     }
 
     const out: Record<string, unknown> = { elements, total, showing: limit, scanned };
+    if (want("font")) {
+      const faces = collectFontFaces();
+      out.fontFaces = faces.rules;
+      out.fontFacesPartial = faces.partial;
+      if (faces.partial) out.fontFacesPartialReasons = faces.partialReasons;
+    }
     if (wantGeo) {
       out.viewport = { w: vw, h: vh };
       const a = rects[0];
