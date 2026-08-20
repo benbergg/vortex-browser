@@ -16,9 +16,12 @@ export type RawProbeResult = {
   fontFacesPartialReasons?: string[];
 };
 
-const CSS_ELEMENT_KEYS = ["index", "tag", "children_count"] as const;
+// errors 只在采集失败时存在:剥掉它等于把"这一维没取到"说成"页面就是这样",
+// 健康页面上不出现,所以三个老形状契约照样一字不变。
+const CSS_ELEMENT_KEYS = ["index", "tag", "children_count", "errors"] as const;
 const GEOMETRY_ELEMENT_KEYS = [
   "index", "tag", "bbox", "inViewport", "occluded", "occludedBy", "textClipped", "clippedByAncestor",
+  "errors",
 ] as const;
 
 // 只拷贝存在的键,避免缺席字段变成 undefined 属性。
@@ -88,7 +91,7 @@ export function shapeStyleResult(
   ];
   // contrast 产的是扁平字段不是同名对象,按维度名去 pick 一个都命不中
   const expanded = groups.flatMap((g) => (g === "contrast" ? [...CONTRAST_KEYS] : [g]));
-  const keys = ["index", "tag", ...expanded, ...extra];
+  const keys = ["index", "tag", ...expanded, ...extra, "errors"];
   return {
     elements: raw.elements.map((e) => pick(e, keys)),
     total: raw.total,

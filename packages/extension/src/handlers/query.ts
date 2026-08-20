@@ -927,10 +927,16 @@ export const elementsProbeFunc = (
     for (let i = 0; i < limit; i++) {
       const el = matched[i] as HTMLElement;
       const item: Record<string, unknown> = { index: i, tag: el.tagName.toLowerCase() };
+      const errors: Record<string, string> = {};
+      const guard = (dim: string, fn: () => void): void => {
+        if (!want(dim)) return;
+        try { fn(); } catch (e) { errors[dim] = e instanceof Error ? e.message : String(e); }
+      };
+      let rect: RectLike | null = null;
 
-      if (wantGeo) {
-        const r = el.getBoundingClientRect();
-        rects.push(r);
+      guard("geometry", () => {
+        rect = el.getBoundingClientRect();
+        const r = rect;
         item.bbox = [R(r.left), R(r.top), R(r.width), R(r.height)];
         item.inViewport = r.left >= -TOL && r.top >= -TOL && r.right <= vw + TOL && r.bottom <= vh + TOL;
 
@@ -960,24 +966,26 @@ export const elementsProbeFunc = (
           }
         }
         item.clippedByAncestor = clipped;
-      }
+      });
+      if (wantGeo) rects.push(rect);
 
-      if (want("text") || want("attrs")) {
-        item.children_count = el.children.length;
-      }
-      if (want("text") && includeText) {
+      // 不属于任一维度:两个维度都要它,放进任一个 guard 都会被另一个的失败带走
+      if (want("text") || want("attrs")) item.children_count = el.children.length;
+      guard("text", () => {
+        if (!includeText) return;
         const t = (el.textContent ?? "").trim().replace(/\s+/g, " ");
         item.text = t.length > 300 ? t.slice(0, 300) + "..." : t;
-      }
-      if (want("attrs") && attributes != null) {
+      });
+      guard("attrs", () => {
+        if (attributes == null) return;
         const attrs: Record<string, string> = {};
         for (const attrName of attributes) {
           const val = el.getAttribute(attrName);
           if (val !== null) attrs[attrName] = val.length > 500 ? val.slice(0, 500) + "..." : val;
         }
         item.attrs = attrs;
-      }
-      if (want("contrast")) {
+      });
+      guard("contrast", () => {
         const cs = getComputedStyle(el);
         const color = cs.color;
         let background = cs.backgroundColor;
@@ -1041,27 +1049,27 @@ export const elementsProbeFunc = (
         item.contrastStatus = contrastStatus;
         item.wcagAA = verdict(4.5);
         item.wcagAAA = verdict(7);
-      }
+      });
 
       // 每组各取各的 cs:共用一个会让任一组的取样异常连坐其余组(维度级隔离见 Task 7)
-      if (want("typography")) {
+      guard("typography", () => {
         item.typography = pickProps(getComputedStyle(el), ["fontFamily", "fontSize", "fontWeight",
           "lineHeight", "letterSpacing", "textAlign", "textTransform"]);
-      }
-      if (want("box")) {
+      });
+      guard("box", () => {
         item.box = pickProps(getComputedStyle(el), ["display", "padding", "margin", "borderRadius",
           "borderWidth", "borderStyle", "borderColor", "width", "height", "flexDirection",
           "flexWrap", "justifyContent", "alignItems", "gap", "gridTemplateColumns",
           "gridTemplateRows"]);
-      }
-      if (want("paint")) {
+      });
+      guard("paint", () => {
         item.paint = pickProps(getComputedStyle(el),
           ["backgroundColor", "backgroundImage", "boxShadow", "opacity", "outline", "filter"]);
-      }
-      if (want("motion")) {
+      });
+      guard("motion", () => {
         item.motion = pickProps(getComputedStyle(el), ["transition", "transform", "animation"]);
-      }
-      if (want("pseudo")) {
+      });
+      guard("pseudo", () => {
         // 只按 content 粗筛(能砍掉 ~98%),渲染判定在 handler 侧纯函数里
         const PSEUDO_PROPS = ["content", "font-family", "color", "display", "visibility",
           "opacity", "background-image", "width", "height"];
@@ -1075,13 +1083,14 @@ export const elementsProbeFunc = (
           (pseudoRaw ??= {})[which.slice(2)] = o;
         }
         if (pseudoRaw) item.pseudoRaw = pseudoRaw;
-      }
-      if (want("font")) {
+      });
+      guard("font", () => {
         item.declaredFont = getComputedStyle(el).getPropertyValue("font-family");
         // 与 deep-query-expr.ts 的 elementFingerprint 必须一致,否则对齐校验形同虚设
         item.fp = pathOf(el);
-      }
+      });
 
+      if (Object.keys(errors).length > 0) item.errors = errors;
       elements.push(item);
     }
 

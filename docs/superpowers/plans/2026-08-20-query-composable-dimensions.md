@@ -1464,7 +1464,11 @@ git commit -m "refactor: style mode 转发到统一元素探针
 - Consumes: `elementsProbeFunc`（Task 5 已完备九维度）
 - Produces: 元素级 `errors?: Record<string, string>` 字段（维度名 → 失败原因）
 
-- [ ] **Step 1: 写失败的测试**
+> **执行中订正（Task 7 首轮）**：三个整形函数必须放行 `errors`。首轮实现只在探针侧记了 `errors`，
+> 整形层按固定键集合 pick 时把它剥掉了——`mode=style` 于是变成"返回成功、字段悄悄少几个"，
+> 比重构前的整体报错还不诚实。健康页面上 `errors` 不存在，所以三个老形状契约照样一字不变。
+
+- [x] **Step 1: 写失败的测试**
 
 ```ts
 describe("维度级错误隔离", () => {
@@ -1485,6 +1489,8 @@ describe("维度级错误隔离", () => {
   }
 
   it("box 维度失败不影响同一元素的 geometry", () => {
+    // 注:这里只请求 geometry+box,不带 contrast —— contrast 也走 getComputedStyle,
+    // 带上它只会多一条 errors,证明不了额外的东西。
     const restore = failStyleOn("boom");
     try {
       const r = elementsProbeFunc(".t", 2, ["geometry", "box"], null, false) as {
@@ -1531,15 +1537,21 @@ describe("维度级错误隔离", () => {
   // want() 判断本身错会让维度静默缺失:既没字段也没 errors 条目,现有断言都发现不了。
   // 这条把"请求了就必须有交代"变成硬判据。
   //
+  // ⚠ jsdom 的 getComputedStyle(el,"::before") **不实现伪元素**,恒返回 content:"normal",
+  // 探针据此判定"页面没有伪元素"而跳过 —— 既无 pseudoRaw 也无 errors。注入 <style> 改变不了
+  // 这一点(实测),必须替掉 getComputedStyle 才造得出"有伪元素"的局面(见 stubPseudoContent)。
   // ⚠ pseudo 必须先造出真实伪元素。实现是"没有伪元素就不设 pseudoRaw"
   // (Task 5:`if (Object.keys(raw).length > 0)`),所以干净 DOM 上 pseudo 既无字段
   // 也无 errors —— 那是合法的"已采集但页面没有伪元素",不是缺失。
   // 不注入伪元素就跑这条,等于要求正常情况必有 pseudoRaw,判据本身是错的。
   it.each([
-    ["geometry"], ["text"], ["attrs"], ["typography"], ["box"], ["paint"], ["motion"], ["pseudo"], ["font"],
+    ["geometry"], ["text"], ["attrs"], ["contrast"],
+    ["typography"], ["box"], ["paint"], ["motion"], ["pseudo"], ["font"],
   ])("请求维度 %s 必须有交代:要么有字段,要么有 errors 条目", (dim) => {
+    // contrast 产的是扁平字段,没有同名键;拿 color 当它的存在凭据
     const FIELD: Record<string, string> = {
       geometry: "bbox", text: "text", attrs: "attrs", font: "declaredFont", pseudo: "pseudoRaw",
+      contrast: "color",
     };
     // 让 pseudo 有确定产出,否则"无伪元素"会被误判成"维度缺失"
     const st = document.createElement("style");
@@ -1629,17 +1641,17 @@ describe("维度级错误隔离", () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `pnpm --filter @vortex-browser/extension exec vitest run --maxWorkers=2 --minWorkers=1 tests/query-contract-shape.test.ts -t "维度级错误隔离"`
 
 Expected: FAIL。前两条会因整体 `try/catch` 返回 `{ error }` 而红。
 
-- [ ] **Step 3: 把元素循环内的采集按维度包起来**
+- [x] **Step 3: 把元素循环内的采集按维度包起来**
 
 **必须逐维度 guard，不能按「三大块」包**。按块包时 `attrs` 失败会连带丢 `text`、
 `box` 失败会连带丢 `motion`——那不叫维度级隔离，只是把整体失败换了个粒度。
-九个维度各自一个 guard：
+十个维度各自一个 guard：
 
 ```ts
       const errors: Record<string, string> = {};
@@ -1659,6 +1671,7 @@ Expected: FAIL。前两条会因整体 `try/catch` 返回 `{ error }` 而红。
       // ⚠ cs 必须在**每个 guard 内部**各自取。Task 5 原写法是循环外取一次六组共用,
       // 那一句若留在 guard 外,它抛错时不被任何 guard 捕获 —— 整个探针返回 {error},
       // 隔离形同虚设,而测试只会看到"整体失败",看不出是哪一步漏了保护。
+      guard("contrast", () => { /* 上溯 painted background + 五态 + verdict 那一整块 */ });
       for (const g of ["typography", "box", "paint", "motion", "pseudo", "font"]) {
         guard(g, () => {
           const cs = getComputedStyle(el);   // 每组各取,别共享外层变量
@@ -1703,13 +1716,13 @@ Expected: FAIL。前两条会因整体 `try/catch` 返回 `{ error }` 而红。
       }
 ```
 
-- [ ] **Step 4: 跑测试确认通过**
+- [x] **Step 4: 跑测试确认通过**
 
 Run: `pnpm --filter @vortex-browser/extension exec vitest run --maxWorkers=2 --minWorkers=1 tests/query-contract-shape.test.ts`
 
 Expected: PASS（含 Task 1-6 的全部既有断言）
 
-- [ ] **Step 5: 变异验证**
+- [x] **Step 5: 变异验证**
 
 | 改动 | 必须转红的用例 |
 |---|---|
@@ -1717,14 +1730,22 @@ Expected: PASS（含 Task 1-6 的全部既有断言）
 | `if (Object.keys(errors).length > 0)` 改成无条件 `item.errors = errors` | 「全部正常时不产生 errors 字段」 |
 | 六个样式组合并成一个 guard | 「pseudo 组失败不连带丢 box 与 typography」 |
 | `guard` 的 `if (!want(dim)) return` 改成对某个维度恒不采集（模拟 want 判断错） | 「请求维度 %s 必须有交代」中该维度那一条 |
-| 几何失败时不 push 占位 rect | 「首元素 geometry 失败时不产生 pair」 |
-| `pair` 前的 `if (a && b)` 改成 `if (rects.length >= 2)`（不判 null） | 「首元素 geometry 失败时不产生 pair」 |
-| `rects.push(rect)` 挪进 `guard` 内部（失败时不 push，退回长度错位） | 「首元素 geometry 失败时不产生 pair」——错位后 `rects[0]` 会是第二个元素的真 rect，pair 照常生成 |
+| 几何失败时不 push 占位 rect | 「中间元素 geometry 失败时 pair 不得跨过它拿后面的元素来比」 |
+| `pair` 前的 `if (a && b)` 改成 `if (rects.length >= 2)`（不判 null） | 「一个元素 geometry 失败,其他元素仍返回」——`a` 为 null，`a.right` 抛错让整个探针返回 `{error}` |
+| `rects.push(rect)` 挪进 `guard` 内部（失败时不 push，退回长度错位） | 「中间元素 geometry 失败时 pair 不得跨过它拿后面的元素来比」 |
 
-五条都必须转红。第三、五条专盯 Luna 复核指出的两个粒度错误——按块 guard 与 pair
+> **执行中订正（Task 7 首轮）**：原表把后三条都指向「首元素 geometry 失败时不产生 pair」，
+> **那条测试证明不了下标错位**。只有两个元素、第一个失败时，补不补占位 `rects` 都只剩一条，
+> pair 两种实现下都不生成——看起来一样。错位要三个元素、失败的在中间才现形：
+> `rects` 变成 `[第0个, 第2个]`，pair 拿第 0 和第 2 个比，还一声不响。已补一条三元素的测试，
+> 补上之后两条变异才转红。
+
+七条都必须转红。变异脚本一律带 `assert 命中数 == 1`——`query.ts` 里同形代码不止一处，
+静默改错地方会让你误判测试是死的（Task 3、Task 4 各栽过一次）。
+第三、五条专盯 Luna 复核指出的两个粒度错误——按块 guard 与 pair
 条件过宽，两者都会让测试看起来在测隔离、实际测的是别的东西。
 
-- [ ] **Step 6: 提交**
+- [x] **Step 6: 提交**
 
 ```bash
 git add packages/extension/src/handlers/query.ts packages/extension/tests/query-contract-shape.test.ts

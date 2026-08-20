@@ -324,3 +324,170 @@ describe("style 转发的下标不变量", () => {
     expect(shaped.total).toBe(3);
   });
 });
+
+describe("维度级错误隔离", () => {
+  beforeEach(() => seed(`<p class="t boom">a</p><p class="t">b</p>`));
+
+  function failStyleOn(cls: string): () => void {
+    const orig = window.getComputedStyle;
+    (window as unknown as { getComputedStyle: unknown }).getComputedStyle = function (
+      el: Element, pseudo?: string | null,
+    ) {
+      if ((el as HTMLElement).classList?.contains(cls)) throw new Error("style boom");
+      return orig.call(window, el, pseudo ?? undefined);
+    };
+    return () => { (window as unknown as { getComputedStyle: unknown }).getComputedStyle = orig; };
+  }
+
+  // 只替伪元素那一路,元素自身的 computed 仍走真实 jsdom —— 否则连 box 都取不到,
+  // 这条测试就变成在测 stub 而不是在测探针。
+  function stubPseudoContent(): () => void {
+    const orig = window.getComputedStyle;
+    (window as unknown as { getComputedStyle: unknown }).getComputedStyle = function (
+      el: Element, pseudo?: string | null,
+    ) {
+      if (!pseudo) return orig.call(window, el, undefined);
+      return { getPropertyValue: (p: string) => (p === "content" ? '"x"' : "auto") };
+    };
+    return () => { (window as unknown as { getComputedStyle: unknown }).getComputedStyle = orig; };
+  }
+
+  it("box 维度失败不影响同一元素的 geometry", () => {
+    const restore = failStyleOn("boom");
+    try {
+      const r = elementsProbeFunc(".t", 2, ["geometry", "box"], null, false) as {
+        error?: string; elements: Array<Record<string, unknown>>;
+      };
+      expect(r.error).toBeUndefined();
+      expect(r.elements).toHaveLength(2);
+      expect(r.elements[0]).toHaveProperty("bbox");
+      expect((r.elements[0].errors as Record<string, string>).box).toMatch(/style boom/);
+      expect(r.elements[1]).toHaveProperty("box");
+      expect("errors" in r.elements[1]).toBe(false);
+    } finally { restore(); }
+  });
+
+  it("pseudo 组失败不连带丢 box 与 typography", () => {
+    const orig = window.getComputedStyle;
+    (window as unknown as { getComputedStyle: unknown }).getComputedStyle = function (
+      el: Element, pseudo?: string | null,
+    ) {
+      if (pseudo) throw new Error("pseudo boom");
+      return orig.call(window, el, undefined);
+    };
+    try {
+      const r = elementsProbeFunc(".t", 1, ["typography", "box", "pseudo"], null, false) as {
+        error?: string; elements: Array<Record<string, unknown>>;
+      };
+      expect(r.error).toBeUndefined();
+      const e = r.elements[0];
+      expect((e.errors as Record<string, string>).pseudo).toMatch(/pseudo boom/);
+      expect("box" in (e.errors as Record<string, string>)).toBe(false);
+      expect("typography" in (e.errors as Record<string, string>)).toBe(false);
+      expect(e).toHaveProperty("box");
+      expect(e).toHaveProperty("typography");
+    } finally { (window as unknown as { getComputedStyle: unknown }).getComputedStyle = orig; }
+  });
+
+  it.each([
+    ["geometry"], ["text"], ["attrs"], ["contrast"], ["typography"],
+    ["box"], ["paint"], ["motion"], ["pseudo"], ["font"],
+  ])("请求维度 %s 必须有交代:要么有字段,要么有 errors 条目", (dim) => {
+    const FIELD: Record<string, string> = {
+      geometry: "bbox", text: "text", attrs: "attrs", font: "declaredFont", pseudo: "pseudoRaw",
+      contrast: "color",
+    };
+    // jsdom 的 getComputedStyle(el,"::before") 不实现伪元素,恒返回 content:"normal",
+    // 探针据此判定"页面没有伪元素"而跳过 —— 既无 pseudoRaw 也无 errors。注入 <style>
+    // 改变不了这一点(实测),只能替掉 getComputedStyle 才造得出"有伪元素"的局面。
+    const restore = dim === "pseudo" ? stubPseudoContent() : (): void => {};
+    try {
+      const r = elementsProbeFunc(".t", 1, [dim], ["id"], true) as {
+        elements: Array<Record<string, unknown>>;
+      };
+      const e = r.elements[0];
+      const key = FIELD[dim] ?? dim;
+      const accounted = key in e || Boolean((e.errors as Record<string, string> | undefined)?.[dim]);
+      expect(accounted, `维度 ${dim} 既没产出 ${key} 也没记 errors.${dim}`).toBe(true);
+    } finally {
+      restore();
+    }
+  });
+
+  it("attrs 失败不连带丢 text", () => {
+    const orig = Element.prototype.getAttribute;
+    Element.prototype.getAttribute = function (n: string) {
+      if (this.classList?.contains("boom")) throw new Error("attr boom");
+      return orig.call(this, n);
+    };
+    try {
+      const r = elementsProbeFunc(".t", 2, ["text", "attrs"], ["id"], true) as { elements: Array<Record<string, unknown>> };
+      expect(r.elements[0].text).toBe("a");
+      expect((r.elements[0].errors as Record<string, string>).attrs).toMatch(/attr boom/);
+      expect("text" in (r.elements[0].errors as Record<string, string>)).toBe(false);
+    } finally { Element.prototype.getAttribute = orig; }
+  });
+
+  it("一个元素 geometry 失败,其他元素仍返回", () => {
+    const orig = Element.prototype.getBoundingClientRect;
+    Element.prototype.getBoundingClientRect = function () {
+      if (this.classList?.contains("boom")) throw new Error("rect boom");
+      return orig.call(this);
+    };
+    try {
+      const r = elementsProbeFunc(".t", 2, ["geometry"], null, false) as { error?: string; elements: Array<Record<string, unknown>> };
+      expect(r.error).toBeUndefined();
+      expect(r.elements).toHaveLength(2);
+      expect(r.elements[1]).toHaveProperty("bbox");
+    } finally { Element.prototype.getBoundingClientRect = orig; }
+  });
+
+  it("首元素 geometry 失败时不产生 pair", () => {
+    const orig = Element.prototype.getBoundingClientRect;
+    Element.prototype.getBoundingClientRect = function () {
+      if (this.classList?.contains("boom")) throw new Error("rect boom");
+      return orig.call(this);
+    };
+    try {
+      const r = elementsProbeFunc(".t", 2, ["geometry"], null, false) as Record<string, unknown>;
+      expect("pair" in r).toBe(false);
+    } finally { Element.prototype.getBoundingClientRect = orig; }
+  });
+
+  // 首元素失败那条挡不住下标错位:只有两个元素、第一个失败时,rects 无论补不补占位
+  // 都只剩一条,pair 都不会生成 —— 两种实现看起来一样。三个元素、失败的在中间,
+  // 错位才现形:rects 变成 [第0个, 第2个],pair 拿第 0 和第 2 个比,还一声不响。
+  it("中间元素 geometry 失败时 pair 不得跨过它拿后面的元素来比", () => {
+    seed(`<div class="t">a</div><div class="t boom">b</div><div class="t">c</div>`);
+    const orig = Element.prototype.getBoundingClientRect;
+    Element.prototype.getBoundingClientRect = function () {
+      if (this.classList?.contains("boom")) throw new Error("rect boom");
+      return orig.call(this);
+    };
+    try {
+      const r = elementsProbeFunc(".t", 3, ["geometry"], null, false) as Record<string, unknown>;
+      expect((r.elements as unknown[]).length).toBe(3);
+      expect("pair" in r).toBe(false);
+    } finally {
+      Element.prototype.getBoundingClientRect = orig;
+    }
+  });
+
+  it("样式组失败不阻止 geometry 的 pair 生成", () => {
+    const restore = failStyleOn("boom");
+    try {
+      const r = elementsProbeFunc(".t", 2, ["geometry", "box"], null, false) as Record<string, unknown>;
+      expect("pair" in r).toBe(true);
+    } finally { restore(); }
+  });
+
+  it("选择器非法仍是整请求错误,不降级成逐元素错误", () => {
+    const r = elementsProbeFunc("div[[", 10, ["geometry"], null, false) as { error?: string };
+    expect(r.error).toMatch(/Invalid CSS selector/);
+  });
+
+  it("全部正常时不产生 errors 字段", () => {
+    const r = elementsProbeFunc(".t", 2, ["geometry"], null, false) as { elements: Array<Record<string, unknown>> };
+    expect("errors" in r.elements[0]).toBe(false);
+  });
+});
