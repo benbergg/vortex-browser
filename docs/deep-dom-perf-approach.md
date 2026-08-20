@@ -219,6 +219,21 @@ open shadow 内自渲染按钮 `true, occludedBy:"host"` → `false`；被同 sh
 | realistic-10k | 10002 | **geometry** > 其余并列 |
 | stress-40k | 40002 | **geometry** > 其余并列 |
 | pathological-deep（深 500 无绘制背景） | 2000 | **contrast** > 其余并列 |
+| shadow-breadth（200 并列 host） | 4002 | 全部并列 |
+| shadow-nested（20 链 × 嵌 6 层） | 2002 | 全部并列 |
+
+**shadow 语料的价值不在耗时次序而在确定量**（50 个元素的命中测试次数）：
+
+| 语料 | 命中测试 | 祖先上溯步数 |
+|---|---|---|
+| 纯 light DOM 各形状 | 50 | 50 / 1650 / 25150 |
+| shadow-breadth（nest 1） | **100** | 50 |
+| shadow-nested（nest 6） | **350** | 50 |
+
+每嵌一层 shadow，每个元素就多一次命中测试；nest 6 = 7 倍，而一次命中测试在 4 万节点上约 0.85ms。
+上溯步数两条 shadow 语料都是 50（每元素 1 步）—— 因为 `contrast` 走 `el.parentElement`，
+**它不跨 shadow 边界**，shadow 内元素够不到 host 的背景色。这是与遮挡同类、但在另一个维度上的缺口，
+本轮只量不修。
 
 最后一行印证了终审坚持保留的表述：无上限上溯的病态最坏情况**真实存在**，只是真站走不满
 （github.com 3 步、en.wikipedia.org 10 步，而语料里走满是 25150 步）。

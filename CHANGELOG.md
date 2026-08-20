@@ -75,6 +75,17 @@
 - **`vortex-bench perf`**：深 DOM 成本归因。四种语料（两个真站量级、一个 4 万节点压力点、
   一个深 500 的病态上溯），逐维度多轮计时 + 确定量计数（命中测试次数、祖先上溯步数）。
 
+  含两条 **open shadow 语料**：`shadow-breadth`（200 个并列 host）压 `queryAllDeep`
+  ——它在每个 shadow root 上都要 `querySelectorAll("*")` 找 host；`shadow-nested`
+  （20 条链各嵌 6 层）压 `deepElementFromPoint` 的逐层下钻。实测命中测试次数（50 个元素）：
+  纯 light DOM **50 次**、nest 1 **100 次**、nest 6 **350 次** —— 每嵌一层多一次，
+  nest 6 就是 7 倍；而一次命中测试在 4 万节点上约 0.85ms。
+
+  shadow 语料还量出另一件事：`contrast` 的祖先上溯走 `el.parentElement`，**它不跨
+  shadow 边界**（card 挂在 shadow root 上，`card.parentElement` 即 `null`）。所以
+  shadow 内元素的上溯恒为 1 步，够不到 host 上的背景色。这是另一个维度上的同类缺口，
+  本次只让语料把它量出来，未修。
+
   **退出码只看结构真值，不看耗时**——端到端墙钟实测同一调用重复 10 次为 96–132ms
   （1.4×），任何墙钟阈值都会 flaky。成本次序在差距小于抖动时以 `~` 标并列，不假装排得出先后。
 

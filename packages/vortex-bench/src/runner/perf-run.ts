@@ -26,13 +26,31 @@ function extractJson(res: unknown): Record<string, unknown> {
   }
 }
 
-/** 页内数确定量:命中测试次数与祖先上溯总步数,不依赖被测代码自陈 */
+/**
+ * 页内数确定量:命中测试次数与祖先上溯总步数,不依赖被测代码自陈。
+ * 目标要深走查 —— shadow 里的元素 document.querySelectorAll 看不见;
+ * 命中测试也要下钻,否则数出来的是 host 而不是探针实际做的次数。
+ */
 const COUNTER_SCRIPT = `(function(){
-  var els = Array.prototype.slice.call(document.querySelectorAll(".t"), 0, 50);
+  function deepAll(sel, r, d, acc) {
+    Array.prototype.push.apply(acc, r.querySelectorAll(sel));
+    var all = r.querySelectorAll("*");
+    for (var i = 0; i < all.length; i++) { var s = all[i].shadowRoot; if (s && d < 8) deepAll(sel, s, d + 1, acc); }
+    return acc;
+  }
+  var els = deepAll(".t", document, 0, []).slice(0, 50);
   var hitTests = 0, steps = 0;
   for (var i = 0; i < els.length; i++) {
     var r = els[i].getBoundingClientRect();
-    if (r.width > 0 && r.height > 0) { hitTests++; document.elementFromPoint(r.left + r.width/2, r.top + r.height/2); }
+    if (r.width > 0 && r.height > 0) {
+      var x = r.left + r.width/2, y = r.top + r.height/2;
+      var hit = document.elementFromPoint(x, y); hitTests++;
+      for (var d = 0; hit && hit.shadowRoot && d < 8; d++) {
+        var inner = hit.shadowRoot.elementFromPoint(x, y); hitTests++;
+        if (!inner || inner === hit) break;
+        hit = inner;
+      }
+    }
     for (var a = els[i].parentElement; a; a = a.parentElement) {
       steps++;
       var cs = getComputedStyle(a);
@@ -88,7 +106,13 @@ async function runShape(
     domNodes,
     matched,
     samples,
-    structuralMismatches: checkStructure(plan, { domNodes, ancestorStepsPerTarget: perTarget }),
+    structuralMismatches: checkStructure(plan, {
+      domNodes,
+      ancestorStepsPerTarget: perTarget,
+      shadowRoots: Number(built.shadowRoots ?? 0),
+      maxNest: Number(built.maxNest ?? 0),
+      slotsUsed: Number(built.slotsUsed ?? 0),
+    }),
   };
 }
 

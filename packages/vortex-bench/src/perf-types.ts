@@ -12,6 +12,8 @@ export interface CorpusShape {
   targets: number;
   /** 最近祖先是否有绘制背景。true=真站常态,false=最坏情况 */
   painted: boolean;
+  /** open shadow root 布局。hosts=横向铺多少个 host,nest=每条链嵌套几层。缺省=纯 light DOM */
+  shadow?: { hosts: number; nest: number };
 }
 
 /** 语料 + 它的结构真值。真值由生成器算出,不从被测代码反推。 */
@@ -24,6 +26,12 @@ export interface CorpusPlan {
     domNodes: number;
     /** 每个目标元素的 contrast 祖先上溯步数 */
     ancestorStepsPerTarget: number;
+    /** open shadow root 个数。0 = 纯 light DOM */
+    shadowRoots: number;
+    /** 最深嵌套了几层 shadow。只数个数验证不了嵌套结构:摊平成并列时个数不变 */
+    maxNest: number;
+    /** 实际装了 card 的容器数。全塞进一个 host 时节点数不变,只有这项能发现 */
+    slotsUsed: number;
   };
 }
 
