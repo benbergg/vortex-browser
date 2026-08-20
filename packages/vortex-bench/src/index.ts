@@ -35,6 +35,8 @@ import { runPage, runSelfTest, cleanupTmp, extractDiscrepancies, selfTestPassed 
 import { shrink } from "./runner/fuzz-shrink.js";
 import { promote } from "./runner/fuzz-promote.js";
 import { renderFuzzMarkdown } from "./fuzz-report.js";
+import { runPerf } from "./runner/perf-run.js";
+import { renderPerfReport, collectMismatches } from "./perf-report.js";
 import type { FuzzReport, FuzzFinding, FuzzPage, PrimitiveKind } from "./fuzz-types.js";
 
 const USAGE = `vortex-bench <command>
@@ -75,6 +77,9 @@ Commands:
   eval [--all]           评测门:A 层(scan synth)+ B 层(tier-tagged case)分档汇总
   eval --gate            额外比对 reports/eval-baseline.json,低于档阈值 exit 1
   eval --save-baseline   把本次实测推成基线写盘(ratchet 地板)
+  perf                   深 DOM 成本归因:逐维度多轮计时 + 确定量计数
+  perf --repeats N       每维度重复轮数(默认 5)
+  perf --url <u>         造语料的落脚页(默认 PLAYGROUND_URL)
   --help                 显示帮助
 
 Env:
@@ -816,6 +821,35 @@ async function cmdExternalBaseline(args: string[]): Promise<number> {
   return 0;
 }
 
+/**
+ * perf:深 DOM 成本归因。退出码只看结构真值,不看耗时 ——
+ * 端到端墙钟实测抖动 1.4×,拿它做门必然 flaky(见 docs/deep-dom-perf-approach.md)。
+ */
+async function cmdPerf(argv: string[]): Promise<number> {
+  const repeatsIdx = argv.indexOf("--repeats");
+  const urlIdx = argv.indexOf("--url");
+  const report = await runPerf({
+    mcpBin: resolveMcpBin(),
+    pageUrl: urlIdx >= 0 ? argv[urlIdx + 1] : playgroundUrl(),
+    repeats: repeatsIdx >= 0 ? Number(argv[repeatsIdx + 1]) : undefined,
+  });
+
+  const md = renderPerfReport(report);
+  const dir = resolve(REPORTS_DIR, "perf");
+  await mkdir(dir, { recursive: true });
+  const stamp = report.generatedAt.replace(/[:.]/g, "-");
+  await writeFile(resolve(dir, `${stamp}.md`), md, "utf8");
+  await writeFile(resolve(dir, `${stamp}.json`), JSON.stringify(report, null, 2), "utf8");
+  process.stdout.write(md + "\n");
+
+  const bad = collectMismatches(report);
+  if (bad.length > 0) {
+    process.stderr.write(`[perf] 结构真值不符 ${bad.length} 处,语料没按预期生成\n`);
+    return 1;
+  }
+  return 0;
+}
+
 async function main(): Promise<number> {
   const [, , cmd, ...rest] = process.argv;
   if (!cmd || cmd === "--help" || cmd === "-h") {
@@ -845,6 +879,8 @@ async function main(): Promise<number> {
       return cmdEval(rest);
     case "external-baseline":
       return cmdExternalBaseline(rest);
+    case "perf":
+      return cmdPerf(rest);
     default:
       process.stderr.write(`[vortex-bench] 未知命令: ${cmd}\n\n${USAGE}`);
       return 1;

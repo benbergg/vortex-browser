@@ -1,0 +1,278 @@
+{
+  "generatedAt": "2026-08-20T08:01:57.885Z",
+  "browser": "Chrome/151.0.0.0",
+  "runs": [
+    {
+      "shapeId": "realistic-2k",
+      "domNodes": 2000,
+      "matched": 1485,
+      "samples": [
+        {
+          "dimension": "geometry",
+          "msSamples": [
+            99,
+            101,
+            103
+          ],
+          "hitTests": 50,
+          "ancestorSteps": 0
+        },
+        {
+          "dimension": "text",
+          "msSamples": [
+            53,
+            50,
+            47
+          ],
+          "hitTests": 0,
+          "ancestorSteps": 0
+        },
+        {
+          "dimension": "attrs",
+          "msSamples": [
+            52,
+            49,
+            51
+          ],
+          "hitTests": 0,
+          "ancestorSteps": 0
+        },
+        {
+          "dimension": "contrast",
+          "msSamples": [
+            91,
+            63,
+            88
+          ],
+          "hitTests": 0,
+          "ancestorSteps": 50
+        },
+        {
+          "dimension": "typography",
+          "msSamples": [
+            57,
+            92,
+            61
+          ],
+          "hitTests": 0,
+          "ancestorSteps": 0
+        },
+        {
+          "dimension": "box",
+          "msSamples": [
+            100,
+            89,
+            67
+          ],
+          "hitTests": 0,
+          "ancestorSteps": 0
+        }
+      ],
+      "structuralMismatches": []
+    },
+    {
+      "shapeId": "realistic-10k",
+      "domNodes": 10002,
+      "matched": 7479,
+      "samples": [
+        {
+          "dimension": "geometry",
+          "msSamples": [
+            154,
+            159,
+            147
+          ],
+          "hitTests": 50,
+          "ancestorSteps": 0
+        },
+        {
+          "dimension": "text",
+          "msSamples": [
+            90,
+            61,
+            94
+          ],
+          "hitTests": 0,
+          "ancestorSteps": 0
+        },
+        {
+          "dimension": "attrs",
+          "msSamples": [
+            95,
+            62,
+            91
+          ],
+          "hitTests": 0,
+          "ancestorSteps": 0
+        },
+        {
+          "dimension": "contrast",
+          "msSamples": [
+            108,
+            96,
+            101
+          ],
+          "hitTests": 0,
+          "ancestorSteps": 50
+        },
+        {
+          "dimension": "typography",
+          "msSamples": [
+            97,
+            97,
+            103
+          ],
+          "hitTests": 0,
+          "ancestorSteps": 0
+        },
+        {
+          "dimension": "box",
+          "msSamples": [
+            108,
+            101,
+            136
+          ],
+          "hitTests": 0,
+          "ancestorSteps": 0
+        }
+      ],
+      "structuralMismatches": []
+    },
+    {
+      "shapeId": "stress-40k",
+      "domNodes": 40002,
+      "matched": 29979,
+      "samples": [
+        {
+          "dimension": "geometry",
+          "msSamples": [
+            1145,
+            1003,
+            1351
+          ],
+          "hitTests": 50,
+          "ancestorSteps": 0
+        },
+        {
+          "dimension": "text",
+          "msSamples": [
+            350,
+            300,
+            248
+          ],
+          "hitTests": 0,
+          "ancestorSteps": 0
+        },
+        {
+          "dimension": "attrs",
+          "msSamples": [
+            241,
+            213,
+            241
+          ],
+          "hitTests": 0,
+          "ancestorSteps": 0
+        },
+        {
+          "dimension": "contrast",
+          "msSamples": [
+            355,
+            452,
+            1549
+          ],
+          "hitTests": 0,
+          "ancestorSteps": 1650
+        },
+        {
+          "dimension": "typography",
+          "msSamples": [
+            492,
+            249,
+            253
+          ],
+          "hitTests": 0,
+          "ancestorSteps": 0
+        },
+        {
+          "dimension": "box",
+          "msSamples": [
+            509,
+            588,
+            311
+          ],
+          "hitTests": 0,
+          "ancestorSteps": 0
+        }
+      ],
+      "structuralMismatches": []
+    },
+    {
+      "shapeId": "pathological-deep",
+      "domNodes": 2000,
+      "matched": 1125,
+      "samples": [
+        {
+          "dimension": "geometry",
+          "msSamples": [
+            106,
+            146,
+            107
+          ],
+          "hitTests": 50,
+          "ancestorSteps": 0
+        },
+        {
+          "dimension": "text",
+          "msSamples": [
+            152,
+            49,
+            50
+          ],
+          "hitTests": 0,
+          "ancestorSteps": 0
+        },
+        {
+          "dimension": "attrs",
+          "msSamples": [
+            47,
+            49,
+            50
+          ],
+          "hitTests": 0,
+          "ancestorSteps": 0
+        },
+        {
+          "dimension": "contrast",
+          "msSamples": [
+            555,
+            602,
+            689
+          ],
+          "hitTests": 0,
+          "ancestorSteps": 25150
+        },
+        {
+          "dimension": "typography",
+          "msSamples": [
+            57,
+            53,
+            49
+          ],
+          "hitTests": 0,
+          "ancestorSteps": 0
+        },
+        {
+          "dimension": "box",
+          "msSamples": [
+            91,
+            67,
+            45
+          ],
+          "hitTests": 0,
+          "ancestorSteps": 0
+        }
+      ],
+      "structuralMismatches": []
+    }
+  ]
+}
