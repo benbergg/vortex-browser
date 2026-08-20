@@ -3,7 +3,7 @@
 // 与既有测试的分工:既有测试断言字段"值"是否算对,这里断言返回体"形状"不漂移
 // —— 键集合、showing 语义、scanned 自陈,三者既有测试都没覆盖。
 import { describe, it, expect, beforeEach } from "vitest";
-import { cssQueryFunc, geometryProbeFunc, styleProbeFunc } from "../src/handlers/query.js";
+import { cssQueryFunc, geometryProbeFunc, styleProbeFunc, elementsProbeFunc } from "../src/handlers/query.js";
 
 function seed(html: string): void {
   document.body.innerHTML = html;
@@ -92,5 +92,47 @@ describe("style 探针返回形状", () => {
     const r = styleProbeFunc(".t", 10, ["font"]) as { elements: Array<{ declaredFont?: string; fp?: string }> };
     expect(typeof r.elements[0].declaredFont).toBe("string");
     expect(r.elements[0].fp).toMatch(/^[A-Z]+:\d/);
+  });
+});
+
+describe("统一探针 geometry 维度", () => {
+  beforeEach(() => seed(`<div id="a">A</div><div id="b">B</div>`));
+
+  it("只请求 geometry 时元素上没有文本与属性字段", () => {
+    const r = elementsProbeFunc("div", 10, ["geometry"], null, false) as {
+      elements: Array<Record<string, unknown>>;
+    };
+    expect(r.elements[0]).toHaveProperty("bbox");
+    expect("text" in r.elements[0]).toBe(false);
+    expect("attrs" in r.elements[0]).toBe(false);
+  });
+
+  it("不请求 geometry 时不产生 viewport 与 pair", () => {
+    const r = elementsProbeFunc("div", 10, ["text"], null, true) as Record<string, unknown>;
+    expect("viewport" in r).toBe(false);
+    expect("pair" in r).toBe(false);
+  });
+
+  it("scanned 恒产出,与是否请求维度无关(零命中诊断依赖它)", () => {
+    const r = elementsProbeFunc(".nope", 10, ["geometry"], null, false) as {
+      total: number; scanned: Record<string, number>;
+    };
+    expect(r.total).toBe(0);
+    expect(Object.keys(r.scanned).sort()).toEqual(["elements", "iframes", "shadowRoots"]);
+  });
+
+  it("非法选择器返回 error 而不是抛出", () => {
+    const r = elementsProbeFunc("div[[", 10, ["geometry"], null, false) as { error?: string };
+    expect(r.error).toMatch(/Invalid CSS selector/);
+  });
+
+  it("经整形层还原后与老 geometry 探针形状一致", async () => {
+    const { shapeGeometryResult } = await import("../src/lib/element-shaping.js");
+    const raw = elementsProbeFunc("div", 10, ["geometry"], null, false);
+    const shaped = shapeGeometryResult(raw as never);
+    const legacy = geometryProbeFunc("div", 10) as Record<string, unknown>;
+    expect(Object.keys(shaped).sort()).toEqual(Object.keys(legacy).sort());
+    expect(Object.keys((shaped.elements as Array<Record<string, unknown>>)[0]).sort())
+      .toEqual(Object.keys((legacy.elements as Array<Record<string, unknown>>)[0]).sort());
   });
 });

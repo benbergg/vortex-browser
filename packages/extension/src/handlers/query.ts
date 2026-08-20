@@ -11,6 +11,8 @@ import { resolveTargetOptional } from "../lib/resolve-target.js";
 import type { DebuggerManager } from "../lib/debugger-manager.js";
 import { fetchPlatformFonts } from "../lib/platform-fonts.js";
 import { aggregateFontFaces, buildFontEvidence, dropInitialLayoutValues, isPseudoRendered } from "../lib/style-evidence.js";
+import { dimensionsForMode } from "../lib/element-dimensions.js";
+import { shapeGeometryResult, type RawProbeResult } from "../lib/element-shaping.js";
 
 type TextScan = { chars: number; nodes: number; shadowRoots: number; iframes: number };
 type CssScan = { elements: number; shadowRoots: number; iframes: number };
@@ -741,6 +743,155 @@ export const geometryProbeFunc = (
     return out;
   } catch (e) {
     return { error: "geometry probe error: " + (e instanceof Error ? e.message : String(e)) };
+  }
+};
+
+/**
+ * page-side 统一元素探针。一次命中元素集合,按 dims 采集各维度**原始值**。
+ * 整形交给 host 侧 element-shaping.ts —— 探针内不做形状裁剪。
+ * 参数 args: [selector, maxResults, dims, attributes, includeText]。
+ * ⚠ 自包含:注入丢模块作用域,queryAllDeep 等必须内联。
+ */
+export const elementsProbeFunc = (
+  selector: string,
+  maxResults: number,
+  dims: string[],
+  attributes: string[] | null,
+  includeText: boolean,
+):
+  | {
+      elements: Array<Record<string, unknown>>;
+      total: number;
+      showing: number;
+      viewport?: { w: number; h: number };
+      pair?: Record<string, boolean>;
+      scanned: { elements: number; shadowRoots: number; iframes: number };
+    }
+  | { error: string } => {
+  try {
+    const want = (d: string): boolean => dims.indexOf(d) !== -1;
+    const SHADOW_WALK_MAX_DEPTH = 8;
+    let scannedElements = 0;
+    let shadowRootsSeen = 0;
+    const queryAllDeep = (sel: string, root: Document | ShadowRoot, depth: number): Element[] => {
+      const acc: Element[] = Array.from(root.querySelectorAll(sel));
+      if (depth >= SHADOW_WALK_MAX_DEPTH) return acc;
+      const all = root.querySelectorAll("*");
+      scannedElements += all.length;
+      for (const host of all) {
+        const sr = (host as HTMLElement).shadowRoot;
+        if (sr) {
+          shadowRootsSeen++;
+          acc.push(...queryAllDeep(sel, sr, depth + 1));
+        }
+      }
+      return acc;
+    };
+
+    let matched: Element[];
+    try {
+      matched = queryAllDeep(selector, document, 0);
+    } catch (e) {
+      return { error: "Invalid CSS selector: " + (e instanceof Error ? e.message : String(e)) };
+    }
+
+    const scanned = {
+      elements: scannedElements,
+      shadowRoots: shadowRootsSeen,
+      iframes: document.querySelectorAll("iframe,frame").length,
+    };
+    const total = matched.length;
+    const limit = Math.min(total, maxResults);
+
+    const wantGeo = want("geometry");
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const R = (n: number): number => Math.round(n);
+    const TOL = 2;
+    const desc = (el: Element | null): string => {
+      if (!el) return "?";
+      let s = el.tagName ? el.tagName.toLowerCase() : "?";
+      if ((el as HTMLElement).id) s += "#" + (el as HTMLElement).id;
+      else if (typeof (el as HTMLElement).className === "string" && (el as HTMLElement).className.trim()) {
+        s += "." + (el as HTMLElement).className.trim().split(/\s+/)[0];
+      }
+      return s;
+    };
+
+    // 只用到六个数值属性;不用 DOMRect 是因为失败占位在 jsdom 下无法构造。
+    // null 表示该元素几何采集失败 —— 与 elements 严格一一对应,不靠长度时机推断。
+    type RectLike = { left: number; top: number; right: number; bottom: number; width: number; height: number };
+    const rects: Array<RectLike | null> = [];
+    const elements: Array<Record<string, unknown>> = [];
+    for (let i = 0; i < limit; i++) {
+      const el = matched[i] as HTMLElement;
+      const item: Record<string, unknown> = { index: i, tag: el.tagName.toLowerCase() };
+
+      if (wantGeo) {
+        const r = el.getBoundingClientRect();
+        rects.push(r);
+        item.bbox = [R(r.left), R(r.top), R(r.width), R(r.height)];
+        item.inViewport = r.left >= -TOL && r.top >= -TOL && r.right <= vw + TOL && r.bottom <= vh + TOL;
+
+        const cx = r.left + r.width / 2;
+        const cy = r.top + r.height / 2;
+        const topEl = typeof document.elementFromPoint === "function" ? document.elementFromPoint(cx, cy) : null;
+        item.occluded = !!(topEl && topEl !== el && !el.contains(topEl));
+        if (item.occluded) item.occludedBy = desc(topEl);
+
+        item.textClipped = el.scrollWidth > el.clientWidth + TOL;
+
+        let clipped = false;
+        for (let a: HTMLElement | null = el.parentElement, j = 0; a && j < 12; j++, a = a.parentElement) {
+          const ov = (() => {
+            try {
+              const cs = getComputedStyle(a);
+              return cs.overflow + " " + cs.overflowX + " " + cs.overflowY;
+            } catch {
+              return "";
+            }
+          })();
+          if (/hidden|auto|scroll|clip/.test(ov)) {
+            const ar = a.getBoundingClientRect();
+            if (r.right > ar.right + TOL || r.bottom > ar.bottom + TOL ||
+                r.left < ar.left - TOL || r.top < ar.top - TOL) clipped = true;
+            break; // 只看最近的裁剪祖先
+          }
+        }
+        item.clippedByAncestor = clipped;
+      }
+
+      // [Task 4 在此插入 text / attrs 维度采集]
+      // [Task 5 在此插入样式六组维度采集]
+
+      elements.push(item);
+    }
+
+    const out: Record<string, unknown> = { elements, total, showing: limit, scanned };
+    if (wantGeo) {
+      out.viewport = { w: vw, h: vh };
+      const a = rects[0];
+      const b = rects[1];
+      if (a && b) {
+        const near = (x: number, y: number): boolean => Math.abs(x - y) <= TOL;
+        out.pair = {
+          overlap: !(a.right <= b.left || a.left >= b.right || a.bottom <= b.top || a.top >= b.bottom),
+          aAboveB: a.bottom <= b.top + TOL,
+          aBelowB: a.top >= b.bottom - TOL,
+          aLeftOfB: a.right <= b.left + TOL,
+          aRightOfB: a.left >= b.right - TOL,
+          sameLeft: near(a.left, b.left),
+          sameTop: near(a.top, b.top),
+          sameRight: near(a.right, b.right),
+          sameBottom: near(a.bottom, b.bottom),
+          sameHCenter: near(a.left + a.width / 2, b.left + b.width / 2),
+          sameVCenter: near(a.top + a.height / 2, b.top + b.height / 2),
+        };
+      }
+    }
+    return out as never;
+  } catch (e) {
+    return { error: "elements probe error: " + (e instanceof Error ? e.message : String(e)) };
   }
 };
 
@@ -1963,21 +2114,18 @@ export function registerQueryHandlers(router: ActionRouter, debuggerMgr?: Debugg
             : null,
         );
       } else if (mode === "geometry") {
-        // geometry 模式:注入 geometryProbeFunc 取 bbox/视口/遮挡/裁剪 + 两元素关系。
+        // geometry 模式:转发统一探针,整形层还原老契约。
         // pattern = CSS 选择器(命中多元素;命中前两个产 pair 关系)。
         const maxResults = Math.min((args.maxResults as number | undefined) ?? 10, 50);
 
         const results = await chrome.scripting.executeScript({
           target: buildExecuteTarget(tid, frameId),
-          func: geometryProbeFunc,
-          args: [pattern, maxResults],
+          func: elementsProbeFunc,
+          args: [pattern, maxResults, dimensionsForMode("geometry", null), null, false],
           world: "MAIN",
         });
 
-        const res = results[0]?.result as
-          | { viewport: unknown; elements: unknown[]; total: number; showing: number }
-          | { error: string }
-          | undefined;
+        const res = results[0]?.result as RawProbeResult | { error: string } | undefined;
 
         if (!res) {
           throw vtxError(VtxErrorCode.JS_EXECUTION_ERROR, "query.queryPage geometry: executeScript returned no result");
@@ -1985,7 +2133,8 @@ export function registerQueryHandlers(router: ActionRouter, debuggerMgr?: Debugg
         if ("error" in res && res.error) {
           throw vtxError(VtxErrorCode.JS_EXECUTION_ERROR, `query.queryPage geometry error: ${res.error}`);
         }
-        return res;
+        // 整形层还原老契约,单一真源见 element-shaping.ts
+        return shapeGeometryResult(res as RawProbeResult);
       } else if (mode === "flow") {
         // flow 模式:注入 flowProbeFunc,adapter 检测流程图→读模型→mermaid/tree/json。
         const format = typeof args.attr === "string" ? args.attr : "mermaid";
