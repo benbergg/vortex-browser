@@ -529,6 +529,32 @@ export const elementsProbeFunc = (
       return s;
     };
 
+    // contains 不穿 shadow:shadow 内元素对其 host 恒 false,会把"命中自己 shadow
+    // 里的叶子"判成被 host 遮挡。与 hit-ownership.ts 的 composedContains 同语义,
+    // 这里必须内联 —— executeScript({func}) 注入丢模块作用域,import 不进来。
+    const composedContains = (ancestor: Element, node: Element): boolean => {
+      let cur: Element | null = node;
+      for (let hops = 0; cur && hops < 64; hops++) {
+        if (cur === ancestor) return true;
+        const p: Node | null = cur.parentNode;
+        cur = p && p.nodeType === 1 ? (p as Element)
+          : p && p.nodeType === 11 ? ((p as unknown as { host?: Element }).host ?? null)
+          : null;
+      }
+      return false;
+    };
+    // elementFromPoint 把 shadow-internal 命中重定向到 host,逐级下钻取真实叶子。
+    // 上限复用 queryAllDeep 那个:发现得到就得判得了,两处不一致会出现查得到却判不准。
+    const deepElementFromPoint = (x: number, y: number): Element | null => {
+      let hit = document.elementFromPoint(x, y);
+      for (let d = 0; hit && (hit as HTMLElement).shadowRoot && d < SHADOW_WALK_MAX_DEPTH; d++) {
+        const inner = (hit as HTMLElement).shadowRoot!.elementFromPoint(x, y);
+        if (!inner || inner === hit) break;
+        hit = inner;
+      }
+      return hit;
+    };
+
     // 以下辅助逻辑当年从 style 探针逐字搬来,不重写:对比度五态与 parseStrict
     // 是真站上纠正过 46% 捏造数字的成果,任何"等价简化"都会把它退回去。
     const pathOf = (start: Element): string => {
@@ -660,12 +686,13 @@ export const elementsProbeFunc = (
         let topEl: Element | null = null;
         if (hasArea) {
           try {
-            topEl = document.elementFromPoint(cx, cy);
+            topEl = deepElementFromPoint(cx, cy);
           } catch {
             topEl = null;
           }
         }
-        item.occluded = topEl ? topEl !== el && !el.contains(topEl) : null;
+        // 命中落在 composed 祖先上仍算遮挡,与点击路径 classifyHit 的 ancestor 分支一致
+        item.occluded = topEl ? topEl !== el && !composedContains(el, topEl) : null;
         if (item.occluded) item.occludedBy = desc(topEl);
 
         item.textClipped = el.scrollWidth > el.clientWidth + TOL;

@@ -31,6 +31,31 @@
   是自相矛盾的组合。判据取 bbox 的零面积这一几何事实，不推断 CSS 可见性——
   `visibility:hidden`、`opacity:0` 仍按原样处理，它们有布局与命中语义。
 
+- **`vortex_query` 的遮挡判定改为穿 open shadow root**。此前用裸
+  `document.elementFromPoint`，而它会把 shadow-internal 的命中重定向到 host —— 于是
+  shadow 里一个**完全没被遮挡**的元素被报成 `occluded: true, occludedBy: <host>`。
+  全仓其它路径（`observe` / `act` / `hit-probe` / CDP）早就下钻，只有 query 没有 ——
+  2026-05-27 那次「读路径穿 open shadow 族 K」扫了 `observe.ts` / `content.ts` / `capture.ts`，
+  漏了 `query.ts`。是成族修复漏了一条路径，不是没人想到。
+
+  同时把归属判断从 `el.contains(topEl)` 换成 composed 包含（跨 shadow 边界上溯到 host），
+  与 `hit-ownership.ts` 的 `composedContains` 同语义。命中落在 composed **祖先**上仍算遮挡，
+  与点击路径 `classifyHit` 的 ancestor 分支保持一致。
+
+  实测（Chrome 151）：open shadow 内自渲染的按钮从 `occluded: true, occludedBy: "host"`
+  变为 `false`；被同一 shadow 内浮层盖住的那个，`occludedBy` 从 host 变成真正的浮层。
+
+  **一个已知的剩余缺口**：组件把可见内容放在 `<slot>` 里时（Shoelace 全站如此），点落在
+  slotted 的 light-DOM 内容上，`shadowRoot.elementFromPoint` 按规范**重定向回 host**，
+  下钻拿不到更深的元素，于是仍报 `occluded: true`。实测 shoelace.style 上 59 个
+  shadow 内元素判定**一个都没变**。这一类要靠"命中落在自己 composed 祖先上算不算遮挡"
+  的语义决定，属独立议题，本次未动。
+
+  原语（下钻、composed 包含）在探针里是内联复刻而非共享模块：`executeScript({func})`
+  注入会丢模块作用域，import 不进来。策略层刻意不与 `classifyHit` 合并 —— 后者还含
+  widget 装饰层、backdrop 放行等"点击能不能到达"的判断，与 query 的"上面有没有东西"
+  不是同一个问题，合并会翻转一批现有取值。
+
 ### Added
 
 - **`vortex_query mode=elements` 与 `dimensions` 参数**（补记：实现已在上一轮合入 main）。

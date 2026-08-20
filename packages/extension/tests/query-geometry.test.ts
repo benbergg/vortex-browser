@@ -211,3 +211,119 @@ describe("occluded 三态:测不了不得伪装成确定值", () => {
     expect(r.elements[0].occluded).toBeNull();
   });
 });
+
+// elementFromPoint 把 shadow-internal 的命中重定向到 host。不下钻就会把「命中自己
+// shadow 里的叶子」判成被 host 遮挡 —— 真站上 Web Components 站点会得到"全部被遮挡"。
+// 全仓其它路径(observe/act/hit-probe/cdp)都下钻,只有 query 不,本组锁住对齐。
+describe("遮挡判定穿 open shadow", () => {
+  /** 造 host + open shadow,并按 composed 路径 stub 两级 elementFromPoint */
+  function mkShadow(hostRect: [number, number, number, number], innerHtml: string) {
+    const host = rect(document.createElement("div"), ...hostRect) as HTMLElement;
+    host.className = "host";
+    document.body.appendChild(host);
+    const sr = host.attachShadow({ mode: "open" });
+    sr.innerHTML = innerHtml;
+    return { host, sr };
+  }
+  /** 外层永远先命中 host —— 这正是真实浏览器的行为 */
+  const hitHostThen = (host: Element, sr: ShadowRoot, inner: Element | null) => {
+    (document as any).elementFromPoint = () => host;
+    (sr as any).elementFromPoint = () => inner;
+  };
+
+  it("shadow 内元素命中自身 → 不算被 host 遮挡", () => {
+    const { host, sr } = mkShadow([100, 100, 200, 50], '<button class="target">ok</button>');
+    const btn = rect(sr.querySelector(".target")!, 100, 100, 200, 50);
+    hitHostThen(host, sr, btn);
+    const r = geometryQuery(".target", 10) as any;
+    expect(r.total).toBe(1); // queryAllDeep 能穿 shadow 找到它
+    expect(r.elements[0].occluded).toBe(false);
+    expect("occludedBy" in r.elements[0]).toBe(false);
+  });
+
+  it("shadow 内元素被同一 shadow 里的浮层遮挡 → 照常报 true", () => {
+    const { host, sr } = mkShadow(
+      [100, 100, 200, 50],
+      '<button class="target">ok</button><div class="veil"></div>',
+    );
+    rect(sr.querySelector(".target")!, 100, 100, 200, 50);
+    hitHostThen(host, sr, sr.querySelector(".veil"));
+    const r = geometryQuery(".target", 10) as any;
+    expect(r.elements[0].occluded).toBe(true);
+    expect(r.elements[0].occludedBy).toContain("veil");
+  });
+
+  it("host 作为查询目标,命中落进它自己的 shadow → 不算遮挡", () => {
+    const { host, sr } = mkShadow([100, 100, 200, 50], '<span class="leaf">x</span>');
+    host.classList.add("probe");
+    hitHostThen(host, sr, sr.querySelector(".leaf"));
+    const r = geometryQuery(".probe", 10) as any;
+    expect(r.elements[0].occluded).toBe(false);
+  });
+
+  it("closed shadow 不下钻,host 当作真实遮挡者报出来", () => {
+    const el = rect(document.createElement("div"), 100, 100, 200, 50);
+    el.className = "target";
+    const closedHost = document.createElement("div");
+    closedHost.className = "closedhost";
+    closedHost.attachShadow({ mode: "closed" }).innerHTML = "<span>hidden</span>";
+    document.body.append(el, closedHost);
+    (document as any).elementFromPoint = () => closedHost;
+    const r = geometryQuery(".target", 10) as any;
+    expect(r.elements[0].occluded).toBe(true);
+    expect(r.elements[0].occludedBy).toContain("closedhost");
+  });
+
+  // 命中落在目标的 composed 祖先上仍算遮挡 —— 与点击路径 classifyHit 的 "ancestor"
+  // 分支一致(hit-ownership.ts:136)。这里锁的是"不要顺手把祖先也放行"。
+  it("命中落在 composed 祖先上 → 仍算遮挡,不因为穿了 shadow 就放行", () => {
+    const { host, sr } = mkShadow([100, 100, 200, 50], '<div class="wrap"><b class="target">t</b></div>');
+    rect(sr.querySelector(".target")!, 100, 100, 200, 50);
+    hitHostThen(host, sr, sr.querySelector(".wrap"));
+    const r = geometryQuery(".target", 10) as any;
+    expect(r.elements[0].occluded).toBe(true);
+    expect(r.elements[0].occludedBy).toContain("wrap");
+  });
+
+  // 真 Chrome 实测:点落在 host 上但 shadow 里没有子元素覆盖时,
+  // shadowRoot.elementFromPoint 返回 host 自己。不 break 就会对同一个点重复
+  // 命中测试到撞上限 —— 大 DOM 上一次命中测试 ~0.85ms,白烧 8 倍。
+  it("下钻遇到自环立即停,不把同一个点重测到撞上限", () => {
+    const { host, sr } = mkShadow([100, 100, 200, 50], '<span class="leaf">x</span>');
+    host.classList.add("probe");
+    let docCalls = 0;
+    let srCalls = 0;
+    (document as any).elementFromPoint = () => { docCalls++; return host; };
+    (sr as any).elementFromPoint = () => { srCalls++; return host; }; // 自环
+    const r = geometryQuery(".probe", 10) as any;
+    expect(docCalls).toBe(1);
+    expect(srCalls).toBe(1); // 不是 SHADOW_WALK_MAX_DEPTH 次
+    expect(r.elements[0].occluded).toBe(false); // 停在 host,而 host 就是目标自身
+  });
+
+  it("下钻深度用与 queryAllDeep 同一个上限,超出即停在当层", () => {
+    // 造 9 层嵌套 open shadow,上限 8 → 第 9 层的叶子够不到
+    let cur: Element = document.body;
+    const roots: ShadowRoot[] = [];
+    for (let i = 0; i < 9; i++) {
+      const h = document.createElement("div");
+      h.className = `h${i}`;
+      cur.appendChild(h);
+      const sr = h.attachShadow({ mode: "open" });
+      roots.push(sr);
+      (sr as any).elementFromPoint = () => sr.firstElementChild;
+      cur = sr as unknown as Element;
+    }
+    const leaf = document.createElement("span");
+    leaf.className = "deepleaf";
+    roots[8].appendChild(leaf);
+    const probe = rect(document.createElement("div"), 100, 100, 200, 50);
+    probe.className = "target";
+    document.body.appendChild(probe);
+    (document as any).elementFromPoint = () => roots[0].host;
+    const r = geometryQuery(".target", 10) as any;
+    // 停在第 8 跳所在的 host,而不是一路走到 deepleaf
+    expect(r.elements[0].occludedBy).not.toContain("deepleaf");
+    expect(r.elements[0].occluded).toBe(true);
+  });
+});
