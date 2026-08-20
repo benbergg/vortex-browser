@@ -1780,7 +1780,7 @@ git commit -m "fix: 统一探针按维度隔离采集错误
 - Consumes: `elementsProbeFunc`、`normalizeDimensions`、`ALL_DIMENSIONS`
 - Produces: `vortex_query({ mode: "elements", pattern, dimensions, maxResults })` 对外能力
 
-- [ ] **Step 1: 写失败的测试**
+- [x] **Step 1: 写失败的测试**
 
 > **执行前订正**：初稿这段测试骨架有四处跑不起来，已按实跑结果改正（spike 验证过）。
 > 请求体是 `{ type:"tool_request", tool, args, requestId, tabId }`，不是 `{ id, action, params }`
@@ -1976,7 +1976,7 @@ describe("mode=elements 维度自陈", () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [x] **Step 2: 跑测试确认失败**
 
 Run: `pnpm --filter @vortex-browser/extension exec vitest run --maxWorkers=2 --minWorkers=1 tests/query-elements-mode.test.ts`
 
@@ -1984,7 +1984,7 @@ Expected: FAIL。实跑确认过当前报错原文是
 `vortex_query: mode must be 'text', 'css', 'component', 'geometry', 'style', 'sheet', 'flow', 'chart', 'schema' or 'tokens'`
 —— Step 3 要同步改的就是这句文案。
 
-- [ ] **Step 3: 新增 elements 分派分支**
+- [x] **Step 3: 新增 elements 分派分支**
 
 在 `query.ts` 的 mode 校验白名单加入 `"elements"`（`query.ts:1879` 那个条件与 `1884` 的报错文案同步），并新增分支：
 
@@ -2064,13 +2064,20 @@ Expected: FAIL。实跑确认过当前报错原文是
         );
 ```
 
-- [ ] **Step 4: 跑测试确认通过**
+- [x] **Step 4: 跑测试确认通过**
 
 Run: `pnpm --filter @vortex-browser/extension exec vitest run --maxWorkers=2 --minWorkers=1 tests/query-elements-mode.test.ts`
 
 Expected: PASS
 
-- [ ] **Step 5: MCP schema 开放组合模式**
+> **执行中订正（Task 8 首轮）**：Step 5 会撞上 `I15.tools-list-budget` 的三条硬约束，
+> 计划完全没提。`tools/list` 总字节 cap、`vortex_query.description` 长度 cap、
+> 参数 description **白名单制**（新增参数必须显式登记理由）。按该文件自己的惯例处理：
+> **加能力调 cap 不压字符**，注释里写清实测字节与余量。本次 11400→11750（实测 11643）、
+> query description 280→330（实测 311）、`vortex_query.dimensions` 登记入白名单。
+> 十个维度名单只在参数说明里列一次，mode 说明不重复——这条是真冗余，该压。
+
+- [x] **Step 5: MCP schema 开放组合模式**
 
 `packages/mcp/src/tools/schemas-public.ts`：
 - `mode` enum（约 `:482`）加 `"elements"`
@@ -2099,7 +2106,7 @@ Expected: PASS
 
 既有测试「每个 mode 都在 tools/list 文本里被提到」会自动覆盖 `elements` 的可发现性——若 description 忘了提，它会转红。
 
-- [ ] **Step 6: 跑 extension 与 mcp 全量**
+- [x] **Step 6: 跑 extension 与 mcp 全量**
 
 Run:
 ```bash
@@ -2111,7 +2118,7 @@ Expected: 全绿。此时老探针尚未删除，`queryAllDeep` 定义处为 5 �
 `grep -c "const queryAllDeep" packages/extension/src/handlers/query.ts` 实测确认）——
 这是过渡态，**Task 9** 收敛到 2 份。
 
-- [ ] **Step 7: 真实浏览器验证（jsdom 无布局，单测证明不了接线）**
+- [x] **Step 7: 真实浏览器验证（jsdom 无布局，单测证明不了接线）**
 
 在真实页面上跑一遍，确认组合模式的几何值不是 0（jsdom 下 `getBoundingClientRect` 恒 0，单测无法暴露接线错误）：
 
@@ -2120,9 +2127,25 @@ vortex_navigate → https://gamma.app
 vortex_query { mode: "elements", pattern: "button", dimensions: "geometry,text,box", maxResults: 5 }
 ```
 
+> **⚠ MCP schema 改动当场不生效**：Claude Code 不 respawn stdio MCP，跑在内存里的还是旧
+> schema，`mode:"elements"` 会被 enum 挡下。绕过办法是直接打 hub 的 HTTP API（跳过 MCP 层）：
+>
+> ```bash
+> curl -s --noproxy '*' -X POST http://127.0.0.1:6800/api/query/queryPage \
+>   -H 'content-type: application/json' -H 'x-vortex-session: cli-lg' \
+>   -d '{"mode":"elements","pattern":"button","dimensions":"geometry,text,box,contrast","maxResults":50}'
+> ```
+>
+> **CLI 会话与 MCP 会话的浏览器绑定是各自独立的**——实测 `cli-lg` 绑在 Edge 上，
+> 拿 Chrome 的 tabId 会报 `TAB_NOT_FOUND`，看起来像标签页没了。先 `POST /api/tab/list`
+> 核一遍 `browserLabel`。
+>
+> **样本要挑**：`button` 命中 506 个，前 3 个全是隐藏模态里的按钮，`bbox` 全 0——
+> 那不是接线错，是取样错。判据改成「返回的 N 个里有几个 bbox 非零」（实测 50 取 44）。
+
 判据：`bbox` 四个数不全为 0；同一元素上 `text`、`box`、`bbox` 三者共存；`dimensions` 三项均 `available:true`。
 
-- [ ] **Step 8: 提交**
+- [x] **Step 8: 提交**
 
 ```bash
 git add packages/extension/src packages/extension/tests packages/mcp/src packages/mcp/tests
