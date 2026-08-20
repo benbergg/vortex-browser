@@ -2247,9 +2247,31 @@ Expected: PASS。若报 `X is not defined`，说明 Task 3-5 搬运时漏内联�
 | `query-shadow-pierce.test.ts` | 同上 |
 | `query-empty-diagnosis.test.ts` | 同上（该条断言 `scanned`，整形层已透传） |
 
-- [ ] **Step 4: 改写契约测试里的五处对照**
+- [ ] **Step 4: 改写契约测试里的对照**
 
-`query-contract-shape.test.ts` 中「与老 X 探针形状一致」的五条，老探针已不存在，
+> **执行前订正**：初稿写「五处」，实数是 **19 处**（Task 1-7 一路在加）。分三类，处理方式不同：
+>
+> | 类 | 位置 | 怎么办 |
+> |---|---|---|
+> | 3 条「经整形层还原后与老 X 探针形状一致」 | `:132` `:193` `:241` | 改为硬编码键集合——它们**就是**契约本身 |
+> | 1 组 `it.each` 五态逐值对照老探针 | `:255` | 用下方基线表硬编码，**不许手推** |
+> | 11 条直接测老探针的 | 头三个 describe（css/geometry/style 探针返回形状） | **逐条改成测统一探针+整形层**，改完只删「与已有用例逐字重复」的那几条，并在报告里列出删了哪几条、与哪条重复 |
+>
+> 第三类不要整块删。它们里有几条（如 geometry 的「showing 受 maxResults 截断而 total 不受」）
+> 在统一探针那侧**没有对应用例**，整块删会静默丢覆盖。
+>
+> **contrast 五态基线**（删除前从老探针实跑导出，`styleProbeFunc(".t", 10, [])`，
+> jsdom 环境；`fontWeight` 恒 `"normal"`、`fontSize` 恒 `"medium"`、`bgFromAncestor` 恒 `false`）：
+>
+> | 用例 style | contrastStatus | contrastRatio | wcagAA/AAA | color | background | backgroundImage |
+> |---|---|---|---|---|---|---|
+> | `color:#111;background:#fff` | `ok` | `18.88` | `true`/`true` | `rgb(17, 17, 17)` | `rgb(255, 255, 255)` | `none` |
+> | `color:#111` | `no-painted-background` | `null` | `null`/`null` | `rgb(17, 17, 17)` | `rgba(0, 0, 0, 0)` | `none` |
+> | `color:#111;background:#fff;opacity:.5` | `translucent` | `null` | `null`/`null` | `rgb(17, 17, 17)` | `rgb(255, 255, 255)` | `none` |
+> | `color:oklch(.5 .1 200);background:#fff` | `unsupported-color` | `null` | `null`/`null` | `oklch(0.5 0.1 200)` | `rgb(255, 255, 255)` | `none` |
+> | `color:#111;background:url(x.png)` | `background-image` | `null` | `null`/`null` | `rgb(17, 17, 17)` | `rgba(0, 0, 0, 0)` | `url("x.png")` |
+
+`query-contract-shape.test.ts` 中「与老 X 探针形状一致」的三条，老探针已不存在，
 改为硬编码期望键集合。示例（css，另两处同法）：
 
 ```ts
