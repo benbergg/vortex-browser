@@ -119,6 +119,9 @@ describe("统一探针 geometry 维度", () => {
     };
     expect(r.total).toBe(0);
     expect(Object.keys(r.scanned).sort()).toEqual(["elements", "iframes", "shadowRoots"]);
+    // 只查键集合是空集假绿:删掉探针里的累加,键还在、值变 0,断言照样通过。
+    // 零命中诊断要的正是"搜了多少个都没匹配",没有这条数字断言就证明不了探针在数。
+    expect(r.scanned.elements).toBeGreaterThan(0);
   });
 
   it("非法选择器返回 error 而不是抛出", () => {
@@ -131,6 +134,67 @@ describe("统一探针 geometry 维度", () => {
     const raw = elementsProbeFunc("div", 10, ["geometry"], null, false);
     const shaped = shapeGeometryResult(raw as never);
     const legacy = geometryProbeFunc("div", 10) as Record<string, unknown>;
+    expect(Object.keys(shaped).sort()).toEqual(Object.keys(legacy).sort());
+    expect(Object.keys((shaped.elements as Array<Record<string, unknown>>)[0]).sort())
+      .toEqual(Object.keys((legacy.elements as Array<Record<string, unknown>>)[0]).sort());
+  });
+});
+
+describe("统一探针 text/attrs 维度", () => {
+  beforeEach(() => seed(`<ul><li class="item" href="/a">A</li><li class="item">B</li></ul>`));
+
+  it("请求 attrs 时按 attributes 白名单取值", () => {
+    const r = elementsProbeFunc(".item", 10, ["attrs"], ["href"], false) as {
+      elements: Array<{ attrs?: Record<string, string> }>;
+    };
+    expect(r.elements[0].attrs).toEqual({ href: "/a" });
+    expect(r.elements[1].attrs).toEqual({});
+  });
+
+  it("超长属性值截断到 500 字符并加省略号", () => {
+    document.querySelector(".item")!.setAttribute("data-x", "y".repeat(600));
+    const r = elementsProbeFunc(".item", 10, ["attrs"], ["data-x"], false) as {
+      elements: Array<{ attrs?: Record<string, string> }>;
+    };
+    expect(r.elements[0].attrs!["data-x"]).toHaveLength(503);
+    expect(r.elements[0].attrs!["data-x"].endsWith("...")).toBe(true);
+  });
+
+  it("请求 text 时带 text 与 children_count", () => {
+    const r = elementsProbeFunc(".item", 10, ["text"], null, true) as {
+      elements: Array<Record<string, unknown>>;
+    };
+    expect(r.elements[0].text).toBe("A");
+    expect(r.elements[0].children_count).toBe(0);
+  });
+
+  it("includeText=false 时即使请求 text 维度也不产 text 字段", () => {
+    const r = elementsProbeFunc(".item", 10, ["text"], null, false) as {
+      elements: Array<Record<string, unknown>>;
+    };
+    expect(r.elements[0]).toHaveProperty("children_count");
+    expect("text" in r.elements[0]).toBe(false);
+  });
+
+  // children_count 何时出现,老契约里只能拿老探针实测建基线。
+  it.each([
+    { attrs: null as string[] | null, includeText: true },
+    { attrs: null as string[] | null, includeText: false },
+    { attrs: ["href"], includeText: true },
+    { attrs: ["href"], includeText: false },
+    { attrs: [] as string[], includeText: true },
+  ])("children_count 出现与否与老 css 探针一致 (attrs=$attrs, includeText=$includeText)", ({ attrs, includeText }) => {
+    const legacy = cssQueryFunc(".item", attrs, 10, includeText) as { elements: Array<Record<string, unknown>> };
+    const now = elementsProbeFunc(".item", 10, ["text", "attrs"], attrs, includeText) as { elements: Array<Record<string, unknown>> };
+    expect("children_count" in now.elements[0]).toBe("children_count" in legacy.elements[0]);
+    expect(now.elements[0].children_count).toBe(legacy.elements[0].children_count);
+  });
+
+  it("经整形层还原后与老 css 探针形状一致", async () => {
+    const { shapeCssResult } = await import("../src/lib/element-shaping.js");
+    const raw = elementsProbeFunc(".item", 10, ["text", "attrs"], ["href"], true);
+    const shaped = shapeCssResult(raw as never, { attributes: ["href"], includeText: true });
+    const legacy = cssQueryFunc(".item", ["href"], 10, true) as Record<string, unknown>;
     expect(Object.keys(shaped).sort()).toEqual(Object.keys(legacy).sort());
     expect(Object.keys((shaped.elements as Array<Record<string, unknown>>)[0]).sort())
       .toEqual(Object.keys((legacy.elements as Array<Record<string, unknown>>)[0]).sort());

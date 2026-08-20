@@ -12,7 +12,7 @@ import type { DebuggerManager } from "../lib/debugger-manager.js";
 import { fetchPlatformFonts } from "../lib/platform-fonts.js";
 import { aggregateFontFaces, buildFontEvidence, dropInitialLayoutValues, isPseudoRendered } from "../lib/style-evidence.js";
 import { dimensionsForMode } from "../lib/element-dimensions.js";
-import { shapeGeometryResult, type RawProbeResult } from "../lib/element-shaping.js";
+import { shapeCssResult, shapeGeometryResult, type RawProbeResult } from "../lib/element-shaping.js";
 
 type TextScan = { chars: number; nodes: number; shadowRoots: number; iframes: number };
 type CssScan = { elements: number; shadowRoots: number; iframes: number };
@@ -861,7 +861,21 @@ export const elementsProbeFunc = (
         item.clippedByAncestor = clipped;
       }
 
-      // [Task 4 在此插入 text / attrs 维度采集]
+      if (want("text") || want("attrs")) {
+        item.children_count = el.children.length;
+      }
+      if (want("text") && includeText) {
+        const t = (el.textContent ?? "").trim().replace(/\s+/g, " ");
+        item.text = t.length > 300 ? t.slice(0, 300) + "..." : t;
+      }
+      if (want("attrs") && attributes != null) {
+        const attrs: Record<string, string> = {};
+        for (const attrName of attributes) {
+          const val = el.getAttribute(attrName);
+          if (val !== null) attrs[attrName] = val.length > 500 ? val.slice(0, 500) + "..." : val;
+        }
+        item.attrs = attrs;
+      }
       // [Task 5 在此插入样式六组维度采集]
 
       elements.push(item);
@@ -2083,22 +2097,18 @@ export function registerQueryHandlers(router: ActionRouter, debuggerMgr?: Debugg
             : null,
         );
       } else if (mode === "css") {
-        // css query 模式
         const attributes: string[] | null = normalizeCssAttrParam(args.attr as string | string[] | undefined);
         const maxResults = Math.min((args.maxResults as number | undefined) ?? 20, 100);
         const includeText = (args.includeText as boolean | undefined) ?? true;
 
         const results = await chrome.scripting.executeScript({
           target: buildExecuteTarget(tid, frameId),
-          func: cssQueryFunc,
-          args: [pattern, attributes, maxResults, includeText],
+          func: elementsProbeFunc,
+          args: [pattern, maxResults, dimensionsForMode("css", null), attributes, includeText],
           world: "MAIN",
         });
 
-        const res = results[0]?.result as
-          | { elements: unknown[]; total: number; showing: number; scanned?: CssScan }
-          | { error: string; elements: never[]; total: number }
-          | undefined;
+        const res = results[0]?.result as RawProbeResult | { error: string } | undefined;
 
         if (!res) {
           throw vtxError(VtxErrorCode.JS_EXECUTION_ERROR, "query.queryPage css: executeScript returned no result");
@@ -2106,10 +2116,12 @@ export function registerQueryHandlers(router: ActionRouter, debuggerMgr?: Debugg
         if ("error" in res && res.error) {
           throw vtxError(VtxErrorCode.JS_EXECUTION_ERROR, `query.queryPage css error: ${res.error}`);
         }
-        const { scanned, ...payload } = res;
+        const raw = res as RawProbeResult;
+        // scanned 只喂诊断不进返回体,与老契约一致。
+        const { scanned, ...payload } = shapeCssResult(raw, { attributes, includeText });
         return withDiagnosis(
           payload,
-          res.total === 0 && scanned
+          raw.total === 0 && scanned
             ? diagnoseEmptyQueryCss({ ...scanned, selector: pattern, frameScoped: frameId != null })
             : null,
         );

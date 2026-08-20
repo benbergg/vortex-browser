@@ -162,6 +162,43 @@ describe("query.queryPage — css mode", () => {
     expect(result.elements).toHaveLength(0);
   });
 
+  it("css mode 零命中时把 scanned 事实带进诊断,而不是只回 total:0", async () => {
+    executeScript.mockResolvedValueOnce([{
+      result: {
+        elements: [], total: 0, showing: 0,
+        scanned: { elements: 137, shadowRoots: 2, iframes: 1 },
+      },
+    }]);
+
+    const res = await router.dispatch(mkReq("query.queryPage", { mode: "css", pattern: ".nope" }));
+
+    expect(res.error).toBeUndefined();
+    const result = res.result as Record<string, unknown>;
+    expect("scanned" in result).toBe(false);
+    const diag = JSON.stringify(result);
+    expect(diag).toContain("137");
+    expect(diag).toContain("2");
+    expect(diag).toContain("1");
+    expect(diag).toMatch(/shadow/i);
+    expect(diag).toMatch(/iframe/i);
+  });
+
+  it("css mode 命中时返回体带 showing,且等于元素数", async () => {
+    executeScript.mockResolvedValueOnce([{
+      result: {
+        elements: [{ index: 0, tag: "li", text: "A", children_count: 0 }],
+        total: 5, showing: 1,
+        scanned: { elements: 10, shadowRoots: 0, iframes: 0 },
+      },
+    }]);
+
+    const res = await router.dispatch(mkReq("query.queryPage", { mode: "css", pattern: ".item", maxResults: 1 }));
+    const result = res.result as { total: number; showing: number; elements: unknown[] };
+    expect(result.total).toBe(5);
+    expect(result.showing).toBe(1);
+    expect(result.elements).toHaveLength(1);
+  });
+
   it("mode=css 缺少 pattern 时返回 INVALID_PARAMS 错误", async () => {
     const res = await router.dispatch(mkReq("query.queryPage", { mode: "css" }));
     expect(res.error?.code).toBe(VtxErrorCode.INVALID_PARAMS);
