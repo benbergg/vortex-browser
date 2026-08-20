@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeEach } from "vitest";
 import { FINGERPRINT_ON_ARRAY_FN, PATH_MAX_SEGMENTS, deepQuerySelectorAllExpr, elementFingerprint } from "../src/lib/deep-query-expr.js";
-import { styleProbeFunc } from "../src/handlers/query.js";
+import { elementsProbeFunc } from "../src/handlers/query.js";
 
 beforeEach(() => {
   document.body.innerHTML = "";
@@ -10,14 +10,14 @@ beforeEach(() => {
 /** 表达式在页面上下文里求值,与 CDP Runtime.evaluate 拿到的是同一份东西 */
 const run = (expr: string): Element[] => eval(expr) as Element[];
 
-describe("deepQuerySelectorAllExpr ↔ styleProbeFunc 集合对齐", () => {
+describe("deepQuerySelectorAllExpr ↔ elementsProbeFunc 集合对齐", () => {
   it("纯 light DOM:两侧数量一致", () => {
     for (let i = 0; i < 4; i++) {
       const d = document.createElement("div");
       d.className = "t";
       document.body.appendChild(d);
     }
-    const probe = styleProbeFunc(".t", 50, []) as any;
+    const probe = elementsProbeFunc(".t", 50, ["font"], null, false) as any;
     expect(run(deepQuerySelectorAllExpr(".t"))).toHaveLength(probe.total);
   });
 
@@ -32,7 +32,7 @@ describe("deepQuerySelectorAllExpr ↔ styleProbeFunc 集合对齐", () => {
     inner.className = "t";
     sr.appendChild(inner);
 
-    const probe = styleProbeFunc(".t", 50, []) as any;
+    const probe = elementsProbeFunc(".t", 50, ["font"], null, false) as any;
     expect(probe.total).toBe(2);
     expect(run(deepQuerySelectorAllExpr(".t"))).toHaveLength(2);
   });
@@ -48,7 +48,7 @@ describe("deepQuerySelectorAllExpr ↔ styleProbeFunc 集合对齐", () => {
     leaf.className = "t";
     s2.appendChild(leaf);
 
-    const probe = styleProbeFunc(".t", 50, []) as any;
+    const probe = elementsProbeFunc(".t", 50, ["font"], null, false) as any;
     expect(probe.total).toBe(1);
     expect(run(deepQuerySelectorAllExpr(".t"))).toHaveLength(1);
   });
@@ -61,7 +61,7 @@ describe("deepQuerySelectorAllExpr ↔ styleProbeFunc 集合对齐", () => {
     inner.className = "t";
     sr.appendChild(inner);
 
-    const probe = styleProbeFunc(".t", 50, []) as any;
+    const probe = elementsProbeFunc(".t", 50, ["font"], null, false) as any;
     expect(run(deepQuerySelectorAllExpr(".t"))).toHaveLength(probe.total);
   });
 
@@ -79,7 +79,7 @@ describe("deepQuerySelectorAllExpr ↔ styleProbeFunc 集合对齐", () => {
       root = sr;
     }
     void root;
-    const probe = styleProbeFunc(".t", 50, []) as any;
+    const probe = elementsProbeFunc(".t", 50, ["font"], null, false) as any;
     expect(run(deepQuerySelectorAllExpr(".t"))).toHaveLength(probe.total);
   });
 
@@ -144,7 +144,7 @@ describe("elementFingerprint ↔ 注入侧 / CDP 侧三处一致", () => {
 
   it("探针内联的身份与真源一致(改一处漏一处会静默错位)", () => {
     document.body.innerHTML = '<div id="z" class="t">abc</div><span class="t">q</span>';
-    const probe = styleProbeFunc(".t", 5, ["font"]) as any;
+    const probe = elementsProbeFunc(".t", 5, ["font"], null, false) as any;
     const els = Array.from(document.querySelectorAll<HTMLElement>(".t"));
     expect(probe.elements.map((e: { fp: string }) => e.fp)).toEqual(els.map(elementFingerprint));
   });
@@ -155,7 +155,7 @@ describe("elementFingerprint ↔ 注入侧 / CDP 侧三处一致", () => {
     const inner = document.createElement("p");
     inner.className = "t";
     sr.appendChild(inner);
-    const probe = styleProbeFunc(".t", 5, ["font"]) as any;
+    const probe = elementsProbeFunc(".t", 5, ["font"], null, false) as any;
     const fps = probe.elements.map((e: { fp: string }) => e.fp);
     expect(new Set(fps).size).toBe(2);
     expect(fps).toContain(elementFingerprint(inner));
@@ -169,7 +169,7 @@ describe("路径深度上限三处一致", () => {
   });
 
   it("探针内联的上限与真源同值 —— 一处改了另一处没改,深 DOM 上两侧身份会不同", () => {
-    const src = styleProbeFunc.toString();
+    const src = elementsProbeFunc.toString();
     expect(src).toContain(`parts.length < ${PATH_MAX_SEGMENTS}`);
   });
 

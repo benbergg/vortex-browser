@@ -1,11 +1,19 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { JSDOM } from "jsdom";
-import { textSearchFunc, cssQueryFunc } from "../src/handlers/query.js";
+import { textSearchFunc, elementsProbeFunc } from "../src/handlers/query.js";
+import { shapeCssResult } from "../src/lib/element-shaping.js";
+
+function queryCssResult(selector: string, maxResults: number, includeText: boolean): any {
+  return shapeCssResult(elementsProbeFunc(selector, maxResults, ["text", "attrs"], null, includeText) as never, {
+    attributes: null,
+    includeText,
+  });
+}
 
 /**
  * vortex_query open shadow 穿透回归锁(白盒实机复现,2026-06-20)。
  *
- * 现象:cssQueryFunc 用 document.querySelectorAll、textSearchFunc 用
+ * 现象:css 查询用 document.querySelectorAll、textSearchFunc 用
  *   createTreeWalker(document.body),两者都不下降 open shadow root。web-component
  *   页面上 shadow 内的元素/文本 → css total 漏计、text total:0,无 error 无信号
  *   (silent false-negative,agent 误读「不存在」)。sibling 感知原语 observe 用
@@ -14,7 +22,7 @@ import { textSearchFunc, cssQueryFunc } from "../src/handlers/query.js";
  *   text 命中 0。
  *
  * 修复:两模式都改深度遍历穿 open shadow(与 observe 同语义,SHADOW_WALK_MAX_DEPTH=8,
- *   closed shadow 的 shadowRoot 返 null 天然不穿)。textSearchFunc / cssQueryFunc 是
+ *   closed shadow 的 shadowRoot 返 null 天然不穿)。textSearchFunc / css 查询是
  *   注入 page-side 的函数,JSDOM 直接执行验证真实遍历行为(JSDOM 实现 open shadow DOM)。
  */
 describe("vortex_query 穿 open shadow(@since 2026-06-20 白盒审计)", () => {
@@ -39,7 +47,7 @@ describe("vortex_query 穿 open shadow(@since 2026-06-20 白盒审计)", () => {
 
   it("css 模式:count 含 open shadow 内 button(light 1 + shadow 1 = 2)", () => {
     mountShadowFixture();
-    const r = cssQueryFunc("button", null, 20, true) as {
+    const r = queryCssResult("button", 20, true) as {
       elements: Array<{ text?: string }>;
       total: number;
     };
@@ -67,7 +75,7 @@ describe("vortex_query 穿 open shadow(@since 2026-06-20 白盒审计)", () => {
 
   it("css 模式:无 shadow 页面零漂移(light-DOM 计数不变)", () => {
     document.body.innerHTML = '<button>A</button><button>B</button><a href="#">L</a>';
-    const r = cssQueryFunc("button", null, 20, true) as { total: number; elements: unknown[] };
+    const r = queryCssResult("button", 20, true) as { total: number; elements: unknown[] };
     expect(r.total).toBe(2);
     expect(r.elements).toHaveLength(2);
   });
@@ -80,7 +88,7 @@ describe("vortex_query 穿 open shadow(@since 2026-06-20 白盒审计)", () => {
     const inner = sr1.getElementById("inner")!;
     const sr2 = inner.attachShadow({ mode: "open" });
     sr2.innerHTML = '<button>Deep Button</button>';
-    const r = cssQueryFunc("button", null, 20, true) as {
+    const r = queryCssResult("button", 20, true) as {
       total: number;
       elements: Array<{ text?: string }>;
     };

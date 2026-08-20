@@ -4,7 +4,7 @@
  * 判据抽成纯函数才能真断言。
  */
 
-/** 伪元素上读回的原始 computed 值,字段与 styleProbeFunc 读的那批一一对应。 */
+/** 伪元素上读回的原始 computed 值,字段与 elementsProbeFunc 读的那批一一对应。 */
 export interface PseudoComputed {
   content: string;
   display: string;

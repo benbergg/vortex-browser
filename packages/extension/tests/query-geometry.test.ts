@@ -1,6 +1,12 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { geometryProbeFunc } from "../src/handlers/query.js";
+import { elementsProbeFunc } from "../src/handlers/query.js";
+import { shapeGeometryResult } from "../src/lib/element-shaping.js";
+
+// 本地薄封装,不是导出的探针 —— 老 geometryProbeFunc 已删除,这里走统一探针+整形层
+function geometryQuery(selector: string, maxResults: number): unknown {
+  return shapeGeometryResult(elementsProbeFunc(selector, maxResults, ["geometry"], null, false) as never);
+}
 
 /** stub getBoundingClientRect。 */
 function rect(el: Element, x: number, y: number, w: number, h: number) {
@@ -26,13 +32,13 @@ afterEach(() => {
   (document as any).elementFromPoint = undefined;
 });
 
-describe("geometryProbeFunc", () => {
+describe("geometry 维度采集", () => {
   it("元素完整在视口内 → inViewport=true,未遮挡", () => {
     const el = rect(document.createElement("div"), 100, 100, 200, 50);
     el.className = "card";
     document.body.appendChild(el);
     (document as any).elementFromPoint = () => el; // 中心点命中自身
-    const r = geometryProbeFunc(".card", 10) as any;
+    const r = geometryQuery(".card", 10) as any;
     expect(r.elements[0].inViewport).toBe(true);
     expect(r.elements[0].occluded).toBe(false);
     expect(r.elements[0].bbox).toEqual([100, 100, 200, 50]);
@@ -43,7 +49,7 @@ describe("geometryProbeFunc", () => {
     el.className = "wide";
     document.body.appendChild(el);
     (document as any).elementFromPoint = () => el;
-    const r = geometryProbeFunc(".wide", 10) as any;
+    const r = geometryQuery(".wide", 10) as any;
     expect(r.elements[0].inViewport).toBe(false);
   });
 
@@ -54,7 +60,7 @@ describe("geometryProbeFunc", () => {
     overlay.className = "overlay";
     document.body.append(el, overlay);
     (document as any).elementFromPoint = () => overlay; // 中心点命中 overlay(非自身/后代)
-    const r = geometryProbeFunc(".target", 10) as any;
+    const r = geometryQuery(".target", 10) as any;
     expect(r.elements[0].occluded).toBe(true);
     expect(r.elements[0].occludedBy).toContain("overlay");
   });
@@ -66,7 +72,7 @@ describe("geometryProbeFunc", () => {
     el.appendChild(child);
     document.body.appendChild(el);
     (document as any).elementFromPoint = () => child; // 后代,非遮挡
-    const r = geometryProbeFunc(".target", 10) as any;
+    const r = geometryQuery(".target", 10) as any;
     expect(r.elements[0].occluded).toBe(false);
   });
 
@@ -76,7 +82,7 @@ describe("geometryProbeFunc", () => {
     scrollDims(el, 300, 120); // 内容 300 > 可视 120 → ellipsis
     document.body.appendChild(el);
     (document as any).elementFromPoint = () => el;
-    const r = geometryProbeFunc(".cell", 10) as any;
+    const r = geometryQuery(".cell", 10) as any;
     expect(r.elements[0].textClipped).toBe(true);
     expect(r.elements[0].clippedByAncestor).toBe(false);
   });
@@ -88,7 +94,7 @@ describe("geometryProbeFunc", () => {
     b.className = "g";
     document.body.append(a, b);
     (document as any).elementFromPoint = () => a;
-    const r = geometryProbeFunc(".g", 10) as any;
+    const r = geometryQuery(".g", 10) as any;
     expect(r.pair.overlap).toBe(true);
     expect(r.pair.sameLeft).toBe(true);
     expect(r.pair.sameTop).toBe(true);
@@ -101,14 +107,14 @@ describe("geometryProbeFunc", () => {
     b.className = "h";
     document.body.append(a, b);
     (document as any).elementFromPoint = () => a;
-    const r = geometryProbeFunc(".h", 10) as any;
+    const r = geometryQuery(".h", 10) as any;
     expect(r.pair.overlap).toBe(false);
     expect(r.pair.aAboveB).toBe(true);
     expect(r.pair.sameLeft).toBe(true);
   });
 
   it("选择器无命中 → total=0,无 pair", () => {
-    const r = geometryProbeFunc(".none", 10) as any;
+    const r = geometryQuery(".none", 10) as any;
     expect(r.total).toBe(0);
     expect(r.pair).toBeUndefined();
   });

@@ -13,7 +13,8 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { JSDOM } from "jsdom";
 import { splitDiagnosis } from "@vortex-browser/shared";
 import { ActionRouter } from "../src/lib/router.js";
-import { textSearchFunc, cssQueryFunc, registerQueryHandlers } from "../src/handlers/query.js";
+import { textSearchFunc, elementsProbeFunc, registerQueryHandlers } from "../src/handlers/query.js";
+import { shapeCssResult } from "../src/lib/element-shaping.js";
 import { diagnoseEmptyQueryText, diagnoseEmptyQueryCss, diagnoseEmptySchema } from "../src/lib/empty-diagnosis.js";
 
 function mountDom(html: string) {
@@ -46,9 +47,11 @@ describe("page-side 自报扫描规模", () => {
     expect(r.scanned.chars).toBe("inner".length);
   });
 
-  it("cssQueryFunc 报出扫描的元素数与 iframe 数", () => {
+  it("css 查询报出扫描的元素数与 iframe 数", () => {
     mountDom(`<div><span></span></div><iframe></iframe>`);
-    const r = cssQueryFunc(".nope", null, 10, false) as any;
+    const r = shapeCssResult(elementsProbeFunc(".nope", 10, ["text", "attrs"], null, false) as never, {
+      attributes: null, includeText: false,
+    }) as any;
     expect(r.total).toBe(0);
     expect(r.scanned.elements).toBeGreaterThanOrEqual(3);
     expect(r.scanned.iframes).toBe(1);

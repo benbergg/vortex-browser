@@ -1,12 +1,21 @@
 // @vitest-environment jsdom
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { styleProbeFunc } from "../src/handlers/query.js";
+import { elementsProbeFunc } from "../src/handlers/query.js";
+import { dimensionsForMode } from "../src/lib/element-dimensions.js";
+import { shapeStyleResult } from "../src/lib/element-shaping.js";
+
+function runStyle(selector: string, maxResults: number, groups?: string[]): any {
+  const effective = ["contrast", ...(groups ?? ["typography", "box", "paint", "motion", "pseudo", "font"] )];
+  const dims = dimensionsForMode("style", groups ?? null);
+  const raw = elementsProbeFunc(selector, maxResults, dims, null, false);
+  return shapeStyleResult(raw as never, effective);
+}
 
 beforeEach(() => {
   document.body.innerHTML = "";
 });
 
-describe("styleProbeFunc", () => {
+describe("elementsProbeFunc style dimensions", () => {
   it("自身有色+背景 → 取 color/background + WCAG 对比度(黑底白≈21)", () => {
     const el = document.createElement("div");
     el.className = "t";
@@ -14,7 +23,7 @@ describe("styleProbeFunc", () => {
     el.style.backgroundColor = "rgb(255, 255, 255)";
     el.textContent = "x";
     document.body.appendChild(el);
-    const r = styleProbeFunc(".t", 10, []) as any;
+    const r = runStyle(".t", 10, []) as any;
     expect(r.elements[0].color).toBe("rgb(0, 0, 0)");
     expect(r.elements[0].background).toBe("rgb(255, 255, 255)");
     expect(r.elements[0].contrastRatio).toBeCloseTo(21, 0);
@@ -30,7 +39,7 @@ describe("styleProbeFunc", () => {
     // 自身背景不设(透明)
     wrap.appendChild(el);
     document.body.appendChild(wrap);
-    const r = styleProbeFunc(".t2", 10, []) as any;
+    const r = runStyle(".t2", 10, []) as any;
     expect(r.elements[0].background).toBe("rgb(255, 255, 255)");
     expect(r.elements[0].bgFromAncestor).toBe(true);
   });
@@ -41,7 +50,7 @@ describe("styleProbeFunc", () => {
     el.style.color = "rgb(200, 200, 200)";
     el.style.backgroundColor = "rgb(255, 255, 255)";
     document.body.appendChild(el);
-    const r = styleProbeFunc(".t3", 10, []) as any;
+    const r = runStyle(".t3", 10, []) as any;
     expect(r.elements[0].wcagAA).toBe(false);
   });
 
@@ -52,7 +61,7 @@ describe("styleProbeFunc", () => {
     el.style.backgroundColor = "rgb(255, 255, 255)";
     el.style.fontWeight = "700";
     document.body.appendChild(el);
-    const r = styleProbeFunc(".t4", 10, []) as any;
+    const r = runStyle(".t4", 10, []) as any;
     expect(r.elements[0].fontWeight).toBe("700");
   });
 
@@ -69,7 +78,7 @@ describe("styleProbeFunc", () => {
     el.style.color = "rgb(0, 0, 0)";
     cur.appendChild(el);
 
-    const r = styleProbeFunc(".deep", 10, []) as any;
+    const r = runStyle(".deep", 10, []) as any;
     expect(r.elements[0].background).toBe("rgb(255, 255, 255)");
     expect(r.elements[0].bgFromAncestor).toBe(true);
     expect(r.elements[0].contrastStatus).toBe("ok");
@@ -84,7 +93,7 @@ describe("styleProbeFunc", () => {
     document.body.style.backgroundColor = "transparent";
     document.body.appendChild(el);
 
-    const r = styleProbeFunc(".nobg", 10, []) as any;
+    const r = runStyle(".nobg", 10, []) as any;
     expect(r.elements[0].contrastRatio).toBeNull();
     expect(r.elements[0].contrastStatus).toBe("no-painted-background");
     expect(r.elements[0].wcagAA).toBeNull();
@@ -101,7 +110,7 @@ describe("styleProbeFunc", () => {
     wrap.appendChild(el);
     document.body.appendChild(wrap);
 
-    const r = styleProbeFunc(".grad", 10, []) as any;
+    const r = runStyle(".grad", 10, []) as any;
     expect(r.elements[0].contrastStatus).toBe("background-image");
     expect(r.elements[0].contrastRatio).toBeNull();
     expect(r.elements[0].wcagAA).toBeNull();
@@ -119,7 +128,7 @@ describe("styleProbeFunc", () => {
     far.appendChild(near);
     document.body.appendChild(far);
 
-    const r = styleProbeFunc(".layered", 10, []) as any;
+    const r = runStyle(".layered", 10, []) as any;
     expect(r.elements[0].contrastStatus).toBe("background-image");
     expect(r.elements[0].contrastRatio).toBeNull();
     expect(r.elements[0].background).not.toBe("rgb(255, 255, 255)");
@@ -135,7 +144,7 @@ describe("styleProbeFunc", () => {
     wrap.appendChild(el);
     document.body.appendChild(wrap);
 
-    const r = styleProbeFunc(".selfimg", 10, []) as any;
+    const r = runStyle(".selfimg", 10, []) as any;
     expect(r.elements[0].contrastStatus).toBe("background-image");
     expect(r.elements[0].bgFromAncestor).toBe(false);
     expect(r.elements[0].wcagAA).toBeNull();
@@ -147,7 +156,7 @@ describe("styleProbeFunc", () => {
     el.style.color = "rgb(200, 200, 200)";
     el.style.backgroundColor = "rgb(255, 255, 255)";
     document.body.appendChild(el);
-    const r = styleProbeFunc(".low2", 10, []) as any;
+    const r = runStyle(".low2", 10, []) as any;
     expect(r.elements[0].wcagAA).toBe(false);
     expect(r.elements[0].contrastStatus).toBe("ok");
   });
@@ -159,7 +168,7 @@ describe("styleProbeFunc", () => {
     el.style.lineHeight = "60px";
     el.style.letterSpacing = "-1.2px";
     document.body.appendChild(el);
-    const r = styleProbeFunc(".g1", 10, ["typography"]) as any;
+    const r = runStyle(".g1", 10, ["typography"]) as any;
     expect(r.elements[0].typography.fontFamily).toBe("ESBuild, sans-serif");
     expect(r.elements[0].typography.lineHeight).toBe("60px");
     expect(r.elements[0].typography.letterSpacing).toBe("-1.2px");
@@ -192,7 +201,7 @@ describe("styleProbeFunc", () => {
       });
     }) as never);
 
-    const r = styleProbeFunc(".g2", 10, ["box"]) as any;
+    const r = runStyle(".g2", 10, ["box"]) as any;
     spy.mockRestore();
 
     expect(Object.keys(r.elements[0].box)).toEqual([
@@ -228,7 +237,7 @@ describe("styleProbeFunc", () => {
         },
       });
     }) as never);
-    styleProbeFunc(".g2b", 10, ["paint"]);
+    runStyle(".g2b", 10, ["paint"]);
     spy.mockRestore();
     expect(asked).toContain("background-image");
     expect(asked).toContain("box-shadow");
@@ -239,7 +248,7 @@ describe("styleProbeFunc", () => {
     el.className = "g3";
     el.style.transition = "background-color 0.2s ease-out";
     document.body.appendChild(el);
-    const r = styleProbeFunc(".g3", 10, ["motion"]) as any;
+    const r = runStyle(".g3", 10, ["motion"]) as any;
     expect(r.elements[0].motion.transition).toContain("background-color");
   });
 
@@ -247,23 +256,23 @@ describe("styleProbeFunc", () => {
     const el = document.createElement("div");
     el.className = "g4";
     document.body.appendChild(el);
-    const r = styleProbeFunc(".g4", 10, ["typography", "box", "paint", "motion"]) as any;
+    const r = runStyle(".g4", 10, ["typography", "box", "paint", "motion"]) as any;
     for (const g of ["typography", "box", "paint", "motion"]) {
       expect(r.elements[0][g], `缺分组 ${g}`).toBeTypeOf("object");
     }
   });
 
   it("注入自包含:剥离模块作用域后仍可运行", () => {
-    const detached = new Function("return " + styleProbeFunc.toString())();
+    const detached = new Function("return " + elementsProbeFunc.toString())();
     const el = document.createElement("div");
     el.className = "iso";
     document.body.appendChild(el);
-    expect(() => detached(".iso", 1, ["typography", "box", "paint", "motion"])).not.toThrow();
+    expect(() => detached(".iso", 1, ["geometry", "text", "attrs", "contrast", "typography", "box", "paint", "motion"], null, true)).not.toThrow();
   });
 
   it("注入自包含:六组全开(含 pseudo/font)剥离模块作用域后仍可运行", () => {
     // 四组那条覆盖不到 collectFontFaces 与伪元素读取,这两段引用模块标识符会真站崩
-    const detached = new Function("return " + styleProbeFunc.toString())();
+    const detached = new Function("return " + elementsProbeFunc.toString())();
     const st = document.createElement("style");
     st.textContent = '@font-face{font-family:"X";src:url(x.woff2)}';
     document.head.appendChild(st);
@@ -272,18 +281,18 @@ describe("styleProbeFunc", () => {
     document.body.appendChild(el);
     let out: unknown;
     expect(() => {
-      out = detached(".iso6", 1, ["typography", "box", "paint", "motion", "pseudo", "font"]);
+      out = detached(".iso6", 1, ["geometry", "text", "attrs", "contrast", "typography", "box", "paint", "motion", "pseudo", "font"], ["id"], true);
     }).not.toThrow();
     expect((out as { error?: string }).error).toBeUndefined();
     expect((out as { fontFaces?: unknown[] }).fontFaces).toBeDefined();
   });
 
   it("groups 缺省(不传)也要能剥离作用域跑 —— 缺省是六组全开", () => {
-    const detached = new Function("return " + styleProbeFunc.toString())();
+    const detached = new Function("return " + elementsProbeFunc.toString())();
     const el = document.createElement("div");
     el.className = "iso7";
     document.body.appendChild(el);
-    const out = detached(".iso7", 1) as { error?: string; elements: Array<{ declaredFont?: string }> };
+    const out = detached(".iso7", 1, ["geometry", "text", "attrs", "contrast", "typography", "box", "paint", "motion", "pseudo", "font"], null, false) as { error?: string; elements: Array<{ declaredFont?: string }> };
     expect(out.error).toBeUndefined();
     expect(out.elements[0].declaredFont).toBeDefined();
   });
@@ -294,7 +303,7 @@ describe("styleProbeFunc", () => {
     el.style.color = "rgb(0, 0, 0)";
     el.style.backgroundColor = "rgba(255, 255, 255, 0.5)";
     document.body.appendChild(el);
-    const r = styleProbeFunc(".alpha", 10, []) as any;
+    const r = runStyle(".alpha", 10, []) as any;
     // 按纯白算会报 21:1,真实观感取决于更底层
     expect(r.elements[0].contrastStatus).toBe("translucent");
     expect(r.elements[0].contrastRatio).toBeNull();
@@ -308,7 +317,7 @@ describe("styleProbeFunc", () => {
     el.style.backgroundColor = "rgb(255, 255, 255)";
     el.style.opacity = "0.5";
     document.body.appendChild(el);
-    const r = styleProbeFunc(".op", 10, []) as any;
+    const r = runStyle(".op", 10, []) as any;
     expect(r.elements[0].contrastStatus).toBe("translucent");
     expect(r.elements[0].contrastRatio).toBeNull();
   });
@@ -330,7 +339,7 @@ describe("styleProbeFunc", () => {
         },
       });
     }) as never);
-    const r = styleProbeFunc(".p3", 10, []) as any;
+    const r = runStyle(".p3", 10, []) as any;
     spy.mockRestore();
     expect(r.elements[0].contrastStatus).toBe("unsupported-color");
     expect(r.elements[0].wcagAAA).toBeNull();
@@ -343,7 +352,7 @@ describe("styleProbeFunc", () => {
     document.documentElement.style.backgroundColor = "transparent";
     document.body.style.backgroundColor = "transparent";
     document.body.appendChild(el);
-    const r = styleProbeFunc(".ser", 10, []) as any;
+    const r = runStyle(".ser", 10, []) as any;
     const round = JSON.parse(JSON.stringify(r.elements[0]));
     expect(round.wcagAA).toBeNull();
     expect(Boolean(round.wcagAA)).toBe(false);
@@ -368,7 +377,7 @@ describe("styleProbeFunc", () => {
         },
       });
     }) as never);
-    styleProbeFunc(".all32", 10, ["typography", "box", "paint", "motion"]);
+    runStyle(".all32", 10, ["typography", "box", "paint", "motion"]);
     spy.mockRestore();
 
     expect(asked).toEqual([
@@ -387,8 +396,8 @@ describe("styleProbeFunc", () => {
     const el = document.createElement("div");
     el.className = "defg";
     document.body.appendChild(el);
-    const withDefault = (styleProbeFunc(".defg", 10) as any).elements[0];
-    const withEmpty = (styleProbeFunc(".defg", 10, []) as any).elements[0];
+    const withDefault = (runStyle(".defg", 10) as any).elements[0];
+    const withEmpty = (runStyle(".defg", 10, []) as any).elements[0];
     for (const g of ["typography", "box", "paint", "motion"]) {
       expect(withDefault[g], `缺省应含 ${g}`).toBeTypeOf("object");
       expect(withEmpty[g], `空数组不应含 ${g}`).toBeUndefined();
@@ -402,7 +411,7 @@ describe("styleProbeFunc", () => {
     el.style.backgroundImage = "linear-gradient(90deg, #000, #fff)";
     el.style.opacity = "0.5";
     document.body.appendChild(el);
-    const r = styleProbeFunc(".imgop", 10, []) as any;
+    const r = runStyle(".imgop", 10, []) as any;
     // 旧实现里 background-image 会把 opacity 这个原因整个盖掉
     expect(r.elements[0].contrastStatus).toBe("translucent");
     expect(r.elements[0].wcagAA).toBeNull();
@@ -417,7 +426,7 @@ describe("styleProbeFunc", () => {
     el.style.color = "rgb(0, 0, 0)";
     anc.appendChild(el);
     document.body.appendChild(anc);
-    const r = styleProbeFunc(".ancimgop", 10, []) as any;
+    const r = runStyle(".ancimgop", 10, []) as any;
     expect(r.elements[0].contrastStatus).toBe("translucent");
   });
 
@@ -437,7 +446,7 @@ describe("styleProbeFunc", () => {
         },
       });
     }) as never);
-    const r = styleProbeFunc(".fgbad", 10, []) as any;
+    const r = runStyle(".fgbad", 10, []) as any;
     spy.mockRestore();
     expect(r.elements[0].contrastStatus).toBe("unsupported-color");
   });
@@ -458,7 +467,7 @@ describe("styleProbeFunc", () => {
         },
       });
     }) as never);
-    const r = styleProbeFunc(".pct", 10, []) as any;
+    const r = runStyle(".pct", 10, []) as any;
     spy.mockRestore();
     // 旧 parse 会读成 [100,0,0],按 100/255 算出错误亮度
     expect(r.elements[0].contrastStatus).toBe("unsupported-color");
@@ -481,20 +490,20 @@ describe("styleProbeFunc", () => {
         },
       });
     }) as never);
-    const r = styleProbeFunc(".abad", 10, []) as any;
+    const r = runStyle(".abad", 10, []) as any;
     spy.mockRestore();
     expect(r.elements[0].contrastStatus).toBe("unsupported-color");
     expect(r.elements[0].contrastRatio).toBeNull();
   });
 
   it("无命中 → total=0", () => {
-    const r = styleProbeFunc(".none", 10, []) as any;
+    const r = runStyle(".none", 10, []) as any;
     expect(r.total).toBe(0);
     expect(r.elements).toEqual([]);
   });
 });
 
-describe("styleProbeFunc 的 @font-face 收集", () => {
+describe("统一探针的 @font-face 收集", () => {
   const faces = (css: string): Array<Record<string, string>> => {
     document.head.querySelectorAll("style").forEach((n) => n.remove());
     const st = document.createElement("style");
@@ -503,7 +512,7 @@ describe("styleProbeFunc 的 @font-face 收集", () => {
     const el = document.createElement("div");
     el.className = "ff";
     document.body.appendChild(el);
-    return (styleProbeFunc(".ff", 1, ["font"]) as any).fontFaces;
+    return (runStyle(".ff", 1, ["font"]) as any).fontFaces;
   };
 
   it("顶层 @font-face 收得到", () => {
@@ -530,7 +539,7 @@ describe("styleProbeFunc 的 @font-face 收集", () => {
     const el = document.createElement("div");
     el.className = "ff2";
     document.body.appendChild(el);
-    return styleProbeFunc(".ff2", 1, ["font"]) as never;
+    return runStyle(".ff2", 1, ["font"]) as never;
   };
 
   it("嵌套超过深度上限 → partial=true,不能把'没扫完'说成'页面没有'", () => {
@@ -552,7 +561,7 @@ describe("styleProbeFunc 的 @font-face 收集", () => {
   });
 });
 
-describe("styleProbeFunc 的伪元素粗筛", () => {
+describe("统一探针的伪元素粗筛", () => {
   // jsdom 的伪元素 content 恒为 normal,真实形态只能靠替身喂进去;
   // 替身转发真实实现,只接管带第二参的调用
   const withPseudo = (before: Record<string, string>): unknown => {
@@ -566,7 +575,7 @@ describe("styleProbeFunc 的伪元素粗筛", () => {
     const el = document.createElement("i");
     el.className = "pe";
     document.body.appendChild(el);
-    const r = styleProbeFunc(".pe", 1, ["pseudo"]) as any;
+    const r = runStyle(".pe", 1, ["pseudo"]) as any;
     vi.unstubAllGlobals();
     return r.elements[0].pseudoRaw;
   };
@@ -596,14 +605,14 @@ describe("styleProbeFunc 的伪元素粗筛", () => {
   });
 });
 
-describe("styleProbeFunc 对坏样式表的容错", () => {
+describe("统一探针对坏样式表的容错", () => {
   const withSheets = (sheets: unknown[]): { fontFaces: Array<Record<string, string>>; fontFacesPartial: boolean; fontFacesPartialReasons?: string[] } => {
     document.head.querySelectorAll("style").forEach((n) => n.remove());
     Object.defineProperty(document, "styleSheets", { configurable: true, get: () => sheets });
     const el = document.createElement("div");
     el.className = "bad";
     document.body.appendChild(el);
-    const r = styleProbeFunc(".bad", 1, ["font"]) as never;
+    const r = runStyle(".bad", 1, ["font"]) as never;
     Reflect.deleteProperty(document, "styleSheets");
     return r;
   };
