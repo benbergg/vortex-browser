@@ -144,3 +144,48 @@
 ### 第二轮结论
 
 第二轮证据扩大了第一轮缺陷面：路线 B 仍然成立，但实现范围应从“视口外 `occluded=null`”扩大为“所有无法进行有意义中心点命中判断的退化几何均为三态未知”，并同步修正零面积的 `inViewport`。shadow 命中穿透不应偷偷混入同一变更；它应作为下一轮独立的 composed hit-test 修复，带自己的自包含注入测试和兼容评估。
+
+## 第三轮：祖先命中语义
+
+### 结论
+
+选择 **C：祖先命中时 `query` 的 `occluded` 报 `null`**，并将其解释为“命中测试不足以判定该目标是否被遮挡”，而不是“确认没有遮挡”。不建议继续选择 A，也不建议把 B 作为默认语义。
+
+### 对 A/B/C 的攻击
+
+**A 的问题不是单纯的用户体验差，而是把不同语义强行当成同一件事。** `classifyHit` 的 ancestor 分支是在判断事件归属：命中目标祖先通常意味着事件不会直接落到目标；只有 button、带 href 的 a、关联 label 等少数可点击祖先才放行。query 的字段名是 `occluded`，首先应回答目标的中心点是否被别的绘制/命中对象挡住。对 shadow 内的 `a[part=base]`，命中自己的 host 可能只是 composed-tree 的边界重定向，不能据此断言 host 是视觉遮挡层。A 会把 Shoelace 这类 slot 组件的系统性重定向误报成遮挡，正好复现本轮要消除的 P1 症状。
+
+**B 的问题是把“不是一个独立命中目标”推成了“确认未被遮挡”。** 祖先命中可能代表 slot 重定向，也可能代表裁剪、pointer-events、祖先覆盖，或者目标只是祖先内部不可独立命中的内容。仅凭 `topEl` 是 composed ancestor，无法区分这些情况。B 虽然改善了组件站上的数值外观，却会制造另一种确定性错误：调用方会把 `false` 当成已确认的无遮挡，甚至进一步当成可点击。
+
+**C 的可用性代价是真实的，但可界定且可接受。** 组件站上会出现更多 `null`，尤其是目标位于 slot、目标的可见区域被 host 边界重定向时；这会减少可直接筛选的布尔结果。但这些元素本来就没有从当前命中结果得到可靠的无遮挡结论。相比 A 的大面积假阳性和 B 的假阴性，C 是诚实地暴露信息不足。`null` 仍保留了元素、bbox、`inViewport` 等其它可用信息，不是把整个元素结果丢掉。
+
+### 哪些祖先命中可以确定
+
+可以保留少量确定性例外，但它们应由命中关系本身证明，而不是由“祖先”这个标签推断：
+
+- `topEl === el`：命中自身，`occluded: false`。
+- `topEl` 是目标的 composed 后代：命中目标内部，`occluded: false`。
+- 目标本身是 shadow host，命中其 shadow 内可访问后代：目标的边界被自己的内容命中，`occluded: false`；现有测试已经锁定这一类。
+- 命中一个既不是目标/后代、也不是目标 composed 祖先的元素：可以判为 `true`，并报告该元素为 blocker；closed shadow 或达到下钻上限时，应按无法继续解析的边界保守处理，而不是假设边界内的目标状态。
+
+以下情形不能仅凭当前数据判为 `false`：命中目标的直接 host、普通 wrapper、slot 重定向得到的 host，或任何其它 composed ancestor。即使 ancestor 是目标的直接 host，`shadowRoot.elementFromPoint` 返回 host 自身也只证明浏览器没有返回更深的独立命中元素；它不能证明目标没有被裁剪、覆盖，也不能证明目标会接收事件。因此这类结果统一为 `null` 更稳妥。
+
+未来若需要提高可用性，可以增加独立的诊断原因，例如 `occlusionReason: "ancestor-hit"` 或 `"shadow-boundary"`，但不能把诊断原因压回 `false`。这类原因字段不是本轮必须项，避免以未经验证的启发式重新引入确定性错误。
+
+### 与 `classifyHit` 分叉的后果
+
+选择 C 后，同一元素出现 `observe.visible: false` 与 `query.occluded: null` 是可能的，但这不是把两个字段定义成相反布尔值：
+
+- `observe.visible` 走 `classifyHit`，含有 actionability/事件派发语义，并对少数可点击祖先做放行。
+- `query.occluded` 是几何查询的遮挡结论；祖先命中时表示命中证据不足，不表示已确认无遮挡。
+
+这个分叉会让模型困惑，特别是当调用方把 `visible`、`occluded` 和“可点击”混用时；但 B 会造成更危险的静默矛盾：observe 已明确判定事件到不了目标，query 却给出确定的 `false`。因此不能为了字段表面一致而选择 B。应在 query 字段说明/公开变更说明中明确：`occluded === null` 不可用于推出无遮挡或可点击，`visible` 也不是 query `occluded` 的别名。
+
+长期方向是让两条路径共享一个返回“命中关系/不确定边界”的低层分类结果，再由 observe 和 query 分别投影出各自字段；在没有完成该语义拆分前，保守的三态结果比伪造一致性更安全。
+
+### 对本轮实现的约束
+
+1. 保留 `topEl === el`、composed 后代命中和明确的非祖先 blocker 的既有确定性判定。
+2. 对 composed ancestor（包括目标直接 host 和 slot 重定向 host）输出 `occluded: null`，且不输出 `occludedBy`。
+3. 增加 slot 重定向、自环 host、普通 composed wrapper 三类契约测试；测试应区分“结果未知”与“确认无遮挡”。
+4. 保持 `classifyHit` 的 ancestor 语义不变，不通过修改点击路径来迁就 query 字段。

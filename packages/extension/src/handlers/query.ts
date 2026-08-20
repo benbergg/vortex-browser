@@ -691,8 +691,13 @@ export const elementsProbeFunc = (
             topEl = null;
           }
         }
-        // 命中落在 composed 祖先上仍算遮挡,与点击路径 classifyHit 的 ancestor 分支一致
-        item.occluded = topEl ? topEl !== el && !composedContains(el, topEl) : null;
+        // 命中祖先只说明浏览器没返回更深的独立命中元素(slot/边界重定向都会这样),
+        // 证明不了目标没被裁剪或覆盖 → 不可判定。与 classifyHit 的 ancestor 语义
+        // 刻意不同:那边答「事件到不到得了」,这里答「上面有没有东西」。
+        item.occluded = !topEl ? null
+          : composedContains(el, topEl) ? false
+          : composedContains(topEl, el) ? null
+          : true;
         if (item.occluded) item.occludedBy = desc(topEl);
 
         item.textClipped = el.scrollWidth > el.clientWidth + TOL;

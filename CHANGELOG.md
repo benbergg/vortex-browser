@@ -45,11 +45,21 @@
   实测（Chrome 151）：open shadow 内自渲染的按钮从 `occluded: true, occludedBy: "host"`
   变为 `false`；被同一 shadow 内浮层盖住的那个，`occludedBy` 从 host 变成真正的浮层。
 
-  **一个已知的剩余缺口**：组件把可见内容放在 `<slot>` 里时（Shoelace 全站如此），点落在
-  slotted 的 light-DOM 内容上，`shadowRoot.elementFromPoint` 按规范**重定向回 host**，
-  下钻拿不到更深的元素，于是仍报 `occluded: true`。实测 shoelace.style 上 59 个
-  shadow 内元素判定**一个都没变**。这一类要靠"命中落在自己 composed 祖先上算不算遮挡"
-  的语义决定，属独立议题，本次未动。
+- **命中落在目标自己的 composed 祖先上时，`occluded` 报 `null`**（此前报 `true`）。
+  组件把可见内容放在 `<slot>` 里时（Shoelace 全站如此），点落在 slotted 的 light-DOM 上，
+  `shadowRoot.elementFromPoint` 按规范**重定向回 host**，下钻拿不到更深的元素。此时最终
+  命中是目标自己的祖先 —— 它只证明浏览器没返回更深的独立命中元素，**证明不了目标被挡住**
+  （报 `true` 是假阳性），也**证明不了目标没被裁剪或覆盖**（报 `false` 是假阴性，调用方会
+  当成已确认可点）。
+
+  这与点击路径 `classifyHit` 的 ancestor 分支刻意不同：那边答"事件到不到得了目标"，
+  祖先命中通常意味着到不了；这边答"目标上面有没有东西"，祖先在后面而不在上面。
+  **`occluded === null` 不能用来推出无遮挡或可点击，`observe` 的 `visible` 也不是它的别名。**
+
+  实测 shoelace.style（关掉页面上那个默认打开的演示对话框后）47 个 shadow 内可测元素：
+  修改前 **47/47 全报 `occluded: true`**；修改后 9 个 `false`（下钻找到目标自己）、
+  30 个 `null`（祖先/slot 重定向）、8 个 `true`（真遮挡）。即 **83% 是假的"被遮挡"**。
+  对照 github.com（无 open shadow）：祖先命中 0 个，判定与改前完全一致，零影响。
 
   原语（下钻、composed 包含）在探针里是内联复刻而非共享模块：`executeScript({func})`
   注入会丢模块作用域，import 不进来。策略层刻意不与 `classifyHit` 合并 —— 后者还含

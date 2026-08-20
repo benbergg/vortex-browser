@@ -274,15 +274,40 @@ describe("遮挡判定穿 open shadow", () => {
     expect(r.elements[0].occludedBy).toContain("closedhost");
   });
 
-  // 命中落在目标的 composed 祖先上仍算遮挡 —— 与点击路径 classifyHit 的 "ancestor"
-  // 分支一致(hit-ownership.ts:136)。这里锁的是"不要顺手把祖先也放行"。
-  it("命中落在 composed 祖先上 → 仍算遮挡,不因为穿了 shadow 就放行", () => {
+  // 命中落在 composed 祖先上 = 浏览器没返回更深的独立命中元素,证明不了目标没被
+  // 裁剪或覆盖 → null。报 true 是假阳性(祖先在后面不在上面),报 false 是假阴性
+  // (调用方会当成已确认无遮挡甚至可点)。与 classifyHit 的 ancestor 语义刻意不同。
+  it("命中落在普通 composed wrapper 上 → null,且不给 occludedBy", () => {
     const { host, sr } = mkShadow([100, 100, 200, 50], '<div class="wrap"><b class="target">t</b></div>');
     rect(sr.querySelector(".target")!, 100, 100, 200, 50);
     hitHostThen(host, sr, sr.querySelector(".wrap"));
     const r = geometryQuery(".target", 10) as any;
-    expect(r.elements[0].occluded).toBe(true);
-    expect(r.elements[0].occludedBy).toContain("wrap");
+    expect(r.elements[0].occluded).toBeNull();
+    expect("occludedBy" in r.elements[0]).toBe(false);
+  });
+
+  // Shoelace 全站的形态:可见内容来自 slot,点落在 slotted 的 light-DOM 上时
+  // shadowRoot.elementFromPoint 按规范重定向回 host,下钻拿不到更深的元素。
+  // 真站实测 59/59 走这条路 —— 它必须是 null,不能是"被自己的 host 遮挡"。
+  it("slot 重定向:shadow 内元素命中被退回 host → null 而非被 host 遮挡", () => {
+    const { host, sr } = mkShadow([100, 100, 200, 50], '<a class="target" part="base"><slot></slot></a>');
+    rect(sr.querySelector(".target")!, 100, 100, 200, 50);
+    hitHostThen(host, sr, host);
+    const r = geometryQuery(".target", 10) as any;
+    expect(r.elements[0].occluded).toBeNull();
+    expect("occludedBy" in r.elements[0]).toBe(false);
+  });
+
+  it("light DOM 里命中自己的祖先(如 pointer-events 落到父级)同样是 null", () => {
+    const parent = rect(document.createElement("div"), 100, 100, 200, 50);
+    parent.className = "parent";
+    const el = rect(document.createElement("span"), 100, 100, 200, 50);
+    el.className = "target";
+    parent.appendChild(el);
+    document.body.appendChild(parent);
+    (document as any).elementFromPoint = () => parent;
+    const r = geometryQuery(".target", 10) as any;
+    expect(r.elements[0].occluded).toBeNull();
   });
 
   // 真 Chrome 实测:点落在 host 上但 shadow 里没有子元素覆盖时,

@@ -189,11 +189,27 @@ open shadow 内自渲染按钮 `true, occludedBy:"host"` → `false`；被同 sh
 根因不是"没人想到"：`CHANGELOG.md:403` 记的 2026-05-27「读路径穿 open shadow 族 K」
 （`dad3d8e`+`4cdea1c`）扫了 `observe.ts` / `content.ts` / `capture.ts`，**漏了 `query.ts`**。
 
-**但真站上没闭合**：shoelace.style（164 个 open shadow root）上 59 个 shadow 内可测元素，
-修复前后判定**一个都没变**。原因是 **slot 重定向**——组件可见内容来自 `<slot>`，点落在 slotted 的
-light-DOM 内容上时 `shadowRoot.elementFromPoint` 按规范重定向回 host（下钻链呈 `sl-button → sl-button`
-自环），最终命中是目标自己的 composed 祖先，按现行语义算遮挡。「祖先命中该报什么」是独立语义议题，
-已交 Luna 第三轮，本轮未动。
+**只下钻还不够，真站上没闭合**：shoelace.style 上 59 个 shadow 内元素判定一个没变。
+原因有两层——那页有个默认打开的演示对话框真遮住了 47 个（**这一层我第一次归因错了**，
+把全部 59 个都算成 slot 重定向，实际只有 7 个是）；剩下的才是 **slot 重定向**：组件可见内容来自
+`<slot>`，点落在 slotted 的 light-DOM 上时 `shadowRoot.elementFromPoint` 按规范重定向回 host
+（下钻链呈 `sl-button → sl-button` 自环），最终命中是目标自己的 composed 祖先。
+
+**祖先命中语义（Luna 第三轮判定，选 C）**：报 `null`。祖先命中只证明浏览器没返回更深的独立
+命中元素，证明不了目标被挡住（`true` 是假阳性），也证明不了目标没被裁剪或覆盖（`false` 是假阴性，
+调用方会当成已确认可点）。与 `classifyHit` 的 ancestor 分支刻意分叉：那边答「事件到不到得了」，
+这边答「上面有没有东西」。
+
+**闭合后的真站数字**（shoelace.style，关掉演示对话框，47 个 shadow 内可测元素）：
+
+| | 改前 | 改后 |
+|---|---|---|
+| `occluded: true` | **47（全部）** | 8（真遮挡） |
+| `occluded: false` | 0 | 9（下钻找到目标自己） |
+| `occluded: null` | 0 | 30（祖先 / slot 重定向） |
+
+**83%（39/47）是假的「被遮挡」。** 对照 github.com（页面无 open shadow）：祖先命中 0 个，
+判定与改前完全一致 —— 这条改动只在该起作用的地方起作用。
 
 **压测首轮**（`vortex-bench perf --repeats 3`，Chrome 151，结构真值 4/4 全绿）：
 
