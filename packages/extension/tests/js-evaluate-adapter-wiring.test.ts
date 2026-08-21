@@ -138,6 +138,19 @@ describe("page-side async 适配器接线", () => {
   });
   afterEach(() => vi.unstubAllGlobals());
 
+  async function detachedAsyncFunc(): Promise<{
+    fn: (c: string, serSrc: string) => Promise<{ result?: unknown; error?: string }>;
+    serSrc: string;
+  }> {
+    await router.dispatch(mkReq("js.evaluateAsync", { code: "return 1" }, 42));
+    const call = executeScript.mock.calls[0][0];
+    const src = (call.func as (...a: unknown[]) => unknown).toString();
+    return {
+      fn: new Function(`return (${src});`)() as (c: string, serSrc: string) => Promise<{ result?: unknown; error?: string }>,
+      serSrc: call.args[1] as string,
+    };
+  }
+
   it("真源以 args 形式送进 async 注入函数", async () => {
     await router.dispatch(mkReq("js.evaluateAsync", { code: "return 1" }, 42));
     const args = executeScript.mock.calls[0][0].args as string[];
@@ -145,18 +158,35 @@ describe("page-side async 适配器接线", () => {
   });
 
   it("剥离作用域后:await 顶层再序列化,host object 不再丢失", async () => {
-    await router.dispatch(mkReq("js.evaluateAsync", { code: "return 1" }, 42));
-    const call = executeScript.mock.calls[0][0];
-    const src = (call.func as (...a: unknown[]) => unknown).toString();
-    const detached = new Function(`return (${src});`)() as (...a: unknown[]) => Promise<{ result?: unknown }>;
-    const rest = (call.args as unknown[]).slice(1);
-    expect((await detached("return new Map([[1,'a']])", ...rest)).result).toEqual([[1, "a"]]);
-    expect((await detached("return Promise.resolve(7)", ...rest)).result).toBe(7);
-    const nested = await detached("return {name:'x', data: Promise.resolve(1)}", ...rest);
+    const { fn, serSrc } = await detachedAsyncFunc();
+    expect((await fn("return new Map([[1,'a']])", serSrc)).result).toEqual([[1, "a"]]);
+    expect((await fn("return Promise.resolve(7)", serSrc)).result).toBe(7);
+    const nested = await fn("return {name:'x', data: Promise.resolve(1)}", serSrc);
     expect(nested.result).toEqual({
       name: "x",
       data: { __vortexUnserializable: "Promise", hint: "await it in your code, e.g. return await expr" },
     });
+  });
+
+  it("async 真源处理 Date 为 ISO 字符串", async () => {
+    const { fn, serSrc } = await detachedAsyncFunc();
+    const out = await fn("return new Date(0)", serSrc);
+    expect(out.error).toBeUndefined();
+    expect(out.result).toBe("1970-01-01T00:00:00.000Z");
+  });
+
+  it("async 真源处理 detached DataView 且不抛错", async () => {
+    const { fn, serSrc } = await detachedAsyncFunc();
+    const out = await fn("const ab=new ArrayBuffer(8); const dv=new DataView(ab); structuredClone(ab,{transfer:[ab]}); return dv", serSrc);
+    expect(out.error).toBeUndefined();
+    expect(out.result).toEqual({ __vortexUnserializable: "DataView" });
+  });
+
+  it("async 真源保留带字段的伪造 Promise brand 对象", async () => {
+    const { fn, serSrc } = await detachedAsyncFunc();
+    const out = await fn('return {foo:1,[Symbol.toStringTag]:"Promise"}', serSrc);
+    expect(out.error).toBeUndefined();
+    expect(out.result).toEqual({ foo: 1 });
   });
 });
 
