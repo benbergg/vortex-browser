@@ -8,6 +8,22 @@
 
 ### Changed
 
+- **`vortex_evaluate` 三条执行路径统一到同一序列化契约**：同步 page-side、异步
+  page-side 与 CSP 回退的 CDP 路径均在跨边界前调用同一序列化真源，避免结果随目标站
+  CSP 或执行路径漂移。行为变更：CSP 严格站点上 `async=false` 遇到顶层 `Promise`，
+  从返回解析值改为返回 marker；CSP 严格站点上的 `Map`、`Set`、`Date` 等 host object
+  从 `{}` 改为正确序列化。
+
+  marker 契约：`Promise` → `{ __vortexUnserializable: "Promise", hint: "await it in your code, e.g. return await expr" }`；
+  `WeakMap` / `WeakSet` / `WeakRef` / `FinalizationRegistry` / `SharedArrayBuffer` →
+  `{ __vortexUnserializable: "<Brand>" }`；`ArrayBuffer` / `DataView` →
+  `{ __vortexUnserializable: "<Brand>", byteLength: N }`，detached 时省略
+  `byteLength`；`RegExp` → `{ __vortexUnserializable: "RegExp", source: "ab+c", flags: "gi" }`；
+  `BigInt` → `{ __vortexUnserializable: "BigInt", value: "<十进制字符串>" }`。
+
+  **调用方注意**：品牌认定还要求 `Object.keys(v).length === 0`；依赖这类判空的分支
+  走向可能改变，带自有字段或伪造 `Symbol.toStringTag` 的普通对象仍按普通对象展开。
+
 - **`vortex_query` 的 `occluded` 改三态，属破坏性变更**：`true`（测到被遮挡）/
   `false`（测到未被遮挡）/ `null`（**测不了**）。过去只有两个取值，四种完全不同的
   输入被压成同一个确定答案：视口外元素、`elementFromPoint` 不可用、以及**零面积元素**。

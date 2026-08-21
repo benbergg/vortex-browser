@@ -1,4 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { ActionRouter } from "../src/lib/router.js";
 import { registerJsHandlers } from "../src/handlers/js.js";
 import { SERIALIZER_FN_NAME } from "../src/lib/evaluate-serializer.js";
@@ -155,5 +157,24 @@ describe("page-side async 适配器接线", () => {
       name: "x",
       data: { __vortexUnserializable: "Promise", hint: "await it in your code, e.g. return await expr" },
     });
+  });
+});
+
+/**
+ * 防复发守卫。本次缺陷的成因就是三条路径各写各的,其中一份还是死代码。
+ */
+describe("单一真源静态守卫", () => {
+  const jsSrc = readFileSync(resolve(__dirname, "../src/handlers/js.ts"), "utf-8");
+
+  it("handlers/js.ts 里不存在第二份品牌路由表", () => {
+    expect(jsSrc).not.toMatch(/normalizeEvaluateResult|expandHost/);
+  });
+
+  it("序列化只从真源模块引入", () => {
+    expect(jsSrc).toMatch(/from "\.\.\/lib\/evaluate-serializer\.js"/);
+  });
+
+  it("遗留 content.ts 不得重新出现", () => {
+    expect(() => readFileSync(resolve(__dirname, "../src/content.ts"), "utf-8")).toThrow();
   });
 });

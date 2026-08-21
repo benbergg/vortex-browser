@@ -1,10 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { ActionRouter } from "../src/lib/router.js";
-import {
-  registerJsHandlers,
-  normalizeEvaluateResult,
-} from "../src/handlers/js.js";
-import { SERIALIZER_FN_NAME, SERIALIZER_SOURCE } from "../src/lib/evaluate-serializer.js";
+import { registerJsHandlers } from "../src/handlers/js.js";
+import { loadSerializer, SERIALIZER_FN_NAME, SERIALIZER_SOURCE } from "../src/lib/evaluate-serializer.js";
+
+const serialize = loadSerializer();
 
 /**
  * VORTEX_FEEDBACK v3.4 BUG-001 + BUG-005: vortex_evaluate 序列化丢 host object 字段
@@ -12,11 +11,9 @@ import { SERIALIZER_FN_NAME, SERIALIZER_SOURCE } from "../src/lib/evaluate-seria
  * CSSStyleDeclaration / DOMStringMap / Date / Error / Map / Set / TypedArray / NodeList /
  * Attr) 只 copy enumerable own properties,prototype 上的 getter 全部丢失。
  *
- * 修复:handler 返结果前对已知 host object 调 .toJSON() / .toArray() / 手动展开,
- * 转 plain object。func 内联(序列化丢作用域),module-level helper 仅供单测。
+ * 修复:页面内统一调用序列化真源,跨 executeScript/CDP 边界前转成可传输值。
  *
  * 关键守卫(V2 风格):
- *   - normalizeEvaluateResult 为纯函数(handler 侧 + 测)
  *   - 真注入 page-side func,stub host object,验证真跑返 plain object
  *   - 不破坏 plain object 行为
  */
@@ -33,7 +30,7 @@ function mkReq(tool: string, args: Record<string, unknown> = {}, tabId = 42): Nm
   return { type: "tool_request", tool, args, requestId: "r-1", tabId };
 }
 
-describe("normalizeEvaluateResult — host object 展开 (BUG-001 + BUG-005)", () => {
+describe("序列化真源 — host object 展开 (BUG-001 + BUG-005)", () => {
   // BUG-001 cases
   const bug001Cases: Array<[label: string, input: unknown, expected: unknown]> = [
     ["DOMRect 展开 (plain object 模拟 — own getter x/y/w/h)",
@@ -75,7 +72,7 @@ describe("normalizeEvaluateResult — host object 展开 (BUG-001 + BUG-005)", (
 
   for (const [label, input, expected] of [...bug001Cases, ...bug005Cases, ...passthroughCases]) {
     it(label, () => {
-      expect(normalizeEvaluateResult(input)).toEqual(expected);
+      expect(serialize(input)).toEqual(expected);
     });
   }
 
@@ -86,7 +83,7 @@ describe("normalizeEvaluateResult — host object 展开 (BUG-001 + BUG-005)", (
     Object.defineProperty(Renamed, "name", { value: "e" });
     const d = new Renamed(0);
     expect(d.constructor.name).toBe("e");  // 复刻百度环境
-    expect(normalizeEvaluateResult(d)).toBe("1970-01-01T00:00:00.000Z");
+    expect(serialize(d)).toBe("1970-01-01T00:00:00.000Z");
   });
 
   it("Map 构造器被重命名仍 → array of pairs", () => {
@@ -94,7 +91,7 @@ describe("normalizeEvaluateResult — host object 展开 (BUG-001 + BUG-005)", (
     Object.defineProperty(RenamedMap, "name", { value: "t" });
     const m = new RenamedMap([[1, "a"]]);
     expect(m.constructor.name).toBe("t");
-    expect(normalizeEvaluateResult(m)).toEqual([[1, "a"]]);
+    expect(serialize(m)).toEqual([[1, "a"]]);
   });
 });
 
@@ -133,12 +130,12 @@ describe("EVALUATE page-side func — host object 展开 (BUG-001 + BUG-005)", (
   }
 
   // V2 关键守卫:防假绿 — func 源码不能引用模块函数
-  it("func 序列化安全:源码不引用 normalizeEvaluateResult", async () => {
+  it("func 序列化安全:源码不引用模块级序列化函数", async () => {
     const { fn } = await captureEvaluateFunc();
-    // 剥离行/块注释后再断言:func 用独立名 expandHost 内联,normalizeEvaluateResult 仅出现在
-    // 解释性注释(「与 module-level normalizeEvaluateResult 行为一致」),裸正则误匹配注释 → 假阳。
+    // 剥离行/块注释后再断言,避免解释性注释造成假阳。
     const src = fn.toString().replace(/\/\/.*$/gm, "").replace(/\/\*[\s\S]*?\*\//g, "");
-    expect(src).not.toMatch(/normalizeEvaluateResult/);
+    expect(src).not.toContain(SERIALIZER_SOURCE);
+    expect(src).not.toContain(SERIALIZER_FN_NAME);
   });
 
   it("plain object 展开直通", async () => {
@@ -163,10 +160,10 @@ describe("EVALUATE page-side func — host object 展开 (BUG-001 + BUG-005)", (
 /**
  * BUG-001/003/005 回归守卫(V2 风格真验):chrome.scripting.executeScript 经
  * func.toString() 把 func 注入页面 MAIN world,**丢模块作用域**。若 func body 引用
- * 模块级 `expandHost`(而非内联),注入后 `expandHost is not defined`,evaluate 全坏。
+ * 模块级序列化函数(而非 args 传入),注入后会 is not defined,evaluate 全坏。
  *
  * 直接在 Node 模块作用域调 captureEvaluateFunc() 返回的 fn 是**假绿**:闭包链能解析
- * 到同模块的 expandHost,跑得通。这里用 `new Function` 把 func 源码从模块作用域**剥离**
+ * 到同模块的序列化函数,跑得通。这里用 `new Function` 把 func 源码从模块作用域**剥离**
  * 后重建再调,精确复刻 executeScript 的注入语义——这才能抓到真 bug。
  */
 describe("EVALUATE func 序列化自包含 — 真注入复刻 (BUG-001/003/005 回归守卫)", () => {
