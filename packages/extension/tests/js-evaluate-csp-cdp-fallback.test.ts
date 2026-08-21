@@ -2,6 +2,9 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { NmRequest } from "@vortex-browser/shared";
 import { ActionRouter } from "../src/lib/router.js";
 import { registerJsHandlers } from "../src/handlers/js.js";
+import { SERIALIZER_FN_NAME } from "../src/lib/evaluate-serializer.js";
+
+// expression 断言只锁用户代码与真源,不锁包装文本的排版。
 
 /**
  * 真实站 dogfood(2026-06-02 github.com round 11)发现:页面 CSP 禁 `unsafe-eval`
@@ -73,8 +76,13 @@ describe("js.evaluate CSP unsafe-eval → CDP Runtime.evaluate 回退 (github do
     expect(dbg.sendCommand).toHaveBeenCalledWith(
       42,
       "Runtime.evaluate",
-      expect.objectContaining({ expression: "40 + 2", returnByValue: true, awaitPromise: true }),
+      expect.objectContaining({
+        expression: expect.stringContaining("40 + 2"),
+        returnByValue: true,
+        awaitPromise: false,
+      }),
     );
+    expect(dbg.sendCommand.mock.calls[0][2].expression).toContain(SERIALIZER_FN_NAME);
   });
 
   it("CDP Runtime.evaluate 的 timeout 必须是 number 毫秒(真实 CDP 契约,非 boolean)", async () => {
@@ -145,8 +153,9 @@ describe("js.evaluate CSP unsafe-eval → CDP Runtime.evaluate 回退 (github do
     expect(dbg.sendCommand).toHaveBeenCalledTimes(2);
     // 第二次用 (function(){...})() 包装。
     expect(dbg.sendCommand.mock.calls[1][2]).toMatchObject({
-      expression: "(function(){return 3 + 4})()",
+      expression: expect.stringContaining("return 3 + 4"),
     });
+    expect(dbg.sendCommand.mock.calls[1][2].expression).toContain(SERIALIZER_FN_NAME);
   });
 
   it("CDP Runtime.evaluate 真异常(非 return)→ 包成 JS_EXECUTION_ERROR 抛出", async () => {
@@ -182,9 +191,10 @@ describe("js.evaluate CSP unsafe-eval → CDP Runtime.evaluate 回退 (github do
     const out = (await router.dispatch(mkReq("js.evaluateAsync", { code: "Promise.resolve(99)" }))) as Resp;
     expect(out.result).toBe(99);
     expect(dbg.sendCommand.mock.calls[0][2]).toMatchObject({
-      expression: "(async () => (Promise.resolve(99)))()",
+      expression: expect.stringContaining("Promise.resolve(99)"),
       awaitPromise: true,
     });
+    expect(dbg.sendCommand.mock.calls[0][2].expression).toContain(SERIALIZER_FN_NAME);
   });
 
   it("js.evaluateAsync 报 unsafe-eval + 语句 code 时,CDP expr-first 失败回退到函数体 IIFE", async () => {
@@ -198,13 +208,15 @@ describe("js.evaluate CSP unsafe-eval → CDP Runtime.evaluate 回退 (github do
     expect(out.result).toBe(99);
     // 第一次 sendCommand 用 expr-first(失败);第二次用函数体 IIFE(成功)
     expect(dbg.sendCommand.mock.calls[0][2]).toMatchObject({
-      expression: "(async () => (return 99))()",
+      expression: expect.stringContaining("return 99"),
       awaitPromise: true,
     });
+    expect(dbg.sendCommand.mock.calls[0][2].expression).toContain(SERIALIZER_FN_NAME);
     expect(dbg.sendCommand.mock.calls[1][2]).toMatchObject({
-      expression: "(async () => { return 99 })()",
+      expression: expect.stringContaining("return 99"),
       awaitPromise: true,
     });
+    expect(dbg.sendCommand.mock.calls[1][2].expression).toContain(SERIALIZER_FN_NAME);
   });
 
   it("无 debuggerMgr 时(未注入)不回退,抛原错(向后兼容)", async () => {
@@ -232,8 +244,13 @@ describe("js.evaluate CSP unsafe-eval → CDP Runtime.evaluate 回退 (github do
     expect(dbg.sendCommand).toHaveBeenCalledWith(
       42,
       "Runtime.evaluate",
-      expect.objectContaining({ expression: "2 + 3", returnByValue: true }),
+      expect.objectContaining({
+        expression: expect.stringContaining("2 + 3"),
+        returnByValue: true,
+        awaitPromise: false,
+      }),
     );
+    expect(dbg.sendCommand.mock.calls[0][2].expression).toContain(SERIALIZER_FN_NAME);
   });
 
   it("js.evaluateAsync 返回 TT 错时,同样回退 CDP(expr-first 包装)", async () => {
@@ -243,9 +260,10 @@ describe("js.evaluate CSP unsafe-eval → CDP Runtime.evaluate 回退 (github do
     const out = (await router.dispatch(mkReq("js.evaluateAsync", { code: "Promise.resolve(88)" }))) as Resp;
     expect(out.result).toBe(88);
     expect(dbg.sendCommand.mock.calls[0][2]).toMatchObject({
-      expression: "(async () => (Promise.resolve(88)))()",
+      expression: expect.stringContaining("Promise.resolve(88)"),
       awaitPromise: true,
     });
+    expect(dbg.sendCommand.mock.calls[0][2].expression).toContain(SERIALIZER_FN_NAME);
   });
 
   it("用户错误恰含 'trusted type'(无 assignment 短语)不触发 CDP 回退", async () => {

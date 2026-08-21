@@ -2,6 +2,7 @@ import { JsActions, MAX_INNER_TIMEOUT_MS, VtxError, VtxErrorCode, vtxError } fro
 import type { ActionRouter } from "../lib/router.js";
 import type { DebuggerManager } from "../lib/debugger-manager.js";
 import { getActiveTabId, buildExecuteTarget, ensureFrameAttached } from "../lib/tab-utils.js";
+import { buildSerializedExpression } from "../lib/evaluate-serializer.js";
 
 /**
  * BUG-003: race a promise against a timeout. Only cancels the client-side wait —
@@ -105,8 +106,8 @@ export function buildAsyncSrc(c: string): string {
  * mouse/keyboard/dom 的 Input.* CDP 路径一致(它们同样 bare-attach 且常驻不 detach,
  * 调试横幅本就已存在)。曾有「无 domain 即 detach」版本,但 bare-attach 特性 domains
  * 也为空,并发交错时会把对方在途的 CDP 会话误 detach(评审 HIGH 回归);保持 attach
- * 零竞态、零新横幅成本。returnByValue 与 executeScript 序列化语义一致;awaitPromise
- * 兼容同步值与 Promise。抛 Error(由调用方包成 vtxError)。
+ * 零竞态、零新横幅成本。returnByValue 会把 host object 压成 `{}`,故序列化必须在页面内先完成(见
+ * evaluate-serializer.ts);awaitPromise 由调用方按 sync/async 显式指定。抛 Error(由调用方包成 vtxError)。
  *
  * v3.4 BUG-003:加 `timeoutMs` 参数(默认 5000)。CDP `Runtime.evaluate { timeout }` 只 native
  * abort **同步**死循环(渲染器强杀),不覆盖 awaitPromise 异步等待;故 cdpEvaluate 内用客户端
@@ -118,6 +119,7 @@ async function cdpEvaluate(
   tabId: number,
   expression: string,
   timeoutMs: number = 5000,
+  awaitTop: boolean,
 ): Promise<unknown> {
   await debuggerMgr.attach(tabId);
   // CDP `Runtime.evaluate.timeout` 是 TimeDelta(number 毫秒)。旧实现(b156687)传
@@ -134,7 +136,8 @@ async function cdpEvaluate(
   const inner = debuggerMgr.sendCommand(tabId, "Runtime.evaluate", {
     expression,
     returnByValue: true,
-    awaitPromise: true,
+    awaitPromise: awaitTop,
+    allowUnsafeEvalBlockedByCSP: true,
     userGesture: false,
     timeout: timeoutMs + CDP_KILL_BACKSTOP_MS,
   }) as Promise<{
@@ -413,11 +416,23 @@ export function registerJsHandlers(
         if (debuggerMgr && frameId == null &&
             (isUnsafeEvalBlocked(res.error) || isTrustedTypesBlocked(res.error))) {
           try {
-            return await cdpEvaluate(debuggerMgr, tid, code, timeout);
+            return await cdpEvaluate(
+              debuggerMgr,
+              tid,
+              buildSerializedExpression(code, { awaitTop: false, asStatement: false }),
+              timeout,
+              false,
+            );
           } catch (e) {
             const m = e instanceof Error ? e.message : String(e);
-            if (/Illegal return/.test(m)) {
-              return await cdpEvaluate(debuggerMgr, tid, `(function(){${code}})()`, timeout);
+            if (/SyntaxError|Unexpected|Illegal return/.test(m)) {
+              return await cdpEvaluate(
+                debuggerMgr,
+                tid,
+                buildSerializedExpression(code, { awaitTop: false, asStatement: true }),
+                timeout,
+                false,
+              );
             }
             if (isTimeoutError(m)) {
               throw jsTimeoutError(timeout);
@@ -516,12 +531,24 @@ export function registerJsHandlers(
           // Runtime.evaluate 求值 expression:先试表达式形式(支持纯表达式 code,B3-4),
           // 语法错误(语句/含 return)→ 回退函数体 IIFE 形式。镜像 page-side form-selection。
           try {
-            return await cdpEvaluate(debuggerMgr, tid, `(async () => (${code}))()`, timeout);
+            return await cdpEvaluate(
+              debuggerMgr,
+              tid,
+              buildSerializedExpression(code, { awaitTop: true, asStatement: false }),
+              timeout,
+              true,
+            );
           } catch (e) {
             const m = e instanceof Error ? e.message : String(e);
             if (/SyntaxError|Unexpected|Illegal return/i.test(m)) {
               try {
-                return await cdpEvaluate(debuggerMgr, tid, `(async () => { ${code} })()`, timeout);
+                return await cdpEvaluate(
+                  debuggerMgr,
+                  tid,
+                  buildSerializedExpression(code, { awaitTop: true, asStatement: true }),
+                  timeout,
+                  true,
+                );
               } catch (e2) {
                 const m2 = e2 instanceof Error ? e2.message : String(e2);
                 // 函数体重试若超时,保留 TIMEOUT 分类(否则被降级为 JS_EXECUTION_ERROR)。

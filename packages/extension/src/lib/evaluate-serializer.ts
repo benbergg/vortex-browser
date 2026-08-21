@@ -79,3 +79,17 @@ export function loadSerializer(): (v: unknown, d?: number) => unknown {
     d?: number,
   ) => unknown;
 }
+
+/**
+ * 把用户代码包成"页面内先求值、再序列化"的 CDP 表达式。
+ * 序列化必须发生在 returnByValue 之前,否则 host object 已被压成 `{}`。
+ */
+export function buildSerializedExpression(
+  userCode: string,
+  opts: { awaitTop: boolean; asStatement: boolean },
+): string {
+  const body = opts.asStatement ? `(function(){ ${userCode} })()` : `(${userCode})`;
+  const value = opts.awaitTop ? `await (${body})` : body;
+  const wrapper = opts.awaitTop ? "async function" : "function";
+  return `(${wrapper} (){ ${SERIALIZER_SOURCE}; var __r = ${value}; return ${SERIALIZER_FN_NAME}(__r); })()`;
+}
