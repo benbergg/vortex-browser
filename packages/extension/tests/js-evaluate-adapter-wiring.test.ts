@@ -76,3 +76,44 @@ describe("CDP 适配器接线", () => {
     expect(call![2].allowUnsafeEvalBlockedByCSP).toBe(true);
   });
 });
+
+describe("page-side sync 适配器接线", () => {
+  let router: ActionRouter;
+  let executeScript: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    vi.unstubAllGlobals();
+    router = new ActionRouter();
+    executeScript = vi.fn().mockResolvedValue([{ result: { result: null } }]);
+    vi.stubGlobal("chrome", {
+      tabs: { query: vi.fn().mockResolvedValue([{ id: 42 }]) },
+      webNavigation: { getAllFrames: vi.fn().mockResolvedValue([{ frameId: 0, parentFrameId: -1, url: "https://x/" }]) },
+      scripting: { executeScript },
+      runtime: { getManifest: vi.fn().mockReturnValue({ host_permissions: ["<all_urls>"] }) },
+    });
+    registerJsHandlers(router);
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("真源以 args 形式送进注入函数,而非在 func 里另写一份", async () => {
+    await router.dispatch(mkReq("js.evaluate", { code: "1+1" }, 42));
+    const args = executeScript.mock.calls[0][0].args as string[];
+    expect(args.some((a) => typeof a === "string" && a.includes(SERIALIZER_FN_NAME))).toBe(true);
+  });
+
+  it("注入函数源码里不再存在第二份品牌路由表", async () => {
+    await router.dispatch(mkReq("js.evaluate", { code: "1+1" }, 42));
+    const src = (executeScript.mock.calls[0][0].func as (...a: unknown[]) => unknown).toString();
+    expect(src).not.toMatch(/expandHost/);
+  });
+
+  it("剥离模块作用域后仍能跑通并按真源序列化", async () => {
+    await router.dispatch(mkReq("js.evaluate", { code: "1+1" }, 42));
+    const call = executeScript.mock.calls[0][0];
+    const src = (call.func as (...a: unknown[]) => unknown).toString();
+    // new Function 在全局作用域重建,看不到模块级标识符——与页面 MAIN world 等价
+    const detached = new Function(`return (${src});`)() as (...a: unknown[]) => { result?: unknown };
+    const out = detached("new Map([[1,'a']])", ...(call.args as unknown[]).slice(1));
+    expect(out.result).toEqual([[1, "a"]]);
+  });
+});

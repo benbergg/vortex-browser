@@ -4,6 +4,7 @@ import {
   registerJsHandlers,
   normalizeEvaluateResult,
 } from "../src/handlers/js.js";
+import { SERIALIZER_FN_NAME, SERIALIZER_SOURCE } from "../src/lib/evaluate-serializer.js";
 
 /**
  * VORTEX_FEEDBACK v3.4 BUG-001 + BUG-005: vortex_evaluate 序列化丢 host object 字段
@@ -119,17 +120,21 @@ describe("EVALUATE page-side func — host object 展开 (BUG-001 + BUG-005)", (
   });
   afterEach(() => vi.unstubAllGlobals());
 
-  async function captureEvaluateFunc(): Promise<(c: string) => Promise<{ result?: unknown; error?: string }>> {
+  async function captureEvaluateFunc(): Promise<{
+    fn: (c: string, serSrc: string) => Promise<{ result?: unknown; error?: string }>;
+    serSrc: string;
+  }> {
     executeScript.mockResolvedValue([{ result: { result: null } }]);
     await router.dispatch(mkReq("js.evaluate", { code: "null" }, 42));
-    const fn = executeScript.mock.calls[0][0].func as (c: string) => Promise<{ result?: unknown; error?: string }>;
+    const call = executeScript.mock.calls[0][0];
+    const fn = call.func as (c: string, serSrc: string) => Promise<{ result?: unknown; error?: string }>;
     executeScript.mockClear();
-    return fn;
+    return { fn, serSrc: call.args[1] as string };
   }
 
   // V2 关键守卫:防假绿 — func 源码不能引用模块函数
   it("func 序列化安全:源码不引用 normalizeEvaluateResult", async () => {
-    const fn = await captureEvaluateFunc();
+    const { fn } = await captureEvaluateFunc();
     // 剥离行/块注释后再断言:func 用独立名 expandHost 内联,normalizeEvaluateResult 仅出现在
     // 解释性注释(「与 module-level normalizeEvaluateResult 行为一致」),裸正则误匹配注释 → 假阳。
     const src = fn.toString().replace(/\/\/.*$/gm, "").replace(/\/\*[\s\S]*?\*\//g, "");
@@ -137,20 +142,20 @@ describe("EVALUATE page-side func — host object 展开 (BUG-001 + BUG-005)", (
   });
 
   it("plain object 展开直通", async () => {
-    const fn = await captureEvaluateFunc();
-    const out = await fn("({a: 1, b: 'x'})");
+    const { fn, serSrc } = await captureEvaluateFunc();
+    const out = await fn("({a: 1, b: 'x'})", serSrc);
     expect(out.result).toEqual({ a: 1, b: "x" });
   });
 
   it("数组展开直通", async () => {
-    const fn = await captureEvaluateFunc();
-    const out = await fn("[1, 2, 3]");
+    const { fn, serSrc } = await captureEvaluateFunc();
+    const out = await fn("[1, 2, 3]", serSrc);
     expect(out.result).toEqual([1, 2, 3]);
   });
 
   it("嵌套 5 层 plain object 完整展开", async () => {
-    const fn = await captureEvaluateFunc();
-    const out = await fn("({a:{b:{c:{d:{e:42}}}}})");
+    const { fn, serSrc } = await captureEvaluateFunc();
+    const out = await fn("({a:{b:{c:{d:{e:42}}}}})", serSrc);
     expect(out.result).toEqual({ a: { b: { c: { d: { e: 42 } } } } });
   });
 });
@@ -187,51 +192,58 @@ describe("EVALUATE func 序列化自包含 — 真注入复刻 (BUG-001/003/005 
   afterEach(() => vi.unstubAllGlobals());
 
   // 捕获 func 源码并从模块作用域剥离重建(模拟 executeScript 注入页面)
-  async function detachedEvaluateFunc(): Promise<(c: string) => { result?: unknown; error?: string }> {
+  async function detachedEvaluateFunc(): Promise<{
+    fn: (c: string, serSrc: string) => { result?: unknown; error?: string };
+    serSrc: string;
+  }> {
     executeScript.mockResolvedValue([{ result: { result: null } }]);
     await router.dispatch(mkReq("js.evaluate", { code: "null" }, 42));
-    const src = (executeScript.mock.calls[0][0].func as (c: string) => unknown).toString();
+    const call = executeScript.mock.calls[0][0];
+    const src = (call.func as (c: string, serSrc: string) => unknown).toString();
     executeScript.mockClear();
-    // new Function 在全局作用域重建,看不到模块级 expandHost——与页面 MAIN world 等价
-    return new Function(`return (${src});`)() as (c: string) => { result?: unknown; error?: string };
+    // new Function 在全局作用域重建,看不到模块级标识符
+    return {
+      fn: new Function(`return (${src});`)() as (c: string, serSrc: string) => { result?: unknown; error?: string },
+      serSrc: call.args[1] as string,
+    };
   }
 
   it("剥离作用域后简单表达式可跑(1+1)", async () => {
-    const fn = await detachedEvaluateFunc();
-    const out = fn("1+1");
+    const { fn, serSrc } = await detachedEvaluateFunc();
+    const out = fn("1+1", serSrc);
     expect(out.result).toBe(2);
   });
 
   it("剥离作用域后 plain object 展开", async () => {
-    const fn = await detachedEvaluateFunc();
-    const out = fn("({x:1, y:2})");
+    const { fn, serSrc } = await detachedEvaluateFunc();
+    const out = fn("({x:1, y:2})", serSrc);
     expect(out.result).toEqual({ x: 1, y: 2 });
   });
 
   it("剥离作用域后真注入 Date → ISO string (BUG-005)", async () => {
-    const fn = await detachedEvaluateFunc();
-    const out = fn("new Date(0)");
+    const { fn, serSrc } = await detachedEvaluateFunc();
+    const out = fn("new Date(0)", serSrc);
     expect(out.result).toBe("1970-01-01T00:00:00.000Z");
   });
 
   it("剥离作用域后真注入 Map → array of pairs (BUG-005)", async () => {
-    const fn = await detachedEvaluateFunc();
-    const out = fn("new Map([[1,'a'],[2,'b']])");
+    const { fn, serSrc } = await detachedEvaluateFunc();
+    const out = fn("new Map([[1,'a'],[2,'b']])", serSrc);
     expect(out.result).toEqual([[1, "a"], [2, "b"]]);
   });
 
   it("剥离作用域后真注入 host object(prototype getter)→ 展开字段 (BUG-001)", async () => {
-    const fn = await detachedEvaluateFunc();
+    const { fn, serSrc } = await detachedEvaluateFunc();
     // 模拟 DOMRect:字段在 prototype getter 上(structured clone 会丢,展开能取回)
-    const out = fn("(()=>{const p={};Object.defineProperties(p,{x:{get:()=>10,enumerable:true},w:{get:()=>100,enumerable:true}});return Object.create(p);})()");
+    const out = fn("(()=>{const p={};Object.defineProperties(p,{x:{get:()=>10,enumerable:true},w:{get:()=>100,enumerable:true}});return Object.create(p);})()", serSrc);
     expect(out.result).toEqual({ x: 10, w: 100 });
   });
 
-  it("守卫:func 源码内**定义** expandHost(不只引用)", async () => {
+  it("守卫:func 源码不引用序列化真源的模块标识符", async () => {
     executeScript.mockResolvedValue([{ result: { result: null } }]);
     await router.dispatch(mkReq("js.evaluate", { code: "null" }, 42));
-    const src = (executeScript.mock.calls[0][0].func as (c: string) => unknown).toString();
-    // 必须在 func body 内定义 expandHost 标识符,而非引用模块级
-    expect(src).toMatch(/(?:const|let|var|function)\s+expandHost|expandHost\s*=/);
+    const src = (executeScript.mock.calls[0][0].func as (c: string, serSrc: string) => unknown).toString();
+    expect(src).not.toContain(SERIALIZER_SOURCE);
+    expect(src).not.toContain(SERIALIZER_FN_NAME);
   });
 });

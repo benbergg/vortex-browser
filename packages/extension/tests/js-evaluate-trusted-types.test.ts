@@ -59,12 +59,16 @@ describe("js.evaluate Trusted Types fallback (youtube dogfood 2026-06-01)", () =
     delete (globalThis as Record<string, unknown>).__vortexTTPolicy;
   });
 
-  async function captureFunc(tool: string): Promise<(c: string) => unknown> {
+  async function captureFunc(tool: string): Promise<{
+    func: (c: string, serSrc: string) => unknown;
+    serSrc: string;
+  }> {
     executeScript.mockResolvedValue([{ result: { result: null } }]);
     await router.dispatch(mkReq(tool, { code: "null" }));
-    const fn = executeScript.mock.calls[0][0].func as (c: string) => unknown;
+    const call = executeScript.mock.calls[0][0];
+    const fn = call.func as (c: string, serSrc: string) => unknown;
     executeScript.mockClear();
-    return fn;
+    return { func: fn, serSrc: call.args[1] as string };
   }
 
   /** 模拟页面 TT 强制:裸字符串 eval 抛 TT 错,TrustedScript 包装对象正常执行。 */
@@ -105,35 +109,35 @@ describe("js.evaluate Trusted Types fallback (youtube dogfood 2026-06-01)", () =
 
   describe("js.evaluate", () => {
     it("on a Trusted Types page, eval(string) is retried through the named policy", async () => {
-      const func = await captureFunc("js.evaluate");
+      const { func, serSrc } = await captureFunc("js.evaluate");
       enforceTrustedTypes();
-      const out = func("1 + 1") as { result?: unknown; error?: string };
+      const out = func("1 + 1", serSrc) as { result?: unknown; error?: string };
       expect(out.error).toBeUndefined();
       expect(out.result).toBe(2);
     });
 
     it("when policy creation is blocked by CSP, the original TT error surfaces (graceful)", async () => {
-      const func = await captureFunc("js.evaluate");
+      const { func, serSrc } = await captureFunc("js.evaluate");
       enforceTrustedTypes({ policyCreatable: false });
-      const out = func("1 + 1") as { result?: unknown; error?: string };
+      const out = func("1 + 1", serSrc) as { result?: unknown; error?: string };
       expect(out.result).toBeUndefined();
       expect(out.error).toMatch(/Trusted Type/);
     });
 
     it("non-TT pages are unaffected — plain eval runs, no policy created", async () => {
-      const func = await captureFunc("js.evaluate");
+      const { func, serSrc } = await captureFunc("js.evaluate");
       // 不安装 trustedTypes:真实 eval 直接执行。
-      const out = func("2 + 3") as { result?: unknown; error?: string };
+      const out = func("2 + 3", serSrc) as { result?: unknown; error?: string };
       expect(out.result).toBe(5);
       expect((globalThis as Record<string, unknown>).__vortexTTPolicy).toBeUndefined();
     });
 
     it("matches the alternate real Chrome eval-sink wording (requires 'TrustedScript' assignment)", async () => {
-      const func = await captureFunc("js.evaluate");
+      const { func, serSrc } = await captureFunc("js.evaluate");
       enforceTrustedTypes({
         msg: "Refused to evaluate a string as JavaScript because this document requires 'TrustedScript' assignment.",
       });
-      const out = func("8 + 9") as { result?: unknown; error?: string };
+      const out = func("8 + 9", serSrc) as { result?: unknown; error?: string };
       expect(out.error).toBeUndefined();
       expect(out.result).toBe(17);
     });
@@ -152,9 +156,12 @@ describe("js.evaluate Trusted Types fallback (youtube dogfood 2026-06-01)", () =
       return router
         .dispatch(mkReq("js.evaluate", { code: "null" }))
         .then(() => {
-          const func = executeScript.mock.calls[0][0].func as (c: string) => unknown;
+          const call = executeScript.mock.calls[0][0];
+          const func = call.func as (c: string, serSrc: string) => unknown;
+          const serSrc = call.args[1] as string;
           const out = func(
             "globalThis.__ttSideEffect++; throw new Error('a trusted type mismatch happened');",
+            serSrc,
           ) as { error?: string };
           expect(out.error).toMatch(/trusted type mismatch/);
           expect(g.__ttSideEffect).toBe(1); // 只执行一次,无 policy 重试
@@ -166,9 +173,9 @@ describe("js.evaluate Trusted Types fallback (youtube dogfood 2026-06-01)", () =
 
   describe("js.evaluateAsync", () => {
     it("on a Trusted Types page, the async wrapper is built through the named policy", async () => {
-      const func = await captureFunc("js.evaluateAsync");
+      const { func, serSrc } = await captureFunc("js.evaluateAsync");
       enforceTrustedTypes();
-      const out = (await func("return 6 * 7")) as { result?: unknown; error?: string };
+      const out = (await func("return 6 * 7", serSrc)) as { result?: unknown; error?: string };
       expect(out.error).toBeUndefined();
       expect(out.result).toBe(42);
     });
@@ -177,9 +184,9 @@ describe("js.evaluate Trusted Types fallback (youtube dogfood 2026-06-01)", () =
     // 根因——async page-side 走 `new Function(p.createScript(src))`,但 `new Function` 不接受
     // TrustedScript(只有 eval 接受)。修复:async 路径改用 `eval` + 表达式 IIFE 形式。
     it("on a Trusted Types page, async multi-statement code runs (eval+policy, not new Function)", async () => {
-      const func = await captureFunc("js.evaluateAsync");
+      const { func, serSrc } = await captureFunc("js.evaluateAsync");
       enforceTrustedTypes();
-      const out = (await func("const a = 3; const b = 4; return a * b;")) as {
+      const out = (await func("const a = 3; const b = 4; return a * b;", serSrc)) as {
         result?: unknown;
         error?: string;
       };
@@ -191,17 +198,17 @@ describe("js.evaluate Trusted Types fallback (youtube dogfood 2026-06-01)", () =
     // `{ ${c} }` 无 return → undefined)。旧实现用 `new Function(exprSrc)` 做语法探测,TT 页
     // 上恒抛 TT 错(非 SyntaxError)→ 无法区分 → 退化为 stmtSrc → 纯表达式丢值。
     it("on a Trusted Types page, async pure expression returns its value", async () => {
-      const func = await captureFunc("js.evaluateAsync");
+      const { func, serSrc } = await captureFunc("js.evaluateAsync");
       enforceTrustedTypes();
-      const out = (await func("6 * 7")) as { result?: unknown; error?: string };
+      const out = (await func("6 * 7", serSrc)) as { result?: unknown; error?: string };
       expect(out.error).toBeUndefined();
       expect(out.result).toBe(42);
     });
 
     it("on a Trusted Types page, async await-expression resolves", async () => {
-      const func = await captureFunc("js.evaluateAsync");
+      const { func, serSrc } = await captureFunc("js.evaluateAsync");
       enforceTrustedTypes();
-      const out = (await func("await Promise.resolve(123)")) as {
+      const out = (await func("await Promise.resolve(123)", serSrc)) as {
         result?: unknown;
         error?: string;
       };
@@ -212,9 +219,9 @@ describe("js.evaluate Trusted Types fallback (youtube dogfood 2026-06-01)", () =
     // policy 不可创建(站点 trusted-types 指令带 allowlist 不含 vortex-eval)→ page-side 无法
     // 自救,优雅返回原始 TT 错(由 handler 决定是否回退 CDP,见 csp-cdp-fallback 测试)。
     it("when policy creation is blocked, async surfaces the original TT error (graceful)", async () => {
-      const func = await captureFunc("js.evaluateAsync");
+      const { func, serSrc } = await captureFunc("js.evaluateAsync");
       enforceTrustedTypes({ policyCreatable: false });
-      const out = (await func("return 6 * 7")) as { result?: unknown; error?: string };
+      const out = (await func("return 6 * 7", serSrc)) as { result?: unknown; error?: string };
       expect(out.result).toBeUndefined();
       expect(out.error).toMatch(/Trusted Type/);
     });

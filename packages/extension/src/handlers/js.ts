@@ -2,7 +2,11 @@ import { JsActions, MAX_INNER_TIMEOUT_MS, VtxError, VtxErrorCode, vtxError } fro
 import type { ActionRouter } from "../lib/router.js";
 import type { DebuggerManager } from "../lib/debugger-manager.js";
 import { getActiveTabId, buildExecuteTarget, ensureFrameAttached } from "../lib/tab-utils.js";
-import { buildSerializedExpression } from "../lib/evaluate-serializer.js";
+import {
+  buildSerializedExpression,
+  SERIALIZER_SOURCE,
+  SERIALIZER_FN_NAME,
+} from "../lib/evaluate-serializer.js";
 
 /**
  * BUG-003: race a promise against a timeout. Only cancels the client-side wait —
@@ -305,52 +309,7 @@ export function registerJsHandlers(
         // 站点普遍)时,裸字符串 eval/new Function 被 CSP 拒。用命名 policy 把代码
         // 包成 TrustedScript 再求值即可绕过(策略创建受页面 trusted-types 指令约束,
         // 失败则优雅回退抛原错——不比现状更糟)。
-        func: (c: string) => {
-          // BUG-001/005:host object 序列化展开。**必须内联在 func 内部** ——
-          // chrome.scripting.executeScript 经 func.toString() 注入页面 MAIN world 时
-          // 丢模块作用域,引用模块级 expandHost 会 `expandHost is not defined`(v3.4 回归)。
-          // 与 module-level normalizeEvaluateResult 行为一致,须同步改两边;守卫要求源码
-          // 不含 "normalizeEvaluateResult" 字符串故这里用独立名 expandHost。
-          const expandHost = (v: unknown, d = 0): unknown => {
-            const MAX = 5;
-            if (d > MAX) return null;
-            if (v === null || v === undefined) return v;
-            const t = typeof v;
-            if (t === "string" || t === "number" || t === "boolean" || t === "bigint") return v;
-            if (t === "function" || t === "symbol") return undefined;
-            if (Array.isArray(v)) return v.map((x: unknown) => expandHost(x, d + 1));
-            if (t === "object") {
-              // 品牌路由,不用 constructor.name(页面可重命名,实测百度 Date→"e")。
-              const tag = Object.prototype.toString.call(v).slice(8, -1);
-              if (tag === "Date") return (v as Date).toJSON();
-              if (tag === "Error" || (v as { name?: string }).name?.endsWith("Error")) {
-                const e = v as Error;
-                const o: Record<string, unknown> = { name: e.name, message: e.message };
-                if (e.stack) o.stack = e.stack;
-                return o;
-              }
-              if (tag === "Map" || tag === "Set" || tag === "NodeList") {
-                return Array.from(v as Iterable<unknown>).map((x: unknown) => expandHost(x, d + 1));
-              }
-              if (tag === "Uint8Array" || tag === "Uint8ClampedArray" || tag === "Int8Array" ||
-                  tag === "Uint16Array" || tag === "Uint32Array" || tag === "Int16Array" ||
-                  tag === "Int32Array" || tag === "Float32Array" || tag === "Float64Array" ||
-                  tag === "BigInt64Array" || tag === "BigUint64Array") {
-                return Array.from(v as Iterable<number>).map((x: unknown) => expandHost(x, d + 1));
-              }
-              const o: Record<string, unknown> = {};
-              for (const k in v as object) {
-                if (Object.prototype.hasOwnProperty.call(Object.prototype, k)) continue;
-                try {
-                  const vv = (v as Record<string, unknown>)[k];
-                  if (typeof vv === "function" || typeof vv === "symbol") continue;
-                  o[k] = expandHost(vv, d + 1);
-                } catch { /* skip inaccessible */ }
-              }
-              return o;
-            }
-            return v;
-          };
+        func: (c: string, serSrc: string) => {
           const g = globalThis as unknown as {
             trustedTypes?: { createPolicy?: (n: string, r: { createScript: (s: string) => string }) => { createScript: (s: string) => string } };
             __vortexTTPolicy?: { createScript: (s: string) => string } | null;
@@ -373,12 +332,21 @@ export function registerJsHandlers(
             } catch { g.__vortexTTPolicy = null; }
             return g.__vortexTTPolicy;
           };
+          let S: (x: unknown) => unknown;
           try {
-            try { return { result: expandHost(eval(c)) }; }
+            S = eval(serSrc) as (x: unknown) => unknown;
+          } catch (err) {
+            const m = err instanceof Error ? err.message : String(err);
+            const p = isTT(m) ? getPolicy() : null;
+            if (!p) return { error: m };
+            S = eval(p.createScript(serSrc) as unknown as string) as (x: unknown) => unknown;
+          }
+          try {
+            try { return { result: S(eval(c)) }; }
             catch (err) {
               const m = err instanceof Error ? err.message : String(err);
               const p = isTT(m) ? getPolicy() : null;
-              if (p) return { result: expandHost(eval(p.createScript(c) as unknown as string)) };
+              if (p) return { result: S(eval(p.createScript(c) as unknown as string)) };
               throw err;
             }
           }
@@ -388,13 +356,13 @@ export function registerJsHandlers(
               try {
                 try {
                   const fn = new Function(c);
-                  return { result: expandHost(fn()), autoIIFE: true };
+                  return { result: S(fn()), autoIIFE: true };
                 } catch (e2) {
                   const m2 = e2 instanceof Error ? e2.message : String(e2);
                   const p = isTT(m2) ? getPolicy() : null;
                   if (!p) throw e2;
                   const fn = new Function(p.createScript(c) as unknown as string);
-                  return { result: expandHost(fn()), autoIIFE: true };
+                  return { result: S(fn()), autoIIFE: true };
                 }
               } catch (err2) {
                 return { error: err2 instanceof Error ? err2.message : String(err2) };
@@ -403,7 +371,7 @@ export function registerJsHandlers(
             return { error: msg };
           }
         },
-        args: [code],
+        args: [code, `(function(){ ${SERIALIZER_SOURCE}; return ${SERIALIZER_FN_NAME}; })()`],
         world: "MAIN",
       });
       // BUG-003: race executeScript against timeout

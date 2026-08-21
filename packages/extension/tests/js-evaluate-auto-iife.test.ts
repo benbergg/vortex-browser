@@ -115,30 +115,34 @@ describe("js.evaluate auto-IIFE retry (P1-B1)", () => {
   });
 
   describe("page-side func body (direct invocation)", () => {
-    async function captureFunc(): Promise<(c: string) => unknown> {
+    async function captureFunc(): Promise<{
+      func: (c: string, serSrc: string) => unknown;
+      serSrc: string;
+    }> {
       executeScript.mockResolvedValue([{ result: { result: null } }]);
       await router.dispatch(mkReq("js.evaluate", { code: "null" }, 42));
-      const fn = executeScript.mock.calls[0][0].func as (c: string) => unknown;
+      const call = executeScript.mock.calls[0][0];
+      const fn = call.func as (c: string, serSrc: string) => unknown;
       executeScript.mockClear();
-      return fn;
+      return { func: fn, serSrc: call.args[1] as string };
     }
 
     it("vanilla eval path: simple expression returns { result }", async () => {
-      const func = await captureFunc();
-      expect(func("1 + 1")).toEqual({ result: 2 });
+      const { func, serSrc } = await captureFunc();
+      expect(func("1 + 1", serSrc)).toEqual({ result: 2 });
     });
 
     it("auto-IIFE recovery: top-level `return` triggers retry, returns { result, autoIIFE:true }", async () => {
-      const func = await captureFunc();
-      const out = func("return 42") as { result?: unknown; autoIIFE?: boolean; error?: string };
+      const { func, serSrc } = await captureFunc();
+      const out = func("return 42", serSrc) as { result?: unknown; autoIIFE?: boolean; error?: string };
       expect(out.error).toBeUndefined();
       expect(out.result).toBe(42);
       expect(out.autoIIFE).toBe(true);
     });
 
     it("auto-IIFE retry covers multi-statement body with `return` as last statement", async () => {
-      const func = await captureFunc();
-      const out = func("const x = {a:1, b:2}; return JSON.stringify(x);") as {
+      const { func, serSrc } = await captureFunc();
+      const out = func("const x = {a:1, b:2}; return JSON.stringify(x);", serSrc) as {
         result?: unknown;
         autoIIFE?: boolean;
       };
@@ -147,23 +151,23 @@ describe("js.evaluate auto-IIFE retry (P1-B1)", () => {
     });
 
     it("retry-of-retry failure: real syntax error inside return → { error } (no infinite loop)", async () => {
-      const func = await captureFunc();
-      const out = func("return {") as { error?: string; result?: unknown };
+      const { func, serSrc } = await captureFunc();
+      const out = func("return {", serSrc) as { error?: string; result?: unknown };
       expect(out.result).toBeUndefined();
       expect(out.error).toBeDefined();
       expect(out.error).toMatch(/SyntaxError|Unexpected/);
     });
 
     it("non-'Illegal return' errors are NOT retried — passed through with original message", async () => {
-      const func = await captureFunc();
-      const out = func("nonExistentVar123.foo") as { error?: string };
+      const { func, serSrc } = await captureFunc();
+      const out = func("nonExistentVar123.foo", serSrc) as { error?: string };
       expect(out.error).toMatch(/nonExistentVar123|not defined/);
       expect(out.error).not.toMatch(/Illegal return/);
     });
 
     it("legitimate script-context code (no `return`) is unchanged — autoIIFE flag absent", async () => {
-      const func = await captureFunc();
-      const out = func("({ok:1})") as { result?: unknown; autoIIFE?: boolean };
+      const { func, serSrc } = await captureFunc();
+      const out = func("({ok:1})", serSrc) as { result?: unknown; autoIIFE?: boolean };
       expect(out.result).toEqual({ ok: 1 });
       expect(out.autoIIFE).toBeUndefined();
     });
