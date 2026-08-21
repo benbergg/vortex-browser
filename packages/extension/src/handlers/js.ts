@@ -428,7 +428,7 @@ export function registerJsHandlers(
       // BUG-003: race executeScript against timeout
       const execPromise = chrome.scripting.executeScript({
         target: buildExecuteTarget(tid, frameId),
-        func: async (c: string) => {
+        func: async (c: string, serSrc: string) => {
           // 见 js.evaluate 注释:Trusted Types 站点上 `new Function(string)` 同被拒,
           // 命名 policy 包成 TrustedScript 后绕过。
           const g = globalThis as unknown as {
@@ -453,6 +453,15 @@ export function registerJsHandlers(
             } catch { g.__vortexTTPolicy = null; }
             return g.__vortexTTPolicy;
           };
+          let S: (x: unknown) => unknown;
+          try {
+            S = eval(serSrc) as (x: unknown) => unknown;
+          } catch (err) {
+            const m = err instanceof Error ? err.message : String(err);
+            const p = isTT(m) ? getPolicy() : null;
+            if (!p) return { error: m };
+            S = eval(p.createScript(serSrc) as unknown as string) as (x: unknown) => unknown;
+          }
           // 表达式 c(无 return)走 exprSrc 返回值,语句/含 return 走 stmtSrc 函数体形式。
           // **用 eval 而非 new Function**:Trusted Types 站点上 `eval(TrustedScript)` 被豁免,
           // 但 `new Function(TrustedScript)` 会对参数 ToString 后重新校验、TrustedScript 不被
@@ -481,10 +490,10 @@ export function registerJsHandlers(
               if (/SyntaxError|Unexpected|Illegal return/i.test(m0)) promise = runEval(stmtSrc);
               else throw e0;
             }
-            return { result: await promise };
+            return { result: S(await promise) };
           } catch (err) { return { error: err instanceof Error ? err.message : String(err) }; }
         },
-        args: [code],
+        args: [code, `(function(){ ${SERIALIZER_SOURCE}; return ${SERIALIZER_FN_NAME}; })()`],
         world: "MAIN",
       });
       // BUG-003: race executeScript against timeout

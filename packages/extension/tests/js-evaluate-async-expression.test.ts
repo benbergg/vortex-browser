@@ -70,14 +70,18 @@ describe("EVALUATE_ASYNC page-side func — 自包含 + 真跑 (B3-4)", () => {
   });
   afterEach(() => vi.unstubAllGlobals());
 
-  async function captureAsyncFunc(): Promise<(c: string) => Promise<{ result?: unknown; error?: string }>> {
+  async function captureAsyncFunc(): Promise<{
+    fn: (c: string, serSrc: string) => Promise<{ result?: unknown; error?: string }>;
+    serSrc: string;
+  }> {
     executeScript.mockResolvedValue([{ result: { result: null } }]);
     await router.dispatch(
       mkReq("js.evaluateAsync", { code: "null" }, 42),
     );
-    const fn = executeScript.mock.calls[0][0].func as (c: string) => Promise<{ result?: unknown; error?: string }>;
+    const call = executeScript.mock.calls[0][0];
+    const fn = call.func as (c: string, serSrc: string) => Promise<{ result?: unknown; error?: string }>;
     executeScript.mockClear();
-    return fn;
+    return { fn, serSrc: call.args[1] as string };
   }
 
   // V2 关键守卫:防 V1 假绿 —— func 源码不能引用 buildAsyncSrc
@@ -89,34 +93,34 @@ describe("EVALUATE_ASYNC page-side func — 自包含 + 真跑 (B3-4)", () => {
   });
 
   it("纯表达式 'Promise.resolve(42)' → { result: 42 }", async () => {
-    const fn = await captureAsyncFunc();
-    const out = await fn("Promise.resolve(42)");
+    const { fn, serSrc } = await captureAsyncFunc();
+    const out = await fn("Promise.resolve(42)", serSrc);
     expect(out.error).toBeUndefined();
     expect(out.result).toBe(42);
   });
 
   it("函数体 'return { ok: true }' → { ok: true } (旧契约不破)", async () => {
-    const fn = await captureAsyncFunc();
-    const out = await fn("return { ok: true }");
+    const { fn, serSrc } = await captureAsyncFunc();
+    const out = await fn("return { ok: true }", serSrc);
     expect(out.error).toBeUndefined();
     expect(out.result).toEqual({ ok: true });
   });
 
   it("IIFE '(async () => 99)()' → 99", async () => {
-    const fn = await captureAsyncFunc();
-    const out = await fn("(async () => 99)()");
+    const { fn, serSrc } = await captureAsyncFunc();
+    const out = await fn("(async () => 99)()", serSrc);
     expect(out.result).toBe(99);
   });
 
   it("表达式含 await 'await Promise.resolve(7)' → 7", async () => {
-    const fn = await captureAsyncFunc();
-    const out = await fn("await Promise.resolve(7)");
+    const { fn, serSrc } = await captureAsyncFunc();
+    const out = await fn("await Promise.resolve(7)", serSrc);
     expect(out.result).toBe(7);
   });
 
   it("真实语法错误 'return {' → { error } 透传", async () => {
-    const fn = await captureAsyncFunc();
-    const out = await fn("return {");
+    const { fn, serSrc } = await captureAsyncFunc();
+    const out = await fn("return {", serSrc);
     expect(out.result).toBeUndefined();
     expect(out.error).toMatch(/SyntaxError|Unexpected/);
   });

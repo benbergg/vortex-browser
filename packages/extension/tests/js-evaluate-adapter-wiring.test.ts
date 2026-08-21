@@ -117,3 +117,43 @@ describe("page-side sync 适配器接线", () => {
     expect(out.result).toEqual([[1, "a"]]);
   });
 });
+
+describe("page-side async 适配器接线", () => {
+  let router: ActionRouter;
+  let executeScript: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    vi.unstubAllGlobals();
+    router = new ActionRouter();
+    executeScript = vi.fn().mockResolvedValue([{ result: { result: null } }]);
+    vi.stubGlobal("chrome", {
+      tabs: { query: vi.fn().mockResolvedValue([{ id: 42 }]) },
+      webNavigation: { getAllFrames: vi.fn().mockResolvedValue([{ frameId: 0, parentFrameId: -1, url: "https://x/" }]) },
+      scripting: { executeScript },
+      runtime: { getManifest: vi.fn().mockReturnValue({ host_permissions: ["<all_urls>"] }) },
+    });
+    registerJsHandlers(router);
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("真源以 args 形式送进 async 注入函数", async () => {
+    await router.dispatch(mkReq("js.evaluateAsync", { code: "return 1" }, 42));
+    const args = executeScript.mock.calls[0][0].args as string[];
+    expect(args.some((a) => typeof a === "string" && a.includes(SERIALIZER_FN_NAME))).toBe(true);
+  });
+
+  it("剥离作用域后:await 顶层再序列化,host object 不再丢失", async () => {
+    await router.dispatch(mkReq("js.evaluateAsync", { code: "return 1" }, 42));
+    const call = executeScript.mock.calls[0][0];
+    const src = (call.func as (...a: unknown[]) => unknown).toString();
+    const detached = new Function(`return (${src});`)() as (...a: unknown[]) => Promise<{ result?: unknown }>;
+    const rest = (call.args as unknown[]).slice(1);
+    expect((await detached("return new Map([[1,'a']])", ...rest)).result).toEqual([[1, "a"]]);
+    expect((await detached("return Promise.resolve(7)", ...rest)).result).toBe(7);
+    const nested = await detached("return {name:'x', data: Promise.resolve(1)}", ...rest);
+    expect(nested.result).toEqual({
+      name: "x",
+      data: { __vortexUnserializable: "Promise", hint: "await it in your code, e.g. return await expr" },
+    });
+  });
+});
