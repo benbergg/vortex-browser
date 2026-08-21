@@ -6,11 +6,16 @@
 
 ## [Unreleased]
 
+---
+
+## [4.0.0] - 2026-08-21
+
 ### Changed
 
 - **`vortex_evaluate` 三条执行路径统一到同一序列化契约**：同步 page-side、异步
-  page-side 与 CSP 回退的 CDP 路径均在跨边界前调用同一序列化真源，避免结果随目标站
-  CSP 或执行路径漂移。行为变更：CSP 严格站点上 `async=false` 遇到顶层 `Promise`，
+  page-side 与 CSP 回退的 CDP 路径均在跨边界前调用同一序列化真源
+  （`packages/extension/src/lib/evaluate-serializer.ts`，一份源码字符串被三条路径共同
+  消费，测试从同一文本还原），避免结果随目标站 CSP 或执行路径漂移。行为变更：CSP 严格站点上 `async=false` 遇到顶层 `Promise`，
   从返回解析值改为返回 marker；CSP 严格站点上的 `Map`、`Set`、`Date` 等 host object
   从 `{}` 改为正确序列化。
 
@@ -114,10 +119,11 @@
   纯 light DOM **50 次**、nest 1 **100 次**、nest 6 **350 次** —— 每嵌一层多一次，
   nest 6 就是 7 倍；而一次命中测试在 4 万节点上约 0.85ms。
 
-  shadow 语料还量出另一件事：`contrast` 的祖先上溯走 `el.parentElement`，**它不跨
-  shadow 边界**（card 挂在 shadow root 上，`card.parentElement` 即 `null`）。所以
-  shadow 内元素的上溯恒为 1 步，够不到 host 上的背景色。这是另一个维度上的同类缺口，
-  本次只让语料把它量出来，未修。
+  shadow 语料还量出另一件事：`contrast` 的祖先上溯当时走 `el.parentElement`，**不跨
+  shadow 边界**（card 挂在 shadow root 上，`card.parentElement` 即 `null`），所以
+  shadow 内元素的上溯恒为 1 步，够不到 host 上的背景色。**该缺口已在本版修复**
+  （见上方 Changed 段「`contrast` 祖先上溯改走 composed tree」）——语料先把它量出来，
+  修复随后跟上，语料现在成了它的回归护栏。
 
   **退出码只看结构真值，不看耗时**——端到端墙钟实测同一调用重复 10 次为 96–132ms
   （1.4×），任何墙钟阈值都会 flaky。成本次序在差距小于抖动时以 `~` 标并列，不假装排得出先后。
