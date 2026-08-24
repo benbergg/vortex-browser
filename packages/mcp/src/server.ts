@@ -107,6 +107,9 @@ let activeSnapshotHash: string | null = null;
 // 在 resolveTargetParam 入口与本次调用 args.tabId 比对, 防止 bare ref
 // 跨导航/跨 tab 绕过 v0.8 hash 严判。null = 尚未 observe 过 (等同无 snapshot)。
 let activeSnapshotTabId: number | null = null;
+// query 产出第二个 snapshot 后，裸 ref 不再有安全的归属语义；新 observe
+// 会把它重置为单 producer 兼容状态。
+let querySnapshotRegistered = false;
 
 const PORT = parseInt(process.env.VORTEX_PORT ?? "6800");
 const DEFAULT_TIMEOUT = parseInt(process.env.VORTEX_TIMEOUT_MS ?? "30000");
@@ -558,6 +561,7 @@ export async function handleCallTool(
     if (snapshotResult?.snapshotId) {
       activeSnapshotId = snapshotResult.snapshotId;
       activeSnapshotHash = computeSnapshotHash(snapshotResult.snapshotId);
+      querySnapshotRegistered = false;
       // 缺陷⑤ (2026-06-07 v4 淘宝评测): 同步记 activeSnapshotTabId 用于
       // tab 维度校验, 防止 bare ref 跨导航绕过 v0.8 hash 严判。tabId 在
       // observe 调用 args 中, 上方 const { scope, filter, tabId, timeout, ...rest }
@@ -627,6 +631,7 @@ export async function handleCallTool(
           activeSnapshotHash,
           activeSnapshotTabId,
           currentTabId,
+          querySnapshotRegistered,
         );
         if (resolved.selector) fieldParams.selector = resolved.selector;
         if (resolved.index != null) {
@@ -732,6 +737,7 @@ export async function handleCallTool(
       try {
         const resolved = resolveTargetParam(
           step.target, activeSnapshotId, activeSnapshotHash, activeSnapshotTabId, currentTabId,
+          querySnapshotRegistered,
         );
         if (resolved.selector) actParams.selector = resolved.selector;
         if (resolved.index != null) {
@@ -792,6 +798,7 @@ export async function handleCallTool(
         activeSnapshotHash,
         activeSnapshotTabId,
         currentTabId,
+        querySnapshotRegistered,
       );
       delete params.target;
       if (resolved.selector) params.selector = resolved.selector;
@@ -820,7 +827,14 @@ export async function handleCallTool(
       const raw = params[refField] as string | undefined;
       if (!raw) continue;
       try {
-        const resolved = resolveTargetParam(raw, activeSnapshotId, activeSnapshotHash, activeSnapshotTabId, currentTabId);
+        const resolved = resolveTargetParam(
+          raw,
+          activeSnapshotId,
+          activeSnapshotHash,
+          activeSnapshotTabId,
+          currentTabId,
+          querySnapshotRegistered,
+        );
         delete params[refField];
         if (resolved.selector) {
           params[`${side}Selector`] = resolved.selector;
@@ -894,6 +908,36 @@ export async function handleCallTool(
           text: formatDispatchError(resp.error),
         }],
       };
+    }
+
+    // query 也会产出 extension snapshot。登记 active snapshot，并在返回项上
+    // 补带身份的 ref；裸 ref 在此之后由 resolveTargetParam 明确拒绝。
+    if (toolDef.name === "vortex_query") {
+      const queryResult = resp.result as {
+        snapshotId?: string;
+        elements?: Array<Record<string, unknown>>;
+      } | undefined;
+      if (queryResult?.snapshotId && Array.isArray(queryResult.elements)) {
+        activeSnapshotId = queryResult.snapshotId;
+        activeSnapshotHash = computeSnapshotHash(queryResult.snapshotId);
+        activeSnapshotTabId = typeof params.tabId === "number" ? params.tabId : null;
+        querySnapshotRegistered = true;
+        const hash = activeSnapshotHash;
+        if (hash) {
+          (resp as { result: unknown }).result = {
+            ...queryResult,
+            elements: queryResult.elements.map((element) => {
+              const index = element.index;
+              if (typeof index !== "number") return element;
+              const frameId = element.frameId;
+              const tail = typeof frameId === "number" && frameId !== 0
+                ? `f${frameId}e${index}`
+                : `e${index}`;
+              return { ...element, ref: `@${hash}:${tail}` };
+            }),
+          };
+        }
+      }
     }
 
     if (toolDef.name === "vortex_browser" && typeof params.browser === "string" && params.browser.trim()) {

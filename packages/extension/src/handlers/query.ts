@@ -13,6 +13,7 @@ import { fetchPlatformFonts } from "../lib/platform-fonts.js";
 import { aggregateFontFaces, buildFontEvidence, dropInitialLayoutValues, isPseudoRendered } from "../lib/style-evidence.js";
 import { dimensionsForMode, normalizeDimensions, ALL_DIMENSIONS } from "../lib/element-dimensions.js";
 import { shapeCssResult, shapeGeometryResult, shapeStyleResult, type RawProbeResult } from "../lib/element-shaping.js";
+import { gcSnapshots, newSnapshotId, setSnapshot } from "../lib/snapshot-store.js";
 
 type TextScan = { chars: number; nodes: number; shadowRoots: number; iframes: number };
 type CssScan = { elements: number; shadowRoots: number; iframes: number };
@@ -576,6 +577,27 @@ export const elementsProbeFunc = (
       }
       return parts.reverse().join(">");
     };
+    // 为 query 结果生成可回喂给 dom.* 的元素级 CSS 路径。
+    // 在 shadow root 边界停止；若多个 root 中路径相同，提交阶段会报 ambiguity，
+    // 不静默选取首个元素。
+    const trackableSelectorOf = (start: Element): string => {
+      const parts: string[] = [];
+      let node: Element | null = start;
+      while (node) {
+        const tag = node.tagName.toLowerCase();
+        let ordinal = 1;
+        let sibling = node.previousElementSibling;
+        while (sibling) {
+          if (sibling.tagName === node.tagName) ordinal++;
+          sibling = sibling.previousElementSibling;
+        }
+        parts.unshift(`${tag}:nth-of-type(${ordinal})`);
+        const parent = node.parentNode;
+        if (!parent || parent.nodeType !== 1) break;
+        node = parent as Element;
+      }
+      return parts.join(" > ");
+    };
     const collectFontFaces = (): { rules: Array<Record<string, string>>; partial: boolean; partialReasons: string[] } => {
       const FACE_PROPS = ["font-family", "src", "font-weight", "font-style", "font-display", "unicode-range"];
       const rules: Array<Record<string, string>> = [];
@@ -667,7 +689,11 @@ export const elementsProbeFunc = (
     const elements: Array<Record<string, unknown>> = [];
     for (let i = 0; i < limit; i++) {
       const el = matched[i] as HTMLElement;
-      const item: Record<string, unknown> = { index: i, tag: el.tagName.toLowerCase() };
+      const item: Record<string, unknown> = {
+        index: i,
+        tag: el.tagName.toLowerCase(),
+        selector: trackableSelectorOf(el),
+      };
       const errors: Record<string, string> = {};
       const guard = (dim: string, fn: () => void): void => {
         if (!want(dim)) return;
@@ -1706,6 +1732,46 @@ async function finalizeStyleResult(
   } as StyleProbeResult;
 }
 
+function createQuerySnapshot(
+  body: RawProbeResult,
+  tabId: number,
+  frameId: number | undefined,
+): RawProbeResult & { snapshotId?: string } {
+  if (!Array.isArray(body.elements) || body.elements.length === 0) {
+    return {
+      ...body,
+      refs: { available: false, reason: "no elements matched" },
+    };
+  }
+  const elements = body.elements as Array<Record<string, unknown>>;
+  // 没有元素级 selector 时不登记，避免把整条 query pattern 当成 selector，
+  // 使后续动作在多命中时静默落到错误元素。
+  if (!elements.every((element) => typeof element.selector === "string")) {
+    return {
+      ...body,
+      refs: {
+        available: false,
+        reason: "element-level selectors unavailable; query refs were not registered",
+      },
+    };
+  }
+
+  gcSnapshots();
+  const snapshotId = newSnapshotId();
+  const resolvedFrameId = frameId ?? 0;
+  setSnapshot(snapshotId, {
+    tabId,
+    frameId: resolvedFrameId,
+    capturedAt: Date.now(),
+    elements: elements.map((element, index) => ({
+      index: typeof element.index === "number" ? element.index : index,
+      selector: element.selector as string,
+      frameId: resolvedFrameId,
+    })),
+  });
+  return { ...body, snapshotId };
+}
+
 export function registerQueryHandlers(router: ActionRouter, debuggerMgr?: DebuggerManager): void {
   router.registerAll({
     [QueryActions.QUERY_PAGE]: async (args, tabId) => {
@@ -1864,7 +1930,8 @@ export function registerQueryHandlers(router: ActionRouter, debuggerMgr?: Debugg
           const badFont = els.find((e) => e.font?.evidence === "unavailable");
           if (badFont) dimensions.font = { available: false, reason: badFont.font?.reason ?? "platform fonts unavailable" };
         }
-        const { scanned, ...rest } = body as RawProbeResult;
+        const bodyWithSnapshot = createQuerySnapshot(body as RawProbeResult, tid, frameId);
+        const { scanned, ...rest } = bodyWithSnapshot as RawProbeResult & { snapshotId?: string };
         return withDiagnosis(
           { ...rest, truncated: raw.total > raw.showing, dimensions },
           raw.total === 0 && scanned ? diagnoseEmptyQueryCss({ ...scanned, selector: pattern, frameScoped: frameId != null }) : null,
