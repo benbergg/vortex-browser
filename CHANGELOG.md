@@ -6,6 +6,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **`vortex_observe → vortex_query → vortex_act` 的旧 observe ref 行为变更**：query 现在会登记自己的 snapshot；随后继续使用带旧 observe hash 的 ref 会得到 `STALE_SNAPSHOT`，不会再尝试按 query snapshot 执行。调用方应重新调用 `vortex_observe`，或直接使用 query 返回的带 hash ref；裸 ref 在 query producer 登记后也会被拒绝。
+
 ---
 
 ## [4.0.0] - 2026-08-21
