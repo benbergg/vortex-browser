@@ -71,7 +71,7 @@ describe("mode=elements 维度自陈", () => {
       total: 1,
       showing: 1,
       scanned: { elements: 3, shadowRoots: 0, iframes: 0 },
-    } }]);
+    } }]).mockResolvedValueOnce([{ result: { valid: true } }]);
 
     const res = await router.dispatch(mkReq({ mode: "elements", pattern: "button.save" }));
     const result = res.result as { snapshotId?: string; elements: Array<{ selector?: string }> };
@@ -95,6 +95,105 @@ describe("mode=elements 维度自陈", () => {
     expect(result.refs).toEqual({
       available: false,
       reason: "element-level selectors unavailable; query refs were not registered",
+    });
+  });
+
+  it("selector 唯一但身份不是原 query 目标时拒绝登记", async () => {
+    executeScript
+      .mockResolvedValueOnce([{ result: {
+        elements: [{ index: 0, tag: "button", selector: "button:nth-of-type(1)" }],
+        total: 1,
+        showing: 1,
+        scanned: { elements: 2, shadowRoots: 1, iframes: 0 },
+      } }])
+      .mockResolvedValueOnce([{ result: {
+        valid: false,
+        reason: "selector resolved to a different element",
+      } }]);
+
+    const res = await router.dispatch(mkReq({ mode: "elements", pattern: "button.shadow-target" }));
+    const result = res.result as { snapshotId?: string; refs?: { available: boolean; reason?: string } };
+
+    expect(result.snapshotId).toBeUndefined();
+    expect(result.refs).toEqual({
+      available: false,
+      reason: "query refs were not registered: selector resolved to a different element",
+    });
+  });
+
+  it("普通 light DOM 目标身份一致时仍登记 ref", async () => {
+    document.body.innerHTML = `<main><button class="save">保存</button><button class="save">另存</button></main>`;
+    let invocation = 0;
+    executeScript.mockImplementation((details: { func: (...args: any[]) => unknown; args: unknown[] }) => {
+      invocation++;
+      if (invocation === 1) {
+        return Promise.resolve([{ result: {
+          elements: [{ index: 0, tag: "button", selector: "main > button:nth-of-type(1)" }],
+          total: 1,
+          showing: 1,
+          scanned: { elements: 3, shadowRoots: 0, iframes: 0 },
+        } }]);
+      }
+      return Promise.resolve([{ result: details.func(...details.args) }]);
+    });
+
+    const res = await router.dispatch(mkReq({ mode: "elements", pattern: "button.save" }));
+    expect((res.result as { snapshotId?: string }).snapshotId).toMatch(/^snap_/);
+  });
+
+  it("P11 页面上的 light DOM 目标不因 shadow 同标签而误伤", async () => {
+    document.body.innerHTML = `<button id="light-target">LIGHT</button><shadow-fixture></shadow-fixture>`;
+    const host = document.querySelector("shadow-fixture")!;
+    const root = host.attachShadow({ mode: "open" });
+    const shadowButton = document.createElement("button");
+    shadowButton.className = "shadow-target";
+    root.append(shadowButton);
+    let invocation = 0;
+    executeScript.mockImplementation((details: { func: (...args: any[]) => unknown; args: unknown[] }) => {
+      invocation++;
+      if (invocation === 1) {
+        return Promise.resolve([{ result: {
+          elements: [{ index: 0, tag: "button", selector: "button:nth-of-type(1)" }],
+          total: 1,
+          showing: 1,
+          scanned: { elements: 3, shadowRoots: 1, iframes: 0 },
+        } }]);
+      }
+      return Promise.resolve([{ result: details.func(...details.args) }]);
+    });
+
+    const res = await router.dispatch(mkReq({ mode: "elements", pattern: "#light-target" }));
+    expect((res.result as { snapshotId?: string }).snapshotId).toMatch(/^snap_/);
+  });
+
+  it("P11 shadow/light 构造经真实身份校验后不登记 ref", async () => {
+    document.body.innerHTML = `<button id="light-target">LIGHT</button><shadow-fixture></shadow-fixture>`;
+    const host = document.querySelector("shadow-fixture")!;
+    const root = host.attachShadow({ mode: "open" });
+    const shadowButton = document.createElement("button");
+    shadowButton.className = "shadow-target";
+    shadowButton.textContent = "SHADOW";
+    root.append(shadowButton);
+    let invocation = 0;
+    executeScript.mockImplementation((details: { func: (...args: any[]) => unknown; args: unknown[] }) => {
+      invocation++;
+      if (invocation === 1) {
+        return Promise.resolve([{ result: {
+          elements: [{ index: 0, tag: "button", selector: "button:nth-of-type(1)" }],
+          total: 1,
+          showing: 1,
+          scanned: { elements: 3, shadowRoots: 1, iframes: 0 },
+        } }]);
+      }
+      return Promise.resolve([{ result: details.func(...details.args) }]);
+    });
+
+    const res = await router.dispatch(mkReq({ mode: "elements", pattern: "button.shadow-target" }));
+    expect(res.result).toMatchObject({
+      refs: {
+        available: false,
+        reason: 'query refs were not registered: selector "button:nth-of-type(1)" resolved to a different element',
+      },
     });
   });
 
@@ -123,7 +222,7 @@ describe("mode=elements 维度自陈", () => {
         total: 1,
         showing: 1,
         scanned: { elements: 1, shadowRoots: 0, iframes: 0 },
-      } }]);
+      } }]).mockResolvedValueOnce([{ result: { valid: true } }]);
       const res = await router.dispatch(mkReq({ mode: "elements", pattern: "button" }));
       const snapshotId = (res.result as { snapshotId: string }).snapshotId;
       expect(getSnapshotEntry(snapshotId)).toBeDefined();

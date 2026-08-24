@@ -1732,11 +1732,56 @@ async function finalizeStyleResult(
   } as StyleProbeResult;
 }
 
-function createQuerySnapshot(
+const validateQuerySelectorsFunc = (
+  pattern: string,
+  selectors: string[],
+): { valid: boolean; reason?: string } => {
+  const SHADOW_WALK_MAX_DEPTH = 8;
+  const queryAllDeep = (selector: string, root: Document | ShadowRoot, depth: number): Element[] => {
+    const matches = Array.from(root.querySelectorAll(selector));
+    if (depth >= SHADOW_WALK_MAX_DEPTH) return matches;
+    for (const host of root.querySelectorAll("*")) {
+      const shadowRoot = (host as HTMLElement).shadowRoot;
+      if (shadowRoot) matches.push(...queryAllDeep(selector, shadowRoot, depth + 1));
+    }
+    return matches;
+  };
+  const resolveLikeConsumer = (selector: string): Element[] => {
+    const light = Array.from(document.querySelectorAll(selector));
+    return light.length > 0 ? light : queryAllDeep(selector, document, 0);
+  };
+
+  let targets: Element[];
+  try {
+    targets = queryAllDeep(pattern, document, 0);
+  } catch (error) {
+    return { valid: false, reason: `query pattern validation failed: ${String(error)}` };
+  }
+  for (let i = 0; i < selectors.length; i++) {
+    let matches: Element[];
+    try {
+      matches = resolveLikeConsumer(selectors[i]);
+    } catch (error) {
+      return { valid: false, reason: `selector validation failed: ${String(error)}` };
+    }
+    if (matches.length !== 1) {
+      return { valid: false, reason: `selector "${selectors[i]}" matched ${matches.length} elements` };
+    }
+    if (targets[i] !== matches[0]) {
+      return { valid: false, reason: `selector "${selectors[i]}" resolved to a different element` };
+    }
+  }
+  return targets.length >= selectors.length
+    ? { valid: true }
+    : { valid: false, reason: `query target count changed below returned range: ${targets.length} < ${selectors.length}` };
+};
+
+async function createQuerySnapshot(
   body: RawProbeResult,
   tabId: number,
   frameId: number | undefined,
-): RawProbeResult & { snapshotId?: string } {
+  pattern: string,
+): Promise<RawProbeResult & { snapshotId?: string }> {
   if (!Array.isArray(body.elements) || body.elements.length === 0) {
     return {
       ...body,
@@ -1752,6 +1797,23 @@ function createQuerySnapshot(
       refs: {
         available: false,
         reason: "element-level selectors unavailable; query refs were not registered",
+      },
+    };
+  }
+
+  const validation = await chrome.scripting.executeScript({
+    target: buildExecuteTarget(tabId, frameId),
+    func: validateQuerySelectorsFunc,
+    args: [pattern, elements.map((element) => element.selector as string)],
+    world: "MAIN",
+  });
+  const result = validation[0]?.result as { valid?: boolean; reason?: string } | undefined;
+  if (result?.valid !== true) {
+    return {
+      ...body,
+      refs: {
+        available: false,
+        reason: `query refs were not registered: ${result?.reason ?? "selector identity validation failed"}`,
       },
     };
   }
@@ -1930,7 +1992,7 @@ export function registerQueryHandlers(router: ActionRouter, debuggerMgr?: Debugg
           const badFont = els.find((e) => e.font?.evidence === "unavailable");
           if (badFont) dimensions.font = { available: false, reason: badFont.font?.reason ?? "platform fonts unavailable" };
         }
-        const bodyWithSnapshot = createQuerySnapshot(body as RawProbeResult, tid, frameId);
+        const bodyWithSnapshot = await createQuerySnapshot(body as RawProbeResult, tid, frameId, pattern);
         const { scanned, ...rest } = bodyWithSnapshot as RawProbeResult & { snapshotId?: string };
         return withDiagnosis(
           { ...rest, truncated: raw.total > raw.showing, dimensions },
