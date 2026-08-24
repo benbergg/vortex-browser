@@ -5,6 +5,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { NmRequest } from "@vortex-browser/shared";
 import { ActionRouter } from "../src/lib/router.js";
 import { registerQueryHandlers } from "../src/handlers/query.js";
+import { gcSnapshots, getSnapshotEntry } from "../src/lib/snapshot-store.js";
 
 let router: ActionRouter;
 let executeScript: ReturnType<typeof vi.fn>;
@@ -51,6 +52,90 @@ describe("mode=elements 维度校验", () => {
 });
 
 describe("mode=elements 维度自陈", () => {
+  it("元素探针为每个命中项返回可追踪 selector", async () => {
+    const { elementsProbeFunc } = await import("../src/handlers/query.js");
+    document.body.innerHTML = `<main><button class="save">保存</button><button class="save">另存</button></main>`;
+
+    const result = elementsProbeFunc("button.save", 10, ["geometry"], null, false) as {
+      elements: Array<{ selector?: string }>;
+    };
+
+    expect(result.elements).toHaveLength(2);
+    expect(result.elements.every((element) => typeof element.selector === "string")).toBe(true);
+    expect(result.elements[0].selector).not.toBe(result.elements[1].selector);
+  });
+
+  it("命中项带 selector 时 handler 返回 query snapshotId", async () => {
+    executeScript.mockResolvedValueOnce([{ result: {
+      elements: [{ index: 0, tag: "button", selector: "main > button:nth-of-type(1)" }],
+      total: 1,
+      showing: 1,
+      scanned: { elements: 3, shadowRoots: 0, iframes: 0 },
+    } }]);
+
+    const res = await router.dispatch(mkReq({ mode: "elements", pattern: "button.save" }));
+    const result = res.result as { snapshotId?: string; elements: Array<{ selector?: string }> };
+
+    expect(result.snapshotId).toMatch(/^snap_/);
+    expect(result.elements[0].selector).toBe("main > button:nth-of-type(1)");
+  });
+
+  it("缺少元素级 selector 时自陈 refs 不可用且不登记 snapshot", async () => {
+    executeScript.mockResolvedValueOnce([{ result: {
+      elements: [{ index: 0, tag: "button" }],
+      total: 1,
+      showing: 1,
+      scanned: { elements: 1, shadowRoots: 0, iframes: 0 },
+    } }]);
+
+    const res = await router.dispatch(mkReq({ mode: "elements", pattern: "button" }));
+    const result = res.result as { snapshotId?: string; refs?: { available: boolean; reason?: string } };
+
+    expect(result.snapshotId).toBeUndefined();
+    expect(result.refs).toEqual({
+      available: false,
+      reason: "element-level selectors unavailable; query refs were not registered",
+    });
+  });
+
+  it("DOM 重渲染后同一结构仍生成同一可追踪路径", async () => {
+    const { elementsProbeFunc } = await import("../src/handlers/query.js");
+    document.body.innerHTML = `<main><button class="save">第一次</button></main>`;
+    const before = elementsProbeFunc("button.save", 1, ["geometry"], null, false) as {
+      elements: Array<{ selector: string }>;
+    };
+
+    document.body.innerHTML = `<main><button class="save">重渲染后</button></main>`;
+    const after = elementsProbeFunc("button.save", 1, ["geometry"], null, false) as {
+      elements: Array<{ selector: string }>;
+    };
+
+    expect(after.elements[0].selector).toBe(before.elements[0].selector);
+  });
+
+  it("query snapshot 超过 60 秒后可由 GC 清除", async () => {
+    vi.useFakeTimers();
+    try {
+      const capturedAt = new Date("2026-08-24T00:00:00.000Z");
+      vi.setSystemTime(capturedAt);
+      executeScript.mockResolvedValueOnce([{ result: {
+        elements: [{ index: 0, tag: "button", selector: "main > button:nth-of-type(1)" }],
+        total: 1,
+        showing: 1,
+        scanned: { elements: 1, shadowRoots: 0, iframes: 0 },
+      } }]);
+      const res = await router.dispatch(mkReq({ mode: "elements", pattern: "button" }));
+      const snapshotId = (res.result as { snapshotId: string }).snapshotId;
+      expect(getSnapshotEntry(snapshotId)).toBeDefined();
+
+      vi.advanceTimersByTime(60_001);
+      gcSnapshots();
+      expect(getSnapshotEntry(snapshotId)).toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("请求了的维度标 available:true", async () => {
     executeScript.mockResolvedValueOnce([{ result: {
       elements: [{ index: 0, tag: "li", bbox: [0, 0, 1, 1], text: "A" }], total: 1, showing: 1,

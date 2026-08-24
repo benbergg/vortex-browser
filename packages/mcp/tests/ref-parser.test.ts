@@ -175,6 +175,22 @@ describe("resolveTargetParam — hash strict check (v0.8)", () => {
   });
 });
 
+describe("resolveTargetParam — query producer 后拒绝裸 ref", () => {
+  it("query producer 已登记时拒绝裸 ref，并提示带 hash 或重新 observe", () => {
+    expect(() => resolveTargetParam("@e1", "s_xyz", "a3f7", undefined, undefined, true)).toThrow(
+      /hash|observe/i,
+    );
+  });
+
+  it("没有 query producer 时保留 observe-only 裸 ref 兼容行为", () => {
+    expect(resolveTargetParam("@e1", "s_xyz", "a3f7", undefined, undefined, false)).toEqual({
+      index: 1,
+      snapshotId: "s_xyz",
+      frameId: 0,
+    });
+  });
+});
+
 describe("resolveTargetParam — bare-ref deprecation telemetry (v0.8 → v0.9)", () => {
   beforeEach(() => {
     _resetBareRefStats();
