@@ -112,6 +112,12 @@ describe("DEFAULT_ERROR_META coverage", () => {
     expect(DEFAULT_ERROR_META.STALE_SNAPSHOT.recoverable).toBe(true);
   });
 
+  it("STALE_SNAPSHOT hint covers page changes and snapshot replacement", () => {
+    expect(DEFAULT_ERROR_META.STALE_SNAPSHOT.hint).toBe(
+      "Snapshot is stale: the page may have changed, or a newer observe/query snapshot replaced it. Call vortex_observe to capture a fresh snapshot, then retry with the new ref.",
+    );
+  });
+
   // ============================================================
   // P1-2 残留修复(vortex-bench 2026-06-07 淘宝评测 V3 §3.3):
   // NOT_STABLE 在 sticky/fixed 容器 + CSS transition 场景频繁误报(0.5px 容差
