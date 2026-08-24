@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { createHash } from "node:crypto";
 
 // 跨层接线锁(评审 Task 1 H-1)。
 // 两侧纯函数测试全绿,也证明不了 helper 挂在 handleCallTool 这条活路径上。
@@ -83,5 +84,81 @@ describe("vortex_query @ref 跨层接线", () => {
     expect((res.content as Array<{ text: string }>)[0].text).toMatch(/pattern.*only|remove `target`/);
     // 只 observe 那一次,query 没有发出去
     expect(vi.mocked(sendRequest).mock.calls.length).toBe(1);
+  });
+
+  it("query producer 登记 snapshot 并给元素返回带 hash 的 ref", async () => {
+    const { sendRequest } = await import("../src/client.js");
+    vi.mocked(sendRequest).mockResolvedValueOnce({
+      result: { snapshotId: "snap_observe_for_query", url: "", elements: [] },
+    } as never);
+    vi.mocked(sendRequest).mockResolvedValueOnce({
+      result: {
+        snapshotId: "snap_query_1",
+        elements: [{ index: 0, selector: "main > button:nth-of-type(1)" }],
+        total: 1,
+        showing: 1,
+      },
+    } as never);
+    vi.mocked(sendRequest).mockResolvedValueOnce({
+      result: { success: true },
+    } as never);
+
+    const { handleCallTool } = await import("../src/server.js");
+    await handleCallTool({ params: { name: "vortex_observe", arguments: { scope: "viewport" } } });
+    const result = await handleCallTool({
+      params: { name: "vortex_query", arguments: { mode: "elements", pattern: "button" } },
+    });
+
+    const payload = JSON.parse((result.content[0] as { text: string }).text) as {
+      snapshotId: string;
+      elements: Array<{ ref?: string }>;
+    };
+    const hash = createHash("sha256").update("snap_query_1").digest("hex").slice(0, 4);
+    expect(payload.snapshotId).toBe("snap_query_1");
+    expect(payload.elements[0].ref).toBe(`@${hash}:e0`);
+
+    const act = await handleCallTool({
+      params: { name: "vortex_act", arguments: { target: `@${hash}:e0`, action: "click" } },
+    });
+    expect(act.isError).not.toBe(true);
+    expect(vi.mocked(sendRequest).mock.calls).toHaveLength(3);
+    const actParams = vi.mocked(sendRequest).mock.calls[2][1] as Record<string, unknown>;
+    expect(actParams.index).toBe(0);
+    expect(actParams.snapshotId).toBe("snap_query_1");
+    expect(actParams.target).toBeUndefined();
+  });
+
+  it("query 后旧 observe hash 不会解析到 query snapshot，裸 ref 明确拒绝", async () => {
+    const { sendRequest } = await import("../src/client.js");
+    vi.mocked(sendRequest).mockResolvedValueOnce({
+      result: { snapshotId: "snap_observe_guard", url: "", elements: [] },
+    } as never);
+    vi.mocked(sendRequest).mockResolvedValueOnce({
+      result: {
+        snapshotId: "snap_query_guard",
+        elements: [{ index: 0, selector: "button" }],
+        total: 1,
+        showing: 1,
+      },
+    } as never);
+
+    const { handleCallTool } = await import("../src/server.js");
+    await handleCallTool({ params: { name: "vortex_observe", arguments: { scope: "viewport" } } });
+    await handleCallTool({ params: { name: "vortex_query", arguments: { mode: "elements", pattern: "button" } } });
+
+    const oldHash = createHash("sha256").update("snap_observe_guard").digest("hex").slice(0, 4);
+    const oldRef = await handleCallTool({
+      params: { name: "vortex_act", arguments: { target: `@${oldHash}:e0`, action: "click" } },
+    });
+    expect(vi.mocked(sendRequest).mock.calls).toHaveLength(2);
+    expect(oldRef.isError).toBe(true);
+    expect((oldRef.content[0] as { text: string }).text).toMatch(/Error \[STALE_SNAPSHOT\]/);
+
+    const bare = await handleCallTool({
+      params: { name: "vortex_act", arguments: { target: "@e0", action: "click" } },
+    });
+    expect(vi.mocked(sendRequest).mock.calls).toHaveLength(2);
+    expect(bare.isError).toBe(true);
+    expect((bare.content[0] as { text: string }).text).toMatch(/Error \[INVALID_PARAMS\]/);
   });
 });

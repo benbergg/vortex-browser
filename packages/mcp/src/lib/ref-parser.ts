@@ -164,10 +164,19 @@ export function resolveTargetParam(
   activeSnapshotHash: string | null,
   activeTabId?: number | null,
   currentTabId?: number | null,
+  rejectBareRef = false,
 ): ResolvedTargetParam {
   const r = parseRef(target);
   if (r.kind === "selector") return { selector: r.selector };
-  if (r.hash === undefined) recordBareRefHit(target);
+  if (r.hash === undefined) {
+    if (rejectBareRef) {
+      throw vtxError(
+        VtxErrorCode.INVALID_PARAMS,
+        "Bare refs (@eN/@fNeM) are rejected after a query snapshot was created; use the hashed ref @<hash>:eN from the latest query result or call vortex_observe again.",
+      );
+    }
+    recordBareRefHit(target);
+  }
   if (!activeSnapshotId) {
     throw vtxError(
       VtxErrorCode.STALE_SNAPSHOT,

@@ -162,7 +162,7 @@ export const DEFAULT_ERROR_META: Record<VtxErrorCode, VtxErrorMeta> = {
 
   // -- Snapshot --
   STALE_SNAPSHOT: {
-    hint: "Page has changed since the snapshot. Call vortex_observe to capture a fresh snapshot, then retry with the new ref.",
+    hint: "Snapshot is stale: the page may have changed, or a newer observe/query snapshot replaced it. Call vortex_observe to capture a fresh snapshot, then retry with the new ref.",
     recoverable: true,
   },
   INVALID_INDEX: {
