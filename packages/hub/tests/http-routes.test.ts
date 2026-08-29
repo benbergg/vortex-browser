@@ -1206,9 +1206,32 @@ describe("hub HTTP command routes", () => {
       body: JSON.stringify({}),
     });
     expect(response.status).toBe(400);
-    const body = await response.json() as { message?: string };
+    const body = await response.json() as { message?: string; error?: { code?: string } };
 
     expect(body.message).toContain("browserId");
+    // MCP 侧 normalizeReloadError 读的是 error.code；只断言 message 的话，
+    // sendError 响应形状被改坏时这里仍全绿，而 MCP 会静默降级成 INTERNAL_ERROR
+    expect(body.error?.code).toBe(VtxErrorCode.INVALID_PARAMS);
+    expect(commands).toEqual([]);
+  });
+
+  it("rejects a reload for an unknown browserId with a typed error code", async () => {
+    started = await startTestHub({ requestTimeoutMs: 250 });
+    const commands: VtxAgentCommand[] = [];
+    const agent = await addAgent(started, "browser-a");
+    observeCommands(agent, commands);
+
+    const response = await fetch(`http://127.0.0.1:${started.port}/dev/reload-extension`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ browserId: "browser-gone" }),
+    });
+
+    expect(response.status).toBe(404);
+    const body = await response.json() as { message?: string; error?: { code?: string } };
+
+    expect(body.error?.code).toBe(VtxErrorCode.INVALID_PARAMS);
+    expect(body.message).toContain("browser-gone");
     expect(commands).toEqual([]);
   });
 

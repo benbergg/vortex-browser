@@ -99,9 +99,9 @@ describe("vortex_dev_reload 绑定到当前浏览器", () => {
     expect(elapsed).toBeLessThan(5_000);
   });
 
-  // 2026-08-13 日志:失败分支的 hint 是无条件硬编码的"扩展未连(SW 可能睡眠)",
-  // 与它自己转发的 hub error code 自相矛盾。hint 应按本地已观测到的事实分支:
-  // 步骤 1 拿到了 browserId,就说明扩展当刻连着。
+  // 2026-08-13 日志:失败分支的 hint 曾无条件硬编码为"扩展未连(SW 可能睡眠)",
+  // 与它自己转发的 hub error code 自相矛盾。现在只陈述 diagnostics.version
+  // 当刻返回的 browserId 与本次请求被 vortex-server 拒绝这一事实。
   it("拿到 browserId 却被 hub 拒绝时，hint 不再诬告扩展未连", async () => {
     const { sendRequest } = await import("../src/client.js");
     vi.mocked(sendRequest).mockResolvedValue({
@@ -123,13 +123,13 @@ describe("vortex_dev_reload 绑定到当前浏览器", () => {
     const res = await handleCallTool({ params: { name: "vortex_dev_reload", arguments: { timeoutMs: 1 } } });
 
     expect(res.isError).toBe(true);
-    const payload = JSON.parse((res.content as Array<{ text: string }>)[0].text);
-    expect(payload.error).toBe("INVALID_PARAMS");
-    expect(payload.hint).not.toContain("扩展未连");
-    expect(payload.hint).toContain("chrome-uuid-1");
+    expect((res.content as Array<{ text: string }>)[0].text).toBe(
+      "Error [INVALID_PARAMS]: browserId 必填\n" +
+      "Hint: diagnostics.version 曾返回 browserId=chrome-uuid-1；本次 reload 请求被 vortex-server 拒绝，请依据错误信息处理。",
+    );
   });
 
-  it("确实拿不到 browserId 时，仍指向扩展未连（此时该判断有依据）", async () => {
+  it("确实拿不到 browserId 时，hint 只描述未返回身份这一事实", async () => {
     const { sendRequest } = await import("../src/client.js");
     vi.mocked(sendRequest).mockRejectedValue(new Error("no browser"));
     vi.stubGlobal(
@@ -144,8 +144,10 @@ describe("vortex_dev_reload 绑定到当前浏览器", () => {
     const { handleCallTool } = await import("../src/server.js");
     const res = await handleCallTool({ params: { name: "vortex_dev_reload", arguments: { timeoutMs: 1 } } });
 
-    const payload = JSON.parse((res.content as Array<{ text: string }>)[0].text);
-    expect(payload.hint).toContain("扩展未连");
+    expect((res.content as Array<{ text: string }>)[0].text).toBe(
+      "Error [EXTENSION_NOT_CONNECTED]: 没有可用 browser\n" +
+      "Hint: diagnostics.version 未返回 browserId；本次 reload 请求被 vortex-server 拒绝，请检查当前浏览器连接后重试。",
+    );
   });
 
   it("拿不到 browserId 时不硬塞(单浏览器场景保持原行为)", async () => {

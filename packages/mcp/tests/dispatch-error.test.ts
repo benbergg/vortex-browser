@@ -28,6 +28,16 @@ describe("formatDispatchError：hint 三层兜底", () => {
     expect(s).toContain("Hint (lastReason=NOT_ATTACHED):");
   });
 
+  it("只把 message 中的候选交给调用方，extras-only 候选不可见", () => {
+    const visible = formatDispatchError({
+      code: "SELECTOR_AMBIGUOUS",
+      message: "matched 2 elements: #1 id=first",
+      context: { extras: { candidates: ["extras-only-secret"] } },
+    });
+    expect(visible).toContain("id=first");
+    expect(visible).not.toContain("extras-only-secret");
+  });
+
   it("既无远端 hint 也无 meta 时只出正文，不编造", () => {
     const s = formatDispatchError({ code: "NOT_A_REAL_CODE", message: "boom" });
     expect(s).toBe("Error [NOT_A_REAL_CODE]: boom");
