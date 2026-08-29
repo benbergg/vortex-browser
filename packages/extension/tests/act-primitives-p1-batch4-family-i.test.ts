@@ -24,11 +24,16 @@ const CB_SRC = readFileSync(
   "utf8",
 );
 
-// 原生 SELECT handler 区间:以下一个 handler([DomActions.SCROLL])为界,
-// 抗 SELECT 块增长(原固定 +9200 偏移在 SELECT 加回读护栏后会把 args 数组挤出窗口)。
-const selectIdx = DOM_SRC.indexOf("[DomActions.SELECT]");
-const scrollIdx = DOM_SRC.indexOf("[DomActions.SCROLL]", selectIdx);
-const SELECT_BLOCK = DOM_SRC.slice(selectIdx, scrollIdx > selectIdx ? scrollIdx : selectIdx + 9200);
+// 原生 SELECT page-side 常量区间：实现已抽成真实注入函数，测试直接检查该单一真源。
+const selectIdx = DOM_SRC.indexOf("export const DOM_SELECT_PAGE_FUNC");
+const hoverIdx = DOM_SRC.indexOf("export const DOM_HOVER_PAGE_FUNC", selectIdx);
+const SELECT_BLOCK = DOM_SRC.slice(selectIdx, hoverIdx > selectIdx ? hoverIdx : selectIdx + 9200);
+const selectHandlerIdx = DOM_SRC.indexOf("[DomActions.SELECT]");
+const scrollIdx = DOM_SRC.indexOf("[DomActions.SCROLL]", selectHandlerIdx);
+const SELECT_HANDLER_BLOCK = DOM_SRC.slice(
+  selectHandlerIdx,
+  scrollIdx > selectHandlerIdx ? scrollIdx : selectHandlerIdx + 9200,
+);
 
 describe("族 I #25 — checkbox-group label 折叠内部空白匹配", () => {
   it("不再用 (b.innerText||\"\").trim() === name 严格等值", () => {
@@ -51,7 +56,7 @@ describe("族 I #23 — 原生 <select> 轮询等异步选项", () => {
     expect(SELECT_BLOCK).toMatch(/opts = Array\.from\(el\.options\)/);
   });
   it("把 timeoutMs 传入 inline func", () => {
-    expect(SELECT_BLOCK).toMatch(/\[selector, value, .*timeout/);
+    expect(SELECT_HANDLER_BLOCK).toMatch(/\[selector, value, .*timeout/);
   });
 });
 

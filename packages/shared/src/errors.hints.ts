@@ -138,7 +138,7 @@ export const DEFAULT_ERROR_META: Record<VtxErrorCode, VtxErrorMeta> = {
     recoverable: true,
   },
   SELECTOR_AMBIGUOUS: {
-    hint: "Selector matched multiple elements. Use a more specific selector, or call vortex_observe to get unique ref indexes (@eN form).",
+    hint: "Selector matched multiple elements. Choose from the candidate summaries in the error message, rewrite the target with a distinguishing attribute or text, then retry vortex_act.",
     recoverable: true,
   },
 

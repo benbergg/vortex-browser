@@ -86,3 +86,103 @@ export function buildNoMatchMessage(target: string, ranked: RankedCandidate[]): 
   return `${head} Nearest by accessible name: ${list}. ` +
     `Call vortex_observe to get an @ref for the intended one, or pass a valid CSS selector.`;
 }
+
+export interface MatchedElementSummary {
+  index: number;
+  tag: string;
+  accessibleName: string;
+  text: string;
+  attributes: Record<string, string>;
+  visible: boolean;
+}
+
+const AMBIGUOUS_MESSAGE_MAX_BYTES = 4096;
+const AMBIGUOUS_CANDIDATE_MAX_BYTES = 480;
+const AMBIGUOUS_FIELD_MAX_CHARS = 120;
+const AMBIGUOUS_CANDIDATE_LIMIT = 10;
+
+function cleanSummaryText(value: unknown): string {
+  return String(value ?? "")
+    .replace(/[\u0000-\u001f\u007f]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function utf8Bytes(value: string): number {
+  return new TextEncoder().encode(value).byteLength;
+}
+
+function clipSummaryText(value: unknown, maxChars = AMBIGUOUS_FIELD_MAX_CHARS): string {
+  const clean = cleanSummaryText(value);
+  return clean.length > maxChars ? `${clean.slice(0, maxChars - 1)}…` : clean;
+}
+
+function clipToBytes(value: string, maxBytes: number): string {
+  if (utf8Bytes(value) <= maxBytes) return value;
+  let out = "";
+  for (const char of value) {
+    const next = `${out}${char}`;
+    if (utf8Bytes(`${next}…`) > maxBytes) break;
+    out = next;
+  }
+  return `${out}…`;
+}
+
+function candidateFingerprint(candidate: MatchedElementSummary): string {
+  return JSON.stringify([
+    candidate.tag,
+    clipSummaryText(candidate.accessibleName),
+    clipSummaryText(candidate.text),
+    Object.entries(candidate.attributes).sort(),
+    candidate.visible,
+  ]);
+}
+
+function formatMatchedCandidate(candidate: MatchedElementSummary): string {
+  const bits = [`#${candidate.index}`, `<${clipSummaryText(candidate.tag, 40) || "element"}>`];
+  const name = clipSummaryText(candidate.accessibleName);
+  const text = clipSummaryText(candidate.text);
+  if (name) bits.push(`name=${JSON.stringify(name)}`);
+  if (text && text !== name) bits.push(`text=${JSON.stringify(text)}`);
+  for (const [key, value] of Object.entries(candidate.attributes)) {
+    const attr = clipSummaryText(key, 40);
+    const val = clipSummaryText(value);
+    if (attr && val) bits.push(`${attr}=${JSON.stringify(val)}`);
+  }
+  bits.push(candidate.visible ? "visible" : "hidden");
+  return clipToBytes(bits.join(" "), AMBIGUOUS_CANDIDATE_MAX_BYTES);
+}
+
+export function buildAmbiguousMessage(
+  target: string,
+  matchedCount: number,
+  candidates: MatchedElementSummary[],
+): string {
+  const total = Math.max(0, Number.isFinite(matchedCount) ? Math.floor(matchedCount) : candidates.length);
+  const safeCandidates = candidates.slice(0, AMBIGUOUS_CANDIDATE_LIMIT);
+  const head = `Selector ${JSON.stringify(clipSummaryText(target, 240))} matched ${total} elements. `;
+  const sameShape = candidates.length > 1 &&
+    candidates.every((item) => candidateFingerprint(item) === candidateFingerprint(candidates[0]));
+  const bodyPrefix = "Matched candidates: ";
+  const suffix = sameShape
+    ? " These candidates have identical summaries and cannot be distinguished by the summary alone; keep the action fail-closed and rewrite the selector with more context."
+    : " Rewrite the selector with a distinguishing attribute or text, then retry vortex_act.";
+  // 先为恢复指引、计数和标点留出最坏情况空间，避免最终裁剪掉 suffix。
+  const reservedCount = ` Showing ${safeCandidates.length}; omitted ${Math.max(total, safeCandidates.length)}.`;
+  const fallbackBody = "(no safe candidate details)";
+  const fixedBytes = utf8Bytes(`${head}${bodyPrefix}${fallbackBody}.${reservedCount}${suffix}`);
+  const bodyBudget = Math.max(0, AMBIGUOUS_MESSAGE_MAX_BYTES - fixedBytes);
+  let body = "";
+  let shown = 0;
+  for (const item of safeCandidates) {
+    const segment = formatMatchedCandidate(item);
+    const separator = body ? "; " : "";
+    if (utf8Bytes(`${body}${separator}${segment}`) > bodyBudget) break;
+    body += `${separator}${segment}`;
+    shown++;
+  }
+  const omitted = Math.max(0, total - shown);
+  const countText = ` Showing ${shown}; omitted ${omitted}.`;
+  const message = `${head}${bodyPrefix}${body || fallbackBody}.${countText}${suffix}`;
+  return message;
+}

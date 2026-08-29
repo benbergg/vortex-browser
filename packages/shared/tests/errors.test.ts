@@ -118,6 +118,14 @@ describe("DEFAULT_ERROR_META coverage", () => {
     );
   });
 
+  it("SELECTOR_AMBIGUOUS hint 指向候选摘要、改写定位条件并保留可恢复语义", () => {
+    const meta = DEFAULT_ERROR_META.SELECTOR_AMBIGUOUS;
+    expect(meta.recoverable).toBe(true);
+    expect(meta.hint).toContain("candidate");
+    expect(meta.hint).toContain("rewrite");
+    expect(meta.hint).toContain("vortex_act");
+  });
+
   // ============================================================
   // P1-2 残留修复(vortex-bench 2026-06-07 淘宝评测 V3 §3.3):
   // NOT_STABLE 在 sticky/fixed 容器 + CSS transition 场景频繁误报(0.5px 容差

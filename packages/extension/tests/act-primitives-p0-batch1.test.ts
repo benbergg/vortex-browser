@@ -87,8 +87,8 @@ describe("族 E — native <select multiple> 多选(#4)", () => {
 
 describe("族 C — HOVER 走 CDP 真鼠标触发 CSS :hover(#2)", () => {
   it("HOVER probe 先 scrollIntoView 再算中心坐标", () => {
-    const hoverIdx = DOM_SRC.indexOf("DomActions.HOVER");
-    const block = DOM_SRC.slice(hoverIdx, hoverIdx + 3500);
+    const hoverIdx = DOM_SRC.indexOf("export const DOM_HOVER_PAGE_FUNC");
+    const block = DOM_SRC.slice(hoverIdx, DOM_SRC.indexOf("export const DOM_COMMIT_PAGE_FUNC", hoverIdx));
     expect(block).toMatch(/scrollIntoView\(\{ block: "center", inline: "center" \}\)/);
     expect(block).toMatch(/const cx = rect\.left \+ rect\.width \/ 2/);
   });
@@ -102,8 +102,8 @@ describe("族 C — HOVER 走 CDP 真鼠标触发 CSS :hover(#2)", () => {
   });
 
   it("mouseenter 合成事件用 bubbles:false 修正语义", () => {
-    const hoverIdx = DOM_SRC.indexOf("DomActions.HOVER");
-    const block = DOM_SRC.slice(hoverIdx, hoverIdx + 3700);
+    const hoverIdx = DOM_SRC.indexOf("export const DOM_HOVER_PAGE_FUNC");
+    const block = DOM_SRC.slice(hoverIdx, DOM_SRC.indexOf("export const DOM_COMMIT_PAGE_FUNC", hoverIdx));
     expect(block).toMatch(/new MouseEvent\("mouseenter", \{ bubbles: false/);
   });
 });

@@ -26,7 +26,33 @@ import {
   isStaleNotAttached,
   tryHealSelector,
 } from "../action/heal.js";
-import { buildNoMatchMessage, rankCandidates } from "../action/candidate-suggest.js";
+import {
+  buildAmbiguousMessage,
+  buildNoMatchMessage,
+  rankCandidates,
+  type MatchedElementSummary,
+} from "../action/candidate-suggest.js";
+
+/** 将页面侧候选 DTO 组装成最终错误正文，并移除不会渲染的候选副本。 */
+function enrichAmbiguousError(
+  res: { error?: string; errorCode?: string; extras?: Record<string, unknown> } | undefined,
+  selector: string,
+): { error?: string; errorCode?: string; extras?: Record<string, unknown> } | undefined {
+  if (res?.errorCode !== VtxErrorCode.SELECTOR_AMBIGUOUS) return res;
+  const candidates = res.extras?.candidates;
+  if (!Array.isArray(candidates)) return res;
+  const extras = { ...(res.extras ?? {}) };
+  delete extras.candidates;
+  return {
+    ...res,
+    error: buildAmbiguousMessage(
+      selector,
+      typeof extras.matchCount === "number" ? extras.matchCount : candidates.length,
+      candidates as MatchedElementSummary[],
+    ),
+    extras,
+  };
+}
 
 /**
  * CDP 不可用 → 合成降级的自陈。useRealMouse 的用途就是要 isTrusted=true,
@@ -168,195 +194,7 @@ async function buildNoMatchError(
   }
 }
 
-export function registerDomHandlers(
-  router: ActionRouter,
-  debuggerMgr: DebuggerManager,
-): void {
-  router.registerAll({
-    [DomActions.QUERY]: async (args, tabId) => {
-      const __t = resolveTarget(args);
-      const selector = __t.selector;
-      const tid = await getActiveTabId(__t.boundTabId ?? (args.tabId as number | undefined) ?? tabId);
-      const frameId = __t.boundFrameId ?? (args.frameId as number | undefined);
-      if (frameId != null) await ensureFrameAttached(tid, frameId);
-      const res = await nativePageQuery<{ result?: unknown; error?: string } | undefined>(
-        tid,
-        frameId,
-        (sel: string) => {
-          try {
-            const el = document.querySelector(sel);
-            if (!el) return { result: null };
-            const attrs: Record<string, string> = {};
-            for (const attr of Array.from(el.attributes)) {
-              attrs[attr.name] = attr.value;
-            }
-            return {
-              result: {
-                tag: el.tagName.toLowerCase(),
-                id: el.id || undefined,
-                classes: Array.from(el.classList),
-                text: (el as HTMLElement).innerText?.slice(0, 500),
-                attributes: attrs,
-              },
-            };
-          } catch (err) {
-            return { error: err instanceof Error ? err.message : String(err) };
-          }
-        },
-        [selector],
-      );
-      if (res?.error) mapPageError(res, selector);
-      return res?.result;
-    },
-
-    [DomActions.QUERY_ALL]: async (args, tabId) => {
-      const __t = resolveTarget(args);
-      const selector = __t.selector;
-      const tid = await getActiveTabId(__t.boundTabId ?? (args.tabId as number | undefined) ?? tabId);
-      const frameId = __t.boundFrameId ?? (args.frameId as number | undefined);
-      if (frameId != null) await ensureFrameAttached(tid, frameId);
-      const res = await nativePageQuery<{ result?: unknown; error?: string } | undefined>(
-        tid,
-        frameId,
-        (sel: string) => {
-          try {
-            const elements = Array.from(document.querySelectorAll(sel)).slice(0, 100);
-            return {
-              result: elements.map((el) => {
-                const attrs: Record<string, string> = {};
-                for (const attr of Array.from(el.attributes)) {
-                  attrs[attr.name] = attr.value;
-                }
-                return {
-                  tag: el.tagName.toLowerCase(),
-                  id: el.id || undefined,
-                  classes: Array.from(el.classList),
-                  text: (el as HTMLElement).innerText?.slice(0, 200),
-                  attributes: attrs,
-                };
-              }),
-            };
-          } catch (err) {
-            return { error: err instanceof Error ? err.message : String(err) };
-          }
-        },
-        [selector],
-      );
-      if (res?.error) mapPageError(res, selector);
-      return res?.result;
-    },
-
-    [DomActions.CLICK]: async (args, tabId) => {
-      const __t = resolveTarget(args);
-      // let 声明：gate 自愈后用 __heal.selector 重绑，下游所有引用统一用 selector。
-      let selector = __t.selector;
-      const tid = await getActiveTabId(__t.boundTabId ?? (args.tabId as number | undefined) ?? tabId);
-      const frameId = __t.boundFrameId ?? (args.frameId as number | undefined);
-      if (frameId != null) await ensureFrameAttached(tid, frameId);
-      const useRealMouse = args.useRealMouse as boolean | undefined;
-      // flag-自适应:server 在 trusted Chrome(带 --silent-debugger-extension-api)下注入
-      // trustedMode=true。此时 click 默认走 CDP trusted(无黄条、广覆盖 isTrusted-gated),
-      // 等价于隐式 useRealMouse。非 trusted 时落到下方合成 + submit-intent 路径(不变)。
-      const trustedMode = args.trustedMode === true;
-      // GAP-G(N0062): click 效果信号采集。opt-in,默认关(零开销)。开启时派发前后采集
-      // 非判定性证据(domMutations/urlChanged/focusChanged/ariaChanged),让 agent 自判
-      // silent failure——success 不翻转。见知识库 N0062 GAP-G 设计 / page-side/click-effect.ts。
-      const observeEffect = args.observeEffect === true;
-      const windowMs = args.windowMs as number | undefined;
-      const explicitOnDialog = args.onDialog !== undefined;
-
-      // L2 integration: actionability + descriptor 自愈 gate。
-      // NOT_ATTACHED 自旋到 TIMEOUT 且有 descriptor 时，healAwareGate 按 descriptor
-      // 重匹配元素、换选择器再跑一次 gate。无 descriptor 或非 stale 错误则原样抛。
-      // NOT_STABLE 自动 force 重试逻辑在 waitActionableAutoForce 内已覆盖。
-      const __heal = await healAwareGate(
-        tid,
-        frameId,
-        selector,
-        // 不覆盖默认:未传 timeout 时透传 undefined,由 waitActionable 落到
-        // DEFAULT_TIMEOUT_MS(2000)。历史 `?? 5000` 覆盖让 perf 修复成死代码。
-        { timeout: args.timeout as number | undefined },
-        args.force as boolean | undefined,
-        __t.descriptor,
-      );
-      // 重绑 selector：若已自愈则改为 healed selector，下游所有路径（早返回/CDP/合成）统一引用。
-      selector = __heal.selector;
-
-      // 把 page-side 返回的 raw dialogs 数组转成对外 dialogHandled 字段 + 默认 dismiss 的 warning。
-      // 定义前置(原在 deferToCdp 段下方)——使下方 useRealMouse/trustedMode 早返回分支也能套用。
-      // 否则 trusted 模式(Chrome 带 flag,click 默认走 CDP)下该分支返回 raw dialogs 无
-      // dialogHandled,a05536b 漏覆盖此路径。(2026-06-13 antd Pro dogfood bench 副产)
-      const attachDialogHandled = (r: unknown): unknown => {
-        const obj = r as { dialogs?: Array<{ type: string; message: string }> } | undefined;
-        if (!obj?.dialogs?.length) return r;
-        const first = obj.dialogs[0];
-        const policy = (args.onDialog as string) === "accept" ? "accepted" : "dismissed";
-        const needsWarn = !explicitOnDialog && (first.type === "confirm" || first.type === "prompt");
-        const { dialogs, ...restResult } = obj;
-        return {
-          ...restResult,
-          dialogHandled: {
-            type: first.type, message: first.message, policy,
-            ...(needsWarn ? { warning: "未设 onDialog,已默认 dismiss;若本意是确认请带 onDialog:accept 重试" } : {}),
-          },
-        };
-      };
-
-      const cdpClickPath = async (): Promise<unknown> => {
-        // 预加载 dom-resolve,使 cdpClickElement 的 page-side 探测能经
-        // __vortexDomResolve 穿 open shadow + 走门同款 isEnabled——与同步路径一致,
-        // 堵 shadow-internal ref 假阴 ELEMENT_NOT_FOUND(#14)。
-        await loadPageSideModule(tid, frameId, "dom-resolve");
-        if (observeEffect) await loadPageSideModule(tid, frameId, "click-effect");
-        const cdpResult = attachDialogHandled(await cdpClickElement(debuggerMgr, tid, frameId, selector, {
-          force: args.force as boolean | undefined,
-          observeEffect,
-          windowMs,
-          onDialog: args.onDialog as string | undefined,
-          promptText: (args.promptText as string | undefined) ?? null,
-        }));
-        return __heal.healed ? { ...(cdpResult as object), healed: true } : cdpResult;
-      };
-
-      // CDP 拿不到也别让调用方弃 tab:合成路径就在本 handler 内(2026-08-18 日志)
-      let degradeNote: string | null = null;
-      const isCdpAttachFailure = (err: unknown): err is VtxError =>
-        err instanceof VtxError && err.code === VtxErrorCode.CDP_NOT_ATTACHED;
-      const noteFor = (err: VtxError): string =>
-        isDebuggerBusyMessage(err.message)
-          ? CDP_BUSY_SYNTHETIC_DIAGNOSIS
-          : cdpUnavailableDiagnosis(err.message);
-
-      if (useRealMouse || trustedMode) {
-        try {
-          return await cdpClickPath();
-        } catch (err) {
-          if (!isCdpAttachFailure(err)) throw err;
-          degradeNote = noteFor(err);
-        }
-      }
-
-      // 降级换了不等价做法,不给证据模型只能信一个可能是假的 success,故强制采效果信号
-      let effectOn = observeEffect || degradeNote !== null;
-      const finishSynthetic = (r: unknown): unknown => {
-        const healed = __heal.healed ? { ...(r as object), healed: true } : r;
-        if (!degradeNote) return healed;
-        return withDiagnosis(
-          { ...(healed as object), degraded: "cdp-busy-synthetic" as const },
-          degradeNote,
-        );
-      };
-
-      // 普通 element.click() 路径（含失败探测）
-      // 加载 dom-resolve 模块，使 inline func 能通过 shadow 穿透解析 selector
-      await loadPageSideModule(tid, frameId, "dom-resolve");
-      if (effectOn) await loadPageSideModule(tid, frameId, "click-effect");
-      // 方案 A:可重跑闭包。cdpAvailable=true 时页内 func 对 submit-intent 元素返回
-      // deferToCdp(不合成点击)→ handler 改走 CDP trusted;CDP 失败时用 false 重跑合成。
-      const runSyntheticClick = async (cdpAvailable: boolean, withEffect: boolean) => {
-      const results = await chrome.scripting.executeScript({
-        target: buildExecuteTarget(tid, frameId),
-        func: async (sel: string, cdpAvailable: boolean, observeEffect: boolean, windowMs: number | undefined, dialogAnswer: string, dialogPromptText: string | null, force: boolean) => {
+export const DOM_CLICK_PAGE_FUNC = async (sel: string, cdpAvailable: boolean, observeEffect: boolean, windowMs: number | undefined, dialogAnswer: string, dialogPromptText: string | null, force: boolean) => {
           try {
             // 探测阶段：逐项检查失败原因，细化错误码
             const els = (window as any).__vortexDomResolve.queryAllDeep(sel) as Element[];
@@ -364,13 +202,37 @@ export function registerDomHandlers(
               return { errorCode: "ELEMENT_NOT_FOUND", error: `Element not found: ${sel}` };
             }
             if (els.length > 1) {
+              const attrNames = new Set<string>();
+              if (sel.includes("#")) attrNames.add("id");
+              if (sel.includes(".")) attrNames.add("class");
+              for (const match of sel.matchAll(/\[\s*([\w:-]+)/g)) attrNames.add(match[1]);
+              const cleanCandidate = (value: unknown) => String(value ?? "").replace(/[\u0000-\u001f\u007f]/g, " ").replace(/\s+/g, " ").trim().slice(0, 120);
+              const descendantText = (node: Node): string => {
+                if (node.nodeType === 3) return node.nodeValue ?? "";
+                if (node.nodeType !== 1) return "";
+                const tagName = (node as Element).tagName.toLowerCase();
+                if (tagName === "style" || tagName === "script") return "";
+                return Array.from(node.childNodes).map(descendantText).join(" ");
+              };
+              const candidates = els.slice(0, 10).map((el, index) => {
+                const attributes: Record<string, string> = {};
+                for (const name of attrNames) { const value = el.getAttribute(name); if (value) attributes[name] = cleanCandidate(value); }
+                const rect = el.getBoundingClientRect();
+                const style = getComputedStyle(el);
+                const directText = Array.from(el.childNodes)
+                  .filter((node) => node.nodeType === 3)
+                  .map((node) => node.nodeValue ?? "")
+                  .join(" ");
+                const text = cleanCandidate(directText || descendantText(el));
+                const accessibleName = cleanCandidate(el.getAttribute("aria-label") || el.getAttribute("title") || el.getAttribute("alt") || "");
+                return { index: index + 1, tag: cleanCandidate(el.tagName).toLowerCase(), accessibleName, text, attributes, visible: style.display !== "none" && style.visibility !== "hidden" && rect.width > 0 && rect.height > 0 };
+              });
               return {
                 errorCode: "SELECTOR_AMBIGUOUS",
                 error: `Selector "${sel}" matched ${els.length} elements`,
-                extras: { matchCount: els.length },
+                extras: { matchCount: els.length, candidates },
               };
-            }
-            const el = els[0] as HTMLElement;
+            }            const el = els[0] as HTMLElement;
             // 探测 disabled 走门同款 isEnabled(含 aria-disabled),与 actionability 门一致,
             // 旧版只判 .disabled 漏 aria-disabled div[role=textbox] 等(#26/#29)。
             if (!(window as any).__vortexDomResolve.isEnabled(el)) {
@@ -612,7 +474,786 @@ export function registerDomHandlers(
           } catch (err) {
             return { error: err instanceof Error ? err.message : String(err) };
           }
+        };
+
+export const DOM_TYPE_PAGE_FUNC = (sel: string, selectAll: boolean) => {
+          const els = (window as any).__vortexDomResolve.queryAllDeep(sel) as Element[];
+          if (els.length === 0) {
+            return { errorCode: "ELEMENT_NOT_FOUND", error: `Element not found: ${sel}` };
+          }
+          if (els.length > 1) {
+            const attrNames = new Set<string>();
+            if (sel.includes("#")) attrNames.add("id");
+            if (sel.includes(".")) attrNames.add("class");
+            for (const match of sel.matchAll(/\[\s*([\w:-]+)/g)) attrNames.add(match[1]);
+            const cleanCandidate = (value: unknown) => String(value ?? "").replace(/[\u0000-\u001f\u007f]/g, " ").replace(/\s+/g, " ").trim().slice(0, 120);
+            const descendantText = (node: Node): string => {
+              if (node.nodeType === 3) return node.nodeValue ?? "";
+              if (node.nodeType !== 1) return "";
+              const tagName = (node as Element).tagName.toLowerCase();
+              if (tagName === "style" || tagName === "script") return "";
+              return Array.from(node.childNodes).map(descendantText).join(" ");
+            };
+            const candidates = els.slice(0, 10).map((el, index) => {
+              const attributes: Record<string, string> = {};
+              for (const name of attrNames) { const value = el.getAttribute(name); if (value) attributes[name] = cleanCandidate(value); }
+              const rect = el.getBoundingClientRect();
+              const style = getComputedStyle(el);
+              const directText = Array.from(el.childNodes)
+                .filter((node) => node.nodeType === 3)
+                .map((node) => node.nodeValue ?? "")
+                .join(" ");
+              const text = cleanCandidate(directText || descendantText(el));
+              const accessibleName = cleanCandidate(el.getAttribute("aria-label") || el.getAttribute("title") || el.getAttribute("alt") || "");
+              return { index: index + 1, tag: cleanCandidate(el.tagName).toLowerCase(), accessibleName, text, attributes, visible: style.display !== "none" && style.visibility !== "hidden" && rect.width > 0 && rect.height > 0 };
+            });
+            return {
+              errorCode: "SELECTOR_AMBIGUOUS",
+              error: `Selector "${sel}" matched ${els.length} elements`,
+              extras: { matchCount: els.length, candidates },
+            };
+          }
+          const el = els[0] as HTMLElement;
+          // 探测 disabled 走门同款 isEnabled(含 aria-disabled),与 CLICK/FILL 一致(#26)。
+          if (!(window as any).__vortexDomResolve.isEnabled(el)) {
+            return { errorCode: "ELEMENT_DISABLED", error: `Element ${sel} is disabled` };
+          }
+          const rect = el.getBoundingClientRect();
+          if (rect.width === 0 || rect.height === 0) {
+            return {
+              errorCode: "ELEMENT_DETACHED",
+              error: `Element ${sel} has zero dimensions (detached or hidden)`,
+            };
+          }
+          const inView =
+            rect.top < window.innerHeight &&
+            rect.bottom > 0 &&
+            rect.left < window.innerWidth &&
+            rect.right > 0;
+          if (!inView) {
+            return {
+              errorCode: "ELEMENT_OFFSCREEN",
+              error: `Element ${sel} is outside the viewport`,
+            };
+          }
+          // Pre-focus so the upcoming CDP insertText / dispatch
+          // event chain has a focused element to land on. focus()
+          // is idempotent if the element is already active.
+          el.focus();
+          // contentEditable clear-before:CDP Input.insertText 在选区/光标处插入,
+          // 空选区时残留旧内容拼接(live 实测 type 一段文本得到 "NEWexisting")。
+          // type 语义是「把这段文本写入字段」,故先全选已有内容,让 insertText 替换
+          // 选区(产生合规 beforeinput,ProseMirror/Slate/Lexical 接受)——等价人手
+          // Ctrl+A 后输入。仅对 contentEditable 且有文本要写时全选,type("") 保持
+          // no-op,对齐 input/textarea 分支契约(2026-06-04 多 agent 审计 #4)。
+          if (selectAll && el.isContentEditable) {
+            const editSel = window.getSelection();
+            if (editSel) {
+              const range = document.createRange();
+              range.selectNodeContents(el);
+              editSel.removeAllRanges();
+              editSel.addRange(range);
+            }
+          }
+          return {
+            ok: true,
+            isContentEditable: el.isContentEditable === true,
+            // 回读校验基线:contentEditable 写入前的文本(select-all 不改 textContent,
+            // 此处捕获安全)。host 端 insertText 后比对,识别编辑器拒收(族 A 护栏)。
+            ceText: el.isContentEditable ? (el.textContent ?? "") : undefined,
+          };
+        };
+
+export const DOM_FILL_PAGE_FUNC = (sel: string, val: string) => {
+          try {
+            // === element probes (in sync with CLICK) ===
+            const els = (window as any).__vortexDomResolve.queryAllDeep(sel) as Element[];
+            if (els.length === 0) {
+              return { errorCode: "ELEMENT_NOT_FOUND", error: `Element not found: ${sel}` };
+            }
+            if (els.length > 1) {
+              const attrNames = new Set<string>();
+              if (sel.includes("#")) attrNames.add("id");
+              if (sel.includes(".")) attrNames.add("class");
+              for (const match of sel.matchAll(/\[\s*([\w:-]+)/g)) attrNames.add(match[1]);
+              const cleanCandidate = (value: unknown) => String(value ?? "").replace(/[\u0000-\u001f\u007f]/g, " ").replace(/\s+/g, " ").trim().slice(0, 120);
+              const descendantText = (node: Node): string => {
+                if (node.nodeType === 3) return node.nodeValue ?? "";
+                if (node.nodeType !== 1) return "";
+                const tagName = (node as Element).tagName.toLowerCase();
+                if (tagName === "style" || tagName === "script") return "";
+                return Array.from(node.childNodes).map(descendantText).join(" ");
+              };
+              const candidates = els.slice(0, 10).map((el, index) => {
+                const attributes: Record<string, string> = {};
+                for (const name of attrNames) { const value = el.getAttribute(name); if (value) attributes[name] = cleanCandidate(value); }
+                const rect = el.getBoundingClientRect();
+                const style = getComputedStyle(el);
+                const directText = Array.from(el.childNodes)
+                  .filter((node) => node.nodeType === 3)
+                  .map((node) => node.nodeValue ?? "")
+                  .join(" ");
+                const text = cleanCandidate(directText || descendantText(el));
+                const accessibleName = cleanCandidate(el.getAttribute("aria-label") || el.getAttribute("title") || el.getAttribute("alt") || "");
+                return { index: index + 1, tag: cleanCandidate(el.tagName).toLowerCase(), accessibleName, text, attributes, visible: style.display !== "none" && style.visibility !== "hidden" && rect.width > 0 && rect.height > 0 };
+              });
+              return {
+                errorCode: "SELECTOR_AMBIGUOUS",
+                error: `Selector "${sel}" matched ${els.length} elements`,
+                extras: { matchCount: els.length, candidates },
+              };
+            }
+            const el = els[0] as HTMLInputElement;
+            // 探测 disabled 走门同款 isEnabled(含 aria-disabled),与 CLICK/TYPE 一致(#26)。
+            if (!(window as any).__vortexDomResolve.isEnabled(el)) {
+              return { errorCode: "ELEMENT_DISABLED", error: `Element ${sel} is disabled` };
+            }
+            const rect = el.getBoundingClientRect();
+            if (rect.width === 0 || rect.height === 0) {
+              return {
+                errorCode: "ELEMENT_DETACHED",
+                error: `Element ${sel} has zero dimensions (detached or hidden)`,
+              };
+            }
+            const inView =
+              rect.top < window.innerHeight &&
+              rect.bottom > 0 &&
+              rect.left < window.innerWidth &&
+              rect.right > 0;
+            if (!inView) {
+              return {
+                errorCode: "ELEMENT_OFFSCREEN",
+                error: `Element ${sel} is outside the viewport`,
+              };
+            }
+            // 元素类型分流:isEditable 门放行的类型(input/textarea/select/
+            // contenteditable)比 fill 写值逻辑能正确处理的多。对非 text-like 的元素,
+            // 回退 `el.value = val` 要么被原生静默忽略、要么写错属性,伪装成
+            // success:true 实则页面无变化(silent false-success)。逐类响亮报错指引正确 action。
+            // (2026-06-03 act 原语白盒审计族 B)
+            //
+            // contenteditable → type(走 CDP Input.insertText 正确驱动)。
+            if (el.isContentEditable) {
+              return {
+                errorCode: "INVALID_TARGET",
+                error: `Element ${sel} is contentEditable; use action "type" instead of "fill"`,
+              };
+            }
+            // 原生 <select> → select(fill 设 el.value 仅按 option value 匹配,传可见
+            // 文本会被静默忽略并清空选中;SELECT handler 有 value→文本→label 回退)。
+            if (el instanceof HTMLSelectElement) {
+              return {
+                errorCode: "INVALID_TARGET",
+                error: `Element ${sel} is a <select>; use action "select" instead of "fill"`,
+              };
+            }
+            // checkbox/radio → click(fill 的原生 value setter 写的是 value 属性即
+            // 提交值,不是 checked 状态;勾选/取消勾选要靠 click 切换)。
+            if (
+              el instanceof HTMLInputElement &&
+              (el.type === "checkbox" || el.type === "radio")
+            ) {
+              return {
+                errorCode: "INVALID_TARGET",
+                error: `Element ${sel} is a ${el.type}; use action "click" to toggle it instead of "fill"`,
+              };
+            }
+            // === fill operation ===
+            // 走原生 value setter 是为绕过 React 受控组件覆盖的 setter,但必须按元素
+            // 实际类型取:textarea 用 HTMLTextAreaElement、input 用 HTMLInputElement。
+            // 用错类型(如对 <textarea> 调用 HTMLInputElement 的 setter)会触发浏览器
+            // 对原生访问器的品牌检查抛 "Illegal invocation"——Bing/Google 搜索框、评论框
+            // 等都是 textarea,误用 input setter 会让 fill 对整类失效。
+            const valueProto =
+              el instanceof HTMLTextAreaElement
+                ? window.HTMLTextAreaElement.prototype
+                : el instanceof HTMLInputElement
+                  ? window.HTMLInputElement.prototype
+                  : null;
+            const nativeValueSetter = valueProto
+              ? Object.getOwnPropertyDescriptor(valueProto, "value")?.set
+              : undefined;
+            if (nativeValueSetter) {
+              nativeValueSetter.call(el, val);
+            } else {
+              el.value = val;
+            }
+            el.dispatchEvent(new Event("input", { bubbles: true }));
+            el.dispatchEvent(new Event("change", { bubbles: true }));
+            // 回读校验副作用真发生:type=number/date/email 等对非法格式的值,原生 setter
+            // 静默置空(el.value="")。传了非空值却读回空 = 输入被拒,报 NO_EFFECT 而非
+            // 假成功(2026-06-03 act 原语白盒审计族 A,#7)。仅判「非空→空」的明确拒绝,
+            // 不误伤值规范化(如 number "007"→"7")。
+            if (String(val) !== "" && (el as HTMLInputElement).value === "") {
+              return {
+                errorCode: "NO_EFFECT",
+                error: `Element ${sel} rejected value "${String(val)}" (likely a format/type constraint, e.g. type=number/date); value is empty after fill`,
+                extras: { attempted: String(val), type: (el as HTMLInputElement).type },
+              };
+            }
+            // DESIGN-002 (N0063): fill 成功后显式 focus,让后续 vortex_press/Enter 落在 input 上。
+            // 原生 value setter 不触发 focus,React 受控组件 click→fill 链路常使 activeElement
+            // 停在 BODY(实测 bytenew 搜索框 fill 后 activeElement=BODY → 搜索+回车整类失效)。
+            // preventScroll 避免 sticky 容器 fill 后视口跳变;不支持该选项的环境兜底裸 focus。
+            if (typeof el.focus === "function") {
+              try { el.focus({ preventScroll: true }); } catch { try { el.focus(); } catch { /* focus 非所有元素可用 */ } }
+            }
+            // focused 反映真实结果(focus 在 disabled/hidden 上不抛错但静默 no-op,review N0063):
+            // 取 el 所在 root(穿 shadow)的 activeElement 是否就是 el,而非硬编码 true。
+            const __root = (el.getRootNode?.() ?? el.ownerDocument) as Document | ShadowRoot;
+            const focused = __root?.activeElement === el;
+            // 回读值随成功返回:success 不说明填进去的是什么,受控组件常回滚
+            // 与 type 同口径封顶 500:大 textarea 会把整段内容回传给模型
+            return {
+              result: {
+                success: true, focused,
+                value: el.value.length > 500 ? el.value.slice(0, 500) + "…" : el.value,
+              },
+            };
+          } catch (err) {
+            return { error: err instanceof Error ? err.message : String(err) };
+          }
+        };
+
+export const DOM_SELECT_PAGE_FUNC = async (sel: string, val: string | string[], timeoutMs: number) => {
+          try {
+            // === 探测（与 CLICK 同步）===
+            const els = (window as any).__vortexDomResolve.queryAllDeep(sel) as Element[];
+            if (els.length === 0) {
+              return { errorCode: "ELEMENT_NOT_FOUND", error: `Element not found: ${sel}` };
+            }
+            if (els.length > 1) {
+              const attrNames = new Set<string>();
+              if (sel.includes("#")) attrNames.add("id");
+              if (sel.includes(".")) attrNames.add("class");
+              for (const match of sel.matchAll(/\[\s*([\w:-]+)/g)) attrNames.add(match[1]);
+              const cleanCandidate = (value: unknown) => String(value ?? "").replace(/[\u0000-\u001f\u007f]/g, " ").replace(/\s+/g, " ").trim().slice(0, 120);
+              const descendantText = (node: Node): string => {
+                if (node.nodeType === 3) return node.nodeValue ?? "";
+                if (node.nodeType !== 1) return "";
+                const tagName = (node as Element).tagName.toLowerCase();
+                if (tagName === "style" || tagName === "script") return "";
+                return Array.from(node.childNodes).map(descendantText).join(" ");
+              };
+              const candidates = els.slice(0, 10).map((el, index) => {
+                const attributes: Record<string, string> = {};
+                for (const name of attrNames) { const value = el.getAttribute(name); if (value) attributes[name] = cleanCandidate(value); }
+                const rect = el.getBoundingClientRect();
+                const style = getComputedStyle(el);
+                const directText = Array.from(el.childNodes)
+                  .filter((node) => node.nodeType === 3)
+                  .map((node) => node.nodeValue ?? "")
+                  .join(" ");
+                const text = cleanCandidate(directText || descendantText(el));
+                const accessibleName = cleanCandidate(el.getAttribute("aria-label") || el.getAttribute("title") || el.getAttribute("alt") || "");
+                return { index: index + 1, tag: cleanCandidate(el.tagName).toLowerCase(), accessibleName, text, attributes, visible: style.display !== "none" && style.visibility !== "hidden" && rect.width > 0 && rect.height > 0 };
+              });
+              return {
+                errorCode: "SELECTOR_AMBIGUOUS",
+                error: `Selector "${sel}" matched ${els.length} elements`,
+                extras: { matchCount: els.length, candidates },
+              };
+            }
+            const el = els[0] as HTMLSelectElement;
+            // 探测 disabled 走门同款 isEnabled(含 aria-disabled),与 CLICK/TYPE/FILL 一致(#26)。
+            if (!(window as any).__vortexDomResolve.isEnabled(el)) {
+              return { errorCode: "ELEMENT_DISABLED", error: `Element ${sel} is disabled` };
+            }
+            const rect = el.getBoundingClientRect();
+            if (rect.width === 0 || rect.height === 0) {
+              return {
+                errorCode: "ELEMENT_DETACHED",
+                error: `Element ${sel} has zero dimensions (detached or hidden)`,
+              };
+            }
+            const inView =
+              rect.top < window.innerHeight &&
+              rect.bottom > 0 &&
+              rect.left < window.innerWidth &&
+              rect.right > 0;
+            if (!inView) {
+              return {
+                errorCode: "ELEMENT_OFFSCREEN",
+                error: `Element ${sel} is outside the viewport`,
+              };
+            }
+            // === select 操作 ===
+            // 原生 <select>:el.value=val 仅按 option 的 value 属性匹配,且选不中时
+            // value 静默变 "" / selectedIndex 变 -1。调用方(尤其 agent)常只看得到可见
+            // 文本(observe 不枚举 option),故按 value → 可见文本(label) → label 属性
+            // 依次回退;全不中则报错而非假成功(2026-06-01 native-select dogfood)。
+            let opts = Array.from(el.options);
+            const norm = (s: string) => s.replace(/\s+/g, " ").trim();
+            const matchOption = (one: string): HTMLOptionElement | null => {
+              const t = norm(String(one));
+              return (
+                opts.find((o) => o.value === one) ??
+                opts.find((o) => norm(o.text) === t) ??
+                opts.find((o) => o.label != null && norm(o.label) === t) ??
+                null
+              );
+            };
+
+            // 轮询等异步选项渲染:options 被 Ajax/远程填充,首帧可能为空,同步枚举一次
+            // 会误报 NO_MATCHING_OPTION(2026-06-03 act 原语白盒审计族 I #23)。el.options
+            // 是 live collection,每轮重读即可拾取后插入的 option。common case 首次即全
+            // 匹配,不进轮询(零额外开销,与原同步行为一致,低回归风险)。
+            const wantList = Array.isArray(val) ? (val as string[]) : [val as string];
+            const allMatchable = () => wantList.every((one) => matchOption(one) != null);
+            if (!allMatchable()) {
+              const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+              const deadline = Date.now() + Math.min(timeoutMs, 4000);
+              while (Date.now() < deadline) {
+                await sleep(50);
+                opts = Array.from(el.options);
+                if (allMatchable()) break;
+              }
+            }
+
+            // 数组 value = 多选(原生 <select multiple>)。单值赋值 el.value 只能选中
+            // 一个 option,多选必须逐 option 设 .selected;全中才提交,任一不中报错而非
+            // 部分假成功(2026-06-03 多选 dogfood,act 原语白盒审计族 E)。
+            if (Array.isArray(val)) {
+              if (!el.multiple) {
+                return {
+                  errorCode: "INVALID_PARAMS",
+                  error: `<select> ${sel} is not multiple; pass a single value, not an array`,
+                };
+              }
+              // 去重:数组里两项可能解析到同一 option(如 ["Apple","Apple"],或一个按
+              // value、一个按可见文本命中同一项)。不去重则 matched 计数 > selectedOptions
+              // 实际选中数,下面回读校验会误报 NO_EFFECT。
+              const matched: HTMLOptionElement[] = [];
+              const seen = new Set<HTMLOptionElement>();
+              const unmatched: string[] = [];
+              for (const one of val as string[]) {
+                const m = matchOption(one);
+                if (!m) {
+                  unmatched.push(String(one));
+                  continue;
+                }
+                if (!seen.has(m)) {
+                  seen.add(m);
+                  matched.push(m);
+                }
+              }
+              if (unmatched.length > 0) {
+                return {
+                  errorCode: "NO_MATCHING_OPTION",
+                  error: `<select> ${sel} has no option matching ${JSON.stringify(unmatched)} (by value or visible text)`,
+                  extras: {
+                    unmatched,
+                    available: opts.map((o) => o.value || o.text).slice(0, 30),
+                  },
+                };
+              }
+              // disabled option 可被程序赋值选中(HTML 规范 disabled 只挡用户交互),
+              // 选中后回读计数相等会假成功(族 I #21)。命中禁用项直接报错而非假选中。
+              const disabledMatched = matched.filter((m) => m.disabled);
+              if (disabledMatched.length > 0) {
+                return {
+                  errorCode: "INVALID_PARAMS",
+                  error: `<select> ${sel} option(s) disabled and cannot be selected: ${disabledMatched.map((m) => norm(m.text)).join(", ")}`,
+                  extras: { disabled: disabledMatched.map((m) => m.value || m.text) },
+                };
+              }
+              for (const o of opts) o.selected = false;
+              for (const m of matched) m.selected = true;
+              el.dispatchEvent(new Event("change", { bubbles: true }));
+              // 回读校验副作用真发生(disabled option 可能拒绝选中):selectedOptions
+              // 必须与意图一致,否则报 NO_EFFECT 而非假成功。
+              const selectedNow = Array.from(el.selectedOptions).map((o) => o.value);
+              if (selectedNow.length !== matched.length) {
+                return {
+                  errorCode: "NO_EFFECT",
+                  error: `<select> ${sel} multi-select did not fully apply (expected ${matched.length} selected, got ${selectedNow.length}; check for disabled options)`,
+                  extras: { selected: selectedNow },
+                };
+              }
+              return { result: { success: true, value: selectedNow } };
+            }
+
+            // 单值
+            const opt = matchOption(val as string);
+            if (!opt) {
+              return {
+                errorCode: "NO_MATCHING_OPTION",
+                error: `<select> ${sel} has no option matching "${String(val)}" (by value or visible text)`,
+                extras: {
+                  available: opts.map((o) => o.value || o.text).slice(0, 30),
+                },
+              };
+            }
+            // disabled option 可被 el.value 程序赋值选中 → 假成功(族 I #21)。明确报错。
+            if (opt.disabled) {
+              return {
+                errorCode: "INVALID_PARAMS",
+                error: `<select> ${sel} option "${String(val)}" is disabled and cannot be selected`,
+                extras: { disabled: opt.value || opt.text },
+              };
+            }
+            el.value = opt.value;
+            el.dispatchEvent(new Event("change", { bubbles: true }));
+            // 回读校验副作用真发生(对齐多选路径 selectedNow 校验):受控/约束 <select>
+            // 可能在 change 监听中把选择 snap-back 还原(React 受控拒收、业务约束回弹),
+            // el.value 读回 ≠ 意图 = 选择被拒,报 NO_EFFECT 而非假成功(2026-06-20 白盒复现)。
+            // option value 是精确值无规范化(不同于 FILL 自由文本的克制空判),严格比对无假阳。
+            if (el.value !== opt.value) {
+              return {
+                errorCode: "NO_EFFECT",
+                error: `<select> ${sel} did not retain selection "${String(val)}" (value is "${el.value}" after change; likely a controlled/constrained select reverting)`,
+                extras: { intended: opt.value, actual: el.value },
+              };
+            }
+            return { result: { success: true, value: el.value } };
+          } catch (err) {
+            return { error: err instanceof Error ? err.message : String(err) };
+          }
+        };
+
+export const DOM_HOVER_PAGE_FUNC = (sel: string) => {
+          try {
+            // === 探测（与 CLICK 同步；HOVER 不检查 disabled，disabled 元素仍可收 hover 事件）===
+            const els = (window as any).__vortexDomResolve.queryAllDeep(sel) as Element[];
+            if (els.length === 0) {
+              return { errorCode: "ELEMENT_NOT_FOUND", error: `Element not found: ${sel}` };
+            }
+            if (els.length > 1) {
+              const attrNames = new Set<string>();
+              if (sel.includes("#")) attrNames.add("id");
+              if (sel.includes(".")) attrNames.add("class");
+              for (const match of sel.matchAll(/\[\s*([\w:-]+)/g)) attrNames.add(match[1]);
+              const cleanCandidate = (value: unknown) => String(value ?? "").replace(/[\u0000-\u001f\u007f]/g, " ").replace(/\s+/g, " ").trim().slice(0, 120);
+              const descendantText = (node: Node): string => {
+                if (node.nodeType === 3) return node.nodeValue ?? "";
+                if (node.nodeType !== 1) return "";
+                const tagName = (node as Element).tagName.toLowerCase();
+                if (tagName === "style" || tagName === "script") return "";
+                return Array.from(node.childNodes).map(descendantText).join(" ");
+              };
+              const candidates = els.slice(0, 10).map((el, index) => {
+                const attributes: Record<string, string> = {};
+                for (const name of attrNames) { const value = el.getAttribute(name); if (value) attributes[name] = cleanCandidate(value); }
+                const rect = el.getBoundingClientRect();
+                const style = getComputedStyle(el);
+                const directText = Array.from(el.childNodes)
+                  .filter((node) => node.nodeType === 3)
+                  .map((node) => node.nodeValue ?? "")
+                  .join(" ");
+                const text = cleanCandidate(directText || descendantText(el));
+                const accessibleName = cleanCandidate(el.getAttribute("aria-label") || el.getAttribute("title") || el.getAttribute("alt") || "");
+                return { index: index + 1, tag: cleanCandidate(el.tagName).toLowerCase(), accessibleName, text, attributes, visible: style.display !== "none" && style.visibility !== "hidden" && rect.width > 0 && rect.height > 0 };
+              });
+              return {
+                errorCode: "SELECTOR_AMBIGUOUS",
+                error: `Selector "${sel}" matched ${els.length} elements`,
+                extras: { matchCount: els.length, candidates },
+              };
+            }
+            const el = els[0] as HTMLElement;
+            // 滚入视口:真鼠标(下面 CDP mouseMoved)只能移到视口内坐标,离屏元素
+            // hover 无效。滚动后再取 rect 算中心(2026-06-03 act 原语白盒审计族 C)。
+            el.scrollIntoView({ block: "center", inline: "center" });
+            const rect = el.getBoundingClientRect();
+            if (rect.width === 0 || rect.height === 0) {
+              return {
+                errorCode: "ELEMENT_DETACHED",
+                error: `Element ${sel} has zero dimensions (detached or hidden)`,
+              };
+            }
+            const cx = rect.left + rect.width / 2;
+            const cy = rect.top + rect.height / 2;
+            // === hover 操作(合成事件回退)===
+            // 合成事件供监听 page-side mouseover 的库即时反应;真实 CSS :hover 态由
+            // handler 侧的 CDP mouseMoved 触发(合成 JS 事件不更新浏览器 hover 态)。
+            // mouseenter 规范上不冒泡,用 bubbles:false 修正语义。
+            el.dispatchEvent(new MouseEvent("mouseover", { bubbles: true, cancelable: true }));
+            el.dispatchEvent(new MouseEvent("mouseenter", { bubbles: false, cancelable: true }));
+            // 静态 tooltip 信息：CSS `title` 的 OS 级 tooltip 不依赖 JS 事件
+            // 触发（需要鼠标在元素上真停留），JS 无法可靠等到。所以直接读
+            // 元素的 tooltip 相关属性返回，调用方不再依赖 DOM 渲染（P2-8,
+            // 2026-05-21）。
+            const tooltipInfo: Record<string, string> = {};
+            const title = el.getAttribute("title");
+            if (title) tooltipInfo.title = title;
+            const ariaLabel = el.getAttribute("aria-label");
+            if (ariaLabel) tooltipInfo.ariaLabel = ariaLabel;
+            const ariaDescribedBy = el.getAttribute("aria-describedby");
+            if (ariaDescribedBy) {
+              tooltipInfo.ariaDescribedBy = ariaDescribedBy;
+              const desc = document.getElementById(ariaDescribedBy);
+              if (desc) {
+                const t = (desc.textContent || "").replace(/\s+/g, " ").trim();
+                if (t) tooltipInfo.ariaDescription = t.slice(0, 200);
+              }
+            }
+            const dataTooltip = el.getAttribute("data-tooltip") || el.getAttribute("data-original-title");
+            if (dataTooltip) tooltipInfo.dataTooltip = dataTooltip;
+            return { result: { cx, cy, tooltip: tooltipInfo } };
+          } catch (err) {
+            return { error: err instanceof Error ? err.message : String(err) };
+          }
+        };
+
+export const DOM_COMMIT_PAGE_FUNC = (
+          sel: string,
+          closestSelector: string,
+          ariaClosest: string,
+          val: unknown,
+          timeoutMs: number,
+          driverId: string,
+        ) => {
+          const w = window as any;
+          if (driverId === "element-plus-checkbox-group") {
+            return w.__vortexCommitCheckboxGroup.run(sel, closestSelector, val, timeoutMs);
+          }
+          if (driverId === "generic-aria-select") {
+            return w.__vortexCommitAriaSelect.run(sel, ariaClosest, val, timeoutMs);
+          }
+          if (driverId === "element-plus-select") {
+            // kind="select" 二段路由:先认 Element Plus el-select(其专属 driver 处理
+            // filterable 虚拟列表等 EP 特有交互),否则回退通用 ARIA combobox/listbox
+            // driver。原生 <select> 不属任一组件 driver,明确指引改用 action "select"。
+            const els = document.querySelectorAll(sel);
+            if (els.length === 0)
+              return { error: `Element not found: ${sel}`, errorCode: "ELEMENT_NOT_FOUND" };
+            if (els.length > 1) {
+              const attrNames = new Set<string>();
+              if (sel.includes("#")) attrNames.add("id");
+              if (sel.includes(".")) attrNames.add("class");
+              for (const match of sel.matchAll(/\[\s*([\w:-]+)/g)) attrNames.add(match[1]);
+              const cleanCandidate = (value: unknown) => String(value ?? "").replace(/[\u0000-\u001f\u007f]/g, " ").replace(/\s+/g, " ").trim().slice(0, 120);
+              const descendantText = (node: Node): string => {
+                if (node.nodeType === 3) return node.nodeValue ?? "";
+                if (node.nodeType !== 1) return "";
+                const tagName = (node as Element).tagName.toLowerCase();
+                if (tagName === "style" || tagName === "script") return "";
+                return Array.from(node.childNodes).map(descendantText).join(" ");
+              };
+              const candidates = Array.from(els).slice(0, 10).map((el, index) => {
+                const attributes: Record<string, string> = {};
+                for (const name of attrNames) { const value = el.getAttribute(name); if (value) attributes[name] = cleanCandidate(value); }
+                const rect = el.getBoundingClientRect();
+                const style = getComputedStyle(el);
+                const directText = Array.from(el.childNodes)
+                  .filter((node) => node.nodeType === 3)
+                  .map((node) => node.nodeValue ?? "")
+                  .join(" ");
+                const text = cleanCandidate(directText || descendantText(el));
+                const accessibleName = cleanCandidate(el.getAttribute("aria-label") || el.getAttribute("title") || el.getAttribute("alt") || "");
+                return { index: index + 1, tag: cleanCandidate(el.tagName).toLowerCase(), accessibleName, text, attributes, visible: style.display !== "none" && style.visibility !== "hidden" && rect.width > 0 && rect.height > 0 };
+              });
+              return {
+                error: `Selector "${sel}" matched ${els.length} elements`,
+                errorCode: "SELECTOR_AMBIGUOUS",
+                extras: { matchCount: els.length, candidates },
+              };
+            }
+            const target = els[0] as HTMLElement;
+            if (target.closest(closestSelector) || target.querySelector(closestSelector)) {
+              return w.__vortexCommitSelect.run(sel, closestSelector, val, timeoutMs);
+            }
+            if (target.tagName === "SELECT" || target.closest("select")) {
+              return {
+                error: `Target is a native <select>; kind="select" is for component-library widgets (Element Plus / Headless UI / MUI / Radix / antd …). Use action "select" (vortex_act) or vortex_fill_form without kind.`,
+                errorCode: "UNSUPPORTED_TARGET",
+                extras: { driverId: "element-plus-select", nativeSelect: true },
+              };
+            }
+            return w.__vortexCommitAriaSelect.run(sel, ariaClosest, val, timeoutMs);
+          }
+          return { error: `Unknown driver id: ${driverId}`, errorCode: "INVALID_PARAMS" };
+        };
+
+export function registerDomHandlers(
+  router: ActionRouter,
+  debuggerMgr: DebuggerManager,
+): void {
+  router.registerAll({
+    [DomActions.QUERY]: async (args, tabId) => {
+      const __t = resolveTarget(args);
+      const selector = __t.selector;
+      const tid = await getActiveTabId(__t.boundTabId ?? (args.tabId as number | undefined) ?? tabId);
+      const frameId = __t.boundFrameId ?? (args.frameId as number | undefined);
+      if (frameId != null) await ensureFrameAttached(tid, frameId);
+      const res = await nativePageQuery<{ result?: unknown; error?: string } | undefined>(
+        tid,
+        frameId,
+        (sel: string) => {
+          try {
+            const el = document.querySelector(sel);
+            if (!el) return { result: null };
+            const attrs: Record<string, string> = {};
+            for (const attr of Array.from(el.attributes)) {
+              attrs[attr.name] = attr.value;
+            }
+            return {
+              result: {
+                tag: el.tagName.toLowerCase(),
+                id: el.id || undefined,
+                classes: Array.from(el.classList),
+                text: (el as HTMLElement).innerText?.slice(0, 500),
+                attributes: attrs,
+              },
+            };
+          } catch (err) {
+            return { error: err instanceof Error ? err.message : String(err) };
+          }
         },
+        [selector],
+      );
+      if (res?.error) mapPageError(res, selector);
+      return res?.result;
+    },
+
+    [DomActions.QUERY_ALL]: async (args, tabId) => {
+      const __t = resolveTarget(args);
+      const selector = __t.selector;
+      const tid = await getActiveTabId(__t.boundTabId ?? (args.tabId as number | undefined) ?? tabId);
+      const frameId = __t.boundFrameId ?? (args.frameId as number | undefined);
+      if (frameId != null) await ensureFrameAttached(tid, frameId);
+      const res = await nativePageQuery<{ result?: unknown; error?: string } | undefined>(
+        tid,
+        frameId,
+        (sel: string) => {
+          try {
+            const elements = Array.from(document.querySelectorAll(sel)).slice(0, 100);
+            return {
+              result: elements.map((el) => {
+                const attrs: Record<string, string> = {};
+                for (const attr of Array.from(el.attributes)) {
+                  attrs[attr.name] = attr.value;
+                }
+                return {
+                  tag: el.tagName.toLowerCase(),
+                  id: el.id || undefined,
+                  classes: Array.from(el.classList),
+                  text: (el as HTMLElement).innerText?.slice(0, 200),
+                  attributes: attrs,
+                };
+              }),
+            };
+          } catch (err) {
+            return { error: err instanceof Error ? err.message : String(err) };
+          }
+        },
+        [selector],
+      );
+      if (res?.error) mapPageError(res, selector);
+      return res?.result;
+    },
+
+    [DomActions.CLICK]: async (args, tabId) => {
+      const __t = resolveTarget(args);
+      // let 声明：gate 自愈后用 __heal.selector 重绑，下游所有引用统一用 selector。
+      let selector = __t.selector;
+      const tid = await getActiveTabId(__t.boundTabId ?? (args.tabId as number | undefined) ?? tabId);
+      const frameId = __t.boundFrameId ?? (args.frameId as number | undefined);
+      if (frameId != null) await ensureFrameAttached(tid, frameId);
+      const useRealMouse = args.useRealMouse as boolean | undefined;
+      // flag-自适应:server 在 trusted Chrome(带 --silent-debugger-extension-api)下注入
+      // trustedMode=true。此时 click 默认走 CDP trusted(无黄条、广覆盖 isTrusted-gated),
+      // 等价于隐式 useRealMouse。非 trusted 时落到下方合成 + submit-intent 路径(不变)。
+      const trustedMode = args.trustedMode === true;
+      // GAP-G(N0062): click 效果信号采集。opt-in,默认关(零开销)。开启时派发前后采集
+      // 非判定性证据(domMutations/urlChanged/focusChanged/ariaChanged),让 agent 自判
+      // silent failure——success 不翻转。见知识库 N0062 GAP-G 设计 / page-side/click-effect.ts。
+      const observeEffect = args.observeEffect === true;
+      const windowMs = args.windowMs as number | undefined;
+      const explicitOnDialog = args.onDialog !== undefined;
+
+      // L2 integration: actionability + descriptor 自愈 gate。
+      // NOT_ATTACHED 自旋到 TIMEOUT 且有 descriptor 时，healAwareGate 按 descriptor
+      // 重匹配元素、换选择器再跑一次 gate。无 descriptor 或非 stale 错误则原样抛。
+      // NOT_STABLE 自动 force 重试逻辑在 waitActionableAutoForce 内已覆盖。
+      const __heal = await healAwareGate(
+        tid,
+        frameId,
+        selector,
+        // 不覆盖默认:未传 timeout 时透传 undefined,由 waitActionable 落到
+        // DEFAULT_TIMEOUT_MS(2000)。历史 `?? 5000` 覆盖让 perf 修复成死代码。
+        { timeout: args.timeout as number | undefined },
+        args.force as boolean | undefined,
+        __t.descriptor,
+      );
+      // 重绑 selector：若已自愈则改为 healed selector，下游所有路径（早返回/CDP/合成）统一引用。
+      selector = __heal.selector;
+
+      // 把 page-side 返回的 raw dialogs 数组转成对外 dialogHandled 字段 + 默认 dismiss 的 warning。
+      // 定义前置(原在 deferToCdp 段下方)——使下方 useRealMouse/trustedMode 早返回分支也能套用。
+      // 否则 trusted 模式(Chrome 带 flag,click 默认走 CDP)下该分支返回 raw dialogs 无
+      // dialogHandled,a05536b 漏覆盖此路径。(2026-06-13 antd Pro dogfood bench 副产)
+      const attachDialogHandled = (r: unknown): unknown => {
+        const obj = r as { dialogs?: Array<{ type: string; message: string }> } | undefined;
+        if (!obj?.dialogs?.length) return r;
+        const first = obj.dialogs[0];
+        const policy = (args.onDialog as string) === "accept" ? "accepted" : "dismissed";
+        const needsWarn = !explicitOnDialog && (first.type === "confirm" || first.type === "prompt");
+        const { dialogs, ...restResult } = obj;
+        return {
+          ...restResult,
+          dialogHandled: {
+            type: first.type, message: first.message, policy,
+            ...(needsWarn ? { warning: "未设 onDialog,已默认 dismiss;若本意是确认请带 onDialog:accept 重试" } : {}),
+          },
+        };
+      };
+
+      const cdpClickPath = async (): Promise<unknown> => {
+        // 预加载 dom-resolve,使 cdpClickElement 的 page-side 探测能经
+        // __vortexDomResolve 穿 open shadow + 走门同款 isEnabled——与同步路径一致,
+        // 堵 shadow-internal ref 假阴 ELEMENT_NOT_FOUND(#14)。
+        await loadPageSideModule(tid, frameId, "dom-resolve");
+        if (observeEffect) await loadPageSideModule(tid, frameId, "click-effect");
+        const cdpResult = attachDialogHandled(await cdpClickElement(debuggerMgr, tid, frameId, selector, {
+          force: args.force as boolean | undefined,
+          observeEffect,
+          windowMs,
+          onDialog: args.onDialog as string | undefined,
+          promptText: (args.promptText as string | undefined) ?? null,
+        }));
+        return __heal.healed ? { ...(cdpResult as object), healed: true } : cdpResult;
+      };
+
+      // CDP 拿不到也别让调用方弃 tab:合成路径就在本 handler 内(2026-08-18 日志)
+      let degradeNote: string | null = null;
+      const isCdpAttachFailure = (err: unknown): err is VtxError =>
+        err instanceof VtxError && err.code === VtxErrorCode.CDP_NOT_ATTACHED;
+      const noteFor = (err: VtxError): string =>
+        isDebuggerBusyMessage(err.message)
+          ? CDP_BUSY_SYNTHETIC_DIAGNOSIS
+          : cdpUnavailableDiagnosis(err.message);
+
+      if (useRealMouse || trustedMode) {
+        try {
+          return await cdpClickPath();
+        } catch (err) {
+          if (!isCdpAttachFailure(err)) throw err;
+          degradeNote = noteFor(err);
+        }
+      }
+
+      // 降级换了不等价做法,不给证据模型只能信一个可能是假的 success,故强制采效果信号
+      let effectOn = observeEffect || degradeNote !== null;
+      const finishSynthetic = (r: unknown): unknown => {
+        const healed = __heal.healed ? { ...(r as object), healed: true } : r;
+        if (!degradeNote) return healed;
+        return withDiagnosis(
+          { ...(healed as object), degraded: "cdp-busy-synthetic" as const },
+          degradeNote,
+        );
+      };
+
+      // 普通 element.click() 路径（含失败探测）
+      // 加载 dom-resolve 模块，使 inline func 能通过 shadow 穿透解析 selector
+      await loadPageSideModule(tid, frameId, "dom-resolve");
+      if (effectOn) await loadPageSideModule(tid, frameId, "click-effect");
+      // 方案 A:可重跑闭包。cdpAvailable=true 时页内 func 对 submit-intent 元素返回
+      // deferToCdp(不合成点击)→ handler 改走 CDP trusted;CDP 失败时用 false 重跑合成。
+      const runSyntheticClick = async (cdpAvailable: boolean, withEffect: boolean) => {
+      const results = await chrome.scripting.executeScript({
+        target: buildExecuteTarget(tid, frameId),
+        func: DOM_CLICK_PAGE_FUNC,
         // BUG-001 (N0063): windowMs 缺省时为 undefined,chrome.scripting.executeScript 的
         // args 走 structured clone 拒 undefined(报 "unserializable at index 3"),非 trusted
         // 合成路径默认 click 100% 崩。默认 300 对齐 page-side click-effect.ts 的 `windowMs ?? 300`
@@ -631,7 +1272,7 @@ export function registerDomHandlers(
       };
       // 走 mapPageError:祖先命中的话术/hint 覆盖只在那一处
       const throwIfClickError = (r: { error?: string; errorCode?: string; extras?: Record<string, unknown> } | undefined) => {
-        if (r?.error) mapPageError(r, selector);
+        if (r?.error) mapPageError(enrichAmbiguousError(r, selector), selector);
       };
       // 首跑:cdpAvailable=!!debuggerMgr。submit-intent 会返回 deferToCdp(未点击)。
       let res = await runSyntheticClick(!degradeNote && !!debuggerMgr, effectOn);
@@ -714,72 +1355,11 @@ export function registerDomHandlers(
       } | undefined>(
         tid,
         frameId,
-        (sel: string, selectAll: boolean) => {
-          const els = (window as any).__vortexDomResolve.queryAllDeep(sel) as Element[];
-          if (els.length === 0) {
-            return { errorCode: "ELEMENT_NOT_FOUND", error: `Element not found: ${sel}` };
-          }
-          if (els.length > 1) {
-            return {
-              errorCode: "SELECTOR_AMBIGUOUS",
-              error: `Selector "${sel}" matched ${els.length} elements`,
-              extras: { matchCount: els.length },
-            };
-          }
-          const el = els[0] as HTMLElement;
-          // 探测 disabled 走门同款 isEnabled(含 aria-disabled),与 CLICK/FILL 一致(#26)。
-          if (!(window as any).__vortexDomResolve.isEnabled(el)) {
-            return { errorCode: "ELEMENT_DISABLED", error: `Element ${sel} is disabled` };
-          }
-          const rect = el.getBoundingClientRect();
-          if (rect.width === 0 || rect.height === 0) {
-            return {
-              errorCode: "ELEMENT_DETACHED",
-              error: `Element ${sel} has zero dimensions (detached or hidden)`,
-            };
-          }
-          const inView =
-            rect.top < window.innerHeight &&
-            rect.bottom > 0 &&
-            rect.left < window.innerWidth &&
-            rect.right > 0;
-          if (!inView) {
-            return {
-              errorCode: "ELEMENT_OFFSCREEN",
-              error: `Element ${sel} is outside the viewport`,
-            };
-          }
-          // Pre-focus so the upcoming CDP insertText / dispatch
-          // event chain has a focused element to land on. focus()
-          // is idempotent if the element is already active.
-          el.focus();
-          // contentEditable clear-before:CDP Input.insertText 在选区/光标处插入,
-          // 空选区时残留旧内容拼接(live 实测 type 一段文本得到 "NEWexisting")。
-          // type 语义是「把这段文本写入字段」,故先全选已有内容,让 insertText 替换
-          // 选区(产生合规 beforeinput,ProseMirror/Slate/Lexical 接受)——等价人手
-          // Ctrl+A 后输入。仅对 contentEditable 且有文本要写时全选,type("") 保持
-          // no-op,对齐 input/textarea 分支契约(2026-06-04 多 agent 审计 #4)。
-          if (selectAll && el.isContentEditable) {
-            const editSel = window.getSelection();
-            if (editSel) {
-              const range = document.createRange();
-              range.selectNodeContents(el);
-              editSel.removeAllRanges();
-              editSel.addRange(range);
-            }
-          }
-          return {
-            ok: true,
-            isContentEditable: el.isContentEditable === true,
-            // 回读校验基线:contentEditable 写入前的文本(select-all 不改 textContent,
-            // 此处捕获安全)。host 端 insertText 后比对,识别编辑器拒收(族 A 护栏)。
-            ceText: el.isContentEditable ? (el.textContent ?? "") : undefined,
-          };
-        },
+        DOM_TYPE_PAGE_FUNC,
         [selector, text !== ""],
       );
       if (probe?.error) {
-        mapPageError(probe, selector);
+        mapPageError(enrichAmbiguousError(probe, selector), selector);
       }
 
       // dialog arm:type 操作(键盘事件序列 / CDP insertText)可能触发同步 confirm,默认 dismiss 防冻屏。
@@ -1020,137 +1600,13 @@ export function registerDomHandlers(
       } | undefined>(
         tid,
         frameId,
-        (sel: string, val: string) => {
-          try {
-            // === element probes (in sync with CLICK) ===
-            const els = (window as any).__vortexDomResolve.queryAllDeep(sel) as Element[];
-            if (els.length === 0) {
-              return { errorCode: "ELEMENT_NOT_FOUND", error: `Element not found: ${sel}` };
-            }
-            if (els.length > 1) {
-              return {
-                errorCode: "SELECTOR_AMBIGUOUS",
-                error: `Selector "${sel}" matched ${els.length} elements`,
-                extras: { matchCount: els.length },
-              };
-            }
-            const el = els[0] as HTMLInputElement;
-            // 探测 disabled 走门同款 isEnabled(含 aria-disabled),与 CLICK/TYPE 一致(#26)。
-            if (!(window as any).__vortexDomResolve.isEnabled(el)) {
-              return { errorCode: "ELEMENT_DISABLED", error: `Element ${sel} is disabled` };
-            }
-            const rect = el.getBoundingClientRect();
-            if (rect.width === 0 || rect.height === 0) {
-              return {
-                errorCode: "ELEMENT_DETACHED",
-                error: `Element ${sel} has zero dimensions (detached or hidden)`,
-              };
-            }
-            const inView =
-              rect.top < window.innerHeight &&
-              rect.bottom > 0 &&
-              rect.left < window.innerWidth &&
-              rect.right > 0;
-            if (!inView) {
-              return {
-                errorCode: "ELEMENT_OFFSCREEN",
-                error: `Element ${sel} is outside the viewport`,
-              };
-            }
-            // 元素类型分流:isEditable 门放行的类型(input/textarea/select/
-            // contenteditable)比 fill 写值逻辑能正确处理的多。对非 text-like 的元素,
-            // 回退 `el.value = val` 要么被原生静默忽略、要么写错属性,伪装成
-            // success:true 实则页面无变化(silent false-success)。逐类响亮报错指引正确 action。
-            // (2026-06-03 act 原语白盒审计族 B)
-            //
-            // contenteditable → type(走 CDP Input.insertText 正确驱动)。
-            if (el.isContentEditable) {
-              return {
-                errorCode: "INVALID_TARGET",
-                error: `Element ${sel} is contentEditable; use action "type" instead of "fill"`,
-              };
-            }
-            // 原生 <select> → select(fill 设 el.value 仅按 option value 匹配,传可见
-            // 文本会被静默忽略并清空选中;SELECT handler 有 value→文本→label 回退)。
-            if (el instanceof HTMLSelectElement) {
-              return {
-                errorCode: "INVALID_TARGET",
-                error: `Element ${sel} is a <select>; use action "select" instead of "fill"`,
-              };
-            }
-            // checkbox/radio → click(fill 的原生 value setter 写的是 value 属性即
-            // 提交值,不是 checked 状态;勾选/取消勾选要靠 click 切换)。
-            if (
-              el instanceof HTMLInputElement &&
-              (el.type === "checkbox" || el.type === "radio")
-            ) {
-              return {
-                errorCode: "INVALID_TARGET",
-                error: `Element ${sel} is a ${el.type}; use action "click" to toggle it instead of "fill"`,
-              };
-            }
-            // === fill operation ===
-            // 走原生 value setter 是为绕过 React 受控组件覆盖的 setter,但必须按元素
-            // 实际类型取:textarea 用 HTMLTextAreaElement、input 用 HTMLInputElement。
-            // 用错类型(如对 <textarea> 调用 HTMLInputElement 的 setter)会触发浏览器
-            // 对原生访问器的品牌检查抛 "Illegal invocation"——Bing/Google 搜索框、评论框
-            // 等都是 textarea,误用 input setter 会让 fill 对整类失效。
-            const valueProto =
-              el instanceof HTMLTextAreaElement
-                ? window.HTMLTextAreaElement.prototype
-                : el instanceof HTMLInputElement
-                  ? window.HTMLInputElement.prototype
-                  : null;
-            const nativeValueSetter = valueProto
-              ? Object.getOwnPropertyDescriptor(valueProto, "value")?.set
-              : undefined;
-            if (nativeValueSetter) {
-              nativeValueSetter.call(el, val);
-            } else {
-              el.value = val;
-            }
-            el.dispatchEvent(new Event("input", { bubbles: true }));
-            el.dispatchEvent(new Event("change", { bubbles: true }));
-            // 回读校验副作用真发生:type=number/date/email 等对非法格式的值,原生 setter
-            // 静默置空(el.value="")。传了非空值却读回空 = 输入被拒,报 NO_EFFECT 而非
-            // 假成功(2026-06-03 act 原语白盒审计族 A,#7)。仅判「非空→空」的明确拒绝,
-            // 不误伤值规范化(如 number "007"→"7")。
-            if (String(val) !== "" && (el as HTMLInputElement).value === "") {
-              return {
-                errorCode: "NO_EFFECT",
-                error: `Element ${sel} rejected value "${String(val)}" (likely a format/type constraint, e.g. type=number/date); value is empty after fill`,
-                extras: { attempted: String(val), type: (el as HTMLInputElement).type },
-              };
-            }
-            // DESIGN-002 (N0063): fill 成功后显式 focus,让后续 vortex_press/Enter 落在 input 上。
-            // 原生 value setter 不触发 focus,React 受控组件 click→fill 链路常使 activeElement
-            // 停在 BODY(实测 bytenew 搜索框 fill 后 activeElement=BODY → 搜索+回车整类失效)。
-            // preventScroll 避免 sticky 容器 fill 后视口跳变;不支持该选项的环境兜底裸 focus。
-            if (typeof el.focus === "function") {
-              try { el.focus({ preventScroll: true }); } catch { try { el.focus(); } catch { /* focus 非所有元素可用 */ } }
-            }
-            // focused 反映真实结果(focus 在 disabled/hidden 上不抛错但静默 no-op,review N0063):
-            // 取 el 所在 root(穿 shadow)的 activeElement 是否就是 el,而非硬编码 true。
-            const __root = (el.getRootNode?.() ?? el.ownerDocument) as Document | ShadowRoot;
-            const focused = __root?.activeElement === el;
-            // 回读值随成功返回:success 不说明填进去的是什么,受控组件常回滚
-            // 与 type 同口径封顶 500:大 textarea 会把整段内容回传给模型
-            return {
-              result: {
-                success: true, focused,
-                value: el.value.length > 500 ? el.value.slice(0, 500) + "…" : el.value,
-              },
-            };
-          } catch (err) {
-            return { error: err instanceof Error ? err.message : String(err) };
-          }
-        },
+        DOM_FILL_PAGE_FUNC,
         [selector, value],
       );
       } finally {
         await readDialogCapturedAndDisarm(tid, frameId);
       }
-      if (res?.error) mapPageError(res, selector);
+      if (res?.error) mapPageError(enrichAmbiguousError(res, selector), selector);
       const fillResult = res?.result;
       return __healFill.healed ? { ...(fillResult as object), healed: true } : fillResult;
     },
@@ -1197,182 +1653,13 @@ export function registerDomHandlers(
       } | undefined>(
         tid,
         frameId,
-        async (sel: string, val: string | string[], timeoutMs: number) => {
-          try {
-            // === 探测（与 CLICK 同步）===
-            const els = (window as any).__vortexDomResolve.queryAllDeep(sel) as Element[];
-            if (els.length === 0) {
-              return { errorCode: "ELEMENT_NOT_FOUND", error: `Element not found: ${sel}` };
-            }
-            if (els.length > 1) {
-              return {
-                errorCode: "SELECTOR_AMBIGUOUS",
-                error: `Selector "${sel}" matched ${els.length} elements`,
-                extras: { matchCount: els.length },
-              };
-            }
-            const el = els[0] as HTMLSelectElement;
-            // 探测 disabled 走门同款 isEnabled(含 aria-disabled),与 CLICK/TYPE/FILL 一致(#26)。
-            if (!(window as any).__vortexDomResolve.isEnabled(el)) {
-              return { errorCode: "ELEMENT_DISABLED", error: `Element ${sel} is disabled` };
-            }
-            const rect = el.getBoundingClientRect();
-            if (rect.width === 0 || rect.height === 0) {
-              return {
-                errorCode: "ELEMENT_DETACHED",
-                error: `Element ${sel} has zero dimensions (detached or hidden)`,
-              };
-            }
-            const inView =
-              rect.top < window.innerHeight &&
-              rect.bottom > 0 &&
-              rect.left < window.innerWidth &&
-              rect.right > 0;
-            if (!inView) {
-              return {
-                errorCode: "ELEMENT_OFFSCREEN",
-                error: `Element ${sel} is outside the viewport`,
-              };
-            }
-            // === select 操作 ===
-            // 原生 <select>:el.value=val 仅按 option 的 value 属性匹配,且选不中时
-            // value 静默变 "" / selectedIndex 变 -1。调用方(尤其 agent)常只看得到可见
-            // 文本(observe 不枚举 option),故按 value → 可见文本(label) → label 属性
-            // 依次回退;全不中则报错而非假成功(2026-06-01 native-select dogfood)。
-            let opts = Array.from(el.options);
-            const norm = (s: string) => s.replace(/\s+/g, " ").trim();
-            const matchOption = (one: string): HTMLOptionElement | null => {
-              const t = norm(String(one));
-              return (
-                opts.find((o) => o.value === one) ??
-                opts.find((o) => norm(o.text) === t) ??
-                opts.find((o) => o.label != null && norm(o.label) === t) ??
-                null
-              );
-            };
-
-            // 轮询等异步选项渲染:options 被 Ajax/远程填充,首帧可能为空,同步枚举一次
-            // 会误报 NO_MATCHING_OPTION(2026-06-03 act 原语白盒审计族 I #23)。el.options
-            // 是 live collection,每轮重读即可拾取后插入的 option。common case 首次即全
-            // 匹配,不进轮询(零额外开销,与原同步行为一致,低回归风险)。
-            const wantList = Array.isArray(val) ? (val as string[]) : [val as string];
-            const allMatchable = () => wantList.every((one) => matchOption(one) != null);
-            if (!allMatchable()) {
-              const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
-              const deadline = Date.now() + Math.min(timeoutMs, 4000);
-              while (Date.now() < deadline) {
-                await sleep(50);
-                opts = Array.from(el.options);
-                if (allMatchable()) break;
-              }
-            }
-
-            // 数组 value = 多选(原生 <select multiple>)。单值赋值 el.value 只能选中
-            // 一个 option,多选必须逐 option 设 .selected;全中才提交,任一不中报错而非
-            // 部分假成功(2026-06-03 多选 dogfood,act 原语白盒审计族 E)。
-            if (Array.isArray(val)) {
-              if (!el.multiple) {
-                return {
-                  errorCode: "INVALID_PARAMS",
-                  error: `<select> ${sel} is not multiple; pass a single value, not an array`,
-                };
-              }
-              // 去重:数组里两项可能解析到同一 option(如 ["Apple","Apple"],或一个按
-              // value、一个按可见文本命中同一项)。不去重则 matched 计数 > selectedOptions
-              // 实际选中数,下面回读校验会误报 NO_EFFECT。
-              const matched: HTMLOptionElement[] = [];
-              const seen = new Set<HTMLOptionElement>();
-              const unmatched: string[] = [];
-              for (const one of val as string[]) {
-                const m = matchOption(one);
-                if (!m) {
-                  unmatched.push(String(one));
-                  continue;
-                }
-                if (!seen.has(m)) {
-                  seen.add(m);
-                  matched.push(m);
-                }
-              }
-              if (unmatched.length > 0) {
-                return {
-                  errorCode: "NO_MATCHING_OPTION",
-                  error: `<select> ${sel} has no option matching ${JSON.stringify(unmatched)} (by value or visible text)`,
-                  extras: {
-                    unmatched,
-                    available: opts.map((o) => o.value || o.text).slice(0, 30),
-                  },
-                };
-              }
-              // disabled option 可被程序赋值选中(HTML 规范 disabled 只挡用户交互),
-              // 选中后回读计数相等会假成功(族 I #21)。命中禁用项直接报错而非假选中。
-              const disabledMatched = matched.filter((m) => m.disabled);
-              if (disabledMatched.length > 0) {
-                return {
-                  errorCode: "INVALID_PARAMS",
-                  error: `<select> ${sel} option(s) disabled and cannot be selected: ${disabledMatched.map((m) => norm(m.text)).join(", ")}`,
-                  extras: { disabled: disabledMatched.map((m) => m.value || m.text) },
-                };
-              }
-              for (const o of opts) o.selected = false;
-              for (const m of matched) m.selected = true;
-              el.dispatchEvent(new Event("change", { bubbles: true }));
-              // 回读校验副作用真发生(disabled option 可能拒绝选中):selectedOptions
-              // 必须与意图一致,否则报 NO_EFFECT 而非假成功。
-              const selectedNow = Array.from(el.selectedOptions).map((o) => o.value);
-              if (selectedNow.length !== matched.length) {
-                return {
-                  errorCode: "NO_EFFECT",
-                  error: `<select> ${sel} multi-select did not fully apply (expected ${matched.length} selected, got ${selectedNow.length}; check for disabled options)`,
-                  extras: { selected: selectedNow },
-                };
-              }
-              return { result: { success: true, value: selectedNow } };
-            }
-
-            // 单值
-            const opt = matchOption(val as string);
-            if (!opt) {
-              return {
-                errorCode: "NO_MATCHING_OPTION",
-                error: `<select> ${sel} has no option matching "${String(val)}" (by value or visible text)`,
-                extras: {
-                  available: opts.map((o) => o.value || o.text).slice(0, 30),
-                },
-              };
-            }
-            // disabled option 可被 el.value 程序赋值选中 → 假成功(族 I #21)。明确报错。
-            if (opt.disabled) {
-              return {
-                errorCode: "INVALID_PARAMS",
-                error: `<select> ${sel} option "${String(val)}" is disabled and cannot be selected`,
-                extras: { disabled: opt.value || opt.text },
-              };
-            }
-            el.value = opt.value;
-            el.dispatchEvent(new Event("change", { bubbles: true }));
-            // 回读校验副作用真发生(对齐多选路径 selectedNow 校验):受控/约束 <select>
-            // 可能在 change 监听中把选择 snap-back 还原(React 受控拒收、业务约束回弹),
-            // el.value 读回 ≠ 意图 = 选择被拒,报 NO_EFFECT 而非假成功(2026-06-20 白盒复现)。
-            // option value 是精确值无规范化(不同于 FILL 自由文本的克制空判),严格比对无假阳。
-            if (el.value !== opt.value) {
-              return {
-                errorCode: "NO_EFFECT",
-                error: `<select> ${sel} did not retain selection "${String(val)}" (value is "${el.value}" after change; likely a controlled/constrained select reverting)`,
-                extras: { intended: opt.value, actual: el.value },
-              };
-            }
-            return { result: { success: true, value: el.value } };
-          } catch (err) {
-            return { error: err instanceof Error ? err.message : String(err) };
-          }
-        },
+        DOM_SELECT_PAGE_FUNC,
         [selector, value, (args.timeout as number | undefined) ?? 5000],
       );
       } finally {
         await readDialogCapturedAndDisarm(tid, frameId);
       }
-      if (res?.error) mapPageError(res, selector);
+      if (res?.error) mapPageError(enrichAmbiguousError(res, selector), selector);
       const selectResult = res?.result;
       return __healSelect.healed ? { ...(selectResult as object), healed: true } : selectResult;
     },
@@ -1573,67 +1860,10 @@ export function registerDomHandlers(
       } | undefined>(
         tid,
         frameId,
-        (sel: string) => {
-          try {
-            // === 探测（与 CLICK 同步；HOVER 不检查 disabled，disabled 元素仍可收 hover 事件）===
-            const els = (window as any).__vortexDomResolve.queryAllDeep(sel) as Element[];
-            if (els.length === 0) {
-              return { errorCode: "ELEMENT_NOT_FOUND", error: `Element not found: ${sel}` };
-            }
-            if (els.length > 1) {
-              return {
-                errorCode: "SELECTOR_AMBIGUOUS",
-                error: `Selector "${sel}" matched ${els.length} elements`,
-                extras: { matchCount: els.length },
-              };
-            }
-            const el = els[0] as HTMLElement;
-            // 滚入视口:真鼠标(下面 CDP mouseMoved)只能移到视口内坐标,离屏元素
-            // hover 无效。滚动后再取 rect 算中心(2026-06-03 act 原语白盒审计族 C)。
-            el.scrollIntoView({ block: "center", inline: "center" });
-            const rect = el.getBoundingClientRect();
-            if (rect.width === 0 || rect.height === 0) {
-              return {
-                errorCode: "ELEMENT_DETACHED",
-                error: `Element ${sel} has zero dimensions (detached or hidden)`,
-              };
-            }
-            const cx = rect.left + rect.width / 2;
-            const cy = rect.top + rect.height / 2;
-            // === hover 操作(合成事件回退)===
-            // 合成事件供监听 page-side mouseover 的库即时反应;真实 CSS :hover 态由
-            // handler 侧的 CDP mouseMoved 触发(合成 JS 事件不更新浏览器 hover 态)。
-            // mouseenter 规范上不冒泡,用 bubbles:false 修正语义。
-            el.dispatchEvent(new MouseEvent("mouseover", { bubbles: true, cancelable: true }));
-            el.dispatchEvent(new MouseEvent("mouseenter", { bubbles: false, cancelable: true }));
-            // 静态 tooltip 信息：CSS `title` 的 OS 级 tooltip 不依赖 JS 事件
-            // 触发（需要鼠标在元素上真停留），JS 无法可靠等到。所以直接读
-            // 元素的 tooltip 相关属性返回，调用方不再依赖 DOM 渲染（P2-8,
-            // 2026-05-21）。
-            const tooltipInfo: Record<string, string> = {};
-            const title = el.getAttribute("title");
-            if (title) tooltipInfo.title = title;
-            const ariaLabel = el.getAttribute("aria-label");
-            if (ariaLabel) tooltipInfo.ariaLabel = ariaLabel;
-            const ariaDescribedBy = el.getAttribute("aria-describedby");
-            if (ariaDescribedBy) {
-              tooltipInfo.ariaDescribedBy = ariaDescribedBy;
-              const desc = document.getElementById(ariaDescribedBy);
-              if (desc) {
-                const t = (desc.textContent || "").replace(/\s+/g, " ").trim();
-                if (t) tooltipInfo.ariaDescription = t.slice(0, 200);
-              }
-            }
-            const dataTooltip = el.getAttribute("data-tooltip") || el.getAttribute("data-original-title");
-            if (dataTooltip) tooltipInfo.dataTooltip = dataTooltip;
-            return { result: { cx, cy, tooltip: tooltipInfo } };
-          } catch (err) {
-            return { error: err instanceof Error ? err.message : String(err) };
-          }
-        },
+        DOM_HOVER_PAGE_FUNC,
         [selector],
       );
-      if (res?.error) mapPageError(res, selector);
+      if (res?.error) mapPageError(enrichAmbiguousError(res, selector), selector);
       const hr = res?.result as
         | { cx: number; cy: number; tooltip: Record<string, string> }
         | undefined;
@@ -1950,49 +2180,7 @@ export function registerDomHandlers(
       } | undefined>(
         tid,
         frameId,
-        (
-          sel: string,
-          closestSelector: string,
-          ariaClosest: string,
-          val: unknown,
-          timeoutMs: number,
-          driverId: string,
-        ) => {
-          const w = window as any;
-          if (driverId === "element-plus-checkbox-group") {
-            return w.__vortexCommitCheckboxGroup.run(sel, closestSelector, val, timeoutMs);
-          }
-          if (driverId === "generic-aria-select") {
-            return w.__vortexCommitAriaSelect.run(sel, ariaClosest, val, timeoutMs);
-          }
-          if (driverId === "element-plus-select") {
-            // kind="select" 二段路由:先认 Element Plus el-select(其专属 driver 处理
-            // filterable 虚拟列表等 EP 特有交互),否则回退通用 ARIA combobox/listbox
-            // driver。原生 <select> 不属任一组件 driver,明确指引改用 action "select"。
-            const els = document.querySelectorAll(sel);
-            if (els.length === 0)
-              return { error: `Element not found: ${sel}`, errorCode: "ELEMENT_NOT_FOUND" };
-            if (els.length > 1)
-              return {
-                error: `Selector "${sel}" matched ${els.length} elements`,
-                errorCode: "SELECTOR_AMBIGUOUS",
-                extras: { matchCount: els.length },
-              };
-            const target = els[0] as HTMLElement;
-            if (target.closest(closestSelector) || target.querySelector(closestSelector)) {
-              return w.__vortexCommitSelect.run(sel, closestSelector, val, timeoutMs);
-            }
-            if (target.tagName === "SELECT" || target.closest("select")) {
-              return {
-                error: `Target is a native <select>; kind="select" is for component-library widgets (Element Plus / Headless UI / MUI / Radix / antd …). Use action "select" (vortex_act) or vortex_fill_form without kind.`,
-                errorCode: "UNSUPPORTED_TARGET",
-                extras: { driverId: "element-plus-select", nativeSelect: true },
-              };
-            }
-            return w.__vortexCommitAriaSelect.run(sel, ariaClosest, val, timeoutMs);
-          }
-          return { error: `Unknown driver id: ${driverId}`, errorCode: "INVALID_PARAMS" };
-        },
+        DOM_COMMIT_PAGE_FUNC,
         [selector, driver.closestSelector, ariaClosestSelector, value as never, timeout, driver.id],
       );
 
@@ -2001,7 +2189,8 @@ export function registerDomHandlers(
         const code = known ? (res.errorCode as VtxErrorCode) : VtxErrorCode.JS_EXECUTION_ERROR;
         const extras: Record<string, unknown> = { ...(res.extras ?? {}), driverId: driver.id };
         if (res.stage) extras.stage = res.stage;
-        throw vtxError(code, res.error, { selector, extras });
+        const enriched = enrichAmbiguousError(res, selector);
+        throw vtxError(code, enriched?.error ?? res.error, { selector, extras: enriched?.extras ?? extras });
       }
       return res?.result;
     },
