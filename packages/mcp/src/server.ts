@@ -61,7 +61,7 @@ import {
   fullPageTruncationWarning,
 } from "./lib/image-utils.js";
 import { eventStore } from "./lib/event-store.js";
-import { VtxError, type VtxEventLevel } from "@vortex-browser/shared";
+import { VtxError, VtxErrorCode, type VtxEventLevel } from "@vortex-browser/shared";
 
 type ContentItem =
   | { type: "text"; text: string }
@@ -83,6 +83,27 @@ function formatError(err: unknown): string {
     return `Error [${err.code}]: ${err.message}${hint}`;
   }
   return (err as Error)?.message ?? String(err);
+}
+
+function normalizeReloadError(
+  error: unknown,
+  fallbackMessage: string,
+  fallbackHint: string,
+): { code: VtxErrorCode; message: string; hint: string } {
+  const payload = error && typeof error === "object" ? error as Record<string, unknown> : {};
+  const rawCode = payload.code;
+  const hasMessage = typeof payload.message === "string" && payload.message.length > 0;
+  const code =
+    typeof rawCode === "string" && Object.values(VtxErrorCode).includes(rawCode as VtxErrorCode)
+      ? rawCode as VtxErrorCode
+      : VtxErrorCode.INTERNAL_ERROR;
+  const message = hasMessage
+    ? payload.message as string
+    : fallbackMessage;
+  const hint = typeof payload.hint === "string" && payload.hint.length > 0
+    ? payload.hint
+    : fallbackHint;
+  return { code, message, hint };
 }
 
 function withEvents(content: ContentItem[]): { content: ContentItem[] } {
@@ -426,22 +447,19 @@ export async function handleCallTool(
       const body = (await r.json()) as {
         ok?: boolean;
         targetStamp?: string | null;
-        error?: { code?: string; message?: string };
+        error?: { code?: unknown; message?: unknown; hint?: unknown };
       };
       if (!r.ok || body.ok === false) {
-        // hint 按本地已观测到的事实分支:步骤 1 的 diagnostics.version 拿到了
-        // browserId,就说明扩展当刻是连着的,再说"扩展未连"与 hub 报的 code 自相
-        // 矛盾(2026-08-11 live:同一刻 tab_list 正常)。
+        const normalized = normalizeReloadError(
+          body.error,
+          `reload trigger failed (HTTP ${r.status})`,
+          boundBrowserId === undefined
+            ? "diagnostics.version 未返回 browserId；本次 reload 请求被 vortex-server 拒绝，请检查当前浏览器连接后重试。"
+            : `diagnostics.version 曾返回 browserId=${boundBrowserId}；本次 reload 请求被 vortex-server 拒绝，请依据错误信息处理。`,
+        );
         return {
           isError: true,
-          content: [{ type: "text" as const, text: JSON.stringify({
-            reloaded: false,
-            error: body.error?.code ?? "RELOAD_TRIGGER_FAILED",
-            message: body.error?.message ?? `reload trigger failed (HTTP ${r.status})`,
-            hint: boundBrowserId === undefined
-              ? "扩展未连(SW 可能睡眠或未加载)。先调一次任意 vortex 工具唤醒 SW,或确认扩展已在目标浏览器（Chrome / Edge 等）加载。"
-              : `扩展连着(当前绑定 ${boundBrowserId}),重载触发被 hub 拒绝——按上面的 error/message 处理,不要去查扩展是否加载。`,
-          }, null, 2) }],
+          content: [{ type: "text" as const, text: formatDispatchError(normalized) }],
         };
       }
       targetStamp = body.targetStamp ?? null;
@@ -450,7 +468,11 @@ export async function handleCallTool(
       return {
         isError: true,
         content: [{ type: "text" as const,
-          text: `vortex-server unreachable at localhost:${PORT} (cannot trigger reload).\n${msg}` }],
+          text: formatDispatchError({
+            code: VtxErrorCode.INTERNAL_ERROR,
+            message: `vortex-server unreachable at localhost:${PORT} (cannot trigger reload).\n${msg}`,
+            hint: `确认 localhost:${PORT} 的 vortex-server 正在运行后重试`,
+          }) }],
       };
     }
 
@@ -487,17 +509,16 @@ export async function handleCallTool(
     if (!toStamp) {
       return {
         isError: true,
-        content: [{ type: "text" as const, text: JSON.stringify({
-          reloaded: false,
-          error: "RELOAD_TIMEOUT",
-          fromStamp: fromStamp ?? null,
-          targetStamp,
-          waitedMs,
+        content: [{ type: "text" as const, text: formatDispatchError({
+          code: VtxErrorCode.TIMEOUT,
+          message:
+            `vortex_dev_reload timed out waiting for buildStamp to change; ` +
+            `fromStamp=${fromStamp ?? "none"}; targetStamp=${targetStamp ?? "none"}; waitedMs=${waitedMs}`,
           hint:
             "buildStamp 未在超时内变化。可能:① chrome.runtime.reload() 未生效;" +
             "② Chrome 加载的扩展 dist 与本 server 服务的 dist 不是同一个(C1 路径错配)——" +
             "为当前 worktree 跑 `node packages/server/dist/bin/vortex-server.js install` 后重载扩展。",
-        }, null, 2) }],
+        }) }],
       };
     }
 
