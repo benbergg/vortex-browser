@@ -37,7 +37,9 @@
     <div><label><input type="checkbox" id="cfgFocusStrict" checked> focusStrict：站点只响应"焦点在编辑器"的 Enter（复现 F2/F4）</label></div>
     <div><label><input type="checkbox" id="cfgUploadStrict" checked> uploadGate=strict：附件未就绪时提交被忽略（复现 F3）</label></div>
     <div>未勾 uploadGate 即为 tolerant：容忍未就绪附件照发（贴近实测真站 12/12 成功）</div>
-    <div style="margin-top:6px">场景 A 触发：<button id="btnStealFocus" style="width:auto;border-radius:6px;padding:4px 10px">把焦点移出编辑器</button>
+    <div style="margin-top:6px">场景 A 触发（两种，区别很重要）：<br>
+      <button id="btnStealFocus" style="width:auto;border-radius:6px;padding:4px 10px">A1 焦点→按钮（历史 E2E 实际状态）</button>
+      <button id="btnDropFocus" style="width:auto;border-radius:6px;padding:4px 10px">A2 焦点→body（无可操作焦点目标）</button><br>
       <span id="focusLabel"></span></div>
   </div>
 
@@ -69,6 +71,7 @@ const cfg = {
   uploadGate: $('cfgUploadStrict').checked ? 'strict' : 'tolerant',
 };
 const app = new MockGeminiComposer(cfg);
+app.attachDocument(document);
 const editor = document.querySelector('.ql-editor');
 const uploadBtn = $('uploadBtn');
 const sendBtn = $('sendBtn');
@@ -96,7 +99,10 @@ function render() {
     `${a.name}<em style="font-style:normal;color:#9aa0a6"> ${a.status === 'ready' ? '' : '(上传中)'}</em>` +
     `<button aria-label="close ${a.name}">✕</button></span>`).join('');
   sendBtn.disabled = !app.canSubmit;
-  $('focusLabel').textContent = `当前焦点模型：${app.focusTarget}` + (app.hasPendingUpload ? ' · 有附件上传中' : '');
+  $('focusLabel').textContent =
+    `真实 activeElement=${document.activeElement ? document.activeElement.tagName + (document.activeElement.id ? '#' + document.activeElement.id : '') : 'null'}` +
+    ` → 模型分类=${app.focusTarget}` +
+    (app.hasPendingUpload ? ' · 有附件上传中' : '');
   status.textContent = `transcript=${app.transcript.length} attachments=${app.attachments.length}`;
   $('transcript').innerHTML = app.transcript.map((t) =>
     `<div class="turn"><span class="who">你说</span>${escapeHtml(t.text) || '<i style="color:#9aa0a6">(无文字)</i>'}` +
@@ -126,21 +132,31 @@ document.addEventListener('change', (e) => {
 
 sendBtn.addEventListener('click', () => doSubmit('send-button'));
 
-// 关键：站点只对"送达编辑器"的 Enter 有反应 —— 这就是 F2/F4 的确定性触发点
+// ── 焦点：模型值必须由**真实** document.activeElement 反推，不得独立设置 ──
+// R2 核销：历史 E2E 里 focusedElement 是 button#btnStealFocus（按钮），
+// 而旧夹具却把模型设成 body —— 那是混用，两者不是一回事。
+const syncFocus = () => app.syncFocusFrom(document.activeElement);
+
+$('btnStealFocus').addEventListener('click', (e) => {
+  // 真实把焦点交给这个按钮本身 —— 与历史 E2E 观测到的 activeElement 一致
+  e.currentTarget.focus();
+  syncFocus(); render();
+});
+$('btnDropFocus').addEventListener('click', () => {
+  // 真正让焦点掉回 body：blur 当前元素后 activeElement 变 body
+  (document.activeElement instanceof HTMLElement) && document.activeElement.blur();
+  syncFocus(); render();
+});
+editor.addEventListener('focus', () => { syncFocus(); render(); });
+editor.addEventListener('blur', () => { syncFocus(); render(); });
+// Enter 之前再同步一次，防止模型与 DOM 漂移
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Enter') return;
+  syncFocus();
   const r = app.submit('Enter');
   log('Enter', r);
   if (r.ok) { editor.innerText = ''; render(); }
-});
-
-$('btnStealFocus').addEventListener('click', () => {
-  app.focusTo('body');                  // 模拟焦点被移出编辑器
-  editor.blur();
-  document.body.focus();
-  render();
-});
-editor.addEventListener('focus', () => { app.focusTo('editor'); render(); });
+}, true);
 
 function doSubmit(via) {
   const r = app.submit(via);
@@ -157,12 +173,13 @@ function log(via, r) {
 window.__mockGemini = {
   app,
   submit: doSubmit,
-  focusTo: (t) => { app.focusTo(t); render(); },
+  /** 读真实 activeElement 并同步模型；返回真实分类供测试断言 */
+  syncFocus: () => { const t = syncFocus(); render(); return { focusTarget: t, activeElement: document.activeElement ? `${document.activeElement.tagName}#${document.activeElement.id}` : null }; },
   state: () => ({
     editorText: app.editorText, attachments: app.attachments, transcript: app.transcript,
-    focusTarget: app.focusTarget, hasPendingUpload: app.hasPendingUpload, canSubmit: app.canSubmit,
+    focusTarget: app.syncFocusFrom(document.activeElement), hasPendingUpload: app.hasPendingUpload, canSubmit: app.canSubmit,
   }),
-  reset: () => { app.reset(); editor.innerText = ''; render(); },
+  reset: () => { app.reset(); app.attachDocument(document); editor.innerText = ''; editor.focus(); render(); },
   config: cfg,
 };
 

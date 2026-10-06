@@ -46,7 +46,18 @@ export class MockGeminiComposer {
     this.attachments = [];
     /** @type {TranscriptEntry[]} */
     this.transcript = [];
-    /** 模型化 document.activeElement：'editor' | 'body' | 'attachment-chip' */
+    /**
+     * **观测得到的**焦点分类，不是独立设置的开关。
+     * 'editor'  = document.activeElement 是编辑器（可操作目标）
+     * 'body'    = document.activeElement 是 body/documentElement（**无可操作焦点目标**）
+     * 'control' = document.activeElement 是按钮/chip 等其他控件（有元素焦点，但不是编辑器）
+     *
+     * R2 核销要求：模型 focusTarget 与 document.activeElement 不得混用。
+     * 页面必须由 document.activeElement **反推**本字段，不得直接赋值。
+     * 另：'control' 与 'body' 站点行为相同（都被忽略），
+     * 但 P4 修复范围**只覆盖 'body'**——见 fixScope 说明。
+     * @type {'editor'|'body'|'control'}
+     */
     this.focusTarget = 'editor';
     this.menuOpen = false;
     this.menuItemsInserted = false;
@@ -54,6 +65,24 @@ export class MockGeminiComposer {
     /** @type {Map<string, any>} */
     this._timers = new Map();
     return this;
+  }
+
+  /**
+   * 由调用方（页面）传入**真实** document.activeElement 来同步焦点分类。
+   * 页面必须用本方法，**不得**直接写 focusTarget。
+   * @param {Element|null} activeEl
+   */
+  syncFocusFrom(activeEl) {
+    const doc = /** @type {any} */ (this)._doc;
+    const el = activeEl;
+    if (!el || el === doc?.body || el === doc?.documentElement) {
+      this.focusTarget = 'body';
+    } else if (el.getAttribute?.('role') === 'textbox' || el.isContentEditable) {
+      this.focusTarget = 'editor';
+    } else {
+      this.focusTarget = 'control';
+    }
+    return this.focusTarget;
   }
 
   // ── 合成区 ────────────────────────────────────────────────
@@ -105,9 +134,21 @@ export class MockGeminiComposer {
     return true;
   }
 
-  /** 场景 A 触发点：把焦点移出编辑器（真实站点里 chip / body / 其他控件都可能夺走焦点）。 */
+  /**
+   * 场景 A 触发点（供**测试**使用；页面必须改用 syncFocusFrom 读真实 activeElement）。
+   * @param {'editor'|'body'|'control'} target
+   */
   focusTo(target) {
     this.focusTarget = target;
+    return this;
+  }
+
+  /**
+   * 挂载真实 document，供 syncFocusFrom 判定 body/documentElement。
+   * @param {Document} doc
+   */
+  attachDocument(doc) {
+    this._doc = doc;
     return this;
   }
 
@@ -133,15 +174,24 @@ export class MockGeminiComposer {
 
   // ── 提交 ──────────────────────────────────────────────────
   /**
-   * 站点侧提交处理。site 只会对"送达编辑器"且"内容可提交"的 Enter 做出反应。
+   * 提交处理。site 只会对"送达编辑器"且"内容可提交"的 Enter 做出反应。
+   *
+   * focusStrict 描述的是**站点行为**（非编辑器焦点时忽略 Enter）。
+   * 注意：'body' 与 'control' 站点行为相同——这与真实夹具 E2E 一致
+   * （D2 中焦点为 button#btnStealFocus 时 transcript 同样为 0）。
+   * 但 P4 修复范围**只覆盖 'body'**（无可操作焦点目标），
+   * 'control' 属于已知未覆盖残留，见 docs 残留不确定性。
+   *
    * @param {'Enter'|'send-button'} [via]
    * @returns {{ok:boolean, reason?:string, entry?:TranscriptEntry}}
    */
   submit(via = 'Enter') {
-    // ① 焦点不在编辑器 → 站点收不到这条 Enter，什么都不发生
-    //    （真实浏览器里按键投给 document.activeElement；这正是 keyboard.ts probeFocus 读的那个值）
+    // ① 焦点不是编辑器 → 站点收不到这条 Enter，什么都不发生
     if (via === 'Enter' && this.config.focusStrict && this.focusTarget !== 'editor') {
-      return { ok: false, reason: 'focus-not-on-editor' };
+      return {
+        ok: false,
+        reason: this.focusTarget === 'body' ? 'no-actionable-focus-target' : 'focus-not-on-editor',
+      };
     }
     // ② 附件仍在上传 → 站点忽略本次提交（复现 F3）
     if (this.config.uploadGate === 'strict' && this.hasPendingUpload) {

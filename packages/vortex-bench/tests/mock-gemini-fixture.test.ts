@@ -34,10 +34,20 @@ describe("夹具自检 · 状态机双向能力", () => {
     app.setText("hello").focusTo("body");
     const r = app.submit("Enter");
     expect(r.ok).toBe(false);
-    expect(r.reason).toBe("focus-not-on-editor");
+    // R2 核销：body 与 control 是**两回事**，reason 必须能区分
+    expect(r.reason).toBe("no-actionable-focus-target");
     // 用户签名 F4：无新消息 + 内容留存
     expect(app.transcript).toHaveLength(0);
     expect(app.editorText).toBe("hello");
+  });
+
+  it("焦点在按钮/控件（control）时站点同样忽略，但 reason 与 body 不同", () => {
+    // 对应历史 E2E 的真实状态：focusedElement 是 button，不是 body
+    const app = new MockGeminiComposer({ focusStrict: true });
+    app.setText("hi").focusTo("control");
+    const r = app.submit("Enter");
+    expect(r.ok).toBe(false);
+    expect(r.reason).toBe("focus-not-on-editor"); // 与 body 的 reason 区分开
   });
 
   it("同一实例上关掉 focusStrict 立刻恢复成功 —— 证明是可开关而非写死", () => {
@@ -135,9 +145,16 @@ describe("夹具自检 · 页面与核心的一致性（静态契约）", () => 
     expect(pageHtml).toMatch(/if \(r\.ok\) \{ editor\.innerText = ''; render\(\); \}/);
   });
 
-  it("场景 A 触发点在页面上可点（把焦点移出编辑器）", () => {
-    expect(pageHtml).toContain("btnStealFocus");
-    expect(pageHtml).toMatch(/app\.focusTo\('body'\)/);
-    expect(pageHtml).toContain("editor.blur()");
+  it("场景 A 两个触发点都在页面上，且分别产出 button 焦点与 body 焦点", () => {
+    // R2 核销：不得再把 button 当 body。页面必须提供**两个**不同触发点，
+    // 并且模型分类由真实 document.activeElement 反推（syncFocusFrom），不得直接赋值。
+    expect(pageHtml).toContain("btnStealFocus");   // → 按钮焦点
+    expect(pageHtml).toContain("btnDropFocus");    // → body 焦点
+    expect(pageHtml).toMatch(/e\.currentTarget\.focus\(\)/);
+    expect(pageHtml).toMatch(/document\.activeElement\.blur\(\)/);
+    expect(pageHtml).toContain("app.syncFocusFrom(document.activeElement)");
+    // 旧写法（把模型直接设成 body + body.focus()）必须已消失
+    expect(pageHtml).not.toMatch(/app\.focusTo\('body'\)/);
+    expect(pageHtml).not.toMatch(/document\.body\.focus\(\)/);
   });
 });

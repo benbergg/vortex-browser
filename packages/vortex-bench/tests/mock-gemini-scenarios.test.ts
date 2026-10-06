@@ -1,17 +1,23 @@
 // packages/vortex-bench/tests/mock-gemini-scenarios.test.ts
 //
-// N023 · 场景 A / B 确定性回归（当前必然失败 —— 复现缺陷）
+// N023 · 场景 A / B 回归（辅助说明，**不是产品验收门禁**）
 //
-// ── 重要且必须说清的一点 ──────────────────────────────────────────
-// 本文件里 `currentPressContract` / `currentUploadContract` 是
-// **对 packages/extension/src/handlers/keyboard.ts 与 file.ts 当前行为的逐条转写**，
-// 不是被 import 的产品代码（这两个 handler 未导出，无法在无浏览器环境下直接单测）。
-// 转写依据已逐行标注。P4 修复后，**这两个模型必须替换为对真实 handler 的调用**，
-// 否则本文件会继续"证明"一个已经不存在的行为。
+// ── R1 核销后的定位变更 ──────────────────────────────────────────
+// P3 审核判 R1：本文件原先用「复制模型」构造返回值并承担产品转绿门禁，
+// 但产品代码怎么改它都不变。现已把**产品验收门禁移到**
+//   packages/extension/tests/n023-press-body-focus-subdefect.test.ts
+// 该文件注册**真实** handler、真跑 probeFocus 注入函数，已在冻结代码 4259bae 上取得真实 RED。
 //
-// `it.fails(...)` 的语义：断言"应当成立"的行为在当前产品下不成立。
-// 产品修好后这些用例会变成 unexpected pass，vitest 会报错提醒把 it.fails 去掉 ——
-// 这正是我们想要的"转绿信号"。
+// 本文件保留的价值：
+//   1. 说明"站点无反应 + chip 留存 + 无新消息"这一用户签名 F4 长什么样；
+//   2. 证明夹具不是单向陷阱；
+//   3. 记录 body 与 control 两种焦点的**区别**（R2 核销点）。
+// 明确声明：**本文件的断言不随产品修复而变化，不得用作转绿依据。**
+//
+// ── 范围（R2 核销 · 主控裁决 2）──────────────────────────────────
+// 已实证的子缺陷 = 焦点为 body/documentElement（无可操作焦点目标）。
+// 焦点在按钮/控件（control）时站点同样忽略，但**不在本批次修复范围**——
+// 历史 E2E 的 focusedElement 正是 button，那条路径修复后仍会静默成功。
 
 import { describe, it, expect } from "vitest";
 import { MockGeminiComposer } from "../playground/public/mock-gemini-core.js";
@@ -110,7 +116,7 @@ describe("场景 A · 焦点不在编辑器时按 Enter（复现 F2/F4）", () =
     const r = app.submit("Enter");
     // 页面侧确定发生的事
     expect(r.ok).toBe(false);
-    expect(r.reason).toBe("focus-not-on-editor");
+    expect(r.reason).toBe("no-actionable-focus-target");
     expect(app.transcript.length).toBe(before.turns); // 无新消息
     expect(app.attachments.length).toBe(before.chips); // chip 留存
     expect(app.editorText).toBe("请看一下这个附件里的内容");
@@ -137,6 +143,24 @@ describe("场景 A · 焦点不在编辑器时按 Enter（复现 F2/F4）", () =
     expect(r.ok).toBe(true);
     expect(app.transcript).toHaveLength(1);
     expect(app.attachments).toHaveLength(0);
+  });
+
+  /**
+   * R2 核心：历史 E2E 里 focusedElement 是 **button**，不是 body。
+   * 本批次修复范围只覆盖 body，因此**这条路径修复后仍会静默成功**。
+   * 本用例把这一残留缺口显式钉住，防止后续误以为"场景 A 已全覆盖"。
+   */
+  it("【残留缺口】焦点在按钮(control)时站点同样忽略，且不在本批次修复范围", () => {
+    const app = new MockGeminiComposer({ focusStrict: true });
+    app.setText("请看一下这个附件里的内容");
+    app.attach({ name: "n023-probe.txt", size: 269 }, { uploadDelayMs: 0 });
+    app.markReady(app.attachments[0].id);
+    app.focusTo("control"); // 按钮/其他控件焦点
+    const r = app.submit("Enter");
+    expect(r.ok).toBe(false);
+    expect(r.reason).toBe("focus-not-on-editor");
+    // P4 只修 body；control 路径修复后依然如此 —— 这是已知残留，不是本轮回归
+    expect(app.transcript).toHaveLength(0);
   });
 });
 
