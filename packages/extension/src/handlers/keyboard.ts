@@ -195,6 +195,31 @@ export function parseKeyExpression(
   return { key: parts[parts.length - 1], modifiers, modifierKeys };
 }
 
+/**
+ * probeFocus 在「焦点是 body/documentElement」时返回的前缀。
+ * 空串表示**读不到焦点**（无注入权限等），与「确定没有焦点元素」是两件事，
+ * 判定时必须区分：空串不得当成"确定无焦点"，否则注入失败会被误判成缺陷。
+ */
+const NO_FOCUS_MARKER = "body (no element focused";
+
+/** 上面那句标识文本本身含 "no effect" 字样，不能直接进错误文案（会越过证据边界）。 */
+function isNoFocusTarget(focusedElement: string): boolean {
+  return focusedElement.startsWith(NO_FOCUS_MARKER);
+}
+
+/**
+ * N023 · 本批「目标键」：内容变更类键，作用于**当前焦点可编辑元素**。
+ * 焦点为 body/documentElement 时不存在该元素，按键无处可去。
+ *
+ * 冻结范围（勿自行扩大）：
+ * - `Enter` —— 唯一有真实端到端证据（Gemini 合成区提交即按此键）
+ * - `Space` / `Backspace` / `Delete` —— 与 Enter **同机制**，属**推断**（尚无独立端到端证据）
+ *
+ * 明确不在本批：可打印字符键、方向键、Home/End/PageUp/PageDown。
+ * 保留键（Escape / F5 / F12 / Tab 等全局或焦点导航语义）一律不适用本判据。
+ */
+const FOCUS_REQUIRED_KEYS = new Set(["Enter", "Space", "Backspace", "Delete"]);
+
 async function dispatchKey(
   debuggerMgr: DebuggerManager,
   tabId: number,
@@ -252,6 +277,32 @@ export function registerKeyboardHandlers(
       await debuggerMgr.attach(tid);
       // 投递前读焦点——按键将作用于此元素(回传给 agent,避免盲目 success,#15)。
       const focusedElement = await probeFocus(tid);
+
+      // ── N023：PRESS 的 silent false-success 修复（body/documentElement 子缺陷）──
+      // 契约：**投递按键前**抛 vtxError（不是投递后）。因此这一分支不会走到 dispatchKey，
+      // 受审门禁按「目标键派发次数为 0」核对。
+      //
+      // 三个边界，逐条都不可放松：
+      // 1. 仅**无修饰键**的单键路径；组合键（Ctrl+s 等）一律保留。
+      // 2. 仅 FOCUS_REQUIRED_KEYS；保留键（Escape/F5/F12/Tab）不在其中。
+      // 3. 仅当 probeFocus **确实读到**焦点为 body/documentElement 时；
+      //    空串表示读不到焦点（注入失败等），**不得**当成"确定无焦点"而误判。
+      //
+      // 错误语义只用可证表述：焦点没有可操作目标。**不得**写成 "key not delivered" ——
+      // 本分支确实没派发，但"投递是否发生"不是这里要断言的东西。
+      if (
+        modifierKeys.length === 0 &&
+        FOCUS_REQUIRED_KEYS.has(key) &&
+        isNoFocusTarget(focusedElement)
+      ) {
+        throw vtxError(
+          VtxErrorCode.INVALID_PARAMS,
+          `no actionable focus target: key "${expr}" needs a focused editable element, ` +
+            `but document.activeElement is body/documentElement; rejected before dispatch. ` +
+            `Click or focus the target element first, then press the key again.`,
+          { key: expr, focusedElement },
+        );
+      }
 
       // Plain single-key path stays byte-identical to v0.8 behavior.
       if (modifierKeys.length === 0) {
