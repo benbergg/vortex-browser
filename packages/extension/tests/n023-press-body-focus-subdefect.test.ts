@@ -22,12 +22,14 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { JSDOM } from "jsdom";
 import { ActionRouter } from "../src/lib/router.js";
 import { registerKeyboardHandlers } from "../src/handlers/keyboard.js";
+import { vtxError, VtxErrorCode } from "@vortex-browser/shared";
 
-/** mock gemini 合成区的最小结构：编辑器 + 一个按钮（焦点可能落点）。 */
+/** mock gemini 合成区的最小结构：编辑器 + 按钮 + 可聚焦附件 chip。 */
 const FIXTURE_HTML = `<!DOCTYPE html><html><body>
   <rich-textarea><div id="editor" class="ql-editor" contenteditable="true" role="textbox"
     aria-label="为 Gemini 输入提示"></div></rich-textarea>
   <button id="steal">移出焦点</button>
+  <div id="chip" class="chip" tabindex="0" role="button" aria-label="close n023-probe.txt">n023-probe</div>
 </body></html>`;
 
 /**
@@ -109,12 +111,15 @@ describe("N023 R1/R2 · PRESS 焦点契约（真实 handler）", () => {
       expect(msg.toLowerCase()).not.toContain("no effect");
     });
 
-    it("即便抛错，按键也不应被描述为『未投递』——CDP 仍会 dispatch", async () => {
+    it("失败后仍会真实派发 CDP 按键（事件投递与成败判定是两件事）", async () => {
+      const before = sendCommand.mock.calls.length;
       await press("Enter");
-      // 说明当前设计下 CDP 调用照常发生；失败判定基于焦点不可证伪，
-      // 因此错误文案不得越过证据边界。
-      // （若 P4 改成「不投递」，本条需同步修订——那时才是可证的。）
-      expect(typeof sendCommand).toBe("function");
+      // 真实断言：CDP Input.dispatchKeyEvent 确实被调用了
+      // （当前冻结实现无条件 dispatch；这条锁住"抛错 != 不投递"这一语义边界）
+      const after = sendCommand.mock.calls.length;
+      expect(after).toBeGreaterThan(before);
+      const methods = sendCommand.mock.calls.map((c) => c[1]);
+      expect(methods).toContain("Input.dispatchKeyEvent");
     });
   });
 
@@ -137,25 +142,124 @@ describe("N023 R1/R2 · PRESS 焦点契约（真实 handler）", () => {
     });
 
     it("焦点在编辑器 → 正常返回 success，无 error", async () => {
+      expect(dom.window.document.activeElement?.id).toBe("editor"); // 输入状态先行
       const resp = await press("Enter");
       expect(resp.error).toBeUndefined();
       expect((resp.result as { success?: boolean })?.success).toBe(true);
     });
 
-    it("焦点在按钮上 → 同样不得判失败（本方案明确不覆盖该场景，也不得误伤）", async () => {
+    it("焦点在按钮上 → 不得判失败（本方案不覆盖该场景，也不得误伤）", async () => {
       (dom.window.document.getElementById("steal") as HTMLElement).focus();
+      expect(dom.window.document.activeElement?.id).toBe("steal");
       const resp = await press("Enter");
-      // 收窄范围的后果：该场景当前仍静默成功，本方案不声称修复它
       expect(resp.error).toBeUndefined();
+      expect((resp.result as { success?: boolean })?.success).toBe(true);
     });
 
-    it("合法全局键与组合键在 body 焦点下也须保留（不得 blanket 判失败）", async () => {
-      // 判据只针对「Enter 这类需要焦点目标的键」；
-      // Escape / F5 / Ctrl+S 这类全局键在无焦点时仍有意义。
-      // 本条锁定该边界的存在，具体清单由 P4 定义。
-      const resp = await press("Escape");
-      // 当前实现不抛错 → 本条现在是绿的；P4 不得把 Escape 也 blanket 判失败
+    it("焦点在可聚焦附件 chip 上 → 不得判失败", async () => {
+      const chip = dom.window.document.getElementById("chip") as HTMLElement;
+      chip.focus();
+      expect(dom.window.document.activeElement?.id).toBe("chip");
+      const resp = await press("Enter");
       expect(resp.error).toBeUndefined();
+      expect((resp.result as { success?: boolean })?.success).toBe(true);
+    });
+  });
+
+  /**
+   * A-2b · **真正的 body 焦点边界门禁**（R2 剩余核销点）
+   *
+   * 复审指出：旧用例名曰「body 焦点」，实际跑在编辑器焦点上，
+   * 因此排除不了「只要 body 就对任何键抛错」的 blanket 实现。
+   * 本组**独立于 A-2 的编辑器 beforeEach**，每条用例都先真实 blur 并断言输入状态。
+   */
+  describe("A-2b · body 焦点下保留键不得 blanket 判失败（真实 body 输入状态）", () => {
+    beforeEach(() => {
+      dom = new JSDOM(FIXTURE_HTML);
+      makeEnv(dom);
+      // 真实造出 body 焦点：先聚焦再 blur，activeElement 落回 body
+      (dom.window.document.getElementById("editor") as HTMLElement).focus();
+      (dom.window.document.activeElement as HTMLElement).blur();
+
+      router = new ActionRouter();
+      sendCommand = vi.fn().mockResolvedValue(undefined);
+      const debuggerMgr = {
+        onEvent: vi.fn(),
+        enableDomain: vi.fn().mockResolvedValue(undefined),
+        attach: vi.fn().mockResolvedValue(undefined),
+        sendCommand,
+      } as never;
+      registerKeyboardHandlers(router, debuggerMgr);
+    });
+
+    /** 断言当前确实是 body 焦点——标题不能替代输入状态。 */
+    const expectBodyFocus = () => {
+      expect(dom.window.document.activeElement).toBe(dom.window.document.body);
+    };
+
+    it("前置：activeElement 确实是 body，且 probeFocus 返回 body 标识", async () => {
+      expectBodyFocus();
+      const resp = await press("Enter");
+      // probeFocus 真实读到的就是 body 标识（不是模型标签）
+      expect((resp.result as { focusedElement?: string })?.focusedElement)
+        .toMatch(/body/i);
+    });
+
+    // ── 本批**目标键清单**（body 焦点下应当判失败）──────────────────
+    // Enter / Space / Backspace / Delete：内容变更类键，作用于"当前焦点可编辑元素"；
+    // body 持焦时不存在该元素，键无处可去。
+    // 依据：Enter 有真实 E2E 证据（历史端到端记录 + A-1 真实 RED）；
+    //      其余三键与 Enter 同机制（作用于焦点可编辑元素），在 v5 入口一并声明。
+    it.each(["Enter", "Space", "Backspace", "Delete"])(
+      "目标键 %s 在 body 焦点下应当判失败（内容变更类键无处可去）",
+      async (key) => {
+        expectBodyFocus();
+        const resp = await press(key);
+        // A-1 的判据：必须返回 error。当前冻结实现不抛 → 预期 RED
+        expect(resp.error, `${key} 在 body 焦点下必须判失败`).toBeDefined();
+      },
+    );
+
+    // ── 本批**保留键清单**（body 焦点下**不得**判失败）────────────────
+    // 全局/浏览器级键与组合键：语义不依赖可编辑焦点。
+    it.each(["Escape", "F5", "F12", "Tab"])(
+      "保留键 %s 在 body 焦点下不得判失败（全局/焦点导航类语义）",
+      async (key) => {
+        expectBodyFocus();
+        const before = sendCommand.mock.calls.length;
+        const resp = await press(key);
+        // 三项断言：无 error / success:true / CDP 派发确实发生
+        expect(resp.error, `${key} 不得被 blanket 判失败`).toBeUndefined();
+        expect((resp.result as { success?: boolean })?.success).toBe(true);
+        expect(sendCommand.mock.calls.length).toBeGreaterThan(before);
+        expect(sendCommand.mock.calls.map((c) => c[1])).toContain("Input.dispatchKeyEvent");
+      },
+    );
+
+    // 组合键必须**真的 press**（旧用例只留标题、没执行）
+    it.each(["Ctrl+s", "Meta+a", "Shift+Tab"])(
+      "组合键 %s 在 body 焦点下不得判失败，且必须真的派发",
+      async (combo) => {
+        expectBodyFocus();
+        const before = sendCommand.mock.calls.length;
+        const resp = await press(combo);
+        expect(resp.error, `${combo} 不得被 blanket 判失败`).toBeUndefined();
+        expect((resp.result as { success?: boolean })?.success).toBe(true);
+        // 组合键会派发多次（修饰键 keyDown + 主键 keyDown/keyUp + 修饰键 keyUp）
+        expect(sendCommand.mock.calls.length).toBeGreaterThan(before);
+        // 且主键必须真的带上修饰位——证明组合路径被走通而非退化成单键
+        const modCalls = sendCommand.mock.calls
+          .slice(before)
+          .filter((c) => c[1] === "Input.dispatchKeyEvent");
+        expect(modCalls.length).toBeGreaterThanOrEqual(2);
+      },
+    );
+
+    it("对照组：body 焦点下 Enter 会派发 CDP（证明上面对比不是空门禁）", async () => {
+      expectBodyFocus();
+      const before = sendCommand.mock.calls.length;
+      await press("Enter");
+      expect(sendCommand.mock.calls.length).toBeGreaterThan(before);
     });
   });
 
@@ -165,11 +269,11 @@ describe("N023 R1/R2 · PRESS 焦点契约（真实 handler）", () => {
    * 那 A-1 的失败就只是断言写错，而不是缺陷存在。
    */
   describe("对照组 · 抛错契约在本 harness 下可观测（证明 RED 可被修复满足）", () => {
-    it("handler 抛 VtxError → ActionRouter 确实返回 { error }", async () => {
+    it("handler 抛真实 VtxError → ActionRouter 走 toJSON 分支返回 { error } 且无 result", async () => {
       const r = new ActionRouter();
       r.register("probe.throw", async () => {
-        const err = new Error("no actionable focus target: focus is on body");
-        throw err;
+        // 用真实的 vtxError（不是 new Error），走 router.ts 的 VtxError 优先分支
+        throw vtxError(VtxErrorCode.INVALID_PARAMS, "no actionable focus target: focus is on body");
       });
       const resp = await r.dispatch({
         type: "tool_request",
@@ -179,7 +283,29 @@ describe("N023 R1/R2 · PRESS 焦点契约（真实 handler）", () => {
         tabId: 1,
       } as never);
       expect(resp.error).toBeDefined();
+      // 真实 VtxError 会带 code，且 toJSON() 分支保证 result 缺失
+      expect(resp.error!.code).toBe(VtxErrorCode.INVALID_PARAMS);
       expect(resp.error!.message).toMatch(/focus/i);
+      expect(resp.result).toBeUndefined();
+    });
+
+    it("handler 抛普通 Error → 走兜底分支也返回 { error }（code 为推断值）", async () => {
+      const r = new ActionRouter();
+      r.register("probe.throwPlain", async () => {
+        throw new Error("no actionable focus target: focus is on body");
+      });
+      const resp = await r.dispatch({
+        type: "tool_request",
+        tool: "probe.throwPlain",
+        args: {},
+        requestId: "ctl-1b",
+        tabId: 1,
+      } as never);
+      expect(resp.error).toBeDefined();
+      // 兜底分支按 message 粗粒度推断 code，不是 INVALID_PARAMS
+      expect(resp.error!.code).not.toBe(VtxErrorCode.INVALID_PARAMS);
+      expect(resp.error!.code).toBe(VtxErrorCode.JS_EXECUTION_ERROR);
+      expect(resp.result).toBeUndefined();
     });
 
     it("handler 正常返回 → ActionRouter 返回 { result }，无 error", async () => {
