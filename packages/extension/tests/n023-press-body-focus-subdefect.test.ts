@@ -111,15 +111,16 @@ describe("N023 R1/R2 · PRESS 焦点契约（真实 handler）", () => {
       expect(msg.toLowerCase()).not.toContain("no effect");
     });
 
-    it("失败后仍会真实派发 CDP 按键（事件投递与成败判定是两件事）", async () => {
+    /**
+     * 契约对齐：v6 入口冻结的是「**投递按键前**抛 vtxError」。
+     * 因此目标键在 body 焦点下按契约应当**不派发**（dispatchKeyEvent 次数为 0）。
+     * 保留键 / 组合键 / 正常路径才必须派发（见 A-2、A-2b）。
+     */
+    it("目标键在 body 焦点下依『投递前拒绝』语义不派发 CDP（派发次数为 0）", async () => {
       const before = sendCommand.mock.calls.length;
       await press("Enter");
-      // 真实断言：CDP Input.dispatchKeyEvent 确实被调用了
-      // （当前冻结实现无条件 dispatch；这条锁住"抛错 != 不投递"这一语义边界）
-      const after = sendCommand.mock.calls.length;
-      expect(after).toBeGreaterThan(before);
-      const methods = sendCommand.mock.calls.map((c) => c[1]);
-      expect(methods).toContain("Input.dispatchKeyEvent");
+      // 修复后：probeFocus 判定无焦点目标 → 抛错 → 不到 dispatchKey
+      expect(sendCommand.mock.calls.length - before).toBe(0);
     });
   });
 
@@ -197,10 +198,18 @@ describe("N023 R1/R2 · PRESS 焦点契约（真实 handler）", () => {
       expect(dom.window.document.activeElement).toBe(dom.window.document.body);
     };
 
-    it("前置：activeElement 确实是 body，且 probeFocus 返回 body 标识", async () => {
+    /**
+     * 前置焦点取证。
+     * 契约对齐：body + **目标键** 按契约必须返回 error 且 `result` 缺失，
+     * 因此焦点取证**不能**依赖目标键的成功返回。
+     * 此处改用**保留键 Escape** 读取真实 `focusedElement`（Escape 在 body 焦点下不判失败）。
+     * press 前的真实 DOM body 检查（expectBodyFocus）保留。
+     */
+    it("前置：activeElement 确实是 body，且 probeFocus 对保留键返回 body 标识", async () => {
       expectBodyFocus();
-      const resp = await press("Enter");
+      const resp = await press("Escape");
       // probeFocus 真实读到的就是 body 标识（不是模型标签）
+      expect(resp.error).toBeUndefined();
       expect((resp.result as { focusedElement?: string })?.focusedElement)
         .toMatch(/body/i);
     });
@@ -245,9 +254,9 @@ describe("N023 R1/R2 · PRESS 焦点契约（真实 handler）", () => {
         const resp = await press(combo);
         expect(resp.error, `${combo} 不得被 blanket 判失败`).toBeUndefined();
         expect((resp.result as { success?: boolean })?.success).toBe(true);
-        // 组合键会派发多次（修饰键 keyDown + 主键 keyDown/keyUp + 修饰键 keyUp）
-        expect(sendCommand.mock.calls.length).toBeGreaterThan(before);
-        // 且主键必须真的带上修饰位——证明组合路径被走通而非退化成单键
+        // 组合键至少两次派发（普通单键本身就有 keyDown/keyUp 两次，
+        // 故本条只证明"确实派发了多次"，不单独用来证明修饰位——
+        // 修饰位由既有 keyboard-press-combos 回归覆盖）
         const modCalls = sendCommand.mock.calls
           .slice(before)
           .filter((c) => c[1] === "Input.dispatchKeyEvent");
@@ -255,11 +264,16 @@ describe("N023 R1/R2 · PRESS 焦点契约（真实 handler）", () => {
       },
     );
 
-    it("对照组：body 焦点下 Enter 会派发 CDP（证明上面对比不是空门禁）", async () => {
+    /**
+     * 契约对齐：目标键依「投递前拒绝」语义**不派发**（与保留键/组合键相反）。
+     * 修复后 body+Enter 走 probeFocus → 抛错 → 不到 dispatchKey。
+     * 当前冻结实现无条件派发 → 本条为预期 RED。
+     */
+    it("目标键 Enter 在 body 焦点下依『投递前拒绝』不派发 CDP", async () => {
       expectBodyFocus();
       const before = sendCommand.mock.calls.length;
       await press("Enter");
-      expect(sendCommand.mock.calls.length).toBeGreaterThan(before);
+      expect(sendCommand.mock.calls.length - before).toBe(0);
     });
   });
 
