@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>mock Gemini 合成区 fixture（N023 缺陷回归）</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 0; background: #131314; color: #e3e3e3; }
+    main { max-width: 760px; margin: 0 auto; padding: 24px 16px 120px; }
+    .controls { background: #1e1f20; border: 1px solid #444; border-radius: 8px; padding: 12px 14px; margin-bottom: 16px; font-size: 12px; line-height: 1.9; }
+    .controls code { background:#000; padding:1px 4px; border-radius:3px; }
+    .composer { border: 1px solid #5f6368; border-radius: 24px; padding: 12px 16px; background: #1b1c1d; }
+    rich-textarea { display:block; }
+    .ql-editor { min-height: 44px; outline: none; font-size: 15px; line-height: 1.5; }
+    .ql-editor:empty::before, .ql-editor[data-empty]::before { content: attr(data-placeholder); color: #8ab4f8; opacity:.6; }
+    .row { display:flex; align-items:center; gap:8px; margin-top: 10px; }
+    button { background:#303134; color:#e3e3e3; border:1px solid #5f6368; border-radius:50%; width:36px; height:36px; cursor:pointer; font-size:14px; }
+    button:disabled { opacity:.38; cursor:not-allowed; }
+    .chip { display:inline-flex; align-items:center; gap:6px; border:1px solid #5f6368; border-radius:8px; padding:4px 8px; font-size:12px; margin:0 6px 6px 0; }
+    .chip .ext { background:#5f6368; border-radius:4px; padding:0 5px; font-size:10px; }
+    .chip button { width:18px; height:18px; border:none; background:transparent; font-size:12px; }
+    .transcript { margin-top: 20px; }
+    .turn { border-left: 2px solid #5f6368; padding: 6px 12px; margin-bottom: 12px; font-size: 14px; }
+    .turn .who { font-size: 11px; color: #9aa0a6; display:block; margin-bottom:4px; }
+    #status { font-size: 12px; color: #9aa0a6; margin-top: 8px; min-height: 18px; }
+  </style>
+</head>
+<body>
+<main>
+  <h1 style="font-size:18px;margin:0 0 8px">mock Gemini 合成区 · 缺陷回归夹具</h1>
+  <p style="font-size:13px;color:#9aa0a6;margin:0 0 14px">
+    N023 夹具。<b>不是 Gemini 行为权威模型</b>——站点性格由下方开关决定，可复现缺陷也可表现健康站点。
+  </p>
+
+  <div class="controls">
+    <div><b>场景开关</b>（改后刷新生效）</div>
+    <div>菜单项延迟：<input type="number" id="cfgMenuDelay" value="200" style="width:70px"> ms　（真站实测 ≈5100）</div>
+    <div><label><input type="checkbox" id="cfgFocusStrict" checked> focusStrict：站点只响应"焦点在编辑器"的 Enter（复现 F2/F4）</label></div>
+    <div><label><input type="checkbox" id="cfgUploadStrict" checked> uploadGate=strict：附件未就绪时提交被忽略（复现 F3）</label></div>
+    <div>未勾 uploadGate 即为 tolerant：容忍未就绪附件照发（贴近实测真站 12/12 成功）</div>
+    <div style="margin-top:6px">场景 A 触发：<button id="btnStealFocus" style="width:auto;border-radius:6px;padding:4px 10px">把焦点移出编辑器</button>
+      <span id="focusLabel"></span></div>
+  </div>
+
+  <div class="composer">
+    <rich-textarea>
+      <div class="ql-editor" contenteditable="true" role="textbox" aria-multiline="true"
+           aria-label="为 Gemini 输入提示" data-placeholder="问问 mock Gemini"></div>
+    </rich-textarea>
+    <div id="chips"></div>
+    <div class="row">
+      <button id="uploadBtn" aria-label="上传和工具" aria-haspopup="menu" aria-expanded="false">+</button>
+      <span id="modeLabel" style="font-size:12px;color:#9aa0a6">Pro</span>
+      <span style="flex:1"></span>
+      <button id="sendBtn" aria-label="发送" disabled>➤</button>
+    </div>
+  </div>
+  <div id="status"></div>
+
+  <div class="transcript" id="transcript"></div>
+</main>
+
+<script type="module">
+import { MockGeminiComposer } from './mock-gemini-core.js';
+
+const $ = (id) => document.getElementById(id);
+const cfg = {
+  menuItemDelayMs: Number($('cfgMenuDelay').value) || 0,
+  focusStrict: $('cfgFocusStrict').checked,
+  uploadGate: $('cfgUploadStrict').checked ? 'strict' : 'tolerant',
+};
+const app = new MockGeminiComposer(cfg);
+const editor = document.querySelector('.ql-editor');
+const uploadBtn = $('uploadBtn');
+const sendBtn = $('sendBtn');
+const status = $('status');
+
+// 隐藏 file input：真实 Gemini 里它由菜单项动态创建（实测 accept 含 .txt，multiple）
+function ensureFileInput() {
+  let inp = document.querySelector('#menu-root input[type=file]');
+  if (inp) return inp;
+  const root = document.createElement('div');
+  root.id = 'menu-root';
+  root.innerHTML =
+    '<uploader><images-files-uploader data-test-id="uploader-images-files-button-advanced">' +
+    '<button role="menuitem" aria-label="上传文件. 文档、数据、代码文件">上传文件</button>' +
+    '<input type="file" accept=".txt,.pdf,.md,.csv" multiple style="width:0;height:0;opacity:0;position:absolute">' +
+    '</images-files-uploader></uploader>';
+  document.body.appendChild(root);
+  return root.querySelector('input[type=file]');
+}
+
+function render() {
+  editor.dataset.empty = app.editorText ? '' : '1';
+  $('chips').innerHTML = app.attachments.map((a) =>
+    `<span class="chip" data-status="${a.status}"><span class="ext">${a.name.split('.').pop().toUpperCase()}</span>` +
+    `${a.name}<em style="font-style:normal;color:#9aa0a6"> ${a.status === 'ready' ? '' : '(上传中)'}</em>` +
+    `<button aria-label="close ${a.name}">✕</button></span>`).join('');
+  sendBtn.disabled = !app.canSubmit;
+  $('focusLabel').textContent = `当前焦点模型：${app.focusTarget}` + (app.hasPendingUpload ? ' · 有附件上传中' : '');
+  status.textContent = `transcript=${app.transcript.length} attachments=${app.attachments.length}`;
+  $('transcript').innerHTML = app.transcript.map((t) =>
+    `<div class="turn"><span class="who">你说</span>${escapeHtml(t.text) || '<i style="color:#9aa0a6">(无文字)</i>'}` +
+    t.attachments.map((a) => `<span class="chip"><span class="ext">${a.name.split('.').pop().toUpperCase()}</span>${escapeHtml(a.name)}</span>`).join('') +
+    `</div>`).join('');
+}
+const escapeHtml = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+editor.addEventListener('input', () => { app.setText(editor.innerText); render(); });
+
+uploadBtn.addEventListener('click', async () => {
+  const opening = !app.menuOpen;
+  if (!opening) { app.closeMenu(); uploadBtn.setAttribute('aria-expanded', 'false'); render(); return; }
+  uploadBtn.setAttribute('aria-expanded', 'true');
+  await app.openMenu();                 // 延迟插入菜单项（真站 ≈5.1s）
+  ensureFileInput();                    // 菜单项到达后才创建隐藏 file input
+  render();
+});
+
+document.addEventListener('change', (e) => {
+  const t = e.target;
+  if (t && t.matches && t.matches('#menu-root input[type=file]') && t.files && t.files[0]) {
+    app.attach({ name: t.files[0].name, size: t.files[0].size });
+    setTimeout(render, 0);
+  }
+});
+
+sendBtn.addEventListener('click', () => doSubmit('send-button'));
+
+// 关键：站点只对"送达编辑器"的 Enter 有反应 —— 这就是 F2/F4 的确定性触发点
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Enter') return;
+  const r = app.submit('Enter');
+  log('Enter', r);
+  if (r.ok) { editor.innerText = ''; render(); }
+});
+
+$('btnStealFocus').addEventListener('click', () => {
+  app.focusTo('body');                  // 模拟焦点被移出编辑器
+  editor.blur();
+  document.body.focus();
+  render();
+});
+editor.addEventListener('focus', () => { app.focusTo('editor'); render(); });
+
+function doSubmit(via) {
+  const r = app.submit(via);
+  log(via, r);
+  if (r.ok) { editor.innerText = ''; render(); }
+  return r;
+}
+function log(via, r) {
+  status.textContent = `submit[${via}] → ${r.ok ? 'OK  已提交' : 'IGNORED  ' + r.reason}` +
+    `   (transcript=${app.transcript.length}, chip留存=${app.attachments.length}, 焦点=${app.focusTarget})`;
+}
+
+// 测试/bench 驱动入口（只读 + 状态操作，不伪造站点结果）
+window.__mockGemini = {
+  app,
+  submit: doSubmit,
+  focusTo: (t) => { app.focusTo(t); render(); },
+  state: () => ({
+    editorText: app.editorText, attachments: app.attachments, transcript: app.transcript,
+    focusTarget: app.focusTarget, hasPendingUpload: app.hasPendingUpload, canSubmit: app.canSubmit,
+  }),
+  reset: () => { app.reset(); editor.innerText = ''; render(); },
+  config: cfg,
+};
+
+render();
+</script>
+</body>
+</html>
