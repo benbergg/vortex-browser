@@ -107,3 +107,51 @@ describe("auto-wait：NOT_VISIBLE 时自动 hover 揭示", () => {
     expect(revealByHover).toHaveBeenCalledTimes(1);
   });
 });
+
+/**
+ * 接线回归:门禁必须拿到 debuggerMgr，否则揭示永远不发生
+ * （此前 call site 漏传，auto-wait 里 `options.debuggerMgr` 为空 → 静默跳过揭示）。
+ */
+describe("门禁接线：CLICK/TYPE/FILL/SELECT 把 debuggerMgr 传进 actionability 门", () => {
+  it("CLICK 的门禁 options 含 debuggerMgr", async () => {
+    vi.resetModules();
+    vi.doMock("../src/action/auto-wait.js", () => ({
+      waitActionable: (...a: unknown[]) => waitActionableSpy(...a),
+    }));
+    vi.doMock("../src/adapter/page-side-loader.js", () => ({
+      loadPageSideModule: vi.fn().mockResolvedValue(undefined),
+    }));
+    vi.doMock("../src/adapter/cdp.js", () => ({
+      cdpClickElement: vi.fn().mockResolvedValue({ success: true }),
+      clickBBox: vi.fn(),
+    }));
+
+    const waitActionableSpy = vi.fn().mockResolvedValue({ ok: true, rect: { x: 0, y: 0, w: 1, h: 1 } });
+    const { ActionRouter } = await import("../src/lib/router.js");
+    const { registerDomHandlers } = await import("../src/handlers/dom.js");
+    const { DomActions } = await import("@vortex-browser/shared");
+
+    vi.stubGlobal("chrome", {
+      tabs: { query: vi.fn().mockResolvedValue([{ id: 42 }]) },
+      webNavigation: {
+        getAllFrames: vi.fn().mockResolvedValue([{ frameId: 0, parentFrameId: -1, url: "https://x/" }]),
+      },
+      scripting: { executeScript: vi.fn().mockResolvedValue([{ result: { success: true } }]) },
+      runtime: { getManifest: vi.fn().mockReturnValue({ host_permissions: ["<all_urls>"] }) },
+    });
+    const debuggerMgr = { attach: vi.fn(), sendCommand: vi.fn() } as any;
+    const router = new ActionRouter();
+    registerDomHandlers(router, debuggerMgr);
+
+    await router.dispatch({
+      type: "tool_request",
+      tool: DomActions.CLICK,
+      args: { selector: "button#s", useRealMouse: true, tabId: 42 },
+      requestId: "r-1",
+    } as any);
+
+    expect(waitActionableSpy).toHaveBeenCalled();
+    const opts = waitActionableSpy.mock.calls[0][3] as { debuggerMgr?: unknown };
+    expect(opts.debuggerMgr).toBe(debuggerMgr);
+  });
+});

@@ -1193,6 +1193,7 @@ export function registerDomHandlers(
         { timeout: args.timeout as number | undefined },
         args.force as boolean | undefined,
         __t.descriptor,
+        debuggerMgr,
       );
       // 重绑 selector：若已自愈则改为 healed selector，下游所有路径（早返回/CDP/合成）统一引用。
       selector = __heal.selector;
@@ -1346,6 +1347,7 @@ export function registerDomHandlers(
         { timeout: args.timeout as number | undefined, needsEditable: true },
         args.force as boolean | undefined,
         __t.descriptor,
+        debuggerMgr,
       );
       // 重绑 selector：若已自愈则改为 healed selector，下游所有引用统一用 selector。
       selector = __healType.selector;
@@ -1575,6 +1577,7 @@ export function registerDomHandlers(
         { timeout: args.timeout as number | undefined, needsEditable: true },
         args.force as boolean | undefined,
         __t.descriptor,
+        debuggerMgr,
       );
       // 重绑 selector：若已自愈则改为 healed selector，下游所有引用统一用 selector。
       selector = __healFill.selector;
@@ -1648,6 +1651,7 @@ export function registerDomHandlers(
         { timeout: args.timeout as number | undefined },
         args.force as boolean | undefined,
         __t.descriptor,
+        debuggerMgr,
       );
       // 重绑 selector：若已自愈则改为 healed selector，下游所有引用统一用 selector。
       selector = __healSelect.selector;
@@ -1862,6 +1866,7 @@ export function registerDomHandlers(
         { timeout: args.timeout as number | undefined },
         /* force */ true, // HOVER 原来不走门，用 force:true 保留原有宽松语义
         __t.descriptor,
+        debuggerMgr,
       );
       // 重绑 selector：若已自愈则改为 healed selector，下游所有引用统一用 selector。
       selector = __healHover.selector;
