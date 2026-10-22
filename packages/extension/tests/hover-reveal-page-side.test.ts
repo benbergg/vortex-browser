@@ -110,7 +110,19 @@ describe("hover-reveal page-side module", () => {
     expect(ns.measureCandidate([9, 9, 9])).toBeNull();
   });
 
-  it("measureCandidate：候选被浮层盖住时改试边缘可点位置；整块被盖 → null", async () => {
+  it("measureCandidate：中心被挡但边缘可命中时，返回边缘坐标", async () => {
+    const ns = await load();
+    document.body.innerHTML = `<div id="row" data-rect="10,20,200,40"><span id="kid" data-rect="0,0,0,0"></span></div>`;
+    // 中心（x=110）被浮层盖；左缘（x=12）命中候选
+    (document as any).elementFromPoint = (x: number) =>
+      x < 100 ? document.getElementById("row") : document.body;
+    const m = ns.measureCandidate([1, 0]) as { x: number; y: number } | null;
+    expect(m).not.toBeNull();
+    expect(m!.x).toBe(12); // 左缘，而不是中心
+    expect(m!.y).toBe(40);
+  });
+
+  it("measureCandidate：候选被浮层盖住时改试边缘可点位置；采样点均被挡 → null", async () => {
     const ns = await load();
     document.body.innerHTML = `<div id="row" data-rect="10,20,200,40"><span id="kid" data-rect="0,0,0,0"></span></div>`;
     // 命中的是 row 的子元素 ⇒ 仍算命中自己

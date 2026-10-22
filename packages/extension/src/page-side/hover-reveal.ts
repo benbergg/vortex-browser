@@ -183,7 +183,8 @@ import { queryDeep } from "./shadow-walk.js";
    * 每次派发鼠标前重测一次，元素消失或已不可见则返回 null（调用方跳过该候选）。
    *
    * 命中检查：浮层（如已打开的 popover）常盖住候选中部，此时改试边缘可点位置；
-   * 整块都被盖住就返回 null——把鼠标派到被盖住的位置只会 hover 到浮层自己。
+   * 所有采样点都被挡就返回 null——把鼠标派到被盖住的位置只会 hover 到浮层自己。
+   * （有限点采样不能证明整块矩形被覆盖，故只说“采样点均被挡”。）
    */
   function measureCandidate(path: number[]): { x: number; y: number; w: number; h: number; inViewport: boolean } | null {
     const el = elementAtPath(path);
@@ -215,7 +216,7 @@ import { queryDeep } from "./shadow-walk.js";
         [cx, r.bottom - 2],
       ];
       const found = tries.find(([tx, ty]) => inView(tx, ty) && hits(tx, ty));
-      if (!found) return null; // 整块被浮层盖住
+      if (!found) return null; // 所有采样点均被挡
       px = found[0];
       py = found[1];
     }

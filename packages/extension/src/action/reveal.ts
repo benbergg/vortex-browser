@@ -188,8 +188,9 @@ export async function revealByHover(opts: {
     await loadPageSideModule(tabId, frameId, "hover-reveal");
     if (remainingMs(deadline) <= 0) return fail("deadline");
     candidates = (await collectCandidates(tabId, frameId, selector, deadline)) ?? [];
-    if (!candidates.length) return fail("no-candidates");
+    // 先归因 deadline，再解释其它原因：过期时不该报成「没有候选」
     if (remainingMs(deadline) <= 0) return fail("deadline");
+    if (!candidates.length) return fail("no-candidates");
 
     // 候选全在视口外:先滚最近的那个进视口,否则真鼠标移过去不产生 hover
     if (!candidates.some((c) => c.inViewport)) {
@@ -203,11 +204,13 @@ export async function revealByHover(opts: {
 
     // 非顶层 frame:偏移必须可靠。getIframeOffset 取不到时返回 {0,0},与「真实零偏移」
     // 不可区分 ⇒ 这种情况下宁可不揭示,也不能把鼠标派到页面别处触发别的浮层。
+    // 保守代价:真实偏移恰为 {0,0} 的 iframe 会被误判为不可信而跳过揭示(极少见),
+    // 此时调用方给的是可执行诊断(先 hover 触发元素),不会误点。
     const offset = await getIframeOffset(tabId, frameId, debuggerMgr);
+    if (remainingMs(deadline) <= 0) return fail("deadline");
     if (frameId != null && frameId !== 0 && offset.x === 0 && offset.y === 0) {
       return fail("iframe-offset-unknown");
     }
-    if (remainingMs(deadline) <= 0) return fail("deadline");
     await debuggerMgr.attach(tabId);
     if (remainingMs(deadline) <= 0) return fail("deadline");
 
@@ -216,8 +219,11 @@ export async function revealByHover(opts: {
       attempts++;
       // 坐标会因重排/滚动而陈旧:派发前重新测量,元素消失/不可见就跳过
       const m = await measureCandidate(tabId, frameId, c.path, deadline);
+      if (remainingMs(deadline) <= 0) return fail("deadline");
       if (!m || !m.inViewport) continue;
-      // 测量本身可能跨过 deadline：再查一次,过期就停——**deadline 之后不得再派发鼠标**
+      // 测量本身可能跨过 deadline：再查一次，过期就停。
+      // 不变式（准确表述）：**deadline 之后不再发起新的鼠标派发**。
+      // 已经发出的那一次 CDP 调用是否在 deadline 前被浏览器处理，本层无法保证。
       if (remainingMs(deadline) <= 0) return fail("deadline");
       await debuggerMgr.sendCommand(tabId, "Input.dispatchMouseEvent", {
         type: "mouseMoved",
@@ -244,5 +250,5 @@ export async function revealByHover(opts: {
     // 过了 deadline 的异常也算 deadline——别把它说成「不知道什么原因」。
     return fail(remainingMs(deadline) <= 0 ? "deadline" : "error");
   }
-  return fail("not-revealed");
+  return fail(remainingMs(deadline) <= 0 ? "deadline" : "not-revealed");
 }
