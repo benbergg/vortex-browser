@@ -100,12 +100,27 @@ describe("hover-reveal page-side module", () => {
   it("measureCandidate：重新测量祖先的当前中心点；元素消失/隐藏 → null", async () => {
     const ns = await load();
     document.body.innerHTML = `<div id="row" data-rect="10,20,200,40"><span id="kid" data-rect="0,0,0,0"></span></div>`;
-    const m = ns.measureCandidate([1, 0]) as { x: number; y: number; inViewport: boolean } | null;
+    // jsdom 无 elementFromPoint ⇒ 打桩：中心点命中自己
+    (document as any).elementFromPoint = () => document.getElementById("row");
+    const m = ns.measureCandidate([1, 0]) as { x: number; y: number } | null;
     expect(m).not.toBeNull();
     expect(m!.x).toBe(110);
     expect(m!.y).toBe(40);
     // 路径不存在 → null
     expect(ns.measureCandidate([9, 9, 9])).toBeNull();
+  });
+
+  it("measureCandidate：候选被浮层盖住时改试边缘可点位置；整块被盖 → null", async () => {
+    const ns = await load();
+    document.body.innerHTML = `<div id="row" data-rect="10,20,200,40"><span id="kid" data-rect="0,0,0,0"></span></div>`;
+    // 命中的是 row 的子元素 ⇒ 仍算命中自己
+    (document as any).elementFromPoint = () => document.getElementById("kid");
+    const m = ns.measureCandidate([1, 0]) as { x: number; y: number } | null;
+    expect(m).not.toBeNull();
+
+    // 命中的是无关元素（浮层）⇒ 边缘也不行 ⇒ null
+    (document as any).elementFromPoint = () => document.body;
+    expect(ns.measureCandidate([1, 0])).toBeNull();
   });
 
   it("findRevealPairs：报出「hover 触发元素即显现」的隐藏控件", async () => {

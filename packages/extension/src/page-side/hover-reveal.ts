@@ -181,6 +181,9 @@ import { queryDeep } from "./shadow-walk.js";
    * 重新测量某个祖先候选的当前中心点。
    * 候选坐标会陈旧：上一次 hover 可能引起重排/滚动，采集时的坐标不再对应原元素。
    * 每次派发鼠标前重测一次，元素消失或已不可见则返回 null（调用方跳过该候选）。
+   *
+   * 命中检查：浮层（如已打开的 popover）常盖住候选中部，此时改试边缘可点位置；
+   * 整块都被盖住就返回 null——把鼠标派到被盖住的位置只会 hover 到浮层自己。
    */
   function measureCandidate(path: number[]): { x: number; y: number; w: number; h: number; inViewport: boolean } | null {
     const el = elementAtPath(path);
@@ -193,14 +196,30 @@ import { queryDeep } from "./shadow-walk.js";
     const vh = window.innerHeight || 0;
     const cx = r.x + r.width / 2;
     const cy = r.y + r.height / 2;
-    return {
-      x: cx,
-      y: cy,
-      w: r.width,
-      h: r.height,
-      // 中心必须真的落在视口内：与视口“相交”的大元素中心可能在视口外
-      inViewport: cx >= 0 && cy >= 0 && cx <= vw && cy <= vh,
+    const hits = (x: number, y: number): boolean => {
+      try {
+        const at = document.elementFromPoint(x, y);
+        return !!at && (at === el || el.contains(at));
+      } catch {
+        return false;
+      }
     };
+    const inView = (x: number, y: number): boolean => x >= 0 && y >= 0 && x <= vw && y <= vh;
+    let px = cx;
+    let py = cy;
+    if (!hits(px, py)) {
+      const tries: Array<[number, number]> = [
+        [r.x + 2, cy],
+        [r.right - 2, cy],
+        [cx, r.y + 2],
+        [cx, r.bottom - 2],
+      ];
+      const found = tries.find(([tx, ty]) => inView(tx, ty) && hits(tx, ty));
+      if (!found) return null; // 整块被浮层盖住
+      px = found[0];
+      py = found[1];
+    }
+    return { x: px, y: py, w: r.width, h: r.height, inViewport: inView(px, py) };
   }
 
   /** 把路径指向的元素滚进视口(目标自身隐藏时用其可见祖先滚) */
