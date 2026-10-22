@@ -165,6 +165,19 @@ describe("hover-reveal page-side module", () => {
     expect(pairs[0].controlTag).toBe("i");
   });
 
+  it("findRevealPairs：条数有上限（大量规则不致噪声爆炸）", async () => {
+    const ns = await load();
+    const css = Array.from({ length: 200 }, (_, i) => `.row${i}:hover .ctl${i} { display: block; }`).join("\n");
+    document.head.innerHTML = `<style>${css}\n.ctl { cursor: pointer; }</style>`;
+    document.body.innerHTML = Array.from(
+      { length: 200 },
+      (_, i) => `<div class="row${i}" data-rect="0,0,200,40"><span class="ctl${i}" style="display:none" data-rect="0,0,0,0"></span></div>`,
+    ).join("");
+
+    const pairs = ns.findRevealPairs(8) as unknown[];
+    expect(pairs.length).toBeLessThanOrEqual(8);
+  });
+
   it("findRevealPairs：无可交互控件时返回空（不报装饰元素）", async () => {
     const ns = await load();
     document.head.innerHTML = `<style>.row:hover .deco { display: block; }</style>`;

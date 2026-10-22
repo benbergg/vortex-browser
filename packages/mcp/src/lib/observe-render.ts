@@ -456,8 +456,10 @@ function blindspotSummary(
 }
 
 /**
- * hover 揭示控件 meta 行:当前隐藏、hover 某祖先即显现的控件。
+ * hover 揭示控件 meta 行：当前隐藏、hover 某祖先即显现的控件。
  * 这类控件不在元素树里（扫描瞬间不可见），agent 靠这一行才知道它们的存在与触发方式。
+ * 措辞用「may appear」：这是基于样式表规则的**静态推断**（层叠/媒体查询等可能让规则不生效），
+ * 不是已验证的事实——真伪由 act 的实际结果说话。
  */
 function hoverRevealSummary(frames?: CompactFrame[]): string | null {
   const parts: string[] = [];
@@ -466,7 +468,7 @@ function hoverRevealSummary(frames?: CompactFrame[]): string | null {
       const fr = f.frameId !== 0 ? ` (frame ${f.frameId})` : "";
       const label = p.controlName ? `"${escapeName(p.controlName)}"` : p.controlTag;
       const trigger = p.triggerText ? `"${escapeName(p.triggerText)}"` : p.triggerSelector;
-      parts.push(`${label} revealed by hovering ${trigger} → act on ${p.controlSelector}${fr}`);
+      parts.push(`${label} may appear on hovering ${trigger} → act on ${p.controlSelector}${fr}`);
     }
   }
   return parts.length ? `# hover-revealed: ${parts.join("; ")}` : null;

@@ -28,7 +28,7 @@ describe("auto-wait：NOT_VISIBLE 时自动 hover 揭示", () => {
     revealByHover.mockReset();
   });
 
-  it("NOT_VISIBLE → 调 reveal；揭示成功后门禁通过并回传 revealed 证据", async () => {
+  it("NOT_VISIBLE → 调 reveal；揭示成功后门禁**重新校验**并回传 revealed 证据", async () => {
     checkActionability
       .mockResolvedValueOnce({ ok: false, reason: "NOT_VISIBLE" })
       .mockResolvedValueOnce({ ok: true, rect: { x: 1, y: 2, w: 3, h: 4 } });
@@ -43,8 +43,22 @@ describe("auto-wait：NOT_VISIBLE 时自动 hover 揭示", () => {
 
     expect(revealByHover).toHaveBeenCalledTimes(1);
     expect(revealByHover.mock.calls[0][0]).toMatchObject({ tabId: 42, selector: "#ctl" });
+    // 揭示后必须重新过一次门（可见 ≠ 可点击：还要查遮挡/稳定/启用/仍连接）
+    expect(checkActionability).toHaveBeenCalledTimes(2);
     expect(r.ok).toBe(true);
     expect((r as any).revealed).toMatchObject({ id: "row" });
+  });
+
+  it("剩余预算不足时不再揭示（不越出动作 deadline）", async () => {
+    checkActionability.mockResolvedValue({ ok: false, reason: "NOT_VISIBLE" });
+    revealByHover.mockResolvedValue({ revealed: false, attempts: 1, candidates: 1 });
+    // timeout 极小 ⇒ 剩余预算 < REVEAL_MIN_BUDGET_MS
+    try {
+      await waitActionable(42, undefined, "#ctl", { timeout: 120, debuggerMgr: fakeDbg });
+    } catch {
+      /* 预期抛错 */
+    }
+    expect(revealByHover).not.toHaveBeenCalled();
   });
 
   it("NOT_VISIBLE 且揭示失败 → 报错给出可执行指引（提到 hover），不再是「调大 timeout」", async () => {
@@ -88,13 +102,22 @@ describe("auto-wait：NOT_VISIBLE 时自动 hover 揭示", () => {
 
   it("揭示失败后在间隔内不再试（避免反复动鼠标）", async () => {
     checkActionability.mockResolvedValue({ ok: false, reason: "NOT_VISIBLE" });
-    revealByHover.mockResolvedValue({ revealed: false, attempts: 2, candidates: 2 });
+    const stamps: number[] = [];
+    revealByHover.mockImplementation(async () => {
+      stamps.push(Date.now());
+      return { revealed: false, attempts: 2, candidates: 2 };
+    });
     try {
-      await waitActionable(42, undefined, "#ctl", { timeout: 200, debuggerMgr: fakeDbg });
+      await waitActionable(42, undefined, "#ctl", { timeout: 900, debuggerMgr: fakeDbg });
     } catch {
       /* 预期抛错 */
     }
-    expect(revealByHover).toHaveBeenCalledTimes(1);
+    // 轮次有界（≤3）
+    expect(revealByHover.mock.calls.length).toBeLessThanOrEqual(3);
+    // 相邻两轮间隔 ≥250ms（不给页面 settle 时间就重试没有意义）
+    for (let i = 1; i < stamps.length; i++) {
+      expect(stamps[i] - stamps[i - 1]).toBeGreaterThanOrEqual(240);
+    }
   });
 
   it("页面刚 settle 时首次揭示可能落空：允许隔一段时间再试一次", async () => {

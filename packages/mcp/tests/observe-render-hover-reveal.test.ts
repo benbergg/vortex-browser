@@ -41,6 +41,8 @@ describe("observe-render: # hover-revealed meta", () => {
     expect(out).toContain("# hover-revealed:");
     expect(out).toContain('"触发"');
     expect(out).toContain(".flow-start .add-icon");
+    // 静态推断不写成已验证事实
+    expect(out).toContain("may appear on hovering");
   });
 
   it("compact 路径：同样输出该行", () => {

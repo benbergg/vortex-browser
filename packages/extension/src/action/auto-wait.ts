@@ -28,6 +28,8 @@ const DEFAULT_TIMEOUT_MS = 2000;
 const MAX_REVEAL_CALLS = 3;
 /** 两轮揭示之间的最小间隔(ms)：给页面挂载/样式生效留时间，也避免预算被鼠标移动吃光 */
 const REVEAL_RETRY_GAP_MS = 250;
+/** 剩余预算低于此值就不再揭示：一轮揭示本身要百毫秒级，不能让它越出动作 deadline */
+const REVEAL_MIN_BUDGET_MS = 300;
 
 // 内层 actionability 等待必须严格小于 MCP 传输层硬超时(client.ts requestOnce,
 // 默认 VORTEX_TIMEOUT_MS=30000ms)。调用方可经 act options.timeout 传任意大值且
@@ -150,10 +152,12 @@ export async function waitActionable(
     // 主动 hover 它的可见祖先把控件揭示出来，再重探。
     // 首次可能落空（页面刚导航、样式/组件尚未挂载完）——隔一段时间允许再试，次数有界。
     const now = Date.now();
+    const remaining = timeout - (now - start);
     if (
       result.reason === "NOT_VISIBLE" &&
       options.debuggerMgr &&
       revealCalls < MAX_REVEAL_CALLS &&
+      remaining >= REVEAL_MIN_BUDGET_MS &&
       (revealCalls === 0 || now - lastRevealAt >= REVEAL_RETRY_GAP_MS)
     ) {
       revealCalls++;
