@@ -101,9 +101,10 @@ tags: [report, vortex, hover]
 | # | 操作 | 结果 |
 |---|---|---|
 | V1 | `vortex_observe`（未 hover） | 输出 `# hover-revealed: … span revealed by hovering "触发" → act on .ipaas-nodes-name-icon[data-v-3c835746] …`（另含 HTTP 节点行的 复制/删除/⊕ 三项） |
-| V2 | `vortex_act click .ipaas-nodes-name-icon[data-v-3c835746]`（按钮此刻隐藏） | `success:true` + `revealed:{tag:"div", cls:"flow-start", depth:4}` |
+| V2 | `vortex_act click .ipaas-nodes-name-icon[data-v-3c835746]`（按钮此刻隐藏） | `success:true` + `revealed:{tag:"div", cls:"flow-start", text:"触发", depth:4}` |
 | V3 | 点击后查 DOM | 对应 `el-popover` 由 `display:none` 变 `display:block` ⇒ **真实生效**（点开了节点类型浮层） |
 | V4 | 改动前同一操作 | `TIMEOUT … NOT_VISIBLE`（对照） |
+| V5 | 页面刚 `location.reload()` 完立即点同一按钮 | `success:true`（首轮揭示落空时自动有界重试，≤3 轮 / 间隔 ≥250ms） |
 
 即：**识别（observe 报出）+ 点击（act 自动揭示后点中并生效）两条链路都在真站闭环**。
 
@@ -138,3 +139,30 @@ tags: [report, vortex, hover]
 2. 通用 hover 隐藏元素场景有自动化测试 + 实际验证 —— ✅（单测 23 例 + 真站）。
 3. 现有识别/定位/点击无回归 —— ✅（extension/mcp/hub 全绿）。
 4. 性能与 token 无明显退化并有依据 —— ✅（§5.3）。
+
+## 8. Code Review
+
+**评审方式说明（重要）**：本环境**子代理不可用**——连续三次 spawn 均以 `exit code 1`
+失败（模型无关：DeepSeek-V4-Pro / gemma-4-31B-it / DeepSeek-V3.2 均同），且子代理会话
+文件在沙箱外不可读。故本节评审由**实现者本人自审**完成，属**同上下文自审**，
+**不构成跨模型独立评审**（如需独立评审，请在可正常 spawn 子代理的环境重跑本节清单）。
+
+自审清单与结论：
+
+| 检查项 | 结论 | 处置 |
+|---|---|---|
+| 通用性（无站点硬编码） | ✅ 全部按 CSS/DOM 通用机制实现；代码中无 iPaaS 类名/文案 | — |
+| 发现链路闭环 | ✅ observe 报出「hover 谁 → 出现什么」+ 可直接 act 的选择器 | — |
+| 点击链路闭环 | ✅ act 门禁自动 hover 祖先揭示后再动作，回传 `revealed` 证据 | — |
+| 副作用（误触发浮层 / 鼠标停留） | ⚠️ 揭示会真鼠标移动；候选只取**可见**祖先、≤6 个、只在 `NOT_VISIBLE` 触发 | 已收敛；残余风险记于 §6 |
+| 失败路径是否误报成功 | ✅ 揭示失败不改变错误语义，仍抛错并给出可执行指引 | — |
+| 既有行为回归 | ✅ extension 2688 / mcp 774 / hub 249 全绿 | — |
+| observe 噪声 | ⚠️ 新增 1 行 frame 级信号（约 96 token）；页内 8 对上限 | 已封顶 |
+| 性能 | ✅ 页面侧扫描真站 5ms；act 成功路径 0 开销 | — |
+| 代码风格（中文注释/单一真源/分层/depcruise） | ⚠️ 初版自造 `queryDeep` 与 `textContent` 取文本，与仓库既有 `shadow-walk` / 可见文本口径重复 | **已修**：复用 `shadow-walk.queryDeep`、统一可见文本口径；并删掉死参数 `revealHidden` |
+| 接线正确性 | ⚠️ **真实页验证暴露缺陷**：门禁 call site 漏传 `debuggerMgr` ⇒ 揭示静默失效（单元测试当时全绿） | **已修** + 补接线回归用例（删参数即转红，已反证） |
+| 页面未 settle 时的鲁棒性 | ⚠️ 首次揭示可能落空（真站：reload 后立即点击曾失败） | **已修**：揭示改为有界重试（≤3 轮、间隔 ≥250ms），真站复测通过 |
+| 测试充分性 | ✅ 25 例新单测；关键契约（接线参数、只在 NOT_VISIBLE 触发、有界次数、失败诊断）均有断言 | — |
+
+自审后追加的修正（均已提交）：
+`43f42cb`（接线漏传）、`914705e`（复用单一真源 + 去死参数）、`25edd28`（揭示有界重试）。
