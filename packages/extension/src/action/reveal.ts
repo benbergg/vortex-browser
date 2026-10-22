@@ -70,15 +70,19 @@ const MAX_DEPTH = 6;
 /** 页面侧单次探针上限(ms)——rAF 等待必须有界,否则后台标签页会挂死 */
 const PROBE_TIMEOUT_MS = 1000;
 
+/** 剩余预算(ms)；无 deadline 时给本地上限 */
 function remainingMs(deadline: number | undefined): number {
   if (deadline === undefined) return PROBE_TIMEOUT_MS;
-  return Math.max(0, deadline - Date.now());
+  return deadline - Date.now();
 }
 
-/** 探针超时取「剩余预算」与「本地上限」的较小值——不能越出动作 deadline */
+/**
+ * 探针超时 = min(本地上限, 剩余预算)。**不给下限**：预算不足时宁可立即失败，
+ * 也不能用一个固定下限把探针推出动作 deadline。
+ */
 function probeTimeout(deadline: number | undefined): number {
   if (deadline === undefined) return PROBE_TIMEOUT_MS;
-  return Math.max(50, Math.min(PROBE_TIMEOUT_MS, deadline - Date.now()));
+  return Math.max(1, Math.min(PROBE_TIMEOUT_MS, deadline - Date.now()));
 }
 
 async function collectCandidates(
@@ -182,8 +186,10 @@ export async function revealByHover(opts: {
   try {
     if (remainingMs(deadline) <= 0) return fail("deadline");
     await loadPageSideModule(tabId, frameId, "hover-reveal");
+    if (remainingMs(deadline) <= 0) return fail("deadline");
     candidates = (await collectCandidates(tabId, frameId, selector, deadline)) ?? [];
     if (!candidates.length) return fail("no-candidates");
+    if (remainingMs(deadline) <= 0) return fail("deadline");
 
     // 候选全在视口外:先滚最近的那个进视口,否则真鼠标移过去不产生 hover
     if (!candidates.some((c) => c.inViewport)) {
@@ -193,6 +199,7 @@ export async function revealByHover(opts: {
       if (!after.length) return fail("not-revealed");
       candidates = after;
     }
+    if (remainingMs(deadline) <= 0) return fail("deadline");
 
     // 非顶层 frame:偏移必须可靠。getIframeOffset 取不到时返回 {0,0},与「真实零偏移」
     // 不可区分 ⇒ 这种情况下宁可不揭示,也不能把鼠标派到页面别处触发别的浮层。
@@ -200,7 +207,9 @@ export async function revealByHover(opts: {
     if (frameId != null && frameId !== 0 && offset.x === 0 && offset.y === 0) {
       return fail("iframe-offset-unknown");
     }
+    if (remainingMs(deadline) <= 0) return fail("deadline");
     await debuggerMgr.attach(tabId);
+    if (remainingMs(deadline) <= 0) return fail("deadline");
 
     for (const c of candidates.slice(0, maxCandidates)) {
       if (remainingMs(deadline) <= 0) return fail("deadline");
@@ -208,6 +217,8 @@ export async function revealByHover(opts: {
       // 坐标会因重排/滚动而陈旧:派发前重新测量,元素消失/不可见就跳过
       const m = await measureCandidate(tabId, frameId, c.path, deadline);
       if (!m || !m.inViewport) continue;
+      // 测量本身可能跨过 deadline：再查一次,过期就停——**deadline 之后不得再派发鼠标**
+      if (remainingMs(deadline) <= 0) return fail("deadline");
       await debuggerMgr.sendCommand(tabId, "Input.dispatchMouseEvent", {
         type: "mouseMoved",
         x: m.x + offset.x,
@@ -229,8 +240,9 @@ export async function revealByHover(opts: {
       }
     }
   } catch {
-    // 注入失败/探针超时/CDP 不可用:退化为「未揭示」,由调用方给可执行诊断
-    return fail("error");
+    // 注入失败/探针超时/CDP 不可用:退化为「未揭示」,由调用方给可执行诊断。
+    // 过了 deadline 的异常也算 deadline——别把它说成「不知道什么原因」。
+    return fail(remainingMs(deadline) <= 0 ? "deadline" : "error");
   }
   return fail("not-revealed");
 }

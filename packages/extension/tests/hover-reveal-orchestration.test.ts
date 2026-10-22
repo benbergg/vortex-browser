@@ -250,6 +250,57 @@ describe("revealByHover：hover 祖先以揭示被隐藏的目标", () => {
     expect(dbg.sent[0]).toMatchObject({ x: 110, y: 220 });
   });
 
+  it("测量期间越过 deadline：不再派发鼠标（迟到的结果不能继续动鼠标）", async () => {
+    // 测量比 deadline 慢：返回时已过期
+    let measureCalls = 0;
+    const slowMeasure = async () => {
+      measureCalls++;
+      await new Promise((r) => setTimeout(r, 30));
+      return { x: 10, y: 10, w: 20, h: 20, inViewport: true };
+    };
+    installPage({ candidates: [cand()], visibleAfter: 1 });
+    (globalThis as any).window.__vortexHoverReveal.measureCandidate = slowMeasure;
+    const dbg = fakeDebugger();
+
+    // 测量开始时尚未过期（15ms 余量），测量返回时已过期
+    const r = await revealByHover({
+      tabId: 7,
+      frameId: undefined,
+      selector: "#ctl",
+      debuggerMgr: dbg.mgr,
+      deadline: Date.now() + 15,
+    });
+
+    expect(measureCalls).toBeGreaterThan(0);
+    expect(dbg.sent).toHaveLength(0);
+    expect(r.revealed).toBe(false);
+    expect(r.reason).toBe("deadline");
+  });
+
+  it("探针超时不得越过剩余预算（不给固定下限）", async () => {
+    installPage({ candidates: [cand()], visibleAfter: 1 });
+    const dbg = fakeDebugger();
+    const timeouts: number[] = [];
+    pageQuery.mockImplementation(
+      async (_t: unknown, _f: unknown, fn: (...a: any[]) => unknown, args: unknown[] = [], timeoutMs?: number) => {
+        if (typeof timeoutMs === "number") timeouts.push(timeoutMs);
+        return fn(...(args as unknown[]));
+      },
+    );
+
+    // 剩余预算只有 20ms ⇒ 探针超时必须 ≤20ms，不能给 50ms 下限
+    await revealByHover({
+      tabId: 7,
+      frameId: undefined,
+      selector: "#ctl",
+      debuggerMgr: dbg.mgr,
+      deadline: Date.now() + 20,
+    });
+
+    expect(timeouts.length).toBeGreaterThan(0);
+    for (const t of timeouts) expect(t).toBeLessThanOrEqual(20);
+  });
+
   it("候选在派发前消失/不可见：跳过该候选（不复用陈旧坐标）", async () => {
     installPage({
       candidates: [cand({ id: "gone" }), cand({ id: "ok" })],
