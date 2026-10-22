@@ -76,16 +76,6 @@ describe("auto-wait：NOT_VISIBLE 时自动 hover 揭示", () => {
     }
   });
 
-  it("revealHidden=false → 不触发 reveal（调用方可显式关闭）", async () => {
-    checkActionability.mockResolvedValue({ ok: false, reason: "NOT_VISIBLE" });
-    try {
-      await waitActionable(42, undefined, "#ctl", { timeout: 40, debuggerMgr: fakeDbg, revealHidden: false });
-    } catch {
-      /* 预期抛错 */
-    }
-    expect(revealByHover).not.toHaveBeenCalled();
-  });
-
   it("无 debuggerMgr → 不触发 reveal（无 CDP 条件不做有副作用的 hover）", async () => {
     checkActionability.mockResolvedValue({ ok: false, reason: "NOT_VISIBLE" });
     try {

@@ -56,10 +56,6 @@ const MAX_DEPTH = 6;
 /** 页面侧单次探针上限(ms)——rAF 等待必须有界,否则后台标签页会挂死 */
 const PROBE_TIMEOUT_MS = 1000;
 
-function ns(): any {
-  return (globalThis as any).window?.__vortexHoverReveal;
-}
-
 async function collectCandidates(
   tabId: number,
   frameId: number | undefined,

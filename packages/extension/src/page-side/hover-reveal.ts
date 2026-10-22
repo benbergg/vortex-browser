@@ -13,6 +13,9 @@
 //       目标当前是否可见(与 actionability 同口径:checkVisibility + 非零 rect)。
 //
 // 不引模块级 helper(page-side inline gotcha): 全部自包含,单例挂 window。
+// （shadow-walk 是仓库内既有 page-side 模块，构建时 inline，与 actionability 同款做法。）
+
+import { queryDeep } from "./shadow-walk.js";
 
 (function () {
   if ((window as any).__vortexHoverReveal?.version === 1) return;
@@ -46,28 +49,13 @@
     inViewport: boolean;
   };
 
-  /** 浅查 + open shadow 下钻(与 dom-resolve 同口径的最小实现) */
-  function queryDeep(selector: string): Element | null {
+  /** 浅查 + open shadow 下钻（与 actionability 门同款查询，单一真源） */
+  function queryTarget(selector: string): Element | null {
     try {
-      const direct = document.querySelector(selector);
-      if (direct) return direct;
+      return queryDeep(selector, document);
     } catch {
       return null; // 非法选择器:当作未命中,不抛
     }
-    const stack: Element[] = Array.from(document.querySelectorAll("*"));
-    while (stack.length) {
-      const el = stack.pop()!;
-      const root = el.shadowRoot;
-      if (!root) continue;
-      try {
-        const hit = root.querySelector(selector);
-        if (hit) return hit;
-      } catch {
-        /* 非法选择器:跳过 */
-      }
-      stack.push(...Array.from(root.querySelectorAll("*")));
-    }
-    return null;
   }
 
   /** 取计算样式:优先 window.getComputedStyle(测试环境无全局 getComputedStyle) */
@@ -129,7 +117,7 @@
     const out: RevealCandidate[] = [];
     let target: Element | null;
     try {
-      target = queryDeep(selector);
+      target = queryTarget(selector);
     } catch {
       return out;
     }
@@ -152,7 +140,7 @@
           tag: cur.tagName.toLowerCase(),
           id: cur.id ?? "",
           cls: typeof cur.className === "string" ? cur.className : "",
-          text: (cur.textContent ?? "").replace(/\s+/g, " ").trim().slice(0, 60),
+          text: visibleText(cur, 60),
           x: cx,
           y: cy,
           w: r.width,
@@ -169,7 +157,7 @@
   function isVisible(selector: string): boolean {
     let target: Element | null;
     try {
-      target = queryDeep(selector);
+      target = queryTarget(selector);
     } catch {
       return false;
     }
@@ -338,7 +326,8 @@
           // 必须在 :hover 之后还有一段（被揭示的那一段）
           if (hi < 0 || hi + 1 >= compounds.length) continue;
           const triggerSel = staticize(compounds.slice(0, hi + 1).join(" "));
-          const controlRel = staticize(compounds.slice(hi + 1).join(" "));
+          // 前导组合符（"> i"）对 querySelectorAll 无效：去掉组合符，按后代关系取
+          const controlRel = staticize(compounds.slice(hi + 1).join(" ")).replace(/^[>+~]\s*/, "");
           if (!triggerSel || !controlRel) continue;
 
           let triggers: Element[] = [];

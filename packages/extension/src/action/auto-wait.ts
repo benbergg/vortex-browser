@@ -46,11 +46,6 @@ const RETRY_INTERVAL_MS: Record<ActionabilityFailure, number> = {
 export interface WaitOptions extends CheckOptions {
   /** Default 2000ms. */
   timeout?: number;
-  /**
-   * 目标「已定位但不可见」时，自动 hover 祖先把它揭示出来（默认开启）。
-   * 只在 NOT_VISIBLE 分支触发——hover 有真实鼠标副作用，不能污染其它失败路径。
-   */
-  revealHidden?: boolean;
   /** 真鼠标 hover 所需（CDP）。缺省则不做揭示（无副作用优先）。 */
   debuggerMgr?: DebuggerManager;
 }
@@ -150,7 +145,6 @@ export async function waitActionable(
     if (
       result.reason === "NOT_VISIBLE" &&
       !revealTried &&
-      options.revealHidden !== false &&
       options.debuggerMgr
     ) {
       revealTried = true;

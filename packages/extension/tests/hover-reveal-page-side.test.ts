@@ -152,6 +152,19 @@ describe("hover-reveal page-side module", () => {
     expect(pairs[0].triggerText).not.toContain("HIDDEN-MENU");
   });
 
+  it("findRevealPairs：子代组合符规则（> i）也能解析出控件", async () => {
+    const ns = await load();
+    document.head.innerHTML = `<style>
+      .row:hover > i { display: block; }
+      i { cursor: pointer; }
+    </style>`;
+    document.body.innerHTML = `<div class="row" data-rect="0,0,200,40"><i style="display:none" data-rect="0,0,0,0"></i></div>`;
+
+    const pairs = ns.findRevealPairs(8) as Array<{ controlSelector: string; controlTag: string }>;
+    expect(pairs.length).toBe(1);
+    expect(pairs[0].controlTag).toBe("i");
+  });
+
   it("findRevealPairs：无可交互控件时返回空（不报装饰元素）", async () => {
     const ns = await load();
     document.head.innerHTML = `<style>.row:hover .deco { display: block; }</style>`;
