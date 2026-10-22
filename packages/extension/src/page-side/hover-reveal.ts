@@ -17,6 +17,17 @@
 (function () {
   if ((window as any).__vortexHoverReveal?.version === 1) return;
 
+  /** hover 揭示的一对：触发元素（hover 它）+ 被揭示控件 */
+  type RevealPair = {
+    triggerSelector: string;
+    triggerText: string;
+    controlSelector: string;
+    controlTag: string;
+    controlClasses: string;
+    controlName: string;
+    controlCursor: string;
+  };
+
   type RevealCandidate = {
     /** 距离目标的祖先层数(1 = 直接父级) */
     depth: number;
@@ -214,11 +225,186 @@
     });
   }
 
+  /** 状态型伪类：hover 揭示的规则里它们只在“当前状态成立”时才有意义 */
+  const STATE_PSEUDO = /:(hover|focus|focus-within|focus-visible|active|visited|target)\b/g;
+
+  /** 把选择器拆成复合器（按空白切，括号/方括号内不切） */
+  function splitCompounds(sel: string): string[] {
+    const out: string[] = [];
+    let cur = "";
+    let depth = 0;
+    for (const ch of sel) {
+      if (ch === "(" || ch === "[") depth++;
+      if (ch === ")" || ch === "]") depth--;
+      if (/\s/.test(ch) && depth === 0) {
+        if (cur) out.push(cur);
+        cur = "";
+      } else {
+        cur += ch;
+      }
+    }
+    if (cur) out.push(cur);
+    return out;
+  }
+
+  /** 按顶层逗号切选择器组（括号内不切） */
+  function splitSelectorList(sel: string): string[] {
+    const out: string[] = [];
+    let cur = "";
+    let depth = 0;
+    for (const ch of sel) {
+      if (ch === "(") depth++;
+      if (ch === ")") depth--;
+      if (ch === "," && depth === 0) {
+        out.push(cur);
+        cur = "";
+      } else {
+        cur += ch;
+      }
+    }
+    out.push(cur);
+    return out.map((s) => s.trim()).filter(Boolean);
+  }
+
+  /** 去掉状态型伪类与伪元素，得到“可静态匹配”的选择器片段 */
+  function staticize(part: string): string {
+    return part
+      .replace(STATE_PSEUDO, "")
+      .replace(/::[a-z-]+(\([^)]*\))?/gi, "")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  /** 取元素的可见文本（跳过 display:none / visibility:hidden 子树） */
+  function visibleText(el: Element, limit: number): string {
+    const parts: string[] = [];
+    const walk = (node: Node) => {
+      for (const child of Array.from(node.childNodes)) {
+        if (child.nodeType === 3) {
+          const t = (child.textContent ?? "").replace(/\s+/g, " ").trim();
+          if (t) parts.push(t);
+        } else if (child.nodeType === 1) {
+          const e = child as Element;
+          const cs = computedStyle(e);
+          if (cs && (cs.display === "none" || cs.visibility === "hidden")) continue;
+          walk(e);
+        }
+      }
+    };
+    walk(el);
+    return parts.join(" ").replace(/\s+/g, " ").trim().slice(0, limit);
+  }
+
+  /**
+   * 扫同源样式表里的 :hover 规则，找出「当前被隐藏、hover 某祖先即显现」的控件。
+   * 只读：不动鼠标、不改页面。给 agent 一条「hover 谁 → 出现什么」的路标。
+   */
+  function findRevealPairs(maxPairs: number): RevealPair[] {
+    const out: RevealPair[] = [];
+    const limit = Math.max(1, Math.min(20, maxPairs || 8));
+    let sheets: CSSStyleSheet[] = [];
+    try {
+      sheets = Array.from(document.styleSheets);
+    } catch {
+      return out;
+    }
+    for (const sheet of sheets) {
+      let rules: CSSRuleList | null = null;
+      try {
+        rules = sheet.cssRules;
+      } catch {
+        continue; // 跨源样式表：读不到就跳过
+      }
+      if (!rules) continue;
+      for (const rule of Array.from(rules)) {
+        const styleRule = rule as CSSStyleRule;
+        const selectorText = styleRule.selectorText;
+        const style = styleRule.style;
+        if (!selectorText || !style || selectorText.indexOf(":hover") < 0) continue;
+        // 只认“显现型”声明：display 非 none / visibility: visible / opacity > 0
+        const display = style.display;
+        const visibility = style.visibility;
+        const opacity = style.opacity;
+        const isReveal =
+          (!!display && display !== "none") ||
+          visibility === "visible" ||
+          (!!opacity && parseFloat(opacity) > 0);
+        if (!isReveal) continue;
+
+        for (const one of splitSelectorList(selectorText)) {
+          if (out.length >= limit) return out;
+          const compounds = splitCompounds(one);
+          const hi = compounds.findIndex((c) => c.indexOf(":hover") >= 0);
+          // 必须在 :hover 之后还有一段（被揭示的那一段）
+          if (hi < 0 || hi + 1 >= compounds.length) continue;
+          const triggerSel = staticize(compounds.slice(0, hi + 1).join(" "));
+          const controlRel = staticize(compounds.slice(hi + 1).join(" "));
+          if (!triggerSel || !controlRel) continue;
+
+          let triggers: Element[] = [];
+          try {
+            triggers = Array.from(document.querySelectorAll(triggerSel)).slice(0, 3);
+          } catch {
+            continue;
+          }
+          for (const trigger of triggers) {
+            let controls: Element[] = [];
+            try {
+              controls = Array.from(trigger.querySelectorAll(controlRel)).slice(0, 3);
+            } catch {
+              continue;
+            }
+            for (const control of controls) {
+              if (out.length >= limit) return out;
+              // 只报“当前不可见”的：可见的 agent 已经能看到
+              if (isElementVisible(control)) continue;
+              const cs = computedStyle(control);
+              const cursor = cs?.cursor ?? "";
+              const title =
+                control.getAttribute("title") ??
+                control.getAttribute("aria-label") ??
+                "";
+              // 只报可交互控件：图标按钮/链接/带名元素。纯装饰元素对 agent 无用
+              const interactive =
+                cursor === "pointer" ||
+                /^(button|a|input|select|textarea)$/i.test(control.tagName) ||
+                !!title;
+              if (!interactive) continue;
+              out.push({
+                triggerSelector: triggerSel.slice(0, 160),
+                triggerText: visibleText(trigger, 40),
+                controlSelector: buildControlSelector(control, triggerSel, controlRel),
+                controlTag: control.tagName.toLowerCase(),
+                controlClasses:
+                  typeof control.className === "string" ? control.className.slice(0, 120) : "",
+                controlName: title.slice(0, 60),
+                controlCursor: cursor,
+              });
+            }
+          }
+        }
+      }
+    }
+    return out;
+  }
+
+  /** 给 agent 一个能直接用的控件选择器：优先 id，其次唯一匹配，最后 trigger+control */
+  function buildControlSelector(control: Element, triggerSel: string, controlRel: string): string {
+    if (control.id) return `#${control.id}`;
+    try {
+      if (document.querySelectorAll(controlRel).length === 1) return controlRel.slice(0, 160);
+    } catch {
+      /* 忽略：走组合形式 */
+    }
+    return `${triggerSel} ${controlRel}`.slice(0, 200);
+  }
+
   (window as any).__vortexHoverReveal = {
     version: 1,
     collectCandidates,
     isVisible,
     scrollIntoView,
     afterPaint,
+    findRevealPairs,
   };
 })();

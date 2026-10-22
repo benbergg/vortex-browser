@@ -96,4 +96,77 @@ describe("hover-reveal page-side module", () => {
     expect(await ns.isVisible("#nope")).toBe(false);
     expect(await ns.isVisible(":::bad")).toBe(false);
   });
+
+  it("findRevealPairs：报出「hover 触发元素即显现」的隐藏控件", async () => {
+    const ns = await load();
+    document.head.innerHTML = `<style>
+      .row:hover .ctl { display: block; }
+      .ctl { cursor: pointer; }
+      .row:hover { background: red; }
+      .other:hover .ctl2 { display: none; }
+    </style>`;
+    document.body.innerHTML = `
+      <div class="row" data-rect="0,0,200,40">Row label
+        <span class="ctl" style="display:none" data-rect="0,0,0,0"></span>
+      </div>
+      <div class="other" data-rect="0,50,200,40">
+        <span class="ctl2" style="display:none" data-rect="0,0,0,0"></span>
+      </div>`;
+
+    const pairs = ns.findRevealPairs(8) as Array<{
+      triggerSelector: string;
+      triggerText: string;
+      controlSelector: string;
+      controlTag: string;
+    }>;
+
+    expect(pairs.length).toBe(1);
+    expect(pairs[0].triggerSelector).toBe(".row");
+    expect(pairs[0].triggerText).toBe("Row label");
+    expect(pairs[0].controlSelector).toContain(".ctl");
+    expect(pairs[0].controlTag).toBe("span");
+  });
+
+  it("findRevealPairs：只报当前不可见的控件（可见的不报）", async () => {
+    const ns = await load();
+    document.head.innerHTML = `<style>.row:hover .ctl { display: block; }</style>`;
+    document.body.innerHTML = `<div class="row" data-rect="0,0,200,40"><span class="ctl" data-rect="0,0,20,20"></span></div>`;
+
+    expect(ns.findRevealPairs(8)).toEqual([]);
+  });
+
+  it("findRevealPairs：触发文本只取可见部分（跳过隐藏子树的文字）", async () => {
+    const ns = await load();
+    document.head.innerHTML = `<style>
+      .row:hover .ctl { display: block; }
+      .ctl { cursor: pointer; }
+    </style>`;
+    document.body.innerHTML = `
+      <div class="row" data-rect="0,0,200,40">Row label
+        <span style="display:none">HIDDEN-MENU</span>
+        <span class="ctl" style="display:none" data-rect="0,0,0,0"></span>
+      </div>`;
+
+    const pairs = ns.findRevealPairs(8) as Array<{ triggerText: string }>;
+    expect(pairs[0].triggerText).toBe("Row label");
+    expect(pairs[0].triggerText).not.toContain("HIDDEN-MENU");
+  });
+
+  it("findRevealPairs：无可交互控件时返回空（不报装饰元素）", async () => {
+    const ns = await load();
+    document.head.innerHTML = `<style>.row:hover .deco { display: block; }</style>`;
+    document.body.innerHTML = `<div class="row" data-rect="0,0,200,40"><span class="deco" style="display:none" data-rect="0,0,0,0"></span></div>`;
+
+    expect(ns.findRevealPairs(8)).toEqual([]);
+  });
+
+  it("findRevealPairs：无 cursor 但有 title 的控件也报（可点击但未设 cursor）", async () => {
+    const ns = await load();
+    document.head.innerHTML = `<style>.row:hover .ctl { display: block; }</style>`;
+    document.body.innerHTML = `<div class="row" data-rect="0,0,200,40"><span class="ctl" title="新增" style="display:none" data-rect="0,0,0,0"></span></div>`;
+
+    const pairs = ns.findRevealPairs(8) as Array<{ controlName: string }>;
+    expect(pairs.length).toBe(1);
+    expect(pairs[0].controlName).toBe("新增");
+  });
 });
