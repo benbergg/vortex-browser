@@ -166,9 +166,59 @@
     return isElementVisible(target);
   }
 
+  /** 按子元素下标路径定位元素(与 pathOf 互逆) */
+  function elementAtPath(path: number[]): Element | null {
+    let cur: Element | null = document.documentElement;
+    for (const idx of path ?? []) {
+      if (!cur) return null;
+      const child: Element | undefined = cur.children?.[idx];
+      if (!child) return null;
+      cur = child;
+    }
+    return cur;
+  }
+
+  /** 把路径指向的元素滚进视口(目标自身隐藏时用其可见祖先滚) */
+  function scrollIntoView(path: number[]): boolean {
+    const el = elementAtPath(path);
+    if (!el) return false;
+    try {
+      el.scrollIntoView({ block: "center", inline: "center" });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /** 等一帧:真鼠标移动后浏览器要更新 hover 态并重算样式,同帧内读可见性可能读到旧值 */
+  function afterPaint(): Promise<void> {
+    return new Promise((resolve) => {
+      const w = window as any;
+      let settled = false;
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        resolve();
+      };
+      // 后台标签页 rAF 可能不触发:给 60ms 兜底,避免探针永挂
+      const timer = setTimeout(finish, 60);
+      if (typeof w.requestAnimationFrame === "function") {
+        w.requestAnimationFrame(() => {
+          clearTimeout(timer);
+          finish();
+        });
+      } else {
+        clearTimeout(timer);
+        finish();
+      }
+    });
+  }
+
   (window as any).__vortexHoverReveal = {
     version: 1,
     collectCandidates,
     isVisible,
+    scrollIntoView,
+    afterPaint,
   };
 })();

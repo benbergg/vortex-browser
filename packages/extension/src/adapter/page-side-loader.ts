@@ -17,7 +17,8 @@ export type PageSideModule =
   | "commit-select"
   | "commit-aria-select"
   | "dom-resolve"
-  | "click-effect";
+  | "click-effect"
+  | "hover-reveal";
 
 const loadedModules = new Map<string, true | Promise<void>>();
 

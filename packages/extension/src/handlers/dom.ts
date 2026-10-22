@@ -20,6 +20,7 @@ import {
 } from "../patterns/index.js";
 import { waitActionable } from "../action/auto-wait.js";
 import { waitActionableAutoForce } from "../action/wait-actionable-auto-force.js";
+import type { RevealTrigger } from "../action/reveal.js";
 import {
   collectNameCandidates,
   isHealableSelectorFailure,
@@ -145,6 +146,22 @@ async function readDialogCapturedAndDisarm(
 }
 
 /**
+ * 把门禁证据并入动作结果：healed（描述符自愈换选择器）/ revealed（目标原被 hover 隐藏、
+ * 由本次 hover 祖先揭示）。两者都是给调用方的可核对事实。
+ */
+function withGateEvidence<T extends object>(
+  r: T,
+  gate: { healed?: boolean; revealed?: RevealTrigger },
+): T {
+  if (!gate.healed && !gate.revealed) return r;
+  return {
+    ...r,
+    ...(gate.healed ? { healed: true as const } : {}),
+    ...(gate.revealed ? { revealed: gate.revealed } : {}),
+  } as T;
+}
+
+/**
  * 包裹 actionability gate：选择器因 NOT_ATTACHED 自旋失败且有 descriptor 时，
  * 按 descriptor 重匹配换选择器再跑一次 gate。返回最终（可能已自愈的）选择器。
  */
@@ -155,15 +172,16 @@ export async function healAwareGate(
   options: { timeout: number | undefined; needsEditable?: boolean },
   force: boolean | undefined,
   descriptor: { role?: string; name: string } | undefined,
-): Promise<{ selector: string; healed: boolean }> {
+  debuggerMgr?: DebuggerManager,
+): Promise<{ selector: string; healed: boolean; revealed?: RevealTrigger }> {
   try {
-    await waitActionableAutoForce(tabId, frameId, selector, options, force);
-    return { selector, healed: false };
+    const ok = await waitActionableAutoForce(tabId, frameId, selector, { ...options, debuggerMgr }, force);
+    return { selector, healed: false, revealed: ok?.revealed };
   } catch (err) {
     if (descriptor && isHealableSelectorFailure(err)) {
       const healed = await tryHealSelector(tabId, frameId, descriptor); // 抛 AMBIGUOUS_DESCRIPTOR/STALE_REF
-      await waitActionableAutoForce(tabId, frameId, healed, options, force);
-      return { selector: healed, healed: true };
+      const ok = await waitActionableAutoForce(tabId, frameId, healed, { ...options, debuggerMgr }, force);
+      return { selector: healed, healed: true, revealed: ok?.revealed };
     }
     // 调用方传的是裸 target(无 descriptor 可自愈)且零命中:日志实测这类 target
     // 27/29 是自然语言,被当 CSS 空转到 TIMEOUT,而 TIMEOUT 的 hint 建议"调大
@@ -1212,7 +1230,7 @@ export function registerDomHandlers(
           onDialog: args.onDialog as string | undefined,
           promptText: (args.promptText as string | undefined) ?? null,
         }));
-        return __heal.healed ? { ...(cdpResult as object), healed: true } : cdpResult;
+        return withGateEvidence(cdpResult as object, __heal);
       };
 
       // CDP 拿不到也别让调用方弃 tab:合成路径就在本 handler 内(2026-08-18 日志)
@@ -1236,7 +1254,7 @@ export function registerDomHandlers(
       // 降级换了不等价做法,不给证据模型只能信一个可能是假的 success,故强制采效果信号
       let effectOn = observeEffect || degradeNote !== null;
       const finishSynthetic = (r: unknown): unknown => {
-        const healed = __heal.healed ? { ...(r as object), healed: true } : r;
+        const healed = withGateEvidence(r as object, __heal);
         if (!degradeNote) return healed;
         return withDiagnosis(
           { ...(healed as object), degraded: "cdp-busy-synthetic" as const },
@@ -1421,7 +1439,7 @@ export function registerDomHandlers(
           path: "cdp-insertText",
           ...(typeof verifiedValue === "string" ? { value: verifiedValue } : {}),
         };
-        return __healType.healed ? { ...cdpTypeResult, healed: true } : cdpTypeResult;
+        return withGateEvidence(cdpTypeResult, __healType);
       }
 
       // input / textarea path — legacy synthetic dispatch (kept
@@ -1518,7 +1536,7 @@ export function registerDomHandlers(
       );
       if (res?.error) mapPageError(res, selector);
       const typeResult = res?.result;
-      return __healType.healed ? { ...(typeResult as object), healed: true } : typeResult;
+      return withGateEvidence(typeResult as object, __healType);
       } finally {
         await readDialogCapturedAndDisarm(tid, frameId);
       }
@@ -1608,7 +1626,7 @@ export function registerDomHandlers(
       }
       if (res?.error) mapPageError(enrichAmbiguousError(res, selector), selector);
       const fillResult = res?.result;
-      return __healFill.healed ? { ...(fillResult as object), healed: true } : fillResult;
+      return withGateEvidence(fillResult as object, __healFill);
     },
 
     [DomActions.SELECT]: async (args, tabId) => {
@@ -1661,7 +1679,7 @@ export function registerDomHandlers(
       }
       if (res?.error) mapPageError(enrichAmbiguousError(res, selector), selector);
       const selectResult = res?.result;
-      return __healSelect.healed ? { ...(selectResult as object), healed: true } : selectResult;
+      return withGateEvidence(selectResult as object, __healSelect);
     },
 
     [DomActions.SCROLL]: async (args, tabId) => {
@@ -1691,6 +1709,7 @@ export function registerDomHandlers(
           { timeout: args.timeout as number | undefined },
           /* force */ true,
           __t?.descriptor,
+          debuggerMgr,
         );
         selector = __healScroll.selector;
       }
@@ -1880,7 +1899,7 @@ export function registerDomHandlers(
         });
       }
       const hoverResult = { success: true, ...(hr?.tooltip ?? {}) };
-      return __healHover.healed ? { ...hoverResult, healed: true } : hoverResult;
+      return withGateEvidence(hoverResult, __healHover);
       } finally {
         await readDialogCapturedAndDisarm(tid, frameId);
       }

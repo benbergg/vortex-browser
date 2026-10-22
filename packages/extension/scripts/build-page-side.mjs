@@ -25,6 +25,7 @@ const entries = [
   { name: "commit-aria-select", entry: "src/page-side/commit-drivers/aria-select.ts" },
   { name: "dom-resolve", entry: "src/page-side/dom-resolve.ts" },
   { name: "click-effect", entry: "src/page-side/click-effect.ts" },
+  { name: "hover-reveal", entry: "src/page-side/hover-reveal.ts" },
 ];
 
 // --watch:dev loop 用。vite build.watch 返回 RollupWatcher，源文件变化自动重建

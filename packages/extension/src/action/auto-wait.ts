@@ -19,6 +19,8 @@ import {
   type ActionabilityResult,
   type CheckOptions,
 } from "./actionability.js";
+import { revealByHover, type RevealTrigger } from "./reveal.js";
+import type { DebuggerManager } from "../lib/debugger-manager.js";
 
 const DEFAULT_TIMEOUT_MS = 2000;
 
@@ -44,11 +46,20 @@ const RETRY_INTERVAL_MS: Record<ActionabilityFailure, number> = {
 export interface WaitOptions extends CheckOptions {
   /** Default 2000ms. */
   timeout?: number;
+  /**
+   * 目标「已定位但不可见」时，自动 hover 祖先把它揭示出来（默认开启）。
+   * 只在 NOT_VISIBLE 分支触发——hover 有真实鼠标副作用，不能污染其它失败路径。
+   */
+  revealHidden?: boolean;
+  /** 真鼠标 hover 所需（CDP）。缺省则不做揭示（无副作用优先）。 */
+  debuggerMgr?: DebuggerManager;
 }
 
 export interface WaitOk {
   ok: true;
   rect: { x: number; y: number; w: number; h: number };
+  /** 目标原被 hover 隐藏、由本次 hover 祖先揭示时给出证据。 */
+  revealed?: RevealTrigger;
 }
 
 export interface ActionabilityTimeoutDiagnosis {
@@ -117,6 +128,9 @@ export async function waitActionable(
   const start = Date.now();
   let lastReason: ActionabilityFailure | null = null;
   let lastExtras: Record<string, unknown> | undefined;
+  let revealed: RevealTrigger | undefined;
+  let revealTried = false;
+  let revealAttempts = 0;
 
   while (Date.now() - start < timeout) {
     const result: ActionabilityResult = await checkActionability(
@@ -126,10 +140,32 @@ export async function waitActionable(
       options,
     );
     if (result.ok) {
-      return { ok: true, rect: result.rect };
+      return revealed ? { ok: true, rect: result.rect, revealed } : { ok: true, rect: result.rect };
     }
     lastReason = result.reason;
     lastExtras = result.extras as Record<string, unknown> | undefined;
+
+    // 目标在 DOM 里但不可见：典型是「父级 :hover 才显示」的控件。
+    // 主动 hover 它的可见祖先把控件揭示出来，再重探（仅试一次，避免反复动鼠标）。
+    if (
+      result.reason === "NOT_VISIBLE" &&
+      !revealTried &&
+      options.revealHidden !== false &&
+      options.debuggerMgr
+    ) {
+      revealTried = true;
+      const rr = await revealByHover({
+        tabId,
+        frameId,
+        selector,
+        debuggerMgr: options.debuggerMgr,
+      });
+      revealAttempts = rr.attempts;
+      if (rr.revealed && rr.trigger) {
+        revealed = rr.trigger;
+        continue; // 立即复查：控件已显现则本次动作继续
+      }
+    }
 
     const interval = RETRY_INTERVAL_MS[result.reason];
     if (interval < 0) {
@@ -183,6 +219,19 @@ export async function waitActionable(
   let hintOverride: string | undefined;
   if (lastReasonIsStability) {
     message = `Element not stable after ${timeout}ms (last reason: NOT_STABLE)`;
+  } else if (lastReason === "NOT_VISIBLE") {
+    // 目标确实在 DOM 里但不可见。已尝试 hover 祖先揭示（若具备 CDP 条件）仍不可见
+    // ⇒ 大概率是「只在一处 hover 才出现」的控件，或元素本就在隐藏容器里。
+    // 这类失败调大 timeout / 等 idle 都是死路，指引必须指向 hover/force。
+    message =
+      `Element is hidden (display:none / visibility:hidden) after ${timeout}ms` +
+      (revealTried ? `; vortex already tried to reveal it by hovering ${revealAttempts} ancestor candidate(s)` : "") +
+      `. The target exists in the DOM but is not rendered.`;
+    hintOverride =
+      "If the element only appears on hover, hover its trigger first, then retry: " +
+      "vortex_act { action: 'hover', target: <trigger element> } followed by the original click. " +
+      "Otherwise act on the visible trigger (e.g. the row/card that reveals the control), " +
+      "or use vortex_act with options: { force: true } to act on the hidden element directly.";
   } else if (inertBlocked) {
     message =
       `Actionability timeout after ${timeout}ms; last reason: DISABLED ` +

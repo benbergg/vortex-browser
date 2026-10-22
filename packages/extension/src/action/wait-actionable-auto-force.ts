@@ -15,7 +15,7 @@
 //     直接抛 —— force 救不了,应引导用户修 selector / 前置条件
 
 import { VtxErrorCode } from "@vortex-browser/shared";
-import { waitActionable, type WaitOptions } from "./auto-wait.js";
+import { waitActionable, type WaitOk, type WaitOptions } from "./auto-wait.js";
 
 export async function waitActionableAutoForce(
   tabId: number,
@@ -23,13 +23,12 @@ export async function waitActionableAutoForce(
   selector: string,
   options: WaitOptions,
   userForce: boolean | undefined,
-): Promise<void> {
+): Promise<WaitOk> {
   try {
-    await waitActionable(tabId, frameId, selector, { ...options, force: userForce });
+    return await waitActionable(tabId, frameId, selector, { ...options, force: userForce });
   } catch (err) {
     if ((err as { code?: string })?.code === VtxErrorCode.NOT_STABLE && userForce === undefined) {
-      await waitActionable(tabId, frameId, selector, { ...options, force: true });
-      return;
+      return await waitActionable(tabId, frameId, selector, { ...options, force: true });
     }
     throw err;
   }
