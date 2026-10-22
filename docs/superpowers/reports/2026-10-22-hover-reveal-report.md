@@ -233,3 +233,14 @@ tags: [report, vortex, hover]
 复验：extension 2699 / mcp 774 / hub 249 全绿；真站触发节点 ⊕ 与 HTTP 节点 ⊕ 两个独立用例
 均成功（popover `none→block`）；浮层遮挡另一节点时诚实报 `OBSCURED`（遮挡元素 `div.node-item`），
 不掩盖为成功。
+
+## 11. 合并记录
+
+- codex 系评审第 4 轮裁决「有条件通过」，要求补齐的三项（deadline 归因顺序、遮挡边缘回退用例、
+  iframe `{0,0}` 保守限制成文 + 不变式表述收窄）已完成并复验。
+- 合并：`main` ← `feat/hover-reveal`（merge commit `5296d90`，13 个提交），分支已删除。
+- 合并后复跑：extension `289 files / 2699 tests`、mcp `76 / 774`、hub `47 / 249` 全绿。
+- 真站复验（最终构建）：触发节点 ⊕ 与 HTTP 节点 ⊕ 两个独立用例均成功（popover `none→block`）；
+  浮层遮挡另一节点时诚实报 `OBSCURED`（遮挡元素 `div.node-item`），不掩盖为成功。
+- 未推送远端：本环境无外网/无凭据（`git pull` 报权限错），且未获推送授权；本地 `main`
+  合并前已与 `origin/main` 同点（`613f5c8`），现本地领先 13 个提交。
