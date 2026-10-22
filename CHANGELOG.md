@@ -6,9 +6,35 @@
 
 ## [Unreleased]
 
+---
+
+## [4.1.0] - 2026-10-22
+
+### Added
+
+- **hover 隐藏元素的通用识别与点击**：控件由父级 `:hover` 揭示（常驻 DOM，但扫描瞬间
+  `display:none`）时，**动作侧**会先自动 hover 其可见祖先把控件揭示出来再执行，命中即在结果里
+  回传 `revealed` 证据（被 hover 的祖先）；**观察侧**新增 frame 级 `hoverControls` 信号，把
+  「当前隐藏、hover 某祖先即显现」的控件报成 `# hover-revealed:` 行（只读，不移动鼠标）。
+  通用机制，不含任何站点特化。
+
+  实现：`packages/extension/src/page-side/hover-reveal.ts`（页面侧：可见祖先候选枚举、可见性判定、
+  `:hover` 规则扫描）、`packages/extension/src/action/reveal.ts`（host：真鼠标 hover 编排）、
+  `packages/extension/src/handlers/observe-hover-reveal.ts`（observe 只读采集）、
+  `packages/extension/src/action/auto-wait.ts`（门禁在 `NOT_VISIBLE` 分支触发揭示）、
+  `packages/extension/src/handlers/dom.ts`（把 `revealed` 证据并入动作结果）、
+  `packages/mcp/src/lib/observe-render.ts`（渲染 `# hover-revealed:` 行）。
+
+  边界（刻意保守，宁可不揭示也不误点）：揭示全程受动作 deadline 约束（过期后不再发起新的
+  鼠标派发）；非顶层 frame 的 iframe 偏移不可信时**失败关闭**（不揭示，改为给可执行诊断）；
+  候选被浮层盖住时改试边缘可点位置，采样点全被挡则不派发鼠标；观察侧的行是**静态推断**
+  （措辞为 “may appear on hovering”），层叠/媒体查询可能让规则当前不生效，真伪由动作结果说话。
+
 ### Changed
 
 - **`vortex_observe → vortex_query → vortex_act` 的旧 observe ref 行为变更**：query 现在会登记自己的 snapshot；随后继续使用带旧 observe hash 的 ref 会得到 `STALE_SNAPSHOT`，不会再尝试按 query snapshot 执行。调用方应重新调用 `vortex_observe`，或直接使用 query 返回的带 hash ref；裸 ref 在 query producer 登记后也会被拒绝。
+- **`NOT_VISIBLE` 的失败诊断改为可执行指引**：目标在 DOM 里但不可见时，报错会说明「元素存在但未渲染」
+  并给出下一步（先 hover 触发元素再重试 / 改点可见的触发元素 / `options.force`），不再只提示调大 timeout。
 
 ---
 
