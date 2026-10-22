@@ -97,6 +97,17 @@ describe("hover-reveal page-side module", () => {
     expect(await ns.isVisible(":::bad")).toBe(false);
   });
 
+  it("measureCandidate：重新测量祖先的当前中心点；元素消失/隐藏 → null", async () => {
+    const ns = await load();
+    document.body.innerHTML = `<div id="row" data-rect="10,20,200,40"><span id="kid" data-rect="0,0,0,0"></span></div>`;
+    const m = ns.measureCandidate([1, 0]) as { x: number; y: number; inViewport: boolean } | null;
+    expect(m).not.toBeNull();
+    expect(m!.x).toBe(110);
+    expect(m!.y).toBe(40);
+    // 路径不存在 → null
+    expect(ns.measureCandidate([9, 9, 9])).toBeNull();
+  });
+
   it("findRevealPairs：报出「hover 触发元素即显现」的隐藏控件", async () => {
     const ns = await load();
     document.head.innerHTML = `<style>

@@ -177,6 +177,32 @@ import { queryDeep } from "./shadow-walk.js";
     return cur;
   }
 
+  /**
+   * 重新测量某个祖先候选的当前中心点。
+   * 候选坐标会陈旧：上一次 hover 可能引起重排/滚动，采集时的坐标不再对应原元素。
+   * 每次派发鼠标前重测一次，元素消失或已不可见则返回 null（调用方跳过该候选）。
+   */
+  function measureCandidate(path: number[]): { x: number; y: number; w: number; h: number; inViewport: boolean } | null {
+    const el = elementAtPath(path);
+    if (!el) return null;
+    const style = computedStyle(el);
+    if (style && (style.display === "none" || style.visibility === "hidden")) return null;
+    const r = el.getBoundingClientRect();
+    if (r.width <= 0 || r.height <= 0) return null;
+    const vw = window.innerWidth || 0;
+    const vh = window.innerHeight || 0;
+    const cx = r.x + r.width / 2;
+    const cy = r.y + r.height / 2;
+    return {
+      x: cx,
+      y: cy,
+      w: r.width,
+      h: r.height,
+      // 中心必须真的落在视口内：与视口“相交”的大元素中心可能在视口外
+      inViewport: cx >= 0 && cy >= 0 && cx <= vw && cy <= vh,
+    };
+  }
+
   /** 把路径指向的元素滚进视口(目标自身隐藏时用其可见祖先滚) */
   function scrollIntoView(path: number[]): boolean {
     const el = elementAtPath(path);
@@ -290,6 +316,13 @@ import { queryDeep } from "./shadow-walk.js";
   function findRevealPairs(maxPairs: number): RevealPair[] {
     const out: RevealPair[] = [];
     const limit = Math.max(1, Math.min(20, maxPairs || 8));
+    // 规则遍历上界：超大字表（动辄上万条）不能让 observe 卡住。
+    // 遍历本身只做子串判定（便宜），真正贵的是「显现型 :hover 规则」的选择器查询，
+    // 那部分单独限流——否则被总量截断时，后面的 :hover 规则会整片漏掉。
+    const MAX_RULES = 20_000;
+    const MAX_REVEAL_RULES = 500;
+    let scanned = 0;
+    let revealScanned = 0;
     let sheets: CSSStyleSheet[] = [];
     try {
       sheets = Array.from(document.styleSheets);
@@ -305,6 +338,7 @@ import { queryDeep } from "./shadow-walk.js";
       }
       if (!rules) continue;
       for (const rule of Array.from(rules)) {
+        if (scanned++ > MAX_RULES) return out;
         const styleRule = rule as CSSStyleRule;
         const selectorText = styleRule.selectorText;
         const style = styleRule.style;
@@ -318,6 +352,9 @@ import { queryDeep } from "./shadow-walk.js";
           visibility === "visible" ||
           (!!opacity && parseFloat(opacity) > 0);
         if (!isReveal) continue;
+        // 限流只算“显现型 :hover 规则”（它们才触发选择器查询）：普通 :hover 规则
+        // （如 :hover 改背景色）不计入，否则会把后段的显现型规则整片挤掉。
+        if (revealScanned++ > MAX_REVEAL_RULES) return out;
 
         for (const one of splitSelectorList(selectorText)) {
           if (out.length >= limit) return out;
@@ -391,6 +428,7 @@ import { queryDeep } from "./shadow-walk.js";
   (window as any).__vortexHoverReveal = {
     version: 1,
     collectCandidates,
+    measureCandidate,
     isVisible,
     scrollIntoView,
     afterPaint,

@@ -134,6 +134,7 @@ export async function waitActionable(
   let revealCalls = 0;
   let lastRevealAt = 0;
   let revealAttempts = 0;
+  let revealReason: string | undefined;
 
   while (Date.now() - start < timeout) {
     const result: ActionabilityResult = await checkActionability(
@@ -167,12 +168,14 @@ export async function waitActionable(
         frameId,
         selector,
         debuggerMgr: options.debuggerMgr,
+        deadline: start + timeout, // 揭示不得拖出动作预算
       });
       revealAttempts += rr.attempts;
       if (rr.revealed && rr.trigger) {
         revealed = rr.trigger;
         continue; // 立即复查：控件已显现则本次动作继续
       }
+      revealReason = rr.reason;
     }
 
     const interval = RETRY_INTERVAL_MS[result.reason];
@@ -234,6 +237,7 @@ export async function waitActionable(
     message =
       `Element is hidden (display:none / visibility:hidden) after ${timeout}ms` +
       (revealCalls ? `; vortex already tried to reveal it by hovering ${revealAttempts} ancestor candidate(s)` : "") +
+      (revealReason ? ` (${revealReason})` : "") +
       `. The target exists in the DOM but is not rendered.`;
     hintOverride =
       "If the element only appears on hover, hover its trigger first, then retry: " +
