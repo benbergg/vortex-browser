@@ -46,7 +46,7 @@ case "$OS" in
     NM_HOST_DIR="$HOME/.config/google-chrome/NativeMessagingHosts"
     ;;
   *)
-    die "不支持的操作系统: $OS。请在 macOS 或 Linux 上运行此脚本。Windows 用户请参考 docs/INSTALL.md 手动安装。"
+    die "不支持的操作系统: ${OS}。请在 macOS 或 Linux 上运行此脚本。Windows 用户请参考 docs/INSTALL.md 手动安装。"
     ;;
 esac
 
@@ -81,7 +81,7 @@ if [[ ! -f "$INSTALL_NM_HOST" ]]; then
   fi
 
   if [[ ! -f "$INSTALL_NM_HOST" ]]; then
-    die "构建完成但仍找不到 $INSTALL_NM_HOST。请检查 tsconfig 输出路径。"
+    die "构建完成但仍找不到 ${INSTALL_NM_HOST}。请检查 tsconfig 输出路径。"
   fi
   ok "server 构建成功"
 else
@@ -123,13 +123,13 @@ if [[ -f "$VORTEX_SERVER_BIN" ]]; then
     info "调用 vortex-server install (ID: $EXTENSION_ID) ..."
     node "$VORTEX_SERVER_BIN" install "$EXTENSION_ID" || {
       NM_EXIT=$?
-      die "NM host 注册失败（退出码 $NM_EXIT）。\n  请检查是否有写入权限: $NM_HOST_DIR"
+      die "NM host 注册失败（退出码 ${NM_EXIT}）。\n  请检查是否有写入权限: $NM_HOST_DIR"
     }
   else
     info "调用 vortex-server install（使用默认钉死 ID）..."
     node "$VORTEX_SERVER_BIN" install || {
       NM_EXIT=$?
-      die "NM host 注册失败（退出码 $NM_EXIT）。\n  请检查是否有写入权限: $NM_HOST_DIR"
+      die "NM host 注册失败（退出码 ${NM_EXIT}）。\n  请检查是否有写入权限: $NM_HOST_DIR"
     }
   fi
 else
@@ -138,7 +138,7 @@ else
   info "调用 install-nm-host.js (ID: $EFFECTIVE_ID) ..."
   node "$INSTALL_NM_HOST" "$EFFECTIVE_ID" || {
     NM_EXIT=$?
-    die "NM host 注册失败（退出码 $NM_EXIT）。\n  请检查是否有写入权限: $NM_HOST_DIR"
+    die "NM host 注册失败（退出码 ${NM_EXIT}）。\n  请检查是否有写入权限: $NM_HOST_DIR"
   }
 fi
 
@@ -160,7 +160,7 @@ echo "  1. 打开 Chrome，访问 chrome://extensions/"
 echo "  2. 开启右上角「开发者模式」"
 echo "  3. 点击「加载已解压的扩展程序」，选择目录:"
 echo -e "     ${BOLD}$EXTENSION_DIST${NC}"
-echo "  4. 扩展 ID 已钉死（$DEFAULT_EXTENSION_ID），无需复制"
+echo "  4. 扩展 ID 已钉死（${DEFAULT_EXTENSION_ID}），无需复制"
 echo "  5. 点击 Vortex 扩展的「重新加载」按钮，使 NM host 注册生效"
 echo ""
 
