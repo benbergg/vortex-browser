@@ -15,6 +15,10 @@ import { captureAXNodeMap } from "../reasoning/ax-snapshot.js";
 import { buildIndexToBackend, applyOverlay, type OverlayableElement } from "./observe-ax-overlay.js";
 import { markListenerElements } from "./observe-js-listener.js";
 import {
+  collectHoverRevealPairs,
+  type HoverRevealPair,
+} from "./observe-hover-reveal.js";
+import {
   ARIA_ROLE_TAXONOMY,
   RECALL_ROLES,
   categoryOf,
@@ -4412,6 +4416,16 @@ export function registerObserveHandlers(router: ActionRouter, debuggerMgr: Debug
         }
       }
 
+      // hover 揭示控件探测（只读）：当前隐藏、hover 某祖先即显现的控件。
+      // 这类控件在元素树里根本不存在（扫描瞬间 display:none），agent 靠这份路标
+      // 才知道「还有东西，只是要 hover 出来」——否则只能靠猜。
+      const hoverControlsByFrame = new Map<number, HoverRevealPair[]>();
+      for (const s of scans) {
+        if (!s.page || s.page.elements.length === 0) continue;
+        const pairs = await collectHoverRevealPairs(tid, s.frameId);
+        if (pairs.length) hoverControlsByFrame.set(s.frameId, pairs);
+      }
+
       // 分配跨 frame 全局 index（按 frameTargets 顺序）
       // 每个元素附加 suggestedUsage：给 LLM 直接可用的下一步命令，避免再自行推断应传 frameId。
       type CompactElementOut = {
@@ -4490,6 +4504,8 @@ export function registerObserveHandlers(router: ActionRouter, debuggerMgr: Debug
         modal?: { name: string; role: string; suppressed: number };
         /** 空壳 SPA/渲染失败 frame 级信号。@since blank-shell */
         blankShell?: { root: string; rootLen: number; framework: string };
+        /** hover 揭示控件（当前隐藏、hover 某祖先即显现）。@since hover-reveal */
+        hoverControls?: HoverRevealPair[];
       }> = [];
 
       for (const s of scans) {
@@ -4659,6 +4675,9 @@ offScreenActionable: e.offScreenActionable,
           ...(s.page.blindspots && s.page.blindspots.length ? { blindspots: s.page.blindspots } : {}),
           ...(s.page.modal ? { modal: s.page.modal } : {}),
           ...(s.page.blankShell ? { blankShell: s.page.blankShell } : {}),
+          ...(hoverControlsByFrame.get(s.frameId)?.length
+            ? { hoverControls: hoverControlsByFrame.get(s.frameId) }
+            : {}),
         });
       }
 

@@ -102,6 +102,16 @@ interface CompactFrame {
   >;
   /** 模态作用域信号(aria-modal 弹层裁剪了背景)。@since modal-scope */
   modal?: { name: string; role: string; suppressed: number };
+  /** hover 揭示控件（当前隐藏、hover 某祖先即显现）。@since hover-reveal */
+  hoverControls?: Array<{
+    triggerSelector: string;
+    triggerText: string;
+    controlSelector: string;
+    controlTag: string;
+    controlClasses: string;
+    controlName: string;
+    controlCursor: string;
+  }>;
   /** 空壳 SPA/渲染失败 frame 级信号。@since blank-shell */
   blankShell?: { root: string; rootLen: number; framework: string };
 }
@@ -445,6 +455,25 @@ function blindspotSummary(
   return parts.length ? `# blindspots: ${parts.join("; ")}` : null;
 }
 
+/**
+ * hover 揭示控件 meta 行：当前隐藏、hover 某祖先即显现的控件。
+ * 这类控件不在元素树里（扫描瞬间不可见），agent 靠这一行才知道它们的存在与触发方式。
+ * 措辞用「may appear」：这是基于样式表规则的**静态推断**（层叠/媒体查询等可能让规则不生效），
+ * 不是已验证的事实——真伪由 act 的实际结果说话。
+ */
+function hoverRevealSummary(frames?: CompactFrame[]): string | null {
+  const parts: string[] = [];
+  for (const f of frames ?? []) {
+    for (const p of f.hoverControls ?? []) {
+      const fr = f.frameId !== 0 ? ` (frame ${f.frameId})` : "";
+      const label = p.controlName ? `"${escapeName(p.controlName)}"` : p.controlTag;
+      const trigger = p.triggerText ? `"${escapeName(p.triggerText)}"` : p.triggerSelector;
+      parts.push(`${label} may appear on hovering ${trigger} → act on ${p.controlSelector}${fr}`);
+    }
+  }
+  return parts.length ? `# hover-revealed: ${parts.join("; ")}` : null;
+}
+
 /** 模态作用域 meta 行:首个带 modal 的 frame → # modal:。对齐 # blindspots: 风格。 */
 function modalSummary(frames?: CompactFrame[]): string | null {
   for (const f of frames ?? []) {
@@ -493,6 +522,8 @@ export function renderObserveCompact(
   }
   const bsLine = blindspotSummary(data.elements, data.frames, snapshotHash);
   if (bsLine) lines.push(bsLine);
+  const hoverLine = hoverRevealSummary(data.frames);
+  if (hoverLine) lines.push(hoverLine);
   const modalLine = modalSummary(data.frames);
   if (modalLine) lines.push(modalLine);
   const blankLine = blankShellSummary(data.frames);
@@ -613,6 +644,8 @@ export function renderObserveTree(
   }
   const bsLine = blindspotSummary(data.elements, data.frames, snapshotHash);
   if (bsLine) lines.push(bsLine);
+  const hoverLine = hoverRevealSummary(data.frames);
+  if (hoverLine) lines.push(hoverLine);
   const modalLine = modalSummary(data.frames);
   if (modalLine) lines.push(modalLine);
   const blankLine = blankShellSummary(data.frames);

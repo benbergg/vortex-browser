@@ -19,8 +19,17 @@ import {
   type ActionabilityResult,
   type CheckOptions,
 } from "./actionability.js";
+import { revealByHover, type RevealTrigger } from "./reveal.js";
+import type { DebuggerManager } from "../lib/debugger-manager.js";
 
 const DEFAULT_TIMEOUT_MS = 2000;
+
+/** 揭示最多试几轮（每轮 ≤6 次真鼠标移动）。首轮落空多因页面尚未 settle，允许再试。 */
+const MAX_REVEAL_CALLS = 3;
+/** 两轮揭示之间的最小间隔(ms)：给页面挂载/样式生效留时间，也避免预算被鼠标移动吃光 */
+const REVEAL_RETRY_GAP_MS = 250;
+/** 剩余预算低于此值就不再揭示：一轮揭示本身要百毫秒级，不能让它越出动作 deadline */
+const REVEAL_MIN_BUDGET_MS = 300;
 
 // 内层 actionability 等待必须严格小于 MCP 传输层硬超时(client.ts requestOnce,
 // 默认 VORTEX_TIMEOUT_MS=30000ms)。调用方可经 act options.timeout 传任意大值且
@@ -44,11 +53,15 @@ const RETRY_INTERVAL_MS: Record<ActionabilityFailure, number> = {
 export interface WaitOptions extends CheckOptions {
   /** Default 2000ms. */
   timeout?: number;
+  /** 真鼠标 hover 所需（CDP）。缺省则不做揭示（无副作用优先）。 */
+  debuggerMgr?: DebuggerManager;
 }
 
 export interface WaitOk {
   ok: true;
   rect: { x: number; y: number; w: number; h: number };
+  /** 目标原被 hover 隐藏、由本次 hover 祖先揭示时给出证据。 */
+  revealed?: RevealTrigger;
 }
 
 export interface ActionabilityTimeoutDiagnosis {
@@ -117,6 +130,11 @@ export async function waitActionable(
   const start = Date.now();
   let lastReason: ActionabilityFailure | null = null;
   let lastExtras: Record<string, unknown> | undefined;
+  let revealed: RevealTrigger | undefined;
+  let revealCalls = 0;
+  let lastRevealAt = 0;
+  let revealAttempts = 0;
+  let revealReason: string | undefined;
 
   while (Date.now() - start < timeout) {
     const result: ActionabilityResult = await checkActionability(
@@ -126,10 +144,39 @@ export async function waitActionable(
       options,
     );
     if (result.ok) {
-      return { ok: true, rect: result.rect };
+      return revealed ? { ok: true, rect: result.rect, revealed } : { ok: true, rect: result.rect };
     }
     lastReason = result.reason;
     lastExtras = result.extras as Record<string, unknown> | undefined;
+
+    // 目标在 DOM 里但不可见：典型是「父级 :hover 才显示」的控件。
+    // 主动 hover 它的可见祖先把控件揭示出来，再重探。
+    // 首次可能落空（页面刚导航、样式/组件尚未挂载完）——隔一段时间允许再试，次数有界。
+    const now = Date.now();
+    const remaining = timeout - (now - start);
+    if (
+      result.reason === "NOT_VISIBLE" &&
+      options.debuggerMgr &&
+      revealCalls < MAX_REVEAL_CALLS &&
+      remaining >= REVEAL_MIN_BUDGET_MS &&
+      (revealCalls === 0 || now - lastRevealAt >= REVEAL_RETRY_GAP_MS)
+    ) {
+      revealCalls++;
+      lastRevealAt = now;
+      const rr = await revealByHover({
+        tabId,
+        frameId,
+        selector,
+        debuggerMgr: options.debuggerMgr,
+        deadline: start + timeout, // 揭示不得拖出动作预算
+      });
+      revealAttempts += rr.attempts;
+      if (rr.revealed && rr.trigger) {
+        revealed = rr.trigger;
+        continue; // 立即复查：控件已显现则本次动作继续
+      }
+      revealReason = rr.reason;
+    }
 
     const interval = RETRY_INTERVAL_MS[result.reason];
     if (interval < 0) {
@@ -183,6 +230,20 @@ export async function waitActionable(
   let hintOverride: string | undefined;
   if (lastReasonIsStability) {
     message = `Element not stable after ${timeout}ms (last reason: NOT_STABLE)`;
+  } else if (lastReason === "NOT_VISIBLE") {
+    // 目标确实在 DOM 里但不可见。已尝试 hover 祖先揭示（若具备 CDP 条件）仍不可见
+    // ⇒ 大概率是「只在一处 hover 才出现」的控件，或元素本就在隐藏容器里。
+    // 这类失败调大 timeout / 等 idle 都是死路，指引必须指向 hover/force。
+    message =
+      `Element is hidden (display:none / visibility:hidden) after ${timeout}ms` +
+      (revealCalls ? `; vortex already tried to reveal it by hovering ${revealAttempts} ancestor candidate(s)` : "") +
+      (revealReason ? ` (${revealReason})` : "") +
+      `. The target exists in the DOM but is not rendered.`;
+    hintOverride =
+      "If the element only appears on hover, hover its trigger first, then retry: " +
+      "vortex_act { action: 'hover', target: <trigger element> } followed by the original click. " +
+      "Otherwise act on the visible trigger (e.g. the row/card that reveals the control), " +
+      "or use vortex_act with options: { force: true } to act on the hidden element directly.";
   } else if (inertBlocked) {
     message =
       `Actionability timeout after ${timeout}ms; last reason: DISABLED ` +
