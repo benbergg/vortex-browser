@@ -86,7 +86,7 @@ describe("auto-wait：NOT_VISIBLE 时自动 hover 揭示", () => {
     expect(revealByHover).not.toHaveBeenCalled();
   });
 
-  it("揭示只尝试一次：揭示失败后继续按原节奏重试，不反复 hover", async () => {
+  it("揭示失败后在间隔内不再试（避免反复动鼠标）", async () => {
     checkActionability.mockResolvedValue({ ok: false, reason: "NOT_VISIBLE" });
     revealByHover.mockResolvedValue({ revealed: false, attempts: 2, candidates: 2 });
     try {
@@ -95,6 +95,19 @@ describe("auto-wait：NOT_VISIBLE 时自动 hover 揭示", () => {
       /* 预期抛错 */
     }
     expect(revealByHover).toHaveBeenCalledTimes(1);
+  });
+
+  it("页面刚 settle 时首次揭示可能落空：允许隔一段时间再试一次", async () => {
+    checkActionability.mockResolvedValue({ ok: false, reason: "NOT_VISIBLE" });
+    revealByHover.mockResolvedValue({ revealed: false, attempts: 2, candidates: 2 });
+    try {
+      await waitActionable(42, undefined, "#ctl", { timeout: 900, debuggerMgr: fakeDbg });
+    } catch {
+      /* 预期抛错 */
+    }
+    // 首次落空（页面尚未挂载完/样式未生效）后允许再试，但次数有界
+    expect(revealByHover.mock.calls.length).toBeGreaterThanOrEqual(2);
+    expect(revealByHover.mock.calls.length).toBeLessThanOrEqual(3);
   });
 });
 
