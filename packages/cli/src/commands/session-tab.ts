@@ -17,7 +17,7 @@
  * 判不出来时**宁可拒绝**：返回一个可读错误，让调用方重新 observe，绝不沿用
  * 可能属于别的 tab 的快照。
  */
-import { VtxErrorCode } from "@vortex-browser/shared";
+import { VtxErrorCode, isInternalUrl } from "@vortex-browser/shared";
 import { sendRequest, formatCliError } from "../client.js";
 
 /** tab.list 里的一条 tab（只取本模块用得到的字段）。 */
@@ -31,6 +31,8 @@ interface TabRecord {
   lastFocused?: unknown;
   /** hub 标注：self | other | none（相对请求方 session 的归属）。 */
   owner?: unknown;
+  /** 扩展标注：这个 tab 的 URL（用来排除 chrome:// 等内部页）。 */
+  url?: unknown;
 }
 
 /**
@@ -89,7 +91,8 @@ async function listSessionTabs(port: number, session: string): Promise<TabRecord
  * - session 已有当前 tab（hub 在 tab.list 里标的 current）⇒ 就是它；
  * - session 还没有当前 tab ⇒ hub 会认领一个没人认领的 tab（lastFocused+active 优先，
  *   其次 active，最后任意无人认领的），这里照同一口径挑同一个，
- *   免得请求落在别的 tab 上、快照也登记到别的 tab 上。
+ *   免得请求落在别的 tab 上、快照也登记到别的 tab 上；
+ * - 内部页（chrome:// 等）不是工作 tab，两边都用**同一个** isInternalUrl 判定排除。
  *
  * 判不出来就抛可读错误：**宁可拒绝，也不猜**——猜错等于把快照登记到别的 tab 上。
  */
@@ -111,21 +114,30 @@ export async function resolveObserveTargetTab(opts: {
 
   // session 还没有当前 tab：按 hub 的口径挑一个（lastFocused+active 优先、其次 active）。
   // 只认「没人认领的」tab：别的 session 认领的 tab 不碰（hub 也不会去认领它）。
-  const candidates = tabs.filter(
+  const unowned = tabs.filter(
     (tab) => typeof tab.id === "number" && (tab.owner === "none" || tab.owner === undefined),
   );
+  // 内部页（chrome:// / devtools:// / edge:// 等）**不是工作 tab**：内容脚本注入不进去，
+  // 认领了也白认。hub 的 ensureCurrentTab 会先排掉它们再挑 tab（同一个 isInternalUrl 判定），
+  // 这里必须用**同一个**口径，否则 cli 会把内部页当显式 tabId 发出去，与 hub 的路由口径不一致。
+  const candidates = unowned.filter((tab) => !isInternalUrl(tab.url));
   const picked = candidates.find((tab) => tab.active === true && tab.lastFocused === true)
     ?? candidates.find((tab) => tab.active === true)
     ?? candidates[0];
   if (picked && typeof picked.id === "number") return picked.id;
 
+  // 全都不可用 ⇒ 报可读错误，**绝不拿内部页凑数**（hub 那条路会新开一个可用 tab）。
+  const internalOnly = unowned.length > 0 && candidates.length === 0;
   throw new Error(formatCliError({
     code: VtxErrorCode.STALE_SNAPSHOT,
-    message:
-      "observe: cannot determine the session's current tab; refusing to take a snapshot that cannot be bound to a tab",
-    hint:
-      "Open or activate a tab for this session and run `vortex observe` again, " +
-      "or pass --tab <id> to target a tab explicitly.",
+    message: internalOnly
+      ? "observe: cannot determine the session's current tab; every unclaimed tab is a browser-internal page (chrome://, devtools://, edge://, ...)"
+      : "observe: cannot determine the session's current tab; refusing to take a snapshot that cannot be bound to a tab",
+    hint: internalOnly
+      ? "Open a normal web page in this browser and run `vortex observe` again, " +
+        "or pass --tab <id> to target a tab explicitly."
+      : "Open or activate a tab for this session and run `vortex observe` again, " +
+        "or pass --tab <id> to target a tab explicitly.",
     recoverable: true,
   }));
 }

@@ -51,6 +51,8 @@ interface FakeTab {
   id: number;
   active: boolean;
   lastFocused: boolean;
+  /** tab 的 URL（扩展 tab.list 会带上；内部页如 chrome:// 不能当工作 tab）。 */
+  url?: string;
 }
 
 /** 模拟 hub 的会话 tab 状态。 */
@@ -85,8 +87,8 @@ beforeEach(() => {
   process.env.VORTEX_SESSION_NAME = SESSION;
   state = {
     tabs: [
-      { id: 5, active: true, lastFocused: true },
-      { id: 7, active: false, lastFocused: false },
+      { id: 5, active: true, lastFocused: true, url: "https://example.com/" },
+      { id: 7, active: false, lastFocused: false, url: "https://example.com/other" },
     ],
     currentTabId: null,
     observeResult: OBSERVE_RESULT,
@@ -114,7 +116,7 @@ beforeEach(() => {
     }
     if (action === "tab.create") {
       const id = state.nextTabId++;
-      state.tabs.push({ id, active: false, lastFocused: false });
+      state.tabs.push({ id, active: false, lastFocused: false, url: "https://example.com/created" });
       // hub：tab.create 之后 session 当前 tab 变成新建的 tab
       state.currentTabId = id;
       return { action, id: "cli-tab-create", result: { id } };
@@ -426,6 +428,59 @@ describe("定向修复轮 ①：快照必须按实际 tab 身份绑定", () => {
 
     expect(sentActionCalls()).toEqual([]);
     expect(stderr.join("\n")).toContain("recoverable: true");
+    exit.mockRestore();
+  });
+});
+
+/**
+ * 内部页（chrome:// 等）不是工作 tab：内容脚本注入不进去。
+ * hub 的 ensureCurrentTab 会用 isInternalUrl 把它们排除掉再挑 tab，
+ * cli 这条路（自己解析目标 tab 并发显式 tabId）必须用**同一个**口径，
+ * 否则 cli 会把内部页当目标发出去，与 hub 的路由口径不一致。
+ */
+describe("内部页不是工作 tab：cli 与 hub 口径一致", () => {
+  it("内部 active tab + 普通未认领 tab ⇒ 选中的是那个普通 tab，不是内部页", async () => {
+    state.tabs = [
+      { id: 5, active: true, lastFocused: true, url: "chrome://downloads/" },
+      { id: 7, active: false, lastFocused: false, url: "https://example.com/" },
+    ];
+    state.currentTabId = null;
+
+    await run(["observe"]);
+
+    const observeCall = sentActionCalls()[0];
+    expect(observeCall[0]).toBe("observe.snapshot");
+    // 必须是那个普通 tab（7），绝不是内部页（5）
+    expect((observeCall[2] as { tabId?: number }).tabId).toBe(7);
+    // 快照也登记在普通 tab 的槽位上
+    const slots = storedSlots();
+    expect(Object.keys(slots)).toEqual(["7"]);
+    expect(slots["7"].tabId).toBe(7);
+  });
+
+  it.each([
+    "chrome://downloads/",
+    "chrome-untrusted://newtab/",
+    "chrome-devtools://devtools/bundled/inspector.html",
+    "devtools://devtools/bundled/inspector.html",
+    "edge://newtab/",
+  ])("只有内部页（%s）时报可读错误，不拿内部页凑数", async (url) => {
+    state.tabs = [{ id: 5, active: true, lastFocused: true, url }];
+    state.currentTabId = null;
+
+    const exit = vi.spyOn(process, "exit").mockImplementation((() => {
+      throw new Error("__exit__");
+    }) as never);
+
+    await expect(run(["observe"])).rejects.toThrow("__exit__");
+
+    // 请求根本没发出去（更没有拿内部页当目标发出去）
+    expect(sentActionCalls()).toEqual([]);
+    expect(storedSlots()).toEqual({});
+    const err = combinedOutput();
+    expect(err).toMatch(/current tab/i);
+    expect(err).toMatch(/internal/i);
+    expect(err).toContain("recoverable: true");
     exit.mockRestore();
   });
 });

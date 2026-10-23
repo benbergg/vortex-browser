@@ -3,6 +3,7 @@
  * Description: Verifies browser-internal pages are never claimed as work tabs.
  */
 import { afterEach, describe, expect, it } from "vitest";
+import { isInternalUrl as sharedIsInternalUrl } from "@vortex-browser/shared";
 import { isInternalUrl } from "../src/tab-ownership.js";
 import { connectClient, connectFakeAgent, startTestHub, type FakeAgent, type TestClient } from "./helpers/harness.js";
 
@@ -37,6 +38,10 @@ describe("internal tab URLs", () => {
     "https://edge.example.test/",
   ])("still accepts %s", (url) => {
     expect(isInternalUrl(url)).toBe(false);
+  });
+
+  it("hub 与 cli 用的是同一个判定实现（判定搬到 shared，hub 原样再导出）", () => {
+    expect(isInternalUrl).toBe(sharedIsInternalUrl);
   });
 
   it("does not claim an internal active tab and creates a usable background tab", async () => {

@@ -13,3 +13,4 @@ export * from "./browsers.js";
 export * from "./public-tools.js";
 export * from "./timeout.js";
 export * from "./diagnosis.js";
+export * from "./internal-url.js";
