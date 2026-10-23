@@ -777,8 +777,11 @@ export async function handleCallTool(
         return { ok: false, error: formatError(err) };
       }
       if (step.value !== undefined) actParams.value = step.value;
-      // click/hover 的自证只能靠副作用信号,不强开就永远是 unknown
-      if (step.action === "click" || step.action === "hover") {
+      // click 的自证只能靠副作用信号,不强开就永远是 unknown。
+      // hover 不开:扩展侧 dom.hover 既不消费 observeEffect、结果里也没有 effect,
+      // 「悬停有没有生效」没有自证通道 —— 开了也没人消费,只会留一个恒 unverified 的假承诺。
+      // 这类步**不参与自证判定**(shared 的 supportsSelfVerification):不是判定失败,也不让序列停下。
+      if (step.action === "click") {
         actParams.options = { observeEffect: true };
       }
       const d = dispatchNewTool("vortex_act", actParams);

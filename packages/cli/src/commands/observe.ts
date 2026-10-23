@@ -10,6 +10,7 @@ import { VtxErrorCode } from "@vortex-browser/shared";
 import { sendRequest, formatCliError } from "../client.js";
 import { printResponse, printObserveResult, exitWithError } from "../output.js";
 import { getGlobalOpts } from "./helpers.js";
+import { resolveSessionCurrentTab } from "./session-tab.js";
 
 /** observe 的枚举参数，取值与公开工具契约一致（packages/mcp/src/tools/schemas-public.ts）。 */
 const DETAIL_VALUES = ["compact", "full"] as const;
@@ -47,32 +48,34 @@ export interface RefEntry {
 /**
  * 最近一次 observe 的快照上下文，act 用它把 @ref 翻成 index + snapshotId。
  *
- * `tabId` 是快照的归属 tab（null = observe 时没指定 tab，即当时的当前 tab）。
+ * `tabId` 是快照的**实际归属 tab**（不是「用户有没有传 --tab」）：
+ * 未指定 tab 时，observe 落在**该 session 当时的当前 tab**上，落盘时就记成那个 tab 的 id。
  * 快照与 tab 绑定：同一个 session 里换 tab 观察，旧 ref 不许被新 tab 沿用
  * （最终整体评审 Important 1：扩展 resolveTarget 的 boundTabId 优先于请求里的 tab，
- *  沿用旧 snapshotId 会真的点在另一个 tab 上）。
+ *  沿用旧 snapshotId 会真的点在另一个 tab 上；定向修复轮 Important ① 把它收紧成
+ *  「按实际 tab 身份校验」——同 tab 的显式 --tab 必须放行，切了 tab 的无参 act 必须报错）。
  */
 export interface SnapshotContext {
   snapshotId: string;
   capturedAt: number;
-  /** 快照所属 tab；null = 未指定 tab（当时的当前 tab）。 */
+  /** 快照所属的**实际 tab**；null = 旧格式（tab 身份未知，不可用）。 */
   tabId: number | null;
   refs: Record<string, RefEntry>;
 }
 
-/** 快照上下文的落盘结构：按 tab 分槽，一个 session 一个文件。 */
+/** 快照上下文的落盘结构：按实际 tab 分槽，一个 session 一个文件。 */
 interface SnapshotStore {
   version: 2;
-  /** 槽位键：tabId 的字符串；"current" = 未指定 tab。 */
+  /** 槽位键：实际 tabId 的字符串；"current" = 旧格式（tab 身份未知）。 */
   slots: Record<string, SnapshotContext>;
 }
 
-/** 未指定 tab 的槽位键。 */
-const CURRENT_SLOT = "current";
+/** 旧格式的槽位键（tab 身份未知，不得被沿用）。 */
+const LEGACY_CURRENT_SLOT = "current";
 
-/** 槽位键：tabId 有值用数字字符串，否则用 "current"。 */
+/** 槽位键：tabId 有值用数字字符串，否则用旧格式键。 */
 export function tabSlot(tabId: number | null | undefined): string {
-  return typeof tabId === "number" ? String(tabId) : CURRENT_SLOT;
+  return typeof tabId === "number" ? String(tabId) : LEGACY_CURRENT_SLOT;
 }
 
 /** CLI 本地状态目录：默认 ~/.vortex/cli，可用 VORTEX_CLI_STATE_DIR 覆盖（测试用）。 */
@@ -92,8 +95,8 @@ export function snapshotContextPath(session: string): string {
 /**
  * 读取落盘的快照存储。
  *
- * 兼容旧格式（v1：单个快照对象，没有 tab 维度）：整体当作 "current" 槽位，
- * 行为与升级前一致（不会把旧快照误认成某个具体 tab 的快照）。
+ * 兼容旧格式（v1：单个快照对象，没有 tab 维度）：整体当作旧格式槽位，
+ * 它的 tab 身份未知 ⇒ **不会被任何具体 tab 的请求沿用**（宁可拒绝，不跨 tab 沿用旧 snapshotId）。
  */
 function readStore(session: string): SnapshotStore {
   const empty: SnapshotStore = { version: 2, slots: {} };
@@ -108,7 +111,7 @@ function readStore(session: string): SnapshotStore {
     const legacy = parsed as Partial<SnapshotContext>;
     if (typeof legacy.snapshotId !== "string" || !legacy.snapshotId) return empty;
     const ctx = normalizeContext(legacy, null);
-    return ctx ? { version: 2, slots: { [CURRENT_SLOT]: ctx } } : empty;
+    return ctx ? { version: 2, slots: { [LEGACY_CURRENT_SLOT]: ctx } } : empty;
   } catch {
     return empty;
   }
@@ -151,12 +154,12 @@ export function saveSnapshotContext(session: string, context: SnapshotContext): 
 /**
  * 读取某个 tab 槽位里的快照上下文；没有或读坏了都当作「没有快照」。
  *
- * `tabId` 是**请求目标 tab**：null = 请求没指定 tab。
- * 只有同槽位的快照才允许被沿用。
+ * `tabId` 是**请求实际会落到的 tab**（数字）。
+ * 只有同槽位的快照才允许被沿用——槽位就是 tab 身份，不再有「未指定 tab」这种伪身份。
  */
 export function loadSnapshotContext(
   session: string,
-  tabId: number | null = null,
+  tabId: number,
 ): SnapshotContext | undefined {
   const store = readStore(session);
   const raw = store.slots[tabSlot(tabId)];
@@ -170,6 +173,8 @@ export function loadSnapshotContext(
  * 用途：请求目标 tab 里没有这个 ref 时，区分「压根不认识这个 ref」与
  * 「这个 ref 是另一个 tab 的快照里的」——后者要报可恢复的 tab 不一致错误，
  * 而不是静默沿用旧 snapshotId。
+ *
+ * 旧格式槽位（tab 身份未知）的 tabId 报 null，调用方要如实说「tab 身份未知」。
  */
 export function findRefContext(
   session: string,
@@ -177,7 +182,7 @@ export function findRefContext(
 ): { context: SnapshotContext; tabId: number | null } | undefined {
   const store = readStore(session);
   for (const [slot, raw] of Object.entries(store.slots)) {
-    const ctx = normalizeContext(raw, slot === CURRENT_SLOT ? null : Number(slot));
+    const ctx = normalizeContext(raw, slot === LEGACY_CURRENT_SLOT ? null : Number(slot));
     if (!ctx) continue;
     if (ctx.refs[ref]) return { context: ctx, tabId: ctx.tabId };
   }
@@ -262,14 +267,30 @@ export function registerObserveCommand(program: Command): void {
         if (typeof result?.snapshotId === "string" && result.snapshotId) {
           // 上下文永远反映「最近一次 observe」：compact 形态没有服务端 ref，
           // refs 就是空的，act 拿任何 ref 来都会命中「未知 ref」分支。
-          const failed = saveSnapshotContext(session, {
-            snapshotId: result.snapshotId,
-            capturedAt: Date.now(),
-            tabId: typeof tab === "number" ? tab : null,
-            refs: Object.fromEntries(refs.map((item) => [item.ref, item.entry])),
-          });
-          if (failed) {
-            console.error(`[vortex-cli] observe snapshot context not saved: ${failed}`);
+          //
+          // 快照按**实际 tab 身份**登记（定向修复轮 Important ①）：
+          // - 显式 --tab ⇒ 就是它；
+          // - 没指定 tab ⇒ 这次请求落在该 session 当时的当前 tab 上，
+          //   请求刚回来、hub 已经回填过 tabId，此时读回来的 current 就是扩展真正观察的那个 tab。
+          // 判不出实际 tab 时**不落盘**：宁可下次 act 报「未知 ref」，也不沿用可能属于别的 tab 的快照。
+          const actualTab = typeof tab === "number"
+            ? tab
+            : await resolveSessionCurrentTab(port, session);
+          if (actualTab === undefined) {
+            console.error(
+              "[vortex-cli] cannot determine the session's current tab; snapshot context not saved" +
+              " (re-run `vortex observe` to bind a fresh snapshot)",
+            );
+          } else {
+            const failed = saveSnapshotContext(session, {
+              snapshotId: result.snapshotId,
+              capturedAt: Date.now(),
+              tabId: actualTab,
+              refs: Object.fromEntries(refs.map((item) => [item.ref, item.entry])),
+            });
+            if (failed) {
+              console.error(`[vortex-cli] observe snapshot context not saved: ${failed}`);
+            }
           }
         }
       } catch (err: any) {

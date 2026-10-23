@@ -124,6 +124,8 @@ function formatStepLine(step: StepTrace): string {
   const state = step.state;
   const bits: string[] = [state];
   if (step.effect) bits.push(`effect: ${step.effect}`);
+  // 无自证通道的动作（如 hover）：压根没参与判定，不是「判定失败」
+  if (step.verification === "not_applicable") bits.push("verification: not_applicable");
   if (step.error) bits.push(`error: ${step.error}`);
   if (step.diagnosis) bits.push(`diagnosis: ${step.diagnosis}`);
   return `${head} → ${bits.join(" | ")}`;

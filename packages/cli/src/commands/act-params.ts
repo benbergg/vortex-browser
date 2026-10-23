@@ -54,7 +54,11 @@ export interface ActStepInput {
 export interface ActParamContext {
   /** 会话名（快照上下文按 session 分文件）。 */
   session: string;
-  /** 请求目标 tab；undefined = 未指定（当时的当前 tab）。 */
+  /**
+   * 请求**实际会落到的 tab**（数字）：显式 --tab 就是它；
+   * 没指定时由调用方解析成「该 session 当时的当前 tab」。
+   * 快照按 tab 身份分槽，这里校验的就是这个身份（定向修复轮 Important ①）。
+   */
   tab?: number;
   frameId?: number;
 }
@@ -94,21 +98,28 @@ export function buildActParams(step: ActStepInput, ctx: ActParamContext): BuiltA
     // 查不到就地报错，绝不把孤立 target 发给服务端 —— 那只能换来
     // 「缺 selector / index+snapshotId」这种没法自解释的错误。
     //
-    // 快照上下文带 tab 维度：只认「请求目标 tab」那个槽位。
+    // 快照上下文带 **tab 身份**维度：只认「请求实际落到的那个 tab」的槽位。
     // ref 属于别的 tab 时报可恢复错误，绝不跨 tab 沿用旧 snapshotId
     // （扩展 resolveTarget 的 boundTabId 优先于请求里的 tab，沿用就会点在别的 tab 上）。
-    const targetTab = typeof ctx.tab === "number" ? ctx.tab : null;
+    if (typeof ctx.tab !== "number") {
+      throw new Error(formatCliError({
+        code: VtxErrorCode.STALE_SNAPSHOT,
+        message: `act: cannot determine the target tab for ref "${target}"`,
+        hint: "Run `vortex observe` again, or pass --tab <id> to target a tab explicitly.",
+        recoverable: true,
+      }));
+    }
+    const targetTab = ctx.tab;
     const context = loadSnapshotContext(ctx.session, targetTab);
     const entry = context?.refs[target];
     if (!context || !entry) {
       const owner = findRefContext(ctx.session, target);
       if (owner) {
-        const ownerTab = owner.tabId == null ? "未指定 tab" : `tab ${owner.tabId}`;
-        const wantTab = targetTab == null ? "未指定 tab" : `tab ${targetTab}`;
+        const ownerTab = owner.tabId == null ? "身份未知的 tab（旧格式快照）" : `tab ${owner.tabId}`;
         throw new Error(formatCliError({
           code: VtxErrorCode.STALE_SNAPSHOT,
           message:
-            `act: ref "${target}" belongs to ${ownerTab}, but this request targets ${wantTab}` +
+            `act: ref "${target}" belongs to ${ownerTab}, but this request targets tab ${targetTab}` +
             " (snapshot context is bound to one tab)",
           hint:
             "先对目标 tab 执行 `vortex observe` 重新取得 ref（快照与 tab 绑定，不能跨 tab 沿用旧 snapshotId）" +

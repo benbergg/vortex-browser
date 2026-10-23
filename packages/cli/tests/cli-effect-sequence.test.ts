@@ -30,6 +30,7 @@ vi.mock("../src/client.js", async (importOriginal) => {
 });
 
 import { createProgram } from "../src/index.js";
+import { installFakeHub, type FakeHub } from "./helpers/fake-hub.js";
 
 const OBSERVE_RESULT = {
   snapshotId: "snap_abc123",
@@ -54,11 +55,14 @@ const CLICK_EFFECT = {
 let stateDir: string;
 let stdout: string[];
 let stderr: string[];
+let hub: FakeHub;
 
 beforeEach(() => {
   stateDir = mkdtempSync(join(tmpdir(), "vortex-cli-effect-"));
   process.env.VORTEX_CLI_STATE_DIR = stateDir;
   sendRequestMock.mockReset();
+  // 假传输层：tab.list 回答 session 当前 tab（快照按实际 tab 身份绑定要用）
+  hub = installFakeHub(sendRequestMock);
   stdout = [];
   stderr = [];
   vi.spyOn(console, "log").mockImplementation((...args: unknown[]) => {
@@ -73,6 +77,8 @@ afterEach(() => {
   vi.restoreAllMocks();
   rmSync(stateDir, { recursive: true, force: true });
   delete process.env.VORTEX_CLI_STATE_DIR;
+  // 退出码是进程级的：测完复位，别把 worker 带成非零退出
+  process.exitCode = 0;
 });
 
 async function run(argv: string[]): Promise<void> {
@@ -86,26 +92,18 @@ function outText(): string {
 
 /** 先 observe 一次，把 @e12 登记进快照上下文。 */
 async function seedObserve(): Promise<void> {
-  sendRequestMock.mockResolvedValueOnce({
-    action: "observe.snapshot",
-    id: "cli-observe",
-    result: OBSERVE_RESULT,
-  });
+  hub.ok(OBSERVE_RESULT);
   await run(["observe", "--json"]);
 }
 
 describe("vortex act 的 effect 通路", () => {
   it("--observe-effect 把开关透传给扩展，默认输出里能看到副作用信号", async () => {
     await seedObserve();
-    sendRequestMock.mockResolvedValueOnce({
-      action: "dom.click",
-      id: "cli-click",
-      result: { success: true, element: { tag: "button", id: "save" }, effect: CLICK_EFFECT },
-    });
+    hub.ok({ success: true, element: { tag: "button", id: "save" }, effect: CLICK_EFFECT });
 
     await run(["act", "--action", "click", "--target", "@e12", "--observe-effect"]);
 
-    const [action, params] = sendRequestMock.mock.calls[1];
+    const [action, params] = hub.actionCalls()[1];
     expect(action).toBe("dom.click");
     expect(params.observeEffect).toBe(true);
 
@@ -119,37 +117,25 @@ describe("vortex act 的 effect 通路", () => {
 
   it("--window-ms 一并透传", async () => {
     await seedObserve();
-    sendRequestMock.mockResolvedValueOnce({
-      action: "dom.click",
-      id: "cli-click",
-      result: { success: true },
-    });
+    hub.ok({ success: true });
 
     await run(["act", "--action", "click", "--target", "@e12", "--observe-effect", "--window-ms", "800"]);
 
-    const [, params] = sendRequestMock.mock.calls[1];
+    const [, params] = hub.actionCalls()[1];
     expect(params.observeEffect).toBe(true);
     expect(params.windowMs).toBe(800);
   });
 
   it("默认输出是人看的几行，--json 才回到原始 JSON", async () => {
     await seedObserve();
-    sendRequestMock.mockResolvedValueOnce({
-      action: "dom.click",
-      id: "cli-click",
-      result: { success: true, effect: CLICK_EFFECT },
-    });
+    hub.ok({ success: true, effect: CLICK_EFFECT });
 
     await run(["act", "--action", "click", "--target", "@e12", "--observe-effect"]);
     expect(outText()).not.toContain("\"action\":\"dom.click\"");
     expect(outText()).toContain("click @e12 → success");
 
     stdout = [];
-    sendRequestMock.mockResolvedValueOnce({
-      action: "dom.click",
-      id: "cli-click",
-      result: { success: true, effect: CLICK_EFFECT },
-    });
+    hub.ok({ success: true, effect: CLICK_EFFECT });
     await run(["act", "--action", "click", "--target", "@e12", "--observe-effect", "--json"]);
     const parsed = JSON.parse(outText());
     expect(parsed.action).toBe("dom.click");
@@ -160,16 +146,8 @@ describe("vortex act 的 effect 通路", () => {
 describe("vortex sequence 的多步自证", () => {
   it("按序执行每一步，click/hover 强制采集副作用信号", async () => {
     await seedObserve();
-    sendRequestMock.mockResolvedValueOnce({
-      action: "dom.click",
-      id: "s1",
-      result: { success: true, effect: CLICK_EFFECT },
-    });
-    sendRequestMock.mockResolvedValueOnce({
-      action: "dom.fill",
-      id: "s2",
-      result: { value: "hello" },
-    });
+    hub.ok({ success: true, effect: CLICK_EFFECT });
+    hub.ok({ value: "hello" });
 
     await run([
       "sequence",
@@ -180,10 +158,10 @@ describe("vortex sequence 的多步自证", () => {
       ]),
     ]);
 
-    expect(sendRequestMock.mock.calls[1][0]).toBe("dom.click");
-    expect(sendRequestMock.mock.calls[1][1].observeEffect).toBe(true);
-    expect(sendRequestMock.mock.calls[2][0]).toBe("dom.fill");
-    expect(sendRequestMock.mock.calls[2][1].observeEffect).toBeUndefined();
+    expect(hub.actionCalls()[1][0]).toBe("dom.click");
+    expect(hub.actionCalls()[1][1].observeEffect).toBe(true);
+    expect(hub.actionCalls()[2][0]).toBe("dom.fill");
+    expect(hub.actionCalls()[2][1].observeEffect).toBeUndefined();
 
     const out = outText();
     expect(out).toContain("sequence 2 steps");
@@ -193,7 +171,7 @@ describe("vortex sequence 的多步自证", () => {
 
   it("一步失败就停：该步 failed，后续步 not_executed", async () => {
     await seedObserve();
-    sendRequestMock.mockRejectedValueOnce(new Error("Error [NOT_FOUND]: 元素没了"));
+    hub.fail(new Error("Error [NOT_FOUND]: 元素没了"));
 
     await run([
       "sequence",
@@ -209,17 +187,13 @@ describe("vortex sequence 的多步自证", () => {
     expect(out).toContain("not_executed");
     expect(out).toContain("summary: total=2 verified=0 unverified=0 failed=1 not_executed=1");
     // 失败即止：第二步根本没发出去
-    expect(sendRequestMock).toHaveBeenCalledTimes(2);
+    expect(hub.actionCalls()).toHaveLength(2);
   });
 
   it("--on-failure continue 时失败后继续跑完", async () => {
     await seedObserve();
-    sendRequestMock.mockRejectedValueOnce(new Error("Error [NOT_FOUND]: 元素没了"));
-    sendRequestMock.mockResolvedValueOnce({
-      action: "dom.click",
-      id: "s2",
-      result: { success: true, effect: CLICK_EFFECT },
-    });
+    hub.fail(new Error("Error [NOT_FOUND]: 元素没了"));
+    hub.ok({ success: true, effect: CLICK_EFFECT });
 
     await run([
       "sequence",
@@ -232,7 +206,7 @@ describe("vortex sequence 的多步自证", () => {
       ]),
     ]);
 
-    expect(sendRequestMock).toHaveBeenCalledTimes(3);
+    expect(hub.actionCalls()).toHaveLength(3);
     expect(outText()).toContain("failed=1");
     expect(outText()).toContain("verified=1");
   });
@@ -240,11 +214,7 @@ describe("vortex sequence 的多步自证", () => {
   it("--json 输出原始报告（summary + steps）", async () => {
     await seedObserve();
     stdout = [];
-    sendRequestMock.mockResolvedValueOnce({
-      action: "dom.click",
-      id: "s1",
-      result: { success: true, effect: CLICK_EFFECT },
-    });
+    hub.ok({ success: true, effect: CLICK_EFFECT });
 
     await run([
       "sequence",
@@ -267,19 +237,91 @@ describe("vortex sequence 的多步自证", () => {
 
     await expect(run(["sequence", "--steps", "not-json"])).rejects.toThrow("__exit__");
 
-    expect(sendRequestMock).not.toHaveBeenCalled();
+    expect(hub.actionCalls()).toEqual([]);
     expect(stderr.join("\n")).toContain("INVALID_PARAMS");
     exit.mockRestore();
   });
 });
 
+describe("定向修复轮 ③：sequence 的退出码契约", () => {
+  it("有 failed 步 ⇒ 退出码 1（报告照常完整打印）", async () => {
+    await seedObserve();
+    hub.fail(new Error("Error [NOT_FOUND]: 元素没了"));
+
+    await run([
+      "sequence",
+      "--steps",
+      JSON.stringify([{ action: "click", target: "@e12" }]),
+    ]);
+
+    // 报告没被牺牲
+    expect(outText()).toContain("failed");
+    expect(outText()).toContain("summary: total=1 verified=0 unverified=0 failed=1 not_executed=0");
+    // 但命令必须以非零退出码收场，调用脚本才知道失败了
+    expect(process.exitCode).toBe(1);
+  });
+
+  it("全通过 ⇒ 退出码 0", async () => {
+    await seedObserve();
+    hub.ok({ success: true, effect: CLICK_EFFECT });
+
+    await run([
+      "sequence",
+      "--steps",
+      JSON.stringify([{ action: "click", target: "@e12" }]),
+    ]);
+
+    expect(outText()).toContain("executed_verified");
+    expect(process.exitCode ?? 0).toBe(0);
+  });
+});
+
+describe("定向修复轮 ④：hover 没有自证通道", () => {
+  it("hover 不采集副作用信号，被标记为不参与自证判定，也不会让序列停下", async () => {
+    await seedObserve();
+    // hover 的结果里没有 effect（扩展侧 dom.hover 不返回 effect）
+    hub.ok({ success: true });
+    hub.ok({ success: true, effect: CLICK_EFFECT });
+
+    await run([
+      "sequence",
+      "--steps",
+      JSON.stringify([
+        { action: "hover", target: "@e12" },
+        { action: "click", target: "@e12" },
+      ]),
+    ]);
+
+    const calls = hub.actionCalls();
+    // 第一步是 hover：不发 observeEffect（扩展侧没人消费这个开关）
+    expect(calls[1][0]).toBe("dom.hover");
+    expect(calls[1][1].observeEffect).toBeUndefined();
+    // 显式标记「不参与自证判定」，而不是含糊的 unknown
+    expect(outText()).toContain("verification: not_applicable");
+    // 不是「判定失败」：序列照常走完第二步
+    expect(calls[2][0]).toBe("dom.click");
+    expect(outText()).toContain("summary: total=2 verified=1 unverified=1 failed=0 not_executed=0");
+    expect(process.exitCode ?? 0).toBe(0);
+  });
+
+  it("hover 真失败时仍然算失败（不参与判定 ≠ 忽略失败）", async () => {
+    await seedObserve();
+    hub.fail(new Error("Error [NOT_FOUND]: 元素没了"));
+
+    await run([
+      "sequence",
+      "--steps",
+      JSON.stringify([{ action: "hover", target: "@e12" }]),
+    ]);
+
+    expect(outText()).toContain("failed");
+    expect(process.exitCode).toBe(1);
+  });
+});
+
 describe("vortex observe 的输出形态", () => {
   it("默认给人看的几行，--json 才回到原始 JSON", async () => {
-    sendRequestMock.mockResolvedValueOnce({
-      action: "observe.snapshot",
-      id: "cli-observe",
-      result: OBSERVE_RESULT,
-    });
+    hub.ok(OBSERVE_RESULT);
 
     await run(["observe"]);
 
@@ -290,11 +332,7 @@ describe("vortex observe 的输出形态", () => {
     expect(out).not.toContain("\"action\":\"observe.snapshot\"");
 
     stdout = [];
-    sendRequestMock.mockResolvedValueOnce({
-      action: "observe.snapshot",
-      id: "cli-observe",
-      result: OBSERVE_RESULT,
-    });
+    hub.ok(OBSERVE_RESULT);
     await run(["observe", "--json"]);
     const parsed = JSON.parse(outText());
     expect(parsed.result.snapshotId).toBe("snap_abc123");
@@ -303,11 +341,7 @@ describe("vortex observe 的输出形态", () => {
 
 describe("既有命令的默认 NDJSON 不动", () => {
   it("vortex js evaluate 仍然一行 NDJSON", async () => {
-    sendRequestMock.mockResolvedValueOnce({
-      action: "js.evaluate",
-      id: "cli-js",
-      result: "42",
-    });
+    hub.ok("42");
 
     await run(["js", "evaluate", "return 42;"]);
 

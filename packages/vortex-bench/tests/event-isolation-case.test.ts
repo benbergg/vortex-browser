@@ -57,10 +57,20 @@ function toolError(code: string, message: string): unknown {
 }
 
 class ExtensionSim {
-  readonly tabs = new Map<number, { id: number; url: string; status: string; current: boolean }>();
+  readonly tabs = new Map<number, { id: number; url: string; status: string; active: boolean; lastFocused: boolean }>();
   readonly requests: FakeRequest[] = [];
   /** 工具调用顺序（用例的时序断言用）。 */
   readonly calls: string[] = [];
+  /**
+   * hub 侧的 **session 当前 tab**：不带 tabId 的请求就落到它上面。
+   * tab.create 会把它切到新建的 tab（hub 的 updateTabState → claimTab(makeCurrent=true)），
+   * 所以建完后台 tab 之后，不带 tabId 的调用其实落在**后台** tab 上。
+   * 模拟器必须照抄这个语义：用例里「前台调用」要是没显式带 tabId，
+   * 就会落到后台 tab 上，用例随即变红 —— 这正是本护栏要防的假失败。
+   */
+  sessionCurrentTab: number = FG_TAB;
+  /** 每次调用实际落到的 tab（用于护栏：前台调用必须显式带上前台 tab）。 */
+  readonly callTabIds: Array<{ name: string; tabId: number }> = [];
   /** 在前台 idle 监听窗口内到达的请求数（含被 tab 过滤掉的 —— 测的是"落在窗口内"）。 */
   requestsDuringIdleWindow = 0;
   /** 每个 tab 的页面状态（用例把慢请求的发起时刻记在页面里）。 */
@@ -74,20 +84,41 @@ class ExtensionSim {
   }> = [];
 
   constructor(private readonly opts: SimOptions) {
-    this.tabs.set(FG_TAB, { id: FG_TAB, url: `${BASE_URL}/`, status: "complete", current: true });
+    this.tabs.set(FG_TAB, {
+      id: FG_TAB,
+      url: `${BASE_URL}/`,
+      status: "complete",
+      active: true,
+      lastFocused: true,
+    });
+  }
+
+  /** 不带 tabId 的调用落到 session 当前 tab（与 hub 的路由口径一致）。 */
+  private resolveTab(args: Record<string, unknown>, name: string): number {
+    const tabId = args.tabId === undefined ? this.sessionCurrentTab : Number(args.tabId);
+    this.callTabIds.push({ name, tabId });
+    return tabId;
   }
 
   /** tab.list */
   listTabs(): unknown {
     this.calls.push("tab_list");
-    return toolText([...this.tabs.values()]);
+    return toolText([...this.tabs.values()].map((t) => ({ ...t, current: t.id === this.sessionCurrentTab })));
   }
 
   /** tab.create */
   createTab(args: Record<string, unknown>): unknown {
     this.calls.push("tab_create");
     const id = BG_TAB;
-    this.tabs.set(id, { id, url: String(args.url ?? ""), status: "complete", current: false });
+    this.tabs.set(id, {
+      id,
+      url: String(args.url ?? ""),
+      status: "complete",
+      active: false,
+      lastFocused: false,
+    });
+    // hub 的语义：tab.create 之后 session 当前 tab 变成新建的 tab
+    this.sessionCurrentTab = id;
     return toolText({ id });
   }
 
@@ -101,7 +132,7 @@ class ExtensionSim {
   /** network.getLogs（debug_read source=network）：只回 API 类（XHR/Fetch）。 */
   readNetwork(args: Record<string, unknown>): unknown {
     this.calls.push("debug_read");
-    const tabId = args.tabId === undefined ? FG_TAB : Number(args.tabId);
+    const tabId = this.resolveTab(args, "debug_read");
     const pattern = String(args.pattern ?? "");
     const entries = this.requests
       .filter((r) => r.tabId === tabId && r.url.includes(pattern))
@@ -120,7 +151,7 @@ class ExtensionSim {
   /** js.evaluate：识别用例的几段脚本 —— 记 t0 / 发慢请求 / 发探针 / 回读。 */
   evaluate(args: Record<string, unknown>): unknown {
     const code = String(args.code ?? "");
-    const tabId = args.tabId === undefined ? FG_TAB : Number(args.tabId);
+    const tabId = this.resolveTab(args, "evaluate");
     const state = this.pageState.get(tabId) ?? {};
     this.pageState.set(tabId, state);
 
@@ -178,8 +209,8 @@ class ExtensionSim {
   /** page.waitForNetworkIdle：照抄扩展 awaitIdle 的语义。 */
   waitForIdle(args: Record<string, unknown>): Promise<unknown> {
     this.calls.push("wait_for");
-    // 不传 tabId 时扩展解析的是「当前 active tab」——模拟器里就是前台 tab。
-    const tabId = args.tabId === undefined ? FG_TAB : Number(args.tabId);
+    // 不传 tabId 时，hub 把请求路由到 session 当前 tab —— 建完后台 tab 后那就是后台 tab。
+    const tabId = this.resolveTab(args, "wait_for");
     const timeout = Number(args.timeout ?? 30000);
     const idleTime = this.opts.idleTime ?? 500;
     const tracked = new Set<number>();
@@ -309,5 +340,26 @@ describe("事件隔离用例：时序与隔离性", () => {
     const assertion = expect(p).rejects.toThrow(/前台 idle 判定不应报错/);
     await vi.advanceTimersByTimeAsync(20_000);
     await assertion;
+  });
+
+  it("定向修复轮 ②：前台调用必须显式带上前台 tab（不能靠不带 tabId 的调用）", async () => {
+    const sim = new ExtensionSim({ tabFilter: true });
+    const p = eventIsolation.run(makeCtx(sim));
+    await vi.advanceTimersByTimeAsync(20_000);
+    await expect(p).resolves.toBeUndefined();
+
+    // hub 的语义被模拟器照抄了：tab.create 之后 session 当前 tab 变成后台 tab。
+    expect(sim.sessionCurrentTab).toBe(BG_TAB);
+
+    // 前台的三个关键调用都必须显式落在前台 tab 上：
+    // 前台网络订阅 / 前台 idle 监听 / 前台探针。
+    const byName = (name: string): number[] =>
+      sim.callTabIds.filter((c) => c.name === name).map((c) => c.tabId);
+    expect(byName("wait_for")).toEqual([FG_TAB]);
+    expect(byName("evaluate")).toContain(FG_TAB);
+    expect(byName("debug_read")).toContain(FG_TAB);
+    // 后台的调用仍然落在后台 tab 上
+    expect(byName("evaluate")).toContain(BG_TAB);
+    expect(byName("debug_read")).toContain(BG_TAB);
   });
 });

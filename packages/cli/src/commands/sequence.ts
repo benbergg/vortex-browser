@@ -10,6 +10,7 @@ import { sendRequest, formatCliError } from "../client.js";
 import { printSequenceResult, exitWithError } from "../output.js";
 import { getGlobalOpts } from "./helpers.js";
 import { buildActParams } from "./act-params.js";
+import { resolveTargetTab } from "./session-tab.js";
 
 const ON_FAILURE_VALUES = ["stop", "continue"] as const;
 
@@ -68,7 +69,13 @@ function parseSteps(raw: string): SequenceStepInput[] {
  * 每步落到 executed_verified / executed_unverified / failed / not_executed，
  * 后续步骤是否继续由 --on-failure 决定（stop = 只有验证通过才继续）。
  *
- * click/hover 强制开副作用信号采集（observeEffect）—— 不开就永远判不出「点了没有」。
+ * click 强制开副作用信号采集（observeEffect）—— 不开就永远判不出「点了没有」。
+ * hover **不开**：扩展侧 dom.hover 既不消费 observeEffect、结果里也没有 effect，
+ * 「悬停有没有生效」压根没有自证通道。这种步**不参与自证判定**
+ * （shared 的 supportsSelfVerification），不会被当成「判定失败」，也不会让序列停下。
+ *
+ * 退出码（packages/cli/README.md 的退出码契约）：报告里出现 failed 步 ⇒ 退出码 1。
+ * 报告照常完整打印，退出码只是把「命令失败」这件事告诉调用脚本。
  */
 export function registerSequenceCommand(program: Command): void {
   program
@@ -91,6 +98,18 @@ export function registerSequenceCommand(program: Command): void {
         }));
       }
 
+      // @ref 目标要按**实际 tab 身份**校验快照 ⇒ 先解析这次请求真正会落到的 tab
+      // （显式 --tab 就是它；没指定就是该 session 当时的当前 tab）。定向修复轮 Important ①。
+      const needsTab = steps.some((step) => step.target.startsWith("@"));
+      let targetTab: number | undefined = tab;
+      if (needsTab) {
+        try {
+          targetTab = await resolveTargetTab({ port, session, tab });
+        } catch (err: unknown) {
+          exitWithError(err instanceof Error ? err.message : String(err));
+        }
+      }
+
       const report = await runSequence(steps, onFailure, async (step) => {
         try {
           const { extensionAction, params } = buildActParams(
@@ -98,12 +117,13 @@ export function registerSequenceCommand(program: Command): void {
               action: step.action,
               target: step.target,
               value: step.value,
-              // click/hover 的自证只能靠副作用信号，不开就恒退化成 unknown
-              observeEffect: step.action === "click" || step.action === "hover",
+              // click 的自证只能靠副作用信号，不开就恒退化成 unknown。
+              // hover 没有自证通道，不开（开了也没人消费，见 shared 的 supportsSelfVerification）。
+              observeEffect: step.action === "click",
             },
-            { session, tab, frameId },
+            { session, tab: targetTab, frameId },
           );
-          const resp = await sendRequest(extensionAction, params, { port, session, tabId: tab });
+          const resp = await sendRequest(extensionAction, params, { port, session, tabId: targetTab });
           const { value, diagnosis } = splitDiagnosis(resp.result);
           return {
             ok: true,
@@ -120,6 +140,12 @@ export function registerSequenceCommand(program: Command): void {
         console.log(JSON.stringify(report, null, pretty ? 2 : 0));
       } else {
         printSequenceResult(report, { pretty });
+      }
+
+      // 退出码契约：有 failed 步 ⇒ 退出码 1（报告已经完整打印，退出码只补「命令失败」这件事）。
+      // 用 process.exitCode 而不是 process.exit：让进程自然退出，stdout 才不会被截断。
+      if (report.summary.failed > 0) {
+        process.exitCode = 1;
       }
     });
 }

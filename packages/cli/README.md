@@ -79,7 +79,7 @@ vortex act --action click --target @e12 --observe-effect
 # click @e12 → success
 # effect: domMutations=2 networkRequests=1 urlChanged=false focusChanged=true ariaChanged=false userFeedback=toast
 
-# 多步序列：每步自证，click/hover 自动开副作用信号采集
+# 多步序列：每步自证，click 自动开副作用信号采集
 vortex sequence --steps '[{"action":"click","target":"@e12"},{"action":"fill","target":"@e13","value":"hi"}]'
 # sequence 2 steps
 #  1. click  @e12 → executed_verified | effect: confirmed
@@ -91,6 +91,23 @@ vortex sequence --on-failure continue --steps '[...]'
 ```
 
 `@ref` 来自最近一次 `vortex observe`，**与 tab 绑定**：换了 tab 就要重新 observe。
+
+**tab 身份怎么算**（`@ref` 的校验口径）：快照按**解析后的实际 tab**登记与校验 ——
+不是按「有没有传 `--tab`」。
+
+- `observe --tab 5` ⇒ 快照属于 tab 5；
+- `observe`（没传 `--tab`）⇒ 请求落在**该 session 当时的当前 tab**上，快照就属于那个 tab；
+- `act --tab 5`（与 observe 同一个 tab）⇒ 放行；
+- `act`（没传 `--tab`）但当前 tab 已经换人 ⇒ 报错并提示「先对该 tab 重新 observe」，
+  **不会**沿用旧 tab 的快照（旧 snapshotId 会被扩展按 `boundTabId` 打在旧 tab 上）；
+- 实际 tab 判不出来时宁可报错，也不沿用可能属于别的 tab 的快照。
+
+**哪些动作参与自证**：`click`（副作用信号）、`fill`/`type`/`select`（值回读）、
+`scroll`（moved 标志）有自证通道。`hover` **没有**：扩展侧 `dom.hover` 既不消费
+`observeEffect`、结果里也没有 `effect`，「悬停有没有生效」无从判定。这类步
+**不参与自证判定**（报告里标 `verification: not_applicable`）—— 既不是「判定失败」，
+也不会让序列停下；但 hover 动作本身真失败时仍然算 `failed`。
+
 `sequence` 的每步判定口径与 MCP 的 `vortex_sequence` 同源（`@vortex-browser/shared` 的
 `sequence.ts`），两条路给出的 verified / unverified 结论一致。
 
@@ -107,6 +124,9 @@ vortex sequence --on-failure continue --steps '[...]'
 - `0`：成功
 - `1`：vortex action 失败（参数缺失 / 元素未找到 / 超时等）
 - `2`：连接 vortex-server 失败（server 未启动）
+
+`vortex sequence` 的报告里出现 `failed` 步 ⇒ 退出码 `1`（报告照常完整打印到 stdout，
+退出码只是把「命令失败」告诉调用脚本）。
 
 ## 调试
 
