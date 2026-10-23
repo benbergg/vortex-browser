@@ -77,6 +77,54 @@ function httpErrorMessage(body: unknown, status: number, statusText: string): st
   return `HTTP ${status}${statusText ? ` ${statusText}` : ""}`;
 }
 
+/**
+ * CLI 非 2xx 的错误渲染：保留服务端的 code / hint / recoverable / context，
+ * 形态与 MCP 层 `Error [CODE]: msg + hint` 对齐（见 packages/mcp/src/tools/dispatch.ts）。
+ * 缺 hint 不编造 —— 服务端没给就不出现。
+ */
+export function formatCliError(payload: {
+  code?: string; message: string; hint?: string; recoverable?: boolean; context?: unknown;
+}): string {
+  const head = payload.code ? `Error [${payload.code}]: ${payload.message}` : payload.message;
+  const parts = [head];
+  if (payload.hint) parts.push(`hint: ${payload.hint}`);
+  if (payload.recoverable !== undefined) parts.push(`recoverable: ${payload.recoverable}`);
+  if (payload.context !== undefined) parts.push(`context: ${JSON.stringify(payload.context)}`);
+  return parts.join("\n");
+}
+
+/**
+ * 非 2xx 的错误体有两种形态：hub 发的 `{message, error:{code,message,hint,...}}`
+ * 与扁平的 `{code,message,hint,...}`。两层都取 code/message/hint/recoverable/context；
+ * body 里没有结构化错误时退回 httpErrorMessage 的裸 message（既有兜底文案不变）。
+ */
+function cliErrorPayload(
+  body: unknown,
+  status: number,
+  statusText: string,
+): {
+  code?: string;
+  message: string;
+  hint?: string;
+  recoverable?: boolean;
+  context?: unknown;
+} {
+  const source = isRecord(body) && isRecord(body.error) ? body.error : body;
+  const structured = isRecord(source) ? source : undefined;
+  const code = typeof structured?.code === "string" ? structured.code : undefined;
+  const rawMessage = typeof structured?.message === "string" ? structured.message : undefined;
+  if (code === undefined && rawMessage === undefined) {
+    return { message: httpErrorMessage(body, status, statusText) };
+  }
+  return {
+    ...(code !== undefined ? { code } : {}),
+    message: rawMessage ?? httpErrorMessage(body, status, statusText),
+    ...(typeof structured?.hint === "string" ? { hint: structured.hint } : {}),
+    ...(typeof structured?.recoverable === "boolean" ? { recoverable: structured.recoverable } : {}),
+    ...(structured?.context !== undefined ? { context: structured.context } : {}),
+  };
+}
+
 function toVtxResponse(action: string, id: string, body: unknown): VtxResponse {
   return {
     ...(isRecord(body) ? body : { result: body }),
@@ -114,7 +162,9 @@ export async function sendRequest(
     signal: AbortSignal.timeout(abortMs),
   });
   const body = await parseResponseBody(response);
-  if (!response.ok) throw new Error(httpErrorMessage(body, response.status, response.statusText));
+  if (!response.ok) {
+    throw new Error(formatCliError(cliErrorPayload(body, response.status, response.statusText)));
+  }
   return toVtxResponse(action, id, body);
 }
 
