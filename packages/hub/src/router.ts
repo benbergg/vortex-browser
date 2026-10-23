@@ -27,7 +27,7 @@ import { matchBrowser, noBrowserHint, noBrowserMessage } from "./browser-match.j
 import { RPC_TIMEOUT_HINT } from "./error-hints.js";
 import { BROWSER_CONTROL_ACTIONS, listBrowsers } from "./browser-control.js";
 import { PendingTable, type HubPending } from "./pending.js";
-import { prepareRequestWithState } from "./tab-ownership.js";
+import { prepareRequestWithState, shouldBecomeCurrentAfterCreate } from "./tab-ownership.js";
 
 export const REQUEST_TIMEOUT_MS = 30_000;
 export const REBIND_GRACE_MS = 15_000;
@@ -699,7 +699,7 @@ export class HubRouter {
     const result = response.result as { id?: unknown; tabId?: unknown } | undefined;
     const tabId = typeof result?.id === "number" ? result.id : typeof result?.tabId === "number" ? result.tabId : undefined;
     if (pending.request.action === "tab.create" && tabId !== undefined) {
-      this.claimTab(session, browser, tabId, true);
+      this.claimTab(session, browser, tabId, shouldBecomeCurrentAfterCreate(pending.request.params));
     }
     if (pending.request.action === "tab.activate") {
       const targetId = tabId ?? this.requestTabId(pending.request);

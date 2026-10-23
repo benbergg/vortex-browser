@@ -29,6 +29,16 @@ export interface PreparedRequest {
   tabIdBackfilledByHub: boolean;
 }
 
+/**
+ * tab.create 之后,这个新 tab 是否应成为 session 的 current。
+ * 与扩展侧 `args.active ?? true`(packages/extension/src/handlers/tab.ts:25)逐字对齐:
+ * 只有**严格布尔 false**(显式后台 tab)才不夺取 current;缺省与 true 都成为 current。
+ */
+export function shouldBecomeCurrentAfterCreate(params: unknown): boolean {
+  if (typeof params !== "object" || params === null) return true;
+  return (params as { active?: unknown }).active !== false;
+}
+
 export async function ensureCurrentTab(
   session: SessionEntry,
   browser: BrowserEntry,
