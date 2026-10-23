@@ -57,6 +57,42 @@ vortex network filter --status-min 400
 | `frames` | list / find |
 | `shortcuts` | 常用组合：`vortex shortcuts copy-page-text` 等 |
 | `raw` | `vortex raw <action> --params '{"k":"v"}'` 直接发任意 action |
+| `observe` | 抓一份可访问性快照并列出元素 ref（一等命令） |
+| `act` | 对元素执行 click / fill / type / select / scroll / hover（一等命令） |
+| `sequence` | 一次跑多步，每步自证（一等命令） |
+
+## observe / act / sequence
+
+这三个是给人直接用的「一等命令」：默认输出**人看的几行**，`--json` 回到原始 JSON
+（其余模块命令的默认 NDJSON 不变）。
+
+```bash
+# 快照：stdout 是可读摘要，ref 列表走 stderr（[refs] 行不污染 stdout）
+vortex observe
+vortex observe --json | jq '.result.elements'
+
+# 动作：target 吃 observe 给的 @ref，也吃裸 CSS selector
+vortex act --action click --target @e12
+
+# 「点了没有」不能只看 success：开副作用信号采集，输出里逐项列出来
+vortex act --action click --target @e12 --observe-effect
+# click @e12 → success
+# effect: domMutations=2 networkRequests=1 urlChanged=false focusChanged=true ariaChanged=false userFeedback=toast
+
+# 多步序列：每步自证，click/hover 自动开副作用信号采集
+vortex sequence --steps '[{"action":"click","target":"@e12"},{"action":"fill","target":"@e13","value":"hi"}]'
+# sequence 2 steps
+#  1. click  @e12 → executed_verified | effect: confirmed
+#  2. fill   @e13 → executed_verified | effect: confirmed
+# summary: total=2 verified=2 unverified=0 failed=0 not_executed=0
+
+# 默认失败即停（只有验证通过才继续）；--on-failure continue 可让失败后继续
+vortex sequence --on-failure continue --steps '[...]'
+```
+
+`@ref` 来自最近一次 `vortex observe`，**与 tab 绑定**：换了 tab 就要重新 observe。
+`sequence` 的每步判定口径与 MCP 的 `vortex_sequence` 同源（`@vortex-browser/shared` 的
+`sequence.ts`），两条路给出的 verified / unverified 结论一致。
 
 ## 通用选项
 

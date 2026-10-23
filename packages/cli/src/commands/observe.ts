@@ -8,7 +8,7 @@ import { join } from "node:path";
 import type { Command } from "commander";
 import { VtxErrorCode } from "@vortex-browser/shared";
 import { sendRequest, formatCliError } from "../client.js";
-import { printResponse, exitWithError } from "../output.js";
+import { printResponse, printObserveResult, exitWithError } from "../output.js";
 import { getGlobalOpts } from "./helpers.js";
 
 /** observe 的枚举参数，取值与公开工具契约一致（packages/mcp/src/tools/schemas-public.ts）。 */
@@ -215,19 +215,21 @@ export function extractRefs(elements: unknown): Array<{ ref: string; entry: RefE
 /**
  * `vortex observe` —— 抓一份可访问性快照，并把元素的 ref 列出来。
  *
- * stdout 保持 NDJSON（可直接喂 jq），`[refs]` 行走 stderr：辅助信息混进 stdout
- * 会让下游 jq 拿到非 JSON 行。参见 packages/cli/src/output.ts 的同款取舍。
+ * 默认输出**人看的几行**（快照摘要 + 元素表）；`--json` 回到一行 NDJSON
+ * （可直接喂 jq）。`[refs]` 行走 stderr：辅助信息混进 stdout 会让下游 jq
+ * 拿到非 JSON 行。参见 packages/cli/src/output.ts 的同款取舍。
  */
 export function registerObserveCommand(program: Command): void {
   program
     .command("observe")
-    .description("Capture a snapshot and list element refs (refs line goes to stderr; stdout stays NDJSON)")
+    .description("Capture a snapshot and list element refs (refs line goes to stderr; stdout is readable by default)")
     .option("--detail <mode>", "compact | full", "full")
     .option("--scope <scope>", "viewport | full", "viewport")
     .option("--frames <frames>", "main | all-same-origin | all-permitted | all", "main")
     .option("--filter <filter>", "interactive | all", "interactive")
     .option("--include-boxes", "include element bounding boxes")
     .option("--timeout <ms>", "snapshot timeout in milliseconds", parseInt)
+    .option("--json", "print the raw JSON response instead of the readable summary")
     .action(async (opts: any, cmd: Command) => {
       const { port, session, tab, frameId, pretty, quiet } = getGlobalOpts(cmd);
       const detail = requireEnum("--detail", opts.detail, DETAIL_VALUES);
@@ -246,7 +248,11 @@ export function registerObserveCommand(program: Command): void {
         if (frameId != null) params.frameId = frameId;
 
         const resp = await sendRequest("observe.snapshot", params, { port, session, tabId: tab });
-        printResponse(resp, { pretty, quiet });
+        if (opts.json) {
+          printResponse(resp, { pretty, quiet });
+        } else {
+          printObserveResult(resp, { pretty, quiet });
+        }
 
         const result = resp.result as { snapshotId?: string; elements?: unknown } | undefined;
         const refs = extractRefs(result?.elements);
