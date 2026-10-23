@@ -2,6 +2,7 @@ import {
   MAX_INNER_TIMEOUT_MS,
   PAGE_HANDLER_MARGIN_MS,
   PageActions,
+  VtxError,
   VtxErrorCode,
   vtxError,
 } from "@vortex-browser/shared";
@@ -221,6 +222,9 @@ export function registerPageHandlers(router: ActionRouter, debuggerMgr: Debugger
       // 空闲)时若只 console.warn 而不 surface,agent 收到与「真达成 idle」无法区分的
       // 成功响应,误以为网络已空闲(silent-false-success / sibling 不对称,2026-06-20)。
       let networkIdleTimedOut = false;
+      // networkidle 的 pending 诊断：静默期语义下 awaitIdle 可能「带着未结束的请求」成功，
+      // 丢弃它等于「带着 pending 成功却毫无诊断」。成功与超时两条路径都要透出 pending 数。
+      let pendingRequests = 0;
       if (waitForLoad) {
         if (waitUntil === "domcontentloaded") {
           // DOM 解析完成即返回,不等子资源(NAV-1)。dclPromise 已在 update 前挂好监听。
@@ -240,12 +244,15 @@ export function registerPageHandlers(router: ActionRouter, debuggerMgr: Debugger
           const elapsed = Date.now() - navStart;
           const idleTimeout = Math.max(1_000, innerCap - elapsed);
           try {
-            await awaitIdle(debuggerMgr, tid, { timeout: idleTimeout, idleTime: 500 });
+            const idleResult = await awaitIdle(debuggerMgr, tid, { timeout: idleTimeout, idleTime: 500 });
+            pendingRequests = idleResult.pendingRequests;
           } catch (err) {
             const msg = err instanceof Error ? err.message : String(err);
             // graceful 降级：保留 navigate 成功语义,但 surface 信号(对齐 load-degrade)。
             console.warn(`[vortex] navigate waitUntil=networkidle degraded to load after ${idleTimeout}ms: ${msg}`);
             networkIdleTimedOut = true;
+            // 超时路径同样透出 pending 数：agent 需要知道「超时那一刻还挂着几个请求」
+            pendingRequests = pendingFromError(err) ?? 0;
           }
         }
       }
@@ -256,6 +263,7 @@ export function registerPageHandlers(router: ActionRouter, debuggerMgr: Debugger
         status: tab.status,
         ...(degraded ? { degraded: true } : {}),
         ...(networkIdleTimedOut ? { networkIdleTimedOut: true } : {}),
+        ...(pendingRequests ? { pendingRequests } : {}),
       };
     },
 
@@ -493,47 +501,98 @@ interface AwaitIdleOpts {
   minRequests?: number;
 }
 
+/** awaitIdle 的返回：pendingRequests 只是诊断（静默期语义下 pending 不再阻断 idle）。 */
+interface AwaitIdleResult {
+  idle: true;
+  waitedMs: number;
+  matchedRequests: number;
+  /** resolve 那一刻仍未结束的匹配请求数。 */
+  pendingRequests: number;
+}
+
+/** pending 明细最多列几条——长轮询页面可能挂着几十个请求，错误消息不能被撑爆。 */
+const PENDING_DETAIL_LIMIT = 10;
+
 /**
  * 通用网络 idle 等待。抽离自 WAIT_FOR_NETWORK_IDLE，供它和 WAIT_FOR_XHR_IDLE 复用。
  *
- * 实现要点：
- * - 只对**通过过滤**的 requestWillBeSent 递增 pending，并把 requestId 放进 set。
- * - loadingFinished/Failed 必须检查 requestId 是否在 set 中，才递减——避免"filter 掉的请求也减数"导致 pending<0 的幽灵 idle。
- * - resolve 条件：(a) pending=0 且已满足 minRequests (b) 最近 idleTime ms 内无新发起。
+ * **静默期语义**（旧语义 = 「tracked 清空」+「最近 idleTime 内无新发起」两个条件同时成立）：
+ * - resolve 条件只看 `matched >= minRequests` 与**最后一次匹配请求后是否已过 idleTime**。
+ * - 未结束的请求（pending）**不再阻断 idle**，但必须作为诊断透出（pendingRequests），
+ *   否则 agent 会把「带着 N 个请求挂着的静默期」误读成「网络真的空了」。
+ * - **静默计时器随每个新匹配请求重启**（见 onEvent 的 requestWillBeSent 分支）：
+ *   只在开始时 arm 一次的话，「请求持续不断」的页面永远判不出 idle，
+ *   navigate 的 networkIdleTimedOut 降级信号也随之失效。
+ * - `tracked` 只做诊断，不再参与判定；loadingFinished/Failed 仍必须检查 requestId
+ *   是否在 tracked 中（过滤掉的请求不能把 pending 减成负数）。
  */
 async function awaitIdle(
   debuggerMgr: DebuggerManager,
   tid: number,
   opts: AwaitIdleOpts,
-): Promise<{ idle: true; waitedMs: number; matchedRequests: number }> {
+): Promise<AwaitIdleResult> {
   await debuggerMgr.enableDomain(tid, "Network");
   const { timeout, idleTime, urlPattern, requestTypes, minRequests = 0 } = opts;
   const typeSet = requestTypes ? new Set(requestTypes) : null;
 
   return new Promise((resolve, reject) => {
-    const tracked = new Set<string>();
+    // tracked 只做诊断：requestId → { url, type }，供 pending 明细用
+    const tracked = new Map<string, { url: string; type: string }>();
     let matched = 0;
     let idleTimer: ReturnType<typeof setTimeout> | null = null;
     const startTime = Date.now();
+    // 静默期基准：最后一次匹配请求的到达时间（初值 = 调用时刻）
+    let lastMatchedAt = startTime;
 
     const timeoutTimer = setTimeout(() => {
       cleanup();
       reject(
         vtxError(
           VtxErrorCode.TIMEOUT,
-          `Network not idle after ${timeout}ms (${tracked.size} matching requests pending, ${matched} seen)`,
-          { extras: { pending: tracked.size, matched, urlPattern, requestTypes } },
+          `Network not idle after ${timeout}ms (${tracked.size} matching requests pending, ${matched} seen) pending: ${pendingDetailText()}`,
+          {
+            extras: {
+              pending: tracked.size,
+              matched,
+              urlPattern,
+              requestTypes,
+              idleTime,
+              lastMatchedAgoMs: Date.now() - lastMatchedAt,
+            },
+          },
         ),
       );
     }, timeout);
 
+    // pending 明细文本。**必须拼进 message**：MCP 侧错误格式化不序列化 extras，
+    // 只放 extras 的话 agent 永远看不到「到底哪些请求还挂着」。
+    function pendingDetailText(): string {
+      const all = [...tracked.values()].map(({ url, type }) => ({ url, type }));
+      const shown = all.slice(0, PENDING_DETAIL_LIMIT);
+      const rest = all.length - shown.length;
+      return `${JSON.stringify(shown)}${rest > 0 ? ` (+${rest} more)` : ""}`;
+    }
+
     function checkIdle(): void {
-      if (tracked.size <= 0 && matched >= minRequests) {
-        idleTimer = setTimeout(() => {
-          cleanup();
-          resolve({ idle: true, waitedMs: Date.now() - startTime, matchedRequests: matched });
-        }, idleTime);
+      if (matched < minRequests) return;
+      // （重）启动静默计时器：把 idle 的判定基准推到「最后一个匹配请求 + idleTime」。
+      // 每次匹配到新请求都会走到这里 ⇒ 计时器随请求流持续后移。
+      if (idleTimer) {
+        clearTimeout(idleTimer);
+        idleTimer = null;
       }
+      idleTimer = setTimeout(() => {
+        idleTimer = null;
+        // 兜底：minRequests 未满足则不 resolve，继续等下一个匹配请求（由它重启计时器）
+        if (matched < minRequests) return;
+        cleanup();
+        resolve({
+          idle: true,
+          waitedMs: Date.now() - startTime,
+          matchedRequests: matched,
+          pendingRequests: tracked.size,
+        });
+      }, idleTime);
     }
 
     function onEvent(evtTabId: number, method: string, params: unknown): void {
@@ -550,9 +609,12 @@ async function awaitIdle(
         if (!reqId) return;
         if (urlPattern && !url.includes(urlPattern)) return;
         if (typeSet && !typeSet.has(type)) return;
-        tracked.add(reqId);
+        tracked.set(reqId, { url, type });
         matched++;
-        if (idleTimer) { clearTimeout(idleTimer); idleTimer = null; }
+        lastMatchedAt = Date.now();
+        // ★ 本次改动的要害：静默计时器随每个新匹配请求重启。
+        // 少了这一步，「请求持续不断」的页面永远不会被判 idle（降级信号随之失效）。
+        checkIdle();
       } else if (
         method === "Network.loadingFinished" ||
         method === "Network.loadingFailed"
@@ -571,7 +633,14 @@ async function awaitIdle(
     }
 
     debuggerMgr.onEvent(onEvent);
-    // 立即检查：如果当前没有进行中的匹配请求且无最小数量要求，直接开始 idle 计时
+    // 立即检查：没有最小数量要求时直接开始静默计时（调用即「最后一次匹配请求」）
     checkIdle();
   });
+}
+
+/** 从 awaitIdle 的超时错误里取 pending 数（navigate 的降级分支要透出它）。 */
+function pendingFromError(err: unknown): number | undefined {
+  if (!(err instanceof VtxError)) return undefined;
+  const v = err.extra?.context?.extras?.pending;
+  return typeof v === "number" ? v : undefined;
 }
