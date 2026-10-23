@@ -54,12 +54,17 @@ export async function readResult(ctx: CaseContext): Promise<string> {
 }
 
 /** 断言 result 区包含子串（自带重试，避免 v-model 异步 commit 导致的 flaky）。
- * retry 窗口 6×500ms = 3s，覆盖 Element Plus 某些场景 Vue flush 的 tail 延迟。*/
+ * retry 窗口 6×500ms = 3s，覆盖 Element Plus 某些场景 Vue flush 的 tail 延迟。
+ * 命中期望文本时也要过一次 ctx.assert：runner 侧的断言计数（防假绿闸门）只认
+ * ctx.assert，这里直接 return 会让本用例被误判成"零断言 → assertion_failure"。*/
 export async function assertResultContains(ctx: CaseContext, expected: string): Promise<void> {
   let lastText = "";
   for (let i = 0; i < 6; i++) {
     lastText = await readResult(ctx);
-    if (lastText.includes(expected)) return;
+    if (lastText.includes(expected)) {
+      ctx.assert(true, `result 区应包含 "${expected}"`);
+      return;
+    }
     await new Promise((r) => setTimeout(r, 500));
   }
   ctx.assert(

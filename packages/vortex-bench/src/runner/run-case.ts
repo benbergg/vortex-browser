@@ -77,6 +77,8 @@ export async function runCase(def: CaseDefinition, opts: RunCaseOptions): Promis
   let fallback = 0;
   let missed = 0;
   let outputBytes = 0;
+  // 防假绿闸门的计数源：ctx.assert 每被调一次 +1（失败的那次也计）。
+  let assertionCount = 0;
   const outputBytesByTool: Record<string, number> = {};
   const customMetrics: Record<string, number> = {};
 
@@ -117,6 +119,9 @@ export async function runCase(def: CaseDefinition, opts: RunCaseOptions): Promis
       missed += n;
     },
     assert(cond, message) {
+      // 计数先于抛错：失败的那次断言同样是"这个用例做过断言"的证据，
+      // 只在通过时计数会让"断言失败"的用例被误判成零断言。
+      assertionCount++;
       if (!cond) throw new AssertionError(message);
     },
     recordMetric(key, value) {
@@ -126,29 +131,98 @@ export async function runCase(def: CaseDefinition, opts: RunCaseOptions): Promis
 
   const started = Date.now();
   try {
-    // 每个 case 开头固定动作：先 about:blank 卸载旧组件，再 navigate 到目标
-    // （同 URL navigate 在 Vue hash router 下不会重 mount，导致跨次 state 残留）
-    await ctx.call("vortex_navigate", { url: "about:blank" });
-    await ctx.call("vortex_navigate", {
-      url: opts.playgroundUrl + def.playgroundPath,
-    });
-    await ctx.call("vortex_wait_for", {
-      mode: "idle",
-      value: "dom",
-      timeout: 5000
-    });
+    let passed = false;
+    let reason: string | undefined;
+    let failureClass: CaseMetrics["failureClass"];
+    try {
+      // 每个 case 开头固定动作：先 about:blank 卸载旧组件，再 navigate 到目标
+      // （同 URL navigate 在 Vue hash router 下不会重 mount，导致跨次 state 残留）
+      await ctx.call("vortex_navigate", { url: "about:blank" });
+      await ctx.call("vortex_navigate", {
+        url: opts.playgroundUrl + def.playgroundPath,
+      });
+      await ctx.call("vortex_wait_for", {
+        mode: "idle",
+        value: "dom",
+        timeout: 5000
+      });
 
-    await def.run(ctx);
+      await def.run(ctx);
 
-    return buildMetrics(def, true, undefined, undefined, callCount, fallback, missed, outputBytes, outputBytesByTool, Date.now() - started, customMetrics);
-  } catch (err) {
-    const reason = err instanceof Error ? err.message : String(err);
-    const failureClass = classifyFailure(err);
-    return buildMetrics(def, false, reason, failureClass, callCount, fallback, missed, outputBytes, outputBytesByTool, Date.now() - started, customMetrics);
+      passed = true;
+    } catch (err) {
+      reason = err instanceof Error ? err.message : String(err);
+      failureClass = classifyFailure(err);
+    }
+
+    const m = buildMetrics(def, passed, reason, failureClass, callCount, fallback, missed, outputBytes, outputBytesByTool, Date.now() - started, customMetrics);
+    m.assertionCount = assertionCount;
+
+    // 两个比率指标：分母为 0 时不写入（保持 report 形状稳定）
+    const derived = computeDerivedMetrics(trace);
+    if (derived.hintPresentRate !== undefined) m.hintPresentRate = derived.hintPresentRate;
+    if (derived.refReuseRate !== undefined) m.refReuseRate = derived.refReuseRate;
+
+    // 防假绿闸门：用例"跑完了但一条断言都没做"——验了等于没验，判失败。
+    // 只在用例正常结束（passed=true）时判；已经失败的用例保留自己的 failureClass
+    // （env_failure / tool_error / timeout 不能被 assertion_failure 掩盖）。
+    if (passed && assertionCount === 0) {
+      m.passed = false;
+      m.failureClass = "assertion_failure";
+      m.failureReason ??= "用例未产生任何断言（防假绿闸门）";
+    }
+    return m;
   } finally {
     await closeMcpConnection(mcp);
     void trace; void mcp as unknown as McpConnection; // 保留引用抑制 unused 警告
   }
+}
+
+/**
+ * 从 trace 事件算两个比率指标（口径见 types.ts 的字段注释）。
+ * 分母为 0 的指标直接不返回 —— 调用方据此不写字段，保持 report 形状稳定。
+ *
+ * - hintPresentRate：分母 = 有错误/诊断文本的调用数，分子 = 其中文本带 hint 的调用数
+ * - refReuseRate：分母 = 参数顶层 target 是非空字符串的调用数，分子 = 其中 target 以 @ 开头的
+ */
+export function computeDerivedMetrics(trace: Trace): { hintPresentRate?: number; refReuseRate?: number } {
+  let errorCalls = 0;
+  let errorCallsWithHint = 0;
+  let targetCalls = 0;
+  let refTargetCalls = 0;
+
+  for (const ev of trace.events) {
+    if (ev.kind === "tool_result") {
+      if (!isErrorResult(ev)) continue;
+      errorCalls++;
+      if (/hint/i.test(ev.resultText)) errorCallsWithHint++;
+    } else if (ev.kind === "tool_call") {
+      const target = readTarget(ev.args);
+      if (target === undefined) continue;
+      targetCalls++;
+      if (target.startsWith("@")) refTargetCalls++;
+    }
+  }
+
+  const out: { hintPresentRate?: number; refReuseRate?: number } = {};
+  if (errorCalls > 0) out.hintPresentRate = errorCallsWithHint / errorCalls;
+  if (targetCalls > 0) out.refReuseRate = refTargetCalls / targetCalls;
+  return out;
+}
+
+/** 这次调用算不算"错误/诊断文本"：MCP 的 isError 标记、错误码、或 `Error [CODE]:` 形状任一命中。 */
+function isErrorResult(ev: { isError: boolean; errorCodes: string[]; resultText: string }): boolean {
+  if (ev.isError) return true;
+  if (ev.errorCodes.length > 0) return true;
+  return /^Error \[[A-Z_]+\]:/m.test(ev.resultText);
+}
+
+/** 读调用参数顶层的 target（非空字符串才算"带 target 的调用"；null/缺省=整页，不计）。 */
+function readTarget(args: unknown): string | undefined {
+  if (!args || typeof args !== "object") return undefined;
+  const target = (args as { target?: unknown }).target;
+  if (typeof target !== "string" || target.length === 0) return undefined;
+  return target;
 }
 
 function buildMetrics(
