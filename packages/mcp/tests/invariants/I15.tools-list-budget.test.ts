@@ -134,6 +134,17 @@
 // "模型会填错或不知道能填什么"的说明,不是新增能力;公开工具集不变(仍 24 个)。
 // payload 实测 11837B,cap +250 留 163B 余量。沿用"加能力调 cap 不压字符"惯例——
 // 压掉这 4 段等于把契约要点从公开面抹掉(护栏见 tests/contract-gate.test.ts)。
+//
+// 静默期等待范围(Task 3): 12000 → 12300 B。vortex_wait_for 公开两个可选参数
+// urlPattern(只算 URL 含此串的请求)与 minRequests(至少见到 N 个匹配请求才算 idle),
+// 并把 idle 的静默期语义写进公开 description(value=net 与 network 等价)。
+// 静默期语义下"全站无新请求"极易在目标请求还没发出时就判定 idle,模型必须能
+// 按 URL 把等待范围收窄、并要求至少见到 N 个匹配请求 —— 压掉这 2 段说明等于把
+// 该能力从公开面抹掉(同契约接线先例)。payload 实测 12150B,cap +300 至 12300
+// 留 150B 余量。沿用"加能力调 cap 不压字符"惯例。
+//
+// (口径更正: 上一条记的"payload 实测 11837B"已被 tab.create 的 active 语义说明
+// 那次提交冲掉 —— 本次改动前的真实基线是 11915B,故本次 +235B。)
 
 import { describe, it, expect, afterEach } from "vitest";
 import { COMMIT_KINDS } from "@vortex-browser/shared";
@@ -145,7 +156,7 @@ describe("I15: tools/list budget + count + internalized grep", () => {
     defs.map(d => ({ name: d.name, description: d.description, inputSchema: d.schema })),
   );
 
-  it("tools/list 字节 ≤ 11100 B (vortex_sequence 后实测 11005 留 95B buffer)", () => {
+  it("tools/list 字节 ≤ 12300 B (静默期等待范围后实测 12150 留 150B buffer)", () => {
     // V2 P0 修复 D16: filter 子字段 description 是必要的文档化豁免
     // (handler 已实现 console.ts:160 level / network.ts:305-321 pattern+statusMin/Max),
     // 移除豁免会触发 V2 D16 真发现复发 (LLM 不知可用子字段)。
@@ -176,7 +187,13 @@ describe("I15: tools/list budget + count + internalized grep", () => {
     // 补的是"模型会填错或不知道能填什么"的说明,不是新增能力。实测 11837B,
     // cap +250 留 163B 余量。沿用"加能力调 cap 不压字符"惯例——压掉这 4 段
     // 等于把契约要点从公开面抹掉(护栏见 tests/contract-gate.test.ts)。
-    expect(toolsListPayload.length).toBeLessThanOrEqual(12000);
+    // 静默期等待范围(Task 3): 12000 → 12300。vortex_wait_for 公开 urlPattern
+    // (只算 URL 含此串的请求)+ minRequests(至少见到 N 个匹配请求才算 idle)两个
+    // 可选参数,并把 idle 静默期语义写进公开 description。静默期语义下"全站无新
+    // 请求"极易在目标请求发出前就判定 idle,模型必须能按 URL 收窄等待范围——
+    // 压掉这 2 段等于把该能力从公开面抹掉。实测 12150B,cap +300 留 150B 余量。
+    // 沿用"加能力调 cap 不压字符"惯例。
+    expect(toolsListPayload.length).toBeLessThanOrEqual(12300);
   });
 
   it("公开工具数量 = 24（23 + vortex_sequence 多步序列）", () => {
@@ -284,6 +301,8 @@ describe("I15: tools/list budget + count + internalized grep", () => {
       "vortex_act.value": "各 action 的值形状不同,click 不传/scroll 传对象",
       "vortex_fill.value": "评测实测: daterange 需 {start,end},只能靠报错反推",
       "vortex_wait_for.value": "评测实测: mode=info 时填什么完全无从得知",
+      "vortex_wait_for.urlPattern": "模型不知道能把等待范围收窄到某条请求: 静默期语义下全站无新请求极易在目标请求发出前就判定 idle",
+      "vortex_wait_for.minRequests": "模型不知道要等够 N 个匹配请求才算 idle: 页面刚起时零请求会被误判成已静默",
       "vortex_query.mode": "评测实测: sheet 只认语雀表格,模型误用于 DOM table",
       "vortex_extract.maxLength": "超长静默截断,不提示会让模型误以为读全了",
       "vortex_query.attr": "attr 支持 , / | 分隔多属性(daddd2b),不写会复发 R11 静默失败",
