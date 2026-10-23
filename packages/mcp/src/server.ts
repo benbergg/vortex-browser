@@ -16,6 +16,7 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import { sendRequest } from "./client.js";
 import { getToolDefs, getToolDef, setEnabledCaps } from "./tools/registry.js";
+import { buildInstructions } from "./instructions.js";
 import { dispatchNewTool } from "./tools/dispatch.js";
 import { timeoutLadder, splitDiagnosis, hubDeadlineFor } from "@vortex-browser/shared";
 import { liftWaitForRefToTarget } from "./lib/wait-for-ref.js";
@@ -215,7 +216,11 @@ function installAutoRestart(): void {
 
 export const SERVER_INFO = { name: "vortex", version: MCP_VERSION };
 
-const server = new Server(SERVER_INFO, { capabilities: { tools: {} } });
+export const server = new Server(SERVER_INFO, {
+  capabilities: { tools: {} },
+  // 握手时把使用契约下发（同一份真值来自 contract.ts，见 instructions.ts）。
+  instructions: buildInstructions(MCP_VERSION),
+});
 
 server.setRequestHandler(ListToolsRequestSchema, async () => {
   const defs = getToolDefs();
