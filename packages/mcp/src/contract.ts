@@ -36,7 +36,8 @@ export interface ContractItem {
  *
  * 逐字串取自"真实踩坑"而非泛泛介绍：
  * - `workflow`：先 observe 拿 ref 再 act，不要盲点。
- * - `ref-lifecycle`：带 hash 的 ref 跨快照身份稳定，裸 ref 只绑定当前快照。
+ * - `ref-lifecycle`：旧 ref 不得静默命中错误元素，新 observe 后须重新取得 ref
+ *   （运行时对旧 hashed ref 是明确拒绝 STALE_SNAPSHOT，不是静默改指别的元素）。
  * - `fill-value-shape`：fill 的值形状随 widget 变（daterange 需 {start,end}）。
  * - `query-mode-boundary`：sheet 只认 Lake Sheet，component 返回 Vue 实例/props。
  * - `wait-for-modes`：mode=info 等自由文本 mode 的含义。
@@ -54,7 +55,7 @@ export const CONTRACT_ITEMS: readonly ContractItem[] = [
   },
   {
     key: "ref-lifecycle",
-    title: "ref 语义与生命周期：跨快照只用带 hash 的 ref，失效后重新 observe",
+    title: "ref 语义与生命周期：旧 ref 不得静默命中别的元素，新 observe 后须重新取得 ref",
     mustInclude: ["@<hash>:eN"],
   },
   {

@@ -15,6 +15,7 @@
 import { describe, it, expect } from "vitest";
 import {
   parseSuite,
+  parseSuiteSelection,
   parseExplicitCaseNames,
   pickCandidateNames,
   filterBySuite,
@@ -136,6 +137,72 @@ describe("按 suite 过滤 case", () => {
 
   it("suite 缺省的 case 不会被 --suite b 选中", () => {
     expect(filterBySuite(defs, "b").map((d) => d.name)).not.toContain("legacy-no-suite");
+  });
+});
+
+// 评审 Minor：`run --suite all` 单独用时不会跑任何用例 ——
+// "没指定 suite"与"显式指定 all"必须分开看。
+describe("显式 --suite all 与未指定 suite 的区分", () => {
+  const allNames = ["el-dropdown", "contract/overlay-pinned"];
+
+  it("parseSuiteSelection 区分「未指定」与「显式 all」", () => {
+    expect(parseSuiteSelection([])).toEqual({ suite: "all", explicit: false });
+    expect(parseSuiteSelection(["--all"])).toEqual({ suite: "all", explicit: false });
+    expect(parseSuiteSelection(["--suite", "all"])).toEqual({ suite: "all", explicit: true });
+    expect(parseSuiteSelection(["--suite=all"])).toEqual({ suite: "all", explicit: true });
+    expect(parseSuiteSelection(["--suite", "b"])).toEqual({ suite: "b", explicit: true });
+    expect(parseSuiteSelection(["--suite", "c"])).toBeNull();
+  });
+
+  it("run --suite all 选中全部 case（而不是空名单）", async () => {
+    const names = await pickCandidateNames(
+      ["--suite", "all"],
+      { runAll: false, suite: "all", suiteExplicit: true },
+      async () => allNames,
+    );
+    expect(names).toEqual(allNames);
+  });
+
+  it("未指定 suite 时仍然不选任何 case（保持既有行为：必须点名或 --all）", async () => {
+    const names = await pickCandidateNames(
+      [],
+      { runAll: false, suite: "all", suiteExplicit: false },
+      async () => allNames,
+    );
+    expect(names).toEqual([]);
+  });
+
+  it("--suite a / --suite b 的选择行为不变", async () => {
+    expect(
+      await pickCandidateNames(
+        ["--suite", "a"],
+        { runAll: false, suite: "a", suiteExplicit: true },
+        async () => allNames,
+      ),
+    ).toEqual(allNames);
+    expect(
+      await pickCandidateNames(
+        ["--suite", "b"],
+        { runAll: false, suite: "b", suiteExplicit: true },
+        async () => allNames,
+      ),
+    ).toEqual(allNames);
+  });
+
+  it("--suite all 选出的名单经过 suite 过滤后仍是全部 case", async () => {
+    const defs = [fakeDef("el-dropdown", "a"), fakeDef("contract/overlay-pinned", "b")];
+    const byName = new Map(defs.map((d) => [d.name, d]));
+    const names = await pickCandidateNames(
+      ["--suite", "all"],
+      { runAll: false, suite: "all", suiteExplicit: true },
+      async () => [...byName.keys()],
+    );
+    expect(
+      filterBySuite(
+        names.map((n) => byName.get(n)!),
+        "all",
+      ).map((d) => d.name),
+    ).toEqual(["el-dropdown", "contract/overlay-pinned"]);
   });
 });
 

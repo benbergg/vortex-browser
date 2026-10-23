@@ -21,6 +21,33 @@ export type SuiteKey = "a" | "b";
  * defaults to "all" when the flag is absent（既有行为不变）。
  */
 export function parseSuite(args: string[]): SuiteFilter | null {
+  const sel = parseSuiteSelection(args);
+  return sel ? sel.suite : null;
+}
+
+/**
+ * `--suite` 的解析结果：**区分"没指定 suite"与"显式指定 all"**。
+ *
+ * 两者解析出的 suite 值都是 "all"，但语义不同：
+ * - `explicit: false` ⇒ 用户没提 suite，跑哪套由别的开关决定（`--all` / 显式 case 名）；
+ * - `explicit: true` ⇒ 用户明确要了 all ⇒ 跑全部 case。
+ *
+ * 少了这个区分，`run --suite all` 会退化成"什么都没选"（空名单 ⇒ 报错退出）。
+ */
+export interface SuiteSelection {
+  suite: SuiteFilter;
+  /** 用户是否**显式**给了 --suite（带合法值）。 */
+  explicit: boolean;
+}
+
+/**
+ * Parse `--suite a|b|all` / `--suite=<v>`，并标记是否显式指定。
+ * Returns null on invalid input（caller surfaces the user-facing error）。
+ *
+ * `--suite` 不带值时按"缺省"处理（suite=all, explicit=false），
+ * 与既有 parseSuite 的行为一致。
+ */
+export function parseSuiteSelection(args: string[]): SuiteSelection | null {
   let raw: string | undefined;
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
@@ -33,9 +60,10 @@ export function parseSuite(args: string[]): SuiteFilter | null {
       break;
     }
   }
-  if (raw === undefined) return "all";
+  if (raw === undefined) return { suite: "all", explicit: false };
   const v = raw.trim().toLowerCase();
-  if (v === "a" || v === "b" || v === "all") return v;
+  if (v === "a" || v === "b") return { suite: v, explicit: true };
+  if (v === "all") return { suite: "all", explicit: true };
   return null;
 }
 
@@ -75,15 +103,20 @@ export function parseExplicitCaseNames(args: string[]): string[] {
 /**
  * 候选 case 名：显式 case 名优先；没给名字时 --all / --suite a|b = 跑整套该套件。
  * 全量名单由调用方注入（CLI 传 listCaseNames；单测传假的）。
+ *
+ * `suiteExplicit` 区分"没指定 suite"与"显式 --suite all"：
+ * 后者要跑全部 case，前者维持既有行为（什么都不选 ⇒ 上层报错提示用 --all）。
  */
 export async function pickCandidateNames(
   args: string[],
-  opts: { runAll: boolean; suite: SuiteFilter },
+  opts: { runAll: boolean; suite: SuiteFilter; suiteExplicit?: boolean },
   listAllNames: () => Promise<string[]>,
 ): Promise<string[]> {
   const explicitNames = parseExplicitCaseNames(args);
   if (explicitNames.length > 0) return explicitNames;
-  if (opts.runAll || opts.suite !== "all") return await listAllNames();
+  if (opts.runAll || opts.suite !== "all" || opts.suiteExplicit === true) {
+    return await listAllNames();
+  }
   return [];
 }
 

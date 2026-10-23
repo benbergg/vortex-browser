@@ -54,7 +54,7 @@ const DETAILS: Record<string, string> = {
   workflow:
     "先用 {{must}} 看清当前页面与可点元素，再动手操作；拿到的 ref 失效就重新再看，别凭空编 ref。",
   "ref-lifecycle":
-    "带 hash 的 ref（形如 {{must}}）跨快照身份稳定；裸 ref 只绑定当前快照且已废弃。报 stale/invalid 就重新 observe 取新 ref。",
+    "带 hash 的 ref（形如 {{must}}）也不跨快照复用：重新 observe 后请重新取得 ref；旧 hashed ref 会被明确拒绝（STALE_SNAPSHOT），不会静默指向别的元素。裸 ref 只绑定当前快照且已废弃。",
   "fill-value-shape":
     "值形状随控件变：普通输入框给字符串，日期区间控件需 {{must}}，级联选择器需逐级路径数组。填错时按错误信息里给出的正确形状重填。",
   "query-mode-boundary":
@@ -78,10 +78,13 @@ const DETAILS: Record<string, string> = {
  *
  * 兜底：新增契约要点若忘了写散文说明，至少保证其逐字串仍然进入 instructions
  * （契约不丢）；散文说明是新增要点时的应有动作。
+ *
+ * @param item 契约要点
+ * @param template 散文说明模板；`null` 表示"这条没有写散文说明"，
+ *   渲染退化成只输出逐字串（护栏测试用它验证"删掉说明 ⇒ 整句限制语句消失"）。
  */
-function renderDetail(item: ContractItem): string {
+export function renderDetail(item: ContractItem, template: string | null = DETAILS[item.key] ?? null): string {
   const must = item.mustInclude.join("、");
-  const template = DETAILS[item.key];
   if (!template) return must;
   return template.includes(MUST_SLOT)
     ? template.replaceAll(MUST_SLOT, must)

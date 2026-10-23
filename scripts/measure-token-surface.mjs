@@ -18,6 +18,12 @@
  *   node scripts/measure-token-surface.mjs --report <path>        # 换 bench 报告
  *   node scripts/measure-token-surface.mjs --compare <path>       # 与另一份报告前后对比
  *   VORTEX_REPO=/path/to/vortex node scripts/measure-token-surface.mjs
+ *
+ * 固定比较集合（重要）：
+ *   A10/A11 只在 **baseline.json 的 case 名称集合** 上计算 ——
+ *   - suite B 的 case 不参与（自包含失败路径用例，量纲不同）；
+ *   - 报告缺 case / 有重复 case / 混入集合外的 case ⇒ 明确报错并**非零退出**，
+ *     不静默跳过（跳过等于让回归被稀释掉）。
  */
 import { readFileSync, existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -163,10 +169,16 @@ function toolSurface() {
 }
 
 /** bench 报告聚合：调用次数 / 输出体量 / 按工具的输出占比。 */
-function benchReport(reportPath) {
+export function benchReport(reportPath, { baselineNames } = {}) {
   if (!existsSync(reportPath)) return null;
   const d = JSON.parse(readFileSync(reportPath, "utf8"));
-  const cases = d.cases ?? [];
+  const rawCases = d.cases ?? [];
+  // 比较集合以基线固定名称集合为准：suite B 的 case 不参与 A10/A11，
+  // 缺失 / 重复 / 混入非比较项一律报错拒绝比较（不静默跳过）。
+  const picked = baselineNames
+    ? selectComparableCases(rawCases, baselineNames)
+    : { cases: rawCases.filter((c) => !isSuiteB(c)), suiteBCases: rawCases.filter(isSuiteB).length };
+  const cases = picked.cases;
   let calls = 0;
   let bytes = 0;
   let dur = 0;
@@ -186,6 +198,7 @@ function benchReport(reportPath) {
     source: reportPath,
     generatedAt: d.generatedAt,
     cases: n,
+    suiteBCases: picked.suiteBCases,
     totalCalls: calls,
     avgCalls: +(calls / n).toFixed(2),
     totalOutputBytes: bytes,
@@ -204,6 +217,96 @@ function benchReport(reportPath) {
       })),
   };
 }
+
+/**
+ * 取 case 名称（bench 报告里字段名是 `case`，兼容 `name`）。
+ */
+export function caseName(c) {
+  if (!c || typeof c !== "object") return undefined;
+  const raw = typeof c.case === "string" ? c.case : typeof c.name === "string" ? c.name : undefined;
+  return raw && raw.length > 0 ? raw : undefined;
+}
+
+/** suite B 的 case（自包含失败路径用例）不参与 A10/A11 的体量计算。 */
+export function isSuiteB(c) {
+  return Boolean(c && typeof c === "object" && c.suite === "b");
+}
+
+/**
+ * 固定比较集合：baseline.json 的 case 名称集合。
+ *
+ * 这是比较的**唯一**依据 —— A10/A11 只在这个集合上算，
+ * 报告里多一个少一个都不作数（否则回归会被稀释掉）。
+ */
+export function baselineCaseNames(reportPath = DEFAULT_REPORT) {
+  if (!existsSync(reportPath)) {
+    throw new Error(`找不到基线报告：${reportPath}`);
+  }
+  const d = JSON.parse(readFileSync(reportPath, "utf8"));
+  const names = [];
+  for (const c of d.cases ?? []) {
+    const name = caseName(c);
+    if (!name) {
+      throw new Error(`基线报告里有 case 缺名称：${reportPath}`);
+    }
+    names.push(name);
+  }
+  const dup = [...new Set(names.filter((n, i) => names.indexOf(n) !== i))];
+  if (dup.length > 0) {
+    throw new Error(`基线报告里有重复 case 名：${dup.join(", ")}（${reportPath}）`);
+  }
+  return names;
+}
+
+/**
+ * 按基线固定名称集合挑出可比较的 case，并校验集合完整性。
+ *
+ * - suite B 的 case 直接剔除（不参与 A10/A11，也不算「混入非比较项」）；
+ * - 缺失 / 重复 / 混入非集合项 ⇒ 抛错，**拒绝比较**（调用方非零退出）。
+ *   绝不静默跳过 —— 跳过等于让回归被稀释掉。
+ */
+export function selectComparableCases(rawCases, baselineNames) {
+  const allowed = new Set(baselineNames);
+  const suiteA = [];
+  let suiteBCases = 0;
+  for (const c of rawCases ?? []) {
+    if (isSuiteB(c)) {
+      suiteBCases += 1;
+      continue;
+    }
+    const name = caseName(c);
+    if (!name) {
+      throw new Error("报告里有 case 缺名称（case / name 字段都没有）");
+    }
+    suiteA.push({ name, case: c });
+  }
+
+  const seen = new Set();
+  const duplicates = [];
+  for (const { name } of suiteA) {
+    if (seen.has(name)) duplicates.push(name);
+    else seen.add(name);
+  }
+  const missing = baselineNames.filter((n) => !seen.has(n));
+  const extra = [...seen].filter((n) => !allowed.has(n));
+
+  if (missing.length > 0 || duplicates.length > 0 || extra.length > 0) {
+    const parts = [];
+    if (missing.length > 0) {
+      parts.push(`缺失 ${missing.length} 个基线 case：${missing.slice(0, 5).join(", ")}${missing.length > 5 ? " …" : ""}`);
+    }
+    if (duplicates.length > 0) {
+      parts.push(`重复 ${[...new Set(duplicates)].join(", ")}`);
+    }
+    if (extra.length > 0) {
+      parts.push(`混入非比较项 ${extra.length} 个：${extra.slice(0, 5).join(", ")}${extra.length > 5 ? " …" : ""}`);
+    }
+    throw new Error(`比较集合与基线固定名称集合不一致：${parts.join("；")}`);
+  }
+
+  return { cases: suiteA.map((x) => x.case), suiteBCases };
+}
+
 
 /** 前后对比：A10/A11 三组数字 vs 阈值。 */
 function compare(primary, secondary) {
@@ -236,60 +339,85 @@ function compare(primary, secondary) {
   return { rows, pass: rows.every((r) => r.pass) };
 }
 
-const surface = toolSurface();
-const primary = benchReport(flagValue("--report") ? resolveArgPath(flagValue("--report")) : DEFAULT_REPORT);
-const compareTo = flagValue("--compare") ? benchReport(resolveArgPath(flagValue("--compare"))) : null;
-const verdict = primary && compareTo ? compare(primary, compareTo) : null;
-
-const report = { surface, bench: primary, compare: compareTo, verdict };
-
-if (hasFlag("--json")) {
-  console.log(JSON.stringify(report, null, 2));
-} else {
-  console.log("=== Vortex MCP 工具面（常驻 token）");
-  console.log(`来源: ${surface.file}`);
-  console.log(`工具数: ${surface.tools.length}`);
-  console.log(
-    `schema 源文件: ${surface.fileChars} 字符 ≈ ${surface.fileTokens} tokens（构建产物，> 运行时真实注入量）`,
+/**
+ * 脚本入口：比较集合不一致 ⇒ 明确报错并**非零退出**（拒绝比较）。
+ */
+function main() {
+  const surface = toolSurface();
+  // 比较集合的唯一依据：baseline.json 的 case 名称集合。
+  const baselineNames = baselineCaseNames(DEFAULT_REPORT);
+  const primary = benchReport(
+    flagValue("--report") ? resolveArgPath(flagValue("--report")) : DEFAULT_REPORT,
+    { baselineNames },
   );
-  const descSum = surface.tools.reduce((a, t) => a + t.descTokens, 0);
-  console.log(`description 合计 ≈ ${descSum} tokens`);
-  console.log("--- 每个工具的 description 体量（运行时真正进上下文的部分）");
-  for (const t of [...surface.tools].sort((a, b) => b.descTokens - a.descTokens)) {
-    console.log(`  ${t.name.padEnd(22)} ${String(t.descTokens).padStart(5)} tokens`);
-  }
+  const compareTo = flagValue("--compare")
+    ? benchReport(resolveArgPath(flagValue("--compare")), { baselineNames })
+    : null;
+  const verdict = primary && compareTo ? compare(primary, compareTo) : null;
 
-  if (primary) {
-    console.log("\n=== bench 基线（每任务增量 token / 效率）");
-    console.log(`来源: ${primary.source}`);
-    console.log(`生成于 ${primary.generatedAt}，${primary.cases} 个 case`);
-    console.log(
-      `平均调用 ${primary.avgCalls} 次/任务，平均输出 ${primary.avgOutputBytes} 字节 ≈ ${primary.avgOutputTokens} tokens/任务`,
-    );
-    console.log(`总输出 ${primary.totalOutputBytes} 字节 ≈ ${primary.totalOutputTokens} tokens`);
-    console.log(`平均耗时 ${primary.avgDurationMs} ms/任务`);
-    console.log("--- 输出字节占比（top）");
-    for (const t of primary.byTool.slice(0, 8)) {
-      console.log(
-        `  ${t.tool.padEnd(22)} ${String(t.bytes).padStart(7)} B  ${String(t.share).padStart(6)}%`,
-      );
-    }
+  const report = { surface, bench: primary, compare: compareTo, verdict };
+
+  if (hasFlag("--json")) {
+    console.log(JSON.stringify(report, null, 2));
   } else {
-    console.log("\n=== bench 基线：未找到报告文件（跳过）");
-  }
-
-  if (compareTo && verdict) {
-    console.log("\n=== 前后对比（A10/A11 三组数字，越小越好）");
+    console.log("=== Vortex MCP 工具面（常驻 token）");
+    console.log(`来源: ${surface.file}`);
+    console.log(`工具数: ${surface.tools.length}`);
     console.log(
-      `  ${padEndWide("指标", 30)} ${padStartWide("baseline", 10)} ${padStartWide("new", 10)} ${padStartWide("阈值", 10)}  判定`,
+      `schema 源文件: ${surface.fileChars} 字符 ≈ ${surface.fileTokens} tokens（构建产物，> 运行时真实注入量）`,
     );
-    for (const r of verdict.rows) {
-      const fmt = (v) => `${v}${r.unit}`;
-      const threshold = `≤${r.max % 1 === 0 ? r.max.toFixed(1) : r.max}${r.unit}`;
-      console.log(
-        `  ${padEndWide(r.label, 30)} ${padStartWide(fmt(r.primary), 10)} ${padStartWide(fmt(r.secondary), 10)} ${padStartWide(threshold, 10)}  ${r.pass ? "PASS" : "FAIL"}`,
-      );
+    const descSum = surface.tools.reduce((a, t) => a + t.descTokens, 0);
+    console.log(`description 合计 ≈ ${descSum} tokens`);
+    console.log("--- 每个工具的 description 体量（运行时真正进上下文的部分）");
+    for (const t of [...surface.tools].sort((a, b) => b.descTokens - a.descTokens)) {
+      console.log(`  ${t.name.padEnd(22)} ${String(t.descTokens).padStart(5)} tokens`);
     }
-    console.log(`  结论: ${verdict.pass ? "PASS（无劣化）" : "FAIL（有劣化）"}`);
+
+    if (primary) {
+      console.log("\n=== bench 基线（每任务增量 token / 效率）");
+      console.log(`来源: ${primary.source}`);
+      console.log(
+        `生成于 ${primary.generatedAt}，${primary.cases} 个 case（比较集合，suite B 另计 ${primary.suiteBCases} 个）`,
+      );
+      console.log(
+        `平均调用 ${primary.avgCalls} 次/任务，平均输出 ${primary.avgOutputBytes} 字节 ≈ ${primary.avgOutputTokens} tokens/任务`,
+      );
+      console.log(`总输出 ${primary.totalOutputBytes} 字节 ≈ ${primary.totalOutputTokens} tokens`);
+      console.log(`平均耗时 ${primary.avgDurationMs} ms/任务`);
+      console.log("--- 输出字节占比（top）");
+      for (const t of primary.byTool.slice(0, 8)) {
+        console.log(
+          `  ${t.tool.padEnd(22)} ${String(t.bytes).padStart(7)} B  ${String(t.share).padStart(6)}%`,
+        );
+      }
+    } else {
+      console.log("\n=== bench 基线：未找到报告文件（跳过）");
+    }
+
+    if (compareTo && verdict) {
+      console.log("\n=== 前后对比（A10/A11 三组数字，越小越好）");
+      console.log(
+        `  ${padEndWide("指标", 30)} ${padStartWide("baseline", 10)} ${padStartWide("new", 10)} ${padStartWide("阈值", 10)}  判定`,
+      );
+      for (const r of verdict.rows) {
+        const fmt = (v) => `${v}${r.unit}`;
+        const threshold = `≤${r.max % 1 === 0 ? r.max.toFixed(1) : r.max}${r.unit}`;
+        console.log(
+          `  ${padEndWide(r.label, 30)} ${padStartWide(fmt(r.primary), 10)} ${padStartWide(fmt(r.secondary), 10)} ${padStartWide(threshold, 10)}  ${r.pass ? "PASS" : "FAIL"}`,
+        );
+      }
+      console.log(`  结论: ${verdict.pass ? "PASS（无劣化）" : "FAIL（有劣化）"}`);
+    }
+  }
+}
+
+/** 作为脚本直接运行时才执行（被单测 import 时只取纯函数）。 */
+const isMain = process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url));
+if (isMain) {
+  try {
+    main();
+  } catch (err) {
+    console.error(`error: ${err instanceof Error ? err.message : String(err)}`);
+    process.exit(1);
   }
 }

@@ -39,7 +39,7 @@ import { renderFuzzMarkdown } from "./fuzz-report.js";
 import { runPerf } from "./runner/perf-run.js";
 import { renderPerfReport, collectMismatches } from "./perf-report.js";
 import {
-  parseSuite,
+  parseSuiteSelection,
   pickCandidateNames,
   filterBySuite,
   tagSuiteMetric,
@@ -209,17 +209,23 @@ async function cmdRun(args: string[]): Promise<number> {
   // CLI flag 与 env var 等价，env 供脚本（Task 7 的 report 脚本）使用。
   const contractMetrics =
     args.includes("--contract-metrics") || process.env.VORTEX_BENCH_CONTRACT_METRICS === "1";
-  const suite = parseSuite(args);
-  if (suite === null) {
+  // suite 选择：区分"没指定 suite"与"显式 --suite all"（后者要跑全部 case）。
+  const suiteSelection = parseSuiteSelection(args);
+  if (suiteSelection === null) {
     process.stderr.write("[vortex-bench] --suite 期望 a|b|all（e.g. --suite b）\n");
     return 1;
   }
+  const suite = suiteSelection.suite;
   // --suite b / --repeats 3 的"值"不能被当成显式 case 名；
-  // 显式 case 名优先（再按套件过滤）；没给名字时 --all / --suite a|b = 跑整套该套件
-  const candidateNames = await pickCandidateNames(args, { runAll, suite }, listCaseNames);
+  // 显式 case 名优先（再按套件过滤）；没给名字时 --all / --suite a|b|all = 跑整套该套件
+  const candidateNames = await pickCandidateNames(
+    args,
+    { runAll, suite, suiteExplicit: suiteSelection.explicit },
+    listCaseNames,
+  );
 
   if (candidateNames.length === 0) {
-    process.stderr.write("[vortex-bench] run 需要 <caseName> 或 --all\n");
+    process.stderr.write("[vortex-bench] run 需要 <caseName> 或 --all 或 --suite a|b|all\n");
     return 1;
   }
 

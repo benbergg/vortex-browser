@@ -109,7 +109,7 @@ describe("vortex observe 的 ref 提取", () => {
     expect(output).toContain("@f1e3");
   });
 
-  it("stdout 保持 NDJSON（可直接喂 jq），[refs] 行不污染 stdout", async () => {
+  it("stdout 默认是可读输出，--json 时保持 NDJSON（可直接喂 jq），[refs] 行不污染 stdout", async () => {
     sendRequestMock.mockResolvedValue({
       action: "observe.snapshot",
       id: "cli-1",
@@ -118,6 +118,14 @@ describe("vortex observe 的 ref 提取", () => {
 
     await run(["observe"]);
 
+    // 默认：人看的几行（不是 JSON）
+    expect(stdout.length).toBeGreaterThan(0);
+    expect(stdout.join("\n")).toContain("snapshot snap_abc123");
+    expect(() => JSON.parse(stdout.join("\n"))).toThrow();
+
+    // --json：一行 NDJSON，jq 能直接吃
+    stdout = [];
+    await run(["observe", "--json"]);
     expect(stdout.length).toBeGreaterThan(0);
     expect(() => JSON.parse(stdout.join("\n"))).not.toThrow();
   });
