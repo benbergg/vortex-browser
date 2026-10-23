@@ -38,6 +38,12 @@ import { promote } from "./runner/fuzz-promote.js";
 import { renderFuzzMarkdown } from "./fuzz-report.js";
 import { runPerf } from "./runner/perf-run.js";
 import { renderPerfReport, collectMismatches } from "./perf-report.js";
+import {
+  parseSuite,
+  pickCandidateNames,
+  filterBySuite,
+  tagSuiteMetric,
+} from "./runner/suite-filter.js";
 import type { FuzzReport, FuzzFinding, FuzzPage, PrimitiveKind } from "./fuzz-types.js";
 
 const USAGE = `vortex-bench <command>
@@ -150,54 +156,6 @@ async function listCaseNames(): Promise<string[]> {
   return names.sort();
 }
 
-/** bench 支持的套件：a = 组件能力基线（依赖 playground），b = 自包含失败路径用例（依赖 fixture）。 */
-type SuiteFilter = "a" | "b" | "all";
-
-/**
- * Parse `--suite a|b|all` or `--suite=<v>` from argv.
- * Returns null on invalid input (caller surfaces the user-facing error),
- * defaults to "all" when the flag is absent（既有行为不变）。
- */
-function parseSuite(args: string[]): SuiteFilter | null {
-  let raw: string | undefined;
-  for (let i = 0; i < args.length; i++) {
-    const a = args[i];
-    if (a === "--suite") {
-      raw = args[i + 1];
-      break;
-    }
-    if (a.startsWith("--suite=")) {
-      raw = a.slice("--suite=".length);
-      break;
-    }
-  }
-  if (raw === undefined) return "all";
-  const v = raw.trim().toLowerCase();
-  if (v === "a" || v === "b" || v === "all") return v;
-  return null;
-}
-
-/**
- * `--flag <value>` / `--flag=<value>` 占用的 argv 下标（**含 value 本身**）。
- * 用来把 `--suite b` 的 "b" 从"显式 case 名"里剔掉（--repeats 的 N 同理）。
- */
-function flagValueIndexes(args: string[], flag: string): Set<number> {
-  const used = new Set<number>();
-  for (let i = 0; i < args.length; i++) {
-    const a = args[i];
-    if (a === flag) {
-      used.add(i);
-      if (i + 1 < args.length && !args[i + 1].startsWith("-")) used.add(i + 1);
-      break;
-    }
-    if (a.startsWith(`${flag}=`)) {
-      used.add(i);
-      break;
-    }
-  }
-  return used;
-}
-
 /**
  * Parse `--repeats=N` or `--repeats N` from argv.
  * Returns null on invalid input (caller surfaces the user-facing error),
@@ -256,21 +214,9 @@ async function cmdRun(args: string[]): Promise<number> {
     process.stderr.write("[vortex-bench] --suite 期望 a|b|all（e.g. --suite b）\n");
     return 1;
   }
-  // --suite b / --repeats 3 的"值"不能被当成显式 case 名
-  const consumed = new Set<number>([
-    ...flagValueIndexes(args, "--repeats"),
-    ...flagValueIndexes(args, "--suite"),
-  ]);
-  const explicitNames = args.filter(
-    (a, i) => !a.startsWith("-") && !/^\d+$/.test(a) && !consumed.has(i),
-  );
+  // --suite b / --repeats 3 的"值"不能被当成显式 case 名；
   // 显式 case 名优先（再按套件过滤）；没给名字时 --all / --suite a|b = 跑整套该套件
-  const candidateNames =
-    explicitNames.length > 0
-      ? explicitNames
-      : runAll || suite !== "all"
-        ? await listCaseNames()
-        : [];
+  const candidateNames = await pickCandidateNames(args, { runAll, suite }, listCaseNames);
 
   if (candidateNames.length === 0) {
     process.stderr.write("[vortex-bench] run 需要 <caseName> 或 --all\n");
@@ -280,7 +226,7 @@ async function cmdRun(args: string[]): Promise<number> {
   // 套件过滤：读 case 模块的 def.suite（**不靠文件名约定**），缺省视为 "a"。
   // 并行加载：全量 --all 时有 100+ 个模块，串行 import 会白等十几秒。
   const defs = await Promise.all(candidateNames.map((name) => loadCase(name)));
-  const selected = defs.filter((def) => suite === "all" || (def.suite ?? "a") === suite);
+  const selected = filterBySuite(defs, suite);
   if (selected.length === 0) {
     process.stderr.write(`[vortex-bench] 没有属于 suite ${suite} 的 case\n`);
     return 1;
@@ -315,10 +261,9 @@ async function cmdRun(args: string[]): Promise<number> {
             await runCase(def, { mcpBin, playgroundUrl: url, baseUrl, contractMetrics }),
           );
         }
-        const m = aggregate(runs);
         // aggregate() 只搬数值字段（tier/suite 这类透传字段会丢）——但**只为 suite B 补回**：
         // suite A 的序列化必须与加这个字段之前逐字节一致。
-        if (suiteKey === "b") m.suite = "b";
+        const m = tagSuiteMetric(aggregate(runs), suiteKey);
         results.push(m);
         process.stdout.write(formatRow(m) + "\n");
       }
