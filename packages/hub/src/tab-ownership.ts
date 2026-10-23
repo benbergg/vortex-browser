@@ -5,6 +5,7 @@
 import {
   TABLESS_ACTIONS,
   VtxErrorCode,
+  isInternalUrl,
   vtxError,
   type VtxRequest,
   type VtxResponse,
@@ -13,6 +14,12 @@ import { type BrowserEntry, type SessionEntry } from "./registry.js";
 
 export const GLOBAL_ACTIONS = TABLESS_ACTIONS;
 
+/**
+ * 内部页判定搬到 @vortex-browser/shared 了（hub 与 cli 都要用**同一个**口径）。
+ * 这里原样再导出一次，保持既有的引用面不变。
+ */
+export { isInternalUrl };
+
 export type BrowserCall = (request: VtxRequest) => Promise<VtxResponse>;
 export type ClaimRetryPolicy = (error: unknown) => boolean;
 
@@ -20,15 +27,6 @@ export interface PreparedRequest {
   request: VtxRequest;
   needsTabResolution: boolean;
   tabIdBackfilledByHub: boolean;
-}
-
-// 内容脚本注入不进这些方案；edge 系由 install --all-channels 纳入后同样会撞上
-const INTERNAL_SCHEMES = ["chrome", "chrome-untrusted", "chrome-devtools", "devtools", "edge"];
-
-export function isInternalUrl(url: unknown): boolean {
-  if (typeof url !== "string") return false;
-  const normalized = url.trim().toLowerCase();
-  return INTERNAL_SCHEMES.some((scheme) => normalized.startsWith(`${scheme}://`));
 }
 
 export async function ensureCurrentTab(
