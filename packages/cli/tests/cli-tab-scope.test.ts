@@ -13,7 +13,9 @@
  * 1. 快照上下文按**解析后的实际 tab**分槽落盘（不再是「current」这个伪槽位）；
  * 2. act 校验的是**实际 tab 身份**：请求目标 tab 的槽位里有这个 ref 才放行；
  * 3. ref 属于别的 tab 时报**可恢复错误**（提示先对该 tab 重新 observe），绝不跨 tab 沿用旧 snapshotId；
- * 4. 实际 tab 判不出来时**宁可拒绝**，也不沿用可能属于别的 tab 的快照。
+ * 4. 实际 tab 判不出来时**宁可拒绝**，也不沿用可能属于别的 tab 的快照；
+ * 5. observe 在**请求发出前**解析目标 tab，请求参数（显式 tabId）与快照登记用**同一个**身份：
+ *    请求在途期间同 session 切了 current tab，快照也不会被登记到别的 tab 上（并发竞态）。
  *
  * 传输层 mock 掉 sendRequest，并**照抄 hub 的会话 tab 语义**：
  * 带 tabId 的请求会把该 tab 认领为 session 当前 tab；不带 tabId 的请求落在 session 当前 tab 上
@@ -60,6 +62,14 @@ interface HubState {
   observeResult: unknown;
   /** 自增的 tab id。 */
   nextTabId: number;
+  /**
+   * 模拟「observe 在途期间另一个请求把 session 当前 tab 切走」：
+   * observe 已经按当时的归属路由出去，响应回来之前当前 tab 已经变了。
+   * undefined = 不发生切换。
+   */
+  tabSwitchDuringObserve?: number | null;
+  /** tab.list 直接失败（模拟扩展没连上等读不到 tab 的情况）。 */
+  tabListError?: Error;
 }
 
 let state: HubState;
@@ -94,6 +104,7 @@ beforeEach(() => {
   sendRequestMock.mockImplementation(async (action: string, _params: unknown, opts: any) => {
     const explicitTab = typeof opts?.tabId === "number" ? opts.tabId : undefined;
     if (action === "tab.list") {
+      if (state.tabListError) throw state.tabListError;
       return {
         action,
         id: "cli-tab-list",
@@ -115,6 +126,10 @@ beforeEach(() => {
       } else if (state.currentTabId === null) {
         const active = state.tabs.find((t) => t.active);
         if (active) state.currentTabId = active.id;
+      }
+      // observe 已经在途：此刻另一个请求把 session 当前 tab 切走
+      if (state.tabSwitchDuringObserve !== undefined) {
+        state.currentTabId = state.tabSwitchDuringObserve;
       }
       return { action, id: "cli-observe", result: state.observeResult };
     }
@@ -318,22 +333,66 @@ describe("定向修复轮 ①：快照必须按实际 tab 身份绑定", () => {
     exit.mockRestore();
   });
 
-  it("判不出实际 tab 时宁可不落快照，也不沿用可能属于别的 tab 的快照", async () => {
-    // hub 侧认不出任何当前 tab：tab.list 里没有 current
-    state.tabs = [];
-    state.currentTabId = null;
+  it("observe 在途期间 current tab 被切走：快照仍登记在请求时解析出的那个 tab 上", async () => {
+    // 会话当前 tab 是 5 ⇒ 这次 observe 要落在 tab 5 上
+    switchSessionTab(5);
+    // observe 在途期间，同 session 的另一个请求把当前 tab 切到 7
+    state.tabSwitchDuringObserve = 7;
 
     await run(["observe"]);
 
-    expect(storedSlots()).toEqual({});
-    expect(combinedOutput()).toMatch(/current tab/i);
+    // ① 请求必须带显式 tabId —— 就是请求发出前解析出的那个身份
+    const observeCall = sentActionCalls()[0];
+    expect(observeCall[0]).toBe("observe.snapshot");
+    expect((observeCall[2] as { tabId?: number }).tabId).toBe(5);
 
-    sendRequestMock.mockClear();
+    // ② 登记的 tab 身份仍是请求时解析出的 5，不是切换后的 7
+    const slots = storedSlots();
+    expect(Object.keys(slots)).toEqual(["5"]);
+    expect(slots["5"].tabId).toBe(5);
+    expect(slots["5"].refs).toEqual(["@e12"]);
+  });
+
+  it("判不出实际 tab 时宁可报错，也不落快照、不沿用可能属于别的 tab 的快照", async () => {
+    // hub 侧认不出任何当前 tab：tab.list 是空的
+    state.tabs = [];
+    state.currentTabId = null;
+
     const exit = vi.spyOn(process, "exit").mockImplementation((() => {
+      throw new Error("__exit__");
+    }) as never);
+
+    // 解析不出 tab 就不该发出 observe 请求（更不能带着猜出来的 tab 发出去）
+    await expect(run(["observe"])).rejects.toThrow("__exit__");
+    expect(sentActionCalls()).toEqual([]);
+    expect(storedSlots()).toEqual({});
+    const err = combinedOutput();
+    expect(err).toMatch(/current tab/i);
+    expect(err).toContain("recoverable: true");
+    exit.mockRestore();
+
+    // 失败的 observe 没有留下任何快照 ⇒ act 也不会沿用旧 snapshotId
+    sendRequestMock.mockClear();
+    const exit2 = vi.spyOn(process, "exit").mockImplementation((() => {
       throw new Error("__exit__");
     }) as never);
     await expect(run(["act", "--action", "click", "--target", "@e12"])).rejects.toThrow("__exit__");
     expect(sentActionCalls()).toEqual([]);
+    exit2.mockRestore();
+  });
+
+  it("tab.list 读不到 tab 时报可读错误，不发 observe 请求", async () => {
+    state.tabListError = new Error("Error [EXTENSION_NOT_CONNECTED]: browser agent is unavailable");
+
+    const exit = vi.spyOn(process, "exit").mockImplementation((() => {
+      throw new Error("__exit__");
+    }) as never);
+
+    await expect(run(["observe"])).rejects.toThrow("__exit__");
+
+    expect(sentActionCalls()).toEqual([]);
+    expect(storedSlots()).toEqual({});
+    expect(stderr.join("\n")).toContain("EXTENSION_NOT_CONNECTED");
     exit.mockRestore();
   });
 

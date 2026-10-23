@@ -96,11 +96,13 @@ vortex sequence --on-failure continue --steps '[...]'
 不是按「有没有传 `--tab`」。
 
 - `observe --tab 5` ⇒ 快照属于 tab 5；
-- `observe`（没传 `--tab`）⇒ 请求落在**该 session 当时的当前 tab**上，快照就属于那个 tab；
+- `observe`（没传 `--tab`）⇒ **请求发出前**先解析出目标 tab（该 session 当时的当前 tab），
+  请求带这个显式 `tabId` 发出、快照也登记到这个 tab：请求与登记同源，
+  期间同 session 切了 current tab，快照也不会被登记到别的 tab 上；
 - `act --tab 5`（与 observe 同一个 tab）⇒ 放行；
 - `act`（没传 `--tab`）但当前 tab 已经换人 ⇒ 报错并提示「先对该 tab 重新 observe」，
   **不会**沿用旧 tab 的快照（旧 snapshotId 会被扩展按 `boundTabId` 打在旧 tab 上）；
-- 实际 tab 判不出来时宁可报错，也不沿用可能属于别的 tab 的快照。
+- 实际 tab 判不出来时**先报错**（连 observe 请求都不发），也不沿用可能属于别的 tab 的快照。
 
 **哪些动作参与自证**：`click`（副作用信号）、`fill`/`type`/`select`（值回读）、
 `scroll`（moved 标志）有自证通道。`hover` **没有**：扩展侧 `dom.hover` 既不消费
