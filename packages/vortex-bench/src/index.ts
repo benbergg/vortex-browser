@@ -307,8 +307,9 @@ async function cmdRun(args: string[]): Promise<number> {
           runs.push(await runCase(def, { mcpBin, playgroundUrl: url, baseUrl }));
         }
         const m = aggregate(runs);
-        // aggregate() 只搬数值字段（tier/suite 这类透传字段会丢），这里补回。
-        m.suite = suiteKey;
+        // aggregate() 只搬数值字段（tier/suite 这类透传字段会丢）——但**只为 suite B 补回**：
+        // suite A 的序列化必须与加这个字段之前逐字节一致。
+        if (suiteKey === "b") m.suite = "b";
         results.push(m);
         process.stdout.write(formatRow(m) + "\n");
       }

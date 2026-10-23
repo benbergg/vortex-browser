@@ -135,40 +135,8 @@ export async function startFixture(): Promise<Fixture> {
     return sendHtml(res, 404, notFoundPage());
   };
 
-  const primary = createServer(handler);
-  await listen(primary, 0, "127.0.0.1");
-  port = (primary.address() as AddressInfo).port;
-
-  // 第二个 server 共享同一 handler、绑同端口的 ::1 —— localhost 解析到 ::1 或 127.0.0.1 都可达。
-  const servers: Server[] = [primary];
-  try {
-    const secondary = createServer(handler);
-    await listen(secondary, port, "::1");
-    servers.push(secondary);
-  } catch {
-    // ::1 不可用（无 IPv6 的机器）：回退成单 server 绑双栈 "::"（覆盖 127.0.0.1 与 ::1）。
-    await closeServer(primary);
-    servers.length = 0;
-    try {
-      const dual = createServer(handler);
-      await listen(dual, port, "::");
-      servers.push(dual);
-    } catch (err) {
-      // 连双栈都不行：退到纯 IPv4（此时 localhost 必须解析到 127.0.0.1，
-      // fixture.test.ts 的"localhost 也能访问"断言会把这种环境揪出来）。
-      await closeServer(servers[0]);
-      servers.length = 0;
-      const v4 = createServer(handler);
-      try {
-        await listen(v4, port, "0.0.0.0");
-      } catch (e) {
-        throw new Error(
-          `fixture 起不来：127.0.0.1:${port} / [::1]:${port} / [::]:${port} / 0.0.0.0:${port} 都绑不上（${e instanceof Error ? e.message : String(e)}）`,
-        );
-      }
-      servers.push(v4);
-    }
-  }
+  const { servers, port: boundPort } = await bindFixtureServers(handler);
+  port = boundPort;
 
   let closed = false;
   return {
@@ -179,6 +147,83 @@ export async function startFixture(): Promise<Fixture> {
       await Promise.all(servers.map((s) => closeServer(s)));
     },
   };
+}
+
+/**
+ * fixture 的绑定方案：
+ * - `pair`：首选"同端口双 host"——第一个 server 绑 127.0.0.1，第二个共享同一 handler 绑另一个 host
+ *   （::1）。这样 localhost 无论解析到 ::1 还是 127.0.0.1 都可达。
+ * - `fallbacks`：首选失败时（无 IPv6 的机器）单 server 的回退顺序（依次尝试，同端口）。
+ *
+ * 可注入是为了单测能覆盖回退分支（真实 bind 失败，不 mock 网络）。
+ */
+export interface FixtureHostPlan {
+  pair: readonly [string, string];
+  fallbacks: readonly string[];
+}
+
+export const DEFAULT_HOST_PLAN: FixtureHostPlan = {
+  pair: ["127.0.0.1", "::1"],
+  fallbacks: ["::", "0.0.0.0"],
+};
+
+/**
+ * 起 fixture 的服务并返回 { servers, port }。
+ * - 首选：两个 server 共享 handler，同端口分别绑 pair[0] 与 pair[1]；
+ * - 回退：pair[1] 绑不上 → 关掉第一个 server，按 fallbacks 顺序逐个试单 server
+ *   （"::" 双栈 → "0.0.0.0" 纯 IPv4）；
+ * - 全绑不上 → 抛错（错误信息带上每个候选地址的失败原因）。
+ */
+export async function bindFixtureServers(
+  handler: (req: IncomingMessage, res: ServerResponse) => void,
+  plan: FixtureHostPlan = DEFAULT_HOST_PLAN,
+): Promise<{ servers: Server[]; port: number }> {
+  const [firstHost, secondHost] = plan.pair;
+  const failures: string[] = [];
+  const errMsg = (err: unknown): string => (err instanceof Error ? err.message : String(err));
+
+  const primary = createServer(handler);
+  try {
+    await listen(primary, 0, firstHost);
+  } catch (err) {
+    failures.push(`${firstHost}:0 → ${errMsg(err)}`);
+    throw new Error(
+      `fixture 起不来：${[firstHost, secondHost, ...plan.fallbacks]
+        .map((h) => `${h}:0`)
+        .join(" / ")} 都绑不上（${failures.join("; ")}）`,
+    );
+  }
+  const port = (primary.address() as AddressInfo).port;
+
+  try {
+    const secondary = createServer(handler);
+    await listen(secondary, port, secondHost);
+    return { servers: [primary, secondary], port };
+  } catch (err) {
+    // 第二个 host 绑不上（无 IPv6 的机器）→ 关掉第一个，回退单 server。
+    failures.push(`${secondHost}:${port} → ${errMsg(err)}`);
+    await closeServer(primary);
+    const servers: Server[] = [];
+    for (const host of plan.fallbacks) {
+      const server = createServer(handler);
+      try {
+        await listen(server, port, host);
+        servers.push(server);
+        return { servers, port };
+      } catch (err2) {
+        failures.push(`${host}:${port} → ${errMsg(err2)}`);
+        // 关掉**这个**刚绑失败的 server（它从未 listen 成功 → 立即返回）。
+        // 注意：不能去关 servers[0] —— 此刻 servers 已被清空，会拿到 undefined。
+        await closeServer(server);
+        servers.length = 0;
+      }
+    }
+    throw new Error(
+      `fixture 起不来：${[firstHost, secondHost, ...plan.fallbacks]
+        .map((h) => `${h}:${port}`)
+        .join(" / ")} 都绑不上（${failures.join("; ")}）`,
+    );
+  }
 }
 
 function listen(server: Server, port: number, host: string): Promise<void> {
@@ -200,10 +245,11 @@ function listen(server: Server, port: number, host: string): Promise<void> {
 /**
  * 关服。必须先断连接：Node 的 keep-alive 连接（fetch/undici 会留着）会让
  * `server.close()` 的回调一直不触发，close() 就会挂住。
+ * 允许 undefined：调用点可能没有可关的 server（例如 bind 失败的回退分支）。
  */
-function closeServer(server: Server): Promise<void> {
+function closeServer(server: Server | undefined): Promise<void> {
   return new Promise((resolve) => {
-    if (!server.listening) return resolve();
+    if (!server?.listening) return resolve();
     server.closeAllConnections?.();
     server.close(() => resolve());
   });

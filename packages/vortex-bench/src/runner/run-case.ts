@@ -263,8 +263,9 @@ function buildMetrics(
   if (failureClass !== undefined) m.failureClass = failureClass;
   if (Object.keys(customMetrics).length > 0) m.customMetrics = { ...customMetrics };
   if (def.tier !== undefined) m.tier = def.tier; // 评测门 P2.2:透传难度档供 eval 分档聚合
-  // 套件归属：缺省视为 "a"。报告按它分组（suite B = 自包含失败路径用例）。
-  m.suite = def.suite ?? "a";
+  // 套件归属：**只为 suite B 写入**。suite A 的序列化必须与加这个字段之前逐字节一致
+  // （既有 baseline.json 按 suite A 的形状生成，多一个键就是报告形状回归）。
+  if (def.suite === "b") m.suite = "b";
   return m;
 }
 

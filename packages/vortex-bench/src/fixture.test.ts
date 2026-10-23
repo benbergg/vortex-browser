@@ -9,6 +9,7 @@
 import { describe, it, expect, afterEach } from "vitest";
 import {
   startFixture,
+  bindFixtureServers,
   FIXTURE_NOT_FOUND_MARKER,
   type Fixture,
 } from "./fixture.js";
@@ -65,5 +66,49 @@ describe("startFixture 双 origin fixture", () => {
     await fixture.close();
     fixture = null;
     await expect(fetch(`${url}/`)).rejects.toThrow();
+  });
+});
+
+describe("bindFixtureServers 的 host 回退", () => {
+  it("首选双 host 失败后逐个回退，最后落到纯 IPv4（不因 servers 被清空而崩）", async () => {
+    // 192.0.2.x 是 TEST-NET-1，本机没有这些地址 → bind 必然失败（EADDRNOTAVAIL）。
+    // 于是走"首选双 host 失败 → 回退单 server"分支；第一个回退目标也失败，
+    // 第二个回退目标 0.0.0.0（纯 IPv4）必须成功。
+    const { servers, port } = await bindFixtureServers(
+      (_req, res) => {
+        res.writeHead(200, { "content-type": "text/plain" });
+        res.end("v4-ok");
+      },
+      {
+        pair: ["127.0.0.1", "192.0.2.1"],
+        fallbacks: ["192.0.2.2", "0.0.0.0"],
+      },
+    );
+    try {
+      expect(port).toBeGreaterThan(0);
+      expect(servers.length).toBe(1);
+      const res = await fetch(`http://127.0.0.1:${port}/`);
+      expect(res.status).toBe(200);
+      expect(await res.text()).toBe("v4-ok");
+    } finally {
+      await Promise.all(
+        servers.map(
+          (s) =>
+            new Promise<void>((resolve) => {
+              s.closeAllConnections?.();
+              s.close(() => resolve());
+            }),
+        ),
+      );
+    }
+  });
+
+  it("所有候选 host 都绑不上时抛错（错误信息带每个候选地址）", async () => {
+    await expect(
+      bindFixtureServers(() => {}, {
+        pair: ["192.0.2.1", "192.0.2.2"],
+        fallbacks: ["192.0.2.3"],
+      }),
+    ).rejects.toThrow(/都绑不上/);
   });
 });
