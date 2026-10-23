@@ -7,6 +7,7 @@ import { resolve, dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { runCase } from "./runner/run-case.js";
 import { aggregate } from "./runner/aggregate.js";
+import { startFixture } from "./fixture.js";
 import { diffReports, renderDiffTable, hasCritical } from "./runner/diff.js";
 import {
   summarizeBoxesBudget,
@@ -44,6 +45,7 @@ const USAGE = `vortex-bench <command>
 Commands:
   run <caseName>         跑单个 case（e.g. el-dropdown）
   run --all              跑 cases/ 下全部
+  run --suite a|b|all    按套件过滤用例（缺省 all；b = 自包含 fixture 的失败路径用例集）
   run --repeats N        每个 case 跑 N 次，median 聚合 + majority-pass
                          （recommended for baseline refresh: N=3）
   run --contract-metrics 额外写入契约指标 assertionCount / hintPresentRate /
@@ -123,12 +125,77 @@ async function loadCase(name: string): Promise<CaseDefinition> {
   return mod.default;
 }
 
+/**
+ * 列出全部 case 名。
+ * - 顶层 `cases/<name>.case.ts`
+ * - 一层子目录 `cases/<sub>/<name>.case.ts`（名字记作 `<sub>/<name>`，loadCase 按此解析）
+ *   suite B 的用例住在 `cases/contract/`。
+ */
 async function listCaseNames(): Promise<string[]> {
-  const entries = await readdir(CASES_DIR);
-  return entries
-    .filter((e) => e.endsWith(".case.ts"))
-    .map((e) => e.replace(/\.case\.ts$/, ""))
-    .sort();
+  const names: string[] = [];
+  const entries = await readdir(CASES_DIR, { withFileTypes: true });
+  for (const entry of entries) {
+    if (entry.isFile() && entry.name.endsWith(".case.ts")) {
+      names.push(entry.name.replace(/\.case\.ts$/, ""));
+      continue;
+    }
+    if (!entry.isDirectory()) continue;
+    const sub = await readdir(resolve(CASES_DIR, entry.name), { withFileTypes: true });
+    for (const e2 of sub) {
+      if (e2.isFile() && e2.name.endsWith(".case.ts")) {
+        names.push(`${entry.name}/${e2.name.replace(/\.case\.ts$/, "")}`);
+      }
+    }
+  }
+  return names.sort();
+}
+
+/** bench 支持的套件：a = 组件能力基线（依赖 playground），b = 自包含失败路径用例（依赖 fixture）。 */
+type SuiteFilter = "a" | "b" | "all";
+
+/**
+ * Parse `--suite a|b|all` or `--suite=<v>` from argv.
+ * Returns null on invalid input (caller surfaces the user-facing error),
+ * defaults to "all" when the flag is absent（既有行为不变）。
+ */
+function parseSuite(args: string[]): SuiteFilter | null {
+  let raw: string | undefined;
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (a === "--suite") {
+      raw = args[i + 1];
+      break;
+    }
+    if (a.startsWith("--suite=")) {
+      raw = a.slice("--suite=".length);
+      break;
+    }
+  }
+  if (raw === undefined) return "all";
+  const v = raw.trim().toLowerCase();
+  if (v === "a" || v === "b" || v === "all") return v;
+  return null;
+}
+
+/**
+ * `--flag <value>` / `--flag=<value>` 占用的 argv 下标（**含 value 本身**）。
+ * 用来把 `--suite b` 的 "b" 从"显式 case 名"里剔掉（--repeats 的 N 同理）。
+ */
+function flagValueIndexes(args: string[], flag: string): Set<number> {
+  const used = new Set<number>();
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (a === flag) {
+      used.add(i);
+      if (i + 1 < args.length && !args[i + 1].startsWith("-")) used.add(i + 1);
+      break;
+    }
+    if (a.startsWith(`${flag}=`)) {
+      used.add(i);
+      break;
+    }
+  }
+  return used;
 }
 
 /**
@@ -184,36 +251,86 @@ async function cmdRun(args: string[]): Promise<number> {
   // CLI flag 与 env var 等价，env 供脚本（Task 7 的 report 脚本）使用。
   const contractMetrics =
     args.includes("--contract-metrics") || process.env.VORTEX_BENCH_CONTRACT_METRICS === "1";
-  const caseNames = runAll
-    ? await listCaseNames()
-    : args.filter((a) => !a.startsWith("-") && !/^\d+$/.test(a)); // 排除 --repeats 的 N 数值
+  const suite = parseSuite(args);
+  if (suite === null) {
+    process.stderr.write("[vortex-bench] --suite 期望 a|b|all（e.g. --suite b）\n");
+    return 1;
+  }
+  // --suite b / --repeats 3 的"值"不能被当成显式 case 名
+  const consumed = new Set<number>([
+    ...flagValueIndexes(args, "--repeats"),
+    ...flagValueIndexes(args, "--suite"),
+  ]);
+  const explicitNames = args.filter(
+    (a, i) => !a.startsWith("-") && !/^\d+$/.test(a) && !consumed.has(i),
+  );
+  // 显式 case 名优先（再按套件过滤）；没给名字时 --all / --suite a|b = 跑整套该套件
+  const candidateNames =
+    explicitNames.length > 0
+      ? explicitNames
+      : runAll || suite !== "all"
+        ? await listCaseNames()
+        : [];
 
-  if (caseNames.length === 0) {
+  if (candidateNames.length === 0) {
     process.stderr.write("[vortex-bench] run 需要 <caseName> 或 --all\n");
+    return 1;
+  }
+
+  // 套件过滤：读 case 模块的 def.suite（**不靠文件名约定**），缺省视为 "a"。
+  // 并行加载：全量 --all 时有 100+ 个模块，串行 import 会白等十几秒。
+  const defs = await Promise.all(candidateNames.map((name) => loadCase(name)));
+  const selected = defs.filter((def) => suite === "all" || (def.suite ?? "a") === suite);
+  if (selected.length === 0) {
+    process.stderr.write(`[vortex-bench] 没有属于 suite ${suite} 的 case\n`);
     return 1;
   }
 
   const mcpBin = resolveMcpBin();
   const url = playgroundUrl();
+  // suite B 自包含：进程内起 fixture（双 origin 同端口），不依赖 vite playground。
+  const needsFixture = selected.some((def) => (def.suite ?? "a") === "b");
+  const fixture = needsFixture ? await startFixture() : null;
   const repeatsMsg = repeats > 1 ? ` (×${repeats} runs, median + majority-pass)` : "";
   process.stdout.write(`[vortex-bench] playground=${url}  mcp=${mcpBin}\n`);
-  process.stdout.write(`[vortex-bench] 跑 ${caseNames.length} 个 case${repeatsMsg}\n\n`);
+  if (fixture) {
+    process.stdout.write(
+      `[vortex-bench] suite B fixture=${fixture.url}（127.0.0.1 与 localhost 同端口，跨源 iframe）\n`,
+    );
+  }
+  process.stdout.write(`[vortex-bench] 跑 ${selected.length} 个 case${repeatsMsg}\n`);
 
   const results: CaseMetrics[] = [];
-  for (const name of caseNames) {
-    const def = await loadCase(name);
-    const runs: CaseMetrics[] = [];
-    for (let i = 0; i < repeats; i++) {
-      runs.push(await runCase(def, { mcpBin, playgroundUrl: url, contractMetrics }));
+  try {
+    // 按套件分组跑：终端输出与报告里 suite A / suite B 各自成组。
+    for (const suiteKey of ["a", "b"] as const) {
+      const group = selected.filter((def) => (def.suite ?? "a") === suiteKey);
+      if (group.length === 0) continue;
+      process.stdout.write(`\n── suite ${suiteKey}（${group.length} cases）──\n`);
+      for (const def of group) {
+        const baseUrl = suiteKey === "b" ? (fixture as { url: string }).url : url;
+        const runs: CaseMetrics[] = [];
+        for (let i = 0; i < repeats; i++) {
+          runs.push(
+            await runCase(def, { mcpBin, playgroundUrl: url, baseUrl, contractMetrics }),
+          );
+        }
+        const m = aggregate(runs);
+        // aggregate() 只搬数值字段（tier/suite 这类透传字段会丢）——但**只为 suite B 补回**：
+        // suite A 的序列化必须与加这个字段之前逐字节一致。
+        if (suiteKey === "b") m.suite = "b";
+        results.push(m);
+        process.stdout.write(formatRow(m) + "\n");
+      }
     }
-    const m = aggregate(runs);
-    results.push(m);
-    process.stdout.write(formatRow(m) + "\n");
+  } finally {
+    if (fixture) await fixture.close();
   }
 
   const report: BenchReport = {
     generatedAt: new Date().toISOString(),
     playgroundUrl: url,
+    ...(fixture ? { fixtureUrl: fixture.url } : {}),
     cases: results,
   };
   const path = await writeLatest(report);
@@ -241,25 +358,40 @@ async function cmdDiff(): Promise<number> {
 
 async function cmdCompareBoxes(args: string[]): Promise<number> {
   const runAll = args.includes("--all");
-  const caseNames = runAll
+  const requested = runAll
     ? await listCaseNames()
     : args.filter((a) => !a.startsWith("-"));
 
-  if (caseNames.length === 0) {
+  if (requested.length === 0) {
     process.stderr.write("[vortex-bench] compare-boxes 需要 <caseName> 或 --all\n");
+    return 1;
+  }
+
+  // suite B（自包含 fixture 用例）不在本命令范围内：compare-boxes 只跑 playground 用例、
+  // 不起 fixture —— suite B 的用例在 playground 上没有对应页面。
+  const defs = new Map<string, CaseDefinition>();
+  for (const name of requested) {
+    const def = await loadCase(name);
+    if ((def.suite ?? "a") === "b") {
+      process.stdout.write(`[skip] ${name}（suite B 自包含用例：compare-boxes 不起 fixture）\n`);
+      continue;
+    }
+    defs.set(name, def);
+  }
+  if (defs.size === 0) {
+    process.stderr.write("[vortex-bench] compare-boxes 没有可跑的 suite A case\n");
     return 1;
   }
 
   const mcpBin = resolveMcpBin();
   const url = playgroundUrl();
   process.stdout.write(`[vortex-bench] compare-boxes  playground=${url}  mcp=${mcpBin}\n`);
-  process.stdout.write(`[vortex-bench] 跑 ${caseNames.length} 个 case × 2 passes (baseline vs includeBoxes:true)\n\n`);
+  process.stdout.write(`[vortex-bench] 跑 ${defs.size} 个 case × 2 passes (baseline vs includeBoxes:true)\n\n`);
 
   async function runPass(label: string, argOverrides?: Record<string, Record<string, unknown>>): Promise<CaseMetrics[]> {
     process.stdout.write(`── pass: ${label} ──\n`);
     const results: CaseMetrics[] = [];
-    for (const name of caseNames) {
-      const def = await loadCase(name);
+    for (const [name, def] of defs) {
       const m = await runCase(def, { mcpBin, playgroundUrl: url, argOverrides });
       results.push(m);
       process.stdout.write(formatRow(m) + "\n");

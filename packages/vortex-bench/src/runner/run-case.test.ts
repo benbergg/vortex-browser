@@ -362,7 +362,55 @@ describe("refReuseRate", () => {
 });
 
 describe("suite 字段", () => {
-  it("suite 缺省视为 a，本任务不实现 suite 过滤（suite=b 的 case 照常运行）", async () => {
+  // 契约：suite 字段**只为 suite B 写入**。suite A 的序列化必须与加这个字段之前逐字节一致
+  // （既有 baseline.json 是按 suite A 的形状生成的，多一个键就是回归）。
+  it("suite 缺省（suite A）→ 报告里不出现 suite 字段", async () => {
+    const def: CaseDefinition = {
+      name: "suite-a-default",
+      playgroundPath: "/#/suite",
+      async run(ctx) {
+        ctx.assert(true, "ok");
+      },
+    };
+
+    const m = await runCase(def, OPTS);
+
+    expect(m.passed).toBe(true);
+    expect("suite" in m).toBe(false);
+    expect(m.suite).toBeUndefined();
+  });
+
+  it("显式写 suite: \"a\" 也不写进报告（suite A 的形状保持原样）", async () => {
+    const def: CaseDefinition = {
+      name: "suite-a-explicit",
+      playgroundPath: "/#/suite",
+      suite: "a",
+      async run(ctx) {
+        ctx.assert(true, "ok");
+      },
+    };
+
+    const m = await runCase(def, OPTS);
+
+    expect("suite" in m).toBe(false);
+  });
+
+  it("suite: \"b\" → 写 suite: \"b\"（报告按它分档）", async () => {
+    const def: CaseDefinition = {
+      name: "suite-b",
+      playgroundPath: "/#/suite",
+      suite: "b",
+      async run(ctx) {
+        ctx.assert(true, "ok");
+      },
+    };
+
+    const m = await runCase(def, OPTS);
+
+    expect(m.suite).toBe("b");
+  });
+
+  it("suite=b 的 case 照常运行（过滤在 CLI 层做，runner 不拦）", async () => {
     const def: CaseDefinition = {
       name: "suite-b-still-runs",
       playgroundPath: "/#/suite",
