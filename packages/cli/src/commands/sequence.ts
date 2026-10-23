@@ -69,7 +69,13 @@ function parseSteps(raw: string): SequenceStepInput[] {
  * 每步落到 executed_verified / executed_unverified / failed / not_executed，
  * 后续步骤是否继续由 --on-failure 决定（stop = 只有验证通过才继续）。
  *
- * click/hover 强制开副作用信号采集（observeEffect）—— 不开就永远判不出「点了没有」。
+ * click 强制开副作用信号采集（observeEffect）—— 不开就永远判不出「点了没有」。
+ * hover **不开**：扩展侧 dom.hover 既不消费 observeEffect、结果里也没有 effect，
+ * 「悬停有没有生效」压根没有自证通道。这种步**不参与自证判定**
+ * （shared 的 supportsSelfVerification），不会被当成「判定失败」，也不会让序列停下。
+ *
+ * 退出码（packages/cli/README.md 的退出码契约）：报告里出现 failed 步 ⇒ 退出码 1。
+ * 报告照常完整打印，退出码只是把「命令失败」这件事告诉调用脚本。
  */
 export function registerSequenceCommand(program: Command): void {
   program
@@ -111,8 +117,9 @@ export function registerSequenceCommand(program: Command): void {
               action: step.action,
               target: step.target,
               value: step.value,
-              // click/hover 的自证只能靠副作用信号，不开就恒退化成 unknown
-              observeEffect: step.action === "click" || step.action === "hover",
+              // click 的自证只能靠副作用信号，不开就恒退化成 unknown。
+              // hover 没有自证通道，不开（开了也没人消费，见 shared 的 supportsSelfVerification）。
+              observeEffect: step.action === "click",
             },
             { session, tab: targetTab, frameId },
           );
@@ -135,5 +142,10 @@ export function registerSequenceCommand(program: Command): void {
         printSequenceResult(report, { pretty });
       }
 
+      // 退出码契约：有 failed 步 ⇒ 退出码 1（报告已经完整打印，退出码只补「命令失败」这件事）。
+      // 用 process.exitCode 而不是 process.exit：让进程自然退出，stdout 才不会被截断。
+      if (report.summary.failed > 0) {
+        process.exitCode = 1;
+      }
     });
 }

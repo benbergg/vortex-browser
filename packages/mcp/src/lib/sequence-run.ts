@@ -10,6 +10,7 @@ export {
   classifyStep,
   shouldContinue,
   summarizeTrace,
+  supportsSelfVerification,
   runSequence,
 } from "@vortex-browser/shared";
 

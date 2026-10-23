@@ -1,5 +1,13 @@
 import { describe, it, expect } from "vitest";
-import { classifyStep, shouldContinue, summarizeTrace, verifyStepEffect, type StepTrace } from "../src/lib/sequence-run.js";
+import {
+  classifyStep,
+  shouldContinue,
+  summarizeTrace,
+  supportsSelfVerification,
+  verifyStepEffect,
+  runSequence,
+  type StepTrace,
+} from "../src/lib/sequence-run.js";
 
 describe("classifyStep：三态必须可分", () => {
   it("请求失败 → failed（未执行或执行未知，交由 error 说明）", () => {
@@ -102,5 +110,54 @@ describe("classifyStep 接入自证", () => {
     const r = classifyStep({ ok: true, fp: {}, effect: "unconfirmed" });
     expect(r.state).toBe("executed_unverified");
     expect(r.effect).toBe("unconfirmed");
+  });
+});
+
+describe("定向修复轮 ④：没有自证通道的动作不参与自证判定", () => {
+  it("hover 被标成没有自证通道（扩展侧 dom.hover 不消费 observeEffect、也不返回 effect）", () => {
+    expect(supportsSelfVerification("hover")).toBe(false);
+    expect(supportsSelfVerification("click")).toBe(true);
+    expect(supportsSelfVerification("fill")).toBe(true);
+  });
+
+  it("hover 步被标记 verification: not_applicable，且不因它停下序列", async () => {
+    const sent: string[] = [];
+    const report = await runSequence(
+      [
+        { action: "hover", target: "@e12" },
+        { action: "click", target: "@e12" },
+      ],
+      "stop",
+      async (step) => {
+        sent.push(step.action);
+        // hover 的结果里没有 effect（扩展侧 dom.hover 不返回 effect）
+        if (step.action === "hover") return { ok: true, result: { success: true } };
+        return {
+          ok: true,
+          result: {
+            success: true,
+            effect: { domMutations: 1, networkRequests: 0, urlChanged: false,
+                      focusChanged: false, ariaChanged: false, userFeedback: "none" },
+          },
+        };
+      },
+    );
+
+    // hover 没有自证通道 ⇒ 不参与判定，也不是「判定失败」：序列继续跑完
+    expect(sent).toEqual(["hover", "click"]);
+    expect(report.steps[0].verification).toBe("not_applicable");
+    expect(report.steps[0].effect).toBeUndefined();
+    expect(report.steps[1].state).toBe("executed_verified");
+  });
+
+  it("hover 真失败时仍然算 failed（不参与判定 ≠ 忽略失败）", async () => {
+    const report = await runSequence(
+      [{ action: "hover", target: "@e12" }],
+      "stop",
+      async () => ({ ok: false, error: "[NOT_FOUND]: 元素没了" }),
+    );
+
+    expect(report.steps[0].state).toBe("failed");
+    expect(report.summary.failed).toBe(1);
   });
 });

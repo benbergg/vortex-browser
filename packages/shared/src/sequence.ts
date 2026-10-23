@@ -23,10 +23,31 @@ export interface StepTrace {
   effect?: StepEffect;
   /** 该步工具的降级/空结果自陈。单调 vortex_act 时经渲染层单独成块,序列里只能挂在步上 */
   diagnosis?: string;
+  /**
+   * 自证判定**不适用**：该动作没有自证通道（如 hover），压根没参与判定 ——
+   * 不是「判定失败」，也不会让序列停下。键存在 = 这一步压根没被判过。
+   */
+  verification?: "not_applicable";
 }
 
 /** confirmed=有证据生效;unconfirmed=有证据未生效;unknown=无可用信号。三值不可合成布尔。 */
 export type StepEffect = "confirmed" | "unconfirmed" | "unknown";
+
+/**
+ * 没有自证通道的动作：扩展侧 `dom.hover` 既不消费 `observeEffect`、结果里也没有 `effect`，
+ * 「悬停有没有生效」无从判定（定向修复轮 Minor ④）。
+ *
+ * 这类动作**不参与自证判定**：
+ * - 不是「判定失败」：轨迹上显式标 `verification: "not_applicable"`，让人看得出它压根没被判；
+ * - 也不会让序列停下：hover 是可重复的幂等动作，重做一遍没有副作用风险；
+ * - 但动作**真失败**（扩展报错）仍然是 failed，照样按 --on-failure 停。
+ */
+const SELF_VERIFICATION_EXEMPT_ACTIONS: ReadonlySet<string> = new Set(["hover"]);
+
+/** 这个动作有没有自证通道（值回读 / 副作用信号 / moved 标志）？ */
+export function supportsSelfVerification(action: string): boolean {
+  return !SELF_VERIFICATION_EXEMPT_ACTIONS.has(action);
+}
 
 /**
  * 指纹漂移的最小结构（MCP 侧 FingerprintOut 的结构子集）。
@@ -135,16 +156,24 @@ export async function runSequence(
       // send 抛错等同该步未执行,可安全重试;不能让一步的异常掀掉整次调用
       out = { ok: false, error: err instanceof Error ? err.message : String(err) };
     }
-    const effect = out.ok && out.result
+    const verifiable = supportsSelfVerification(steps[i].action);
+    const effect = verifiable && out.ok && out.result
       ? verifyStepEffect(steps[i].action, steps[i].value, out.result)
       : undefined;
     const c = classifyStep({ ok: out.ok, error: out.error, fp: out.fp ?? {}, effect });
     traces[i] = {
-      ...traces[i], state: c.state, drift: c.drift, effect: c.effect, error: out.error,
+      ...traces[i], state: c.state, drift: c.drift,
+      // 无自证通道的动作没有「信号」可言：effect 留空，别把「没通道」说成「信号不明」
+      effect: verifiable ? c.effect : undefined,
+      error: out.error,
+      ...(verifiable ? {} : { verification: "not_applicable" as const }),
       // 条件展开:JSON 之外的 in-memory 消费者靠键存在性判断有没有自陈
       ...(out.diagnosis ? { diagnosis: out.diagnosis } : {}),
     };
-    if (!shouldContinue(c.state, onFailure)) break;
+    // 无自证通道的动作不参与判定 ⇒ 不因它停下；但它真失败时（state=failed）照常按 --on-failure 停
+    if (verifiable || c.state === "failed") {
+      if (!shouldContinue(c.state, onFailure)) break;
+    }
   }
   return { summary: summarizeTrace(traces), steps: traces };
 }

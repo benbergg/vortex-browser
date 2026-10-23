@@ -243,6 +243,82 @@ describe("vortex sequence 的多步自证", () => {
   });
 });
 
+describe("定向修复轮 ③：sequence 的退出码契约", () => {
+  it("有 failed 步 ⇒ 退出码 1（报告照常完整打印）", async () => {
+    await seedObserve();
+    hub.fail(new Error("Error [NOT_FOUND]: 元素没了"));
+
+    await run([
+      "sequence",
+      "--steps",
+      JSON.stringify([{ action: "click", target: "@e12" }]),
+    ]);
+
+    // 报告没被牺牲
+    expect(outText()).toContain("failed");
+    expect(outText()).toContain("summary: total=1 verified=0 unverified=0 failed=1 not_executed=0");
+    // 但命令必须以非零退出码收场，调用脚本才知道失败了
+    expect(process.exitCode).toBe(1);
+  });
+
+  it("全通过 ⇒ 退出码 0", async () => {
+    await seedObserve();
+    hub.ok({ success: true, effect: CLICK_EFFECT });
+
+    await run([
+      "sequence",
+      "--steps",
+      JSON.stringify([{ action: "click", target: "@e12" }]),
+    ]);
+
+    expect(outText()).toContain("executed_verified");
+    expect(process.exitCode ?? 0).toBe(0);
+  });
+});
+
+describe("定向修复轮 ④：hover 没有自证通道", () => {
+  it("hover 不采集副作用信号，被标记为不参与自证判定，也不会让序列停下", async () => {
+    await seedObserve();
+    // hover 的结果里没有 effect（扩展侧 dom.hover 不返回 effect）
+    hub.ok({ success: true });
+    hub.ok({ success: true, effect: CLICK_EFFECT });
+
+    await run([
+      "sequence",
+      "--steps",
+      JSON.stringify([
+        { action: "hover", target: "@e12" },
+        { action: "click", target: "@e12" },
+      ]),
+    ]);
+
+    const calls = hub.actionCalls();
+    // 第一步是 hover：不发 observeEffect（扩展侧没人消费这个开关）
+    expect(calls[1][0]).toBe("dom.hover");
+    expect(calls[1][1].observeEffect).toBeUndefined();
+    // 显式标记「不参与自证判定」，而不是含糊的 unknown
+    expect(outText()).toContain("verification: not_applicable");
+    // 不是「判定失败」：序列照常走完第二步
+    expect(calls[2][0]).toBe("dom.click");
+    expect(outText()).toContain("summary: total=2 verified=1 unverified=1 failed=0 not_executed=0");
+    expect(process.exitCode ?? 0).toBe(0);
+  });
+
+  it("hover 真失败时仍然算失败（不参与判定 ≠ 忽略失败）", async () => {
+    await seedObserve();
+    hub.fail(new Error("Error [NOT_FOUND]: 元素没了"));
+
+    await run([
+      "sequence",
+      "--steps",
+      JSON.stringify([{ action: "hover", target: "@e12" }]),
+    ]);
+
+    expect(outText()).toContain("failed");
+    expect(process.exitCode).toBe(1);
+  });
+});
+
 describe("vortex observe 的输出形态", () => {
   it("默认给人看的几行，--json 才回到原始 JSON", async () => {
     hub.ok(OBSERVE_RESULT);
