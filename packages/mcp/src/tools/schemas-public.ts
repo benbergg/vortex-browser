@@ -252,11 +252,15 @@ export const PUBLIC_TOOLS: ToolDef[] = [
   {
     name: "vortex_wait_for",
     action: "L4.wait_for",
-    // idle 语义: 静默期(窗口内无新匹配请求即算 idle，即使还有请求未结束)。
-    // value=net 与 network 等价(都是 network idle)；xhr 只看 XHR/fetch；dom 看 DOM 静止。
+    // idle 有两套互不相同的判定口径，公开文案必须分开写，否则读者会以为
+    // DOM 也走"数请求"那一套：
+    //   - net/network/xhr = 网络静默期（连续 idleTime 无新请求即算 idle），
+    //     可用 urlPattern / minRequests 把等待范围收窄；
+    //   - dom = DOM mutation 稳定判定（handler dom.ts WAIT_SETTLED 只看
+    //     MutationObserver，完全不数请求，也忽略上面两个参数）。
     // description 硬上限 60 char(见 tests/vortex-wait-for-description.test.ts)，
-    // 故省掉 "mode=" 前缀与冗余空格，把预算让给 idle 的静默期语义。
-    description: "Wait. element|CSS, custom|JS, idle(静默期)=net|xhr|dom, info.",
+    // 故省掉 "mode=" 前缀，把预算让给两套口径的区分。
+    description: "Wait. element|CSS, custom|JS, idle: net/xhr 静默|dom稳定, info.",
     schema: {
       type: "object",
       properties: {
@@ -264,19 +268,19 @@ export const PUBLIC_TOOLS: ToolDef[] = [
         value: {
           description:
             "element: CSS selector; custom: JS expression; " +
-            "idle: net=all traffic|xhr=XHR/fetch|dom=DOM settled(静默期: 无新请求即 idle); " +
+            "idle: net=all|xhr=XHR only 网络静默期(连续 idleTime 无新请求即 idle)|dom=DOM mutation 稳定判定; " +
             "info: omit",
         },
         // 收窄等待范围的两个可选参数(handler page.ts 读 args.urlPattern / args.minRequests)。
-        // 静默期语义下"全站无新请求"很容易在目标请求还没发出时就判定 idle，
-        // 模型需要能按 URL 盯住目标请求、并要求至少见到 N 个匹配请求。
+        // 仅对网络静默期口径(net/network/xhr)有效；value=dom 走 DOM mutation 稳定判定，
+        // 不数请求，这两个参数对它无效 —— 不写清楚会让调用方以为 dom 也能按 URL 过滤。
         urlPattern: {
           type: "string",
-          description: "idle only: 只算 URL 含此串的请求；把等待范围收窄到某条请求",
+          description: "net/network/xhr only: 只算 URL 含此串的请求；把等待范围收窄到某条请求（value=dom 忽略）",
         },
         minRequests: {
           type: "number",
-          description: "idle only: 至少看到 N 个匹配请求才算 idle（默认 0，防页面静止瞬间假 idle）",
+          description: "net/network/xhr only: 至少看到 N 个匹配请求才算 idle（默认 0，防页面静止瞬间假 idle；value=dom 忽略）",
         },
         timeout: { type: "number", maximum: MAX_INNER_TIMEOUT_MS },
         ...tabFields,
