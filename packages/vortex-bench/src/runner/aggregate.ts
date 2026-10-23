@@ -14,6 +14,11 @@ export function median(xs: number[]): number {
   return (sorted[mid - 1] + sorted[mid]) / 2;
 }
 
+/** 只保留已定义的值（undefined ≠ 0）。 */
+function definedValues(values: (number | undefined)[]): number[] {
+  return values.filter((v): v is number => v !== undefined);
+}
+
 /**
  * Aggregate N runs of the same case. Caller guarantees `runs.length >= 1`
  * and that every run is for the same case (same `case` field).
@@ -77,6 +82,16 @@ export function aggregate(runs: CaseMetrics[]): CaseMetrics {
     }
     m.customMetrics = custom;
   }
+
+  // 契约指标（assertionCount / hintPresentRate / refReuseRate）：N-run 聚合时保留，
+  // 只对**已定义**的 run 取 median——缺失 ≠ 0（比率指标的 0 与"本次无该类调用"语义不同，
+  // 补 0 会把"没测到"误报成"测出来是 0"）。全部缺失时不写入，保持报告形状稳定。
+  const assertionCounts = definedValues(runs.map((r) => r.assertionCount));
+  if (assertionCounts.length > 0) m.assertionCount = median(assertionCounts);
+  const hintRates = definedValues(runs.map((r) => r.hintPresentRate));
+  if (hintRates.length > 0) m.hintPresentRate = median(hintRates);
+  const refRates = definedValues(runs.map((r) => r.refReuseRate));
+  if (refRates.length > 0) m.refReuseRate = median(refRates);
 
   if (!passed) {
     const failures = runs.filter((r) => !r.passed);

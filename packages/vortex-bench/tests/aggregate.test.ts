@@ -192,3 +192,46 @@ describe("aggregate()", () => {
     expect(out.case).toBe("el-dropdown");
   });
 });
+
+describe("aggregate() 契约指标", () => {
+  it("三个新指标在 N-run 聚合后保留（median over defined values）", () => {
+    const runs = [
+      r({ assertionCount: 1, hintPresentRate: 1, refReuseRate: 0.5 }),
+      r({ assertionCount: 3, hintPresentRate: 0.5, refReuseRate: 1 }),
+      r({ assertionCount: 5, hintPresentRate: 0.5, refReuseRate: 0.5 }),
+    ];
+    const out = aggregate(runs);
+    expect(out.assertionCount).toBe(3);
+    expect(out.hintPresentRate).toBe(0.5);
+    expect(out.refReuseRate).toBe(0.5);
+  });
+
+  it("只对已定义的 run 聚合（缺失不当 0 补）", () => {
+    const runs = [
+      r({ assertionCount: 2, hintPresentRate: 1, refReuseRate: 1 }),
+      r({ assertionCount: 4 }), // 本次无错误 → hint/ref 指标缺省
+      r({ assertionCount: 6, hintPresentRate: 0, refReuseRate: 0 }),
+    ];
+    const out = aggregate(runs);
+    expect(out.assertionCount).toBe(4);
+    expect(out.hintPresentRate).toBe(0.5); // median(1, 0)，不是 median(1, 0, 0)
+    expect(out.refReuseRate).toBe(0.5);
+  });
+
+  it("全部缺失 → 三个指标都不写入（保持报告形状稳定）", () => {
+    const runs = [r({ passed: true }), r({ passed: true })];
+    const out = aggregate(runs);
+    expect("assertionCount" in out).toBe(false);
+    expect("hintPresentRate" in out).toBe(false);
+    expect("refReuseRate" in out).toBe(false);
+  });
+
+  it("repeats=1 时原样返回（已带指标的 run 不丢字段）", () => {
+    const single = r({ passed: true, assertionCount: 2, hintPresentRate: 1, refReuseRate: 0.5 });
+    const out = aggregate([single]);
+    expect(out).toBe(single);
+    expect(out.assertionCount).toBe(2);
+    expect(out.hintPresentRate).toBe(1);
+    expect(out.refReuseRate).toBe(0.5);
+  });
+});

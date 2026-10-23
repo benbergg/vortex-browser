@@ -15,6 +15,15 @@ export interface RunCaseOptions {
    * (which would break pass-1 byte parity vs the v0.6 baseline lockdown).
    */
   argOverrides?: Record<string, Record<string, unknown>>;
+  /**
+   * 契约指标开关（默认关 = 不写进报告）。
+   * - 关：CaseMetrics 的形状与本字段引入前**逐字节一致**，`baseline.json` 的字节比对不受影响。
+   * - 开：额外写入 assertionCount / hintPresentRate / refReuseRate。
+   *
+   * 注意：防假绿闸门（零断言 → assertion_failure）**不受**此开关影响，永远生效——
+   * 它改的是既有字段（passed / failureClass / failureReason），不是新增字段。
+   */
+  contractMetrics?: boolean;
 }
 
 /** Exported for unit tests; production code goes through `ctx.assert`. */
@@ -156,16 +165,20 @@ export async function runCase(def: CaseDefinition, opts: RunCaseOptions): Promis
     }
 
     const m = buildMetrics(def, passed, reason, failureClass, callCount, fallback, missed, outputBytes, outputBytesByTool, Date.now() - started, customMetrics);
-    m.assertionCount = assertionCount;
 
-    // 两个比率指标：分母为 0 时不写入（保持 report 形状稳定）
-    const derived = computeDerivedMetrics(trace);
-    if (derived.hintPresentRate !== undefined) m.hintPresentRate = derived.hintPresentRate;
-    if (derived.refReuseRate !== undefined) m.refReuseRate = derived.refReuseRate;
+    // 契约指标（默认关）：关时报告形状与引入前逐字节一致（不加这三个字段）。
+    // 比率指标分母为 0 时仍不写入（保持 report 形状稳定）。
+    if (opts.contractMetrics === true) {
+      m.assertionCount = assertionCount;
+      const derived = computeDerivedMetrics(trace);
+      if (derived.hintPresentRate !== undefined) m.hintPresentRate = derived.hintPresentRate;
+      if (derived.refReuseRate !== undefined) m.refReuseRate = derived.refReuseRate;
+    }
 
     // 防假绿闸门：用例"跑完了但一条断言都没做"——验了等于没验，判失败。
     // 只在用例正常结束（passed=true）时判；已经失败的用例保留自己的 failureClass
     // （env_failure / tool_error / timeout 不能被 assertion_failure 掩盖）。
+    // 闸门**不受** contractMetrics 开关影响：它不新增字段，只改既有字段的取值。
     if (passed && assertionCount === 0) {
       m.passed = false;
       m.failureClass = "assertion_failure";
@@ -210,8 +223,11 @@ export function computeDerivedMetrics(trace: Trace): { hintPresentRate?: number;
   return out;
 }
 
-/** 这次调用算不算"错误/诊断文本"：MCP 的 isError 标记、错误码、或 `Error [CODE]:` 形状任一命中。 */
+/** 这次调用算不算"错误/诊断文本"：MCP 的 isError 标记、错误码、或 `Error [CODE]:` 形状任一命中。
+ * 空文本错误（isError=true 但 content 为空）不算——分母口径是"有错误文本的调用数"，
+ * 没有文本就无从判断它带没带 hint，计进分母只会凭空拉低比率。 */
 function isErrorResult(ev: { isError: boolean; errorCodes: string[]; resultText: string }): boolean {
+  if (ev.resultText.trim() === "") return false;
   if (ev.isError) return true;
   if (ev.errorCodes.length > 0) return true;
   return /^Error \[[A-Z_]+\]:/m.test(ev.resultText);
