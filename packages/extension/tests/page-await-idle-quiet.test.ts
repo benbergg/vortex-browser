@@ -223,4 +223,59 @@ describe("page.waitForNetworkIdle 的静默期语义 + pending 诊断", () => {
     const resp = await p;
     expect(resp.error?.code).toBe(VtxErrorCode.TIMEOUT);
   });
+
+  // ↓ 2026-10-24 评审 Important：结束事件也重启静默计时器 ⇒ 静默截止被推后，
+  // 甚至撞上超时。静默期的计时**只能**由「匹配的新请求」重启；
+  // loadingFinished / loadingFailed 只更新诊断集合（tracked.delete）。
+  // 复现时序（评审给的）：请求 0ms 发起、idleTime=200、timeout=250、150ms 结束
+  // ⇒ 应于 200ms resolve；被推后则 350ms 才静默，250ms 直接 TIMEOUT。
+  it("断言6 loadingFinished 不延后静默截止时间（结束事件只更新诊断集合）", async () => {
+    const p = router.dispatch(
+      mkReq("page.waitForNetworkIdle", { idleTime: 200, timeout: 250 }, TAB),
+    );
+    await flush();
+
+    // 0ms 发起最后一个匹配请求 ⇒ 静默截止时间 = 200ms
+    dbg.fire(TAB, "Network.requestWillBeSent", {
+      requestId: "finishes-1",
+      type: "Fetch",
+      request: { url: "https://x.test/api/finishes" },
+    });
+
+    // 150ms 时请求结束 —— 不得把静默截止时间推到 350ms
+    await vi.advanceTimersByTimeAsync(150);
+    dbg.fire(TAB, "Network.loadingFinished", { requestId: "finishes-1" });
+
+    // 越过 200ms（静默截止）但不超过 250ms（超时）
+    await vi.advanceTimersByTimeAsync(100);
+
+    const resp = await p;
+    expect(resp.error, "结束事件不应延后静默截止时间").toBeUndefined();
+    expect(resp.result).toMatchObject({ idle: true, matchedRequests: 1 });
+    // 截止时间没被推后：仍在 200ms resolve（被推后则 waitedMs ≥ 350 或直接超时）
+    expect((resp.result as { waitedMs: number }).waitedMs).toBe(200);
+  });
+
+  it("断言7 loadingFailed 不延后静默截止时间（结束事件只更新诊断集合）", async () => {
+    const p = router.dispatch(
+      mkReq("page.waitForNetworkIdle", { idleTime: 200, timeout: 250 }, TAB),
+    );
+    await flush();
+
+    dbg.fire(TAB, "Network.requestWillBeSent", {
+      requestId: "fails-1",
+      type: "Fetch",
+      request: { url: "https://x.test/api/fails" },
+    });
+
+    await vi.advanceTimersByTimeAsync(150);
+    dbg.fire(TAB, "Network.loadingFailed", { requestId: "fails-1" });
+
+    await vi.advanceTimersByTimeAsync(100);
+
+    const resp = await p;
+    expect(resp.error, "结束事件不应延后静默截止时间").toBeUndefined();
+    expect(resp.result).toMatchObject({ idle: true, matchedRequests: 1 });
+    expect((resp.result as { waitedMs: number }).waitedMs).toBe(200);
+  });
 });

@@ -523,6 +523,9 @@ const PENDING_DETAIL_LIMIT = 10;
  * - **静默计时器随每个新匹配请求重启**（见 onEvent 的 requestWillBeSent 分支）：
  *   只在开始时 arm 一次的话，「请求持续不断」的页面永远判不出 idle，
  *   navigate 的 networkIdleTimedOut 降级信号也随之失效。
+ * - **结束事件（loadingFinished/loadingFailed）只更新诊断集合，不碰计时器**：
+ *   静默期的截止时间只由「匹配的新请求」推进，结束事件若也重启计时器，
+ *   截止时间会被推后（甚至撞上超时），且 tracked 又会间接影响 idle 判定。
  * - `tracked` 只做诊断，不再参与判定；loadingFinished/Failed 仍必须检查 requestId
  *   是否在 tracked 中（过滤掉的请求不能把 pending 减成负数）。
  */
@@ -621,8 +624,12 @@ async function awaitIdle(
       ) {
         const reqId = p.requestId;
         if (!reqId || !tracked.has(reqId)) return;
+        // 结束事件**只更新诊断集合**，绝不碰静默计时器：
+        // 静默期的计时只能由「匹配的新请求」重启。若在这里调 checkIdle()，
+        // 结束事件会把截止时间往后推（tracked 间接影响 idle 判定）——
+        // 「最后一次请求 0ms 发起、idleTime=200、150ms 结束」本该 200ms 静默，
+        // 实际被推到 350ms，甚至直接撞上 250ms 的超时（2026-10-24 评审 Important）。
         tracked.delete(reqId);
-        checkIdle();
       }
     }
 
