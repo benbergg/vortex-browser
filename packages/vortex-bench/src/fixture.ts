@@ -35,6 +35,52 @@ export const FIXTURE_TOGGLED_TEXT = "Toggled";
 /** 首页按钮点击前的文本。 */
 export const FIXTURE_TOGGLE_TEXT = "Toggle";
 
+/**
+ * suite B 的 hash 路由 fixture：A12「路径大小写」的行为断言底座。
+ *
+ * 契约：应用路由**按大小写敏感**匹配 —— 只有 `HASH_ROUTE_CORRECT` 这个精确的
+ * hash 才算命中；`HASH_ROUTE_WRONG_CASE`（同一个路由名，大小写不同）**不命中**。
+ * 两次导航的 HTTP 都是 200：导航成功 ≠ 应用路由存在，这正是要锁住的那条边界。
+ */
+export const HASH_ROUTE_CORRECT = "#/app/settings";
+export const HASH_ROUTE_WRONG_CASE = "#/App/Settings";
+/** 命中时页面渲染出的标识文本。 */
+export const HASH_ROUTE_OK_MARKER = "VORTEX_FIXTURE_HASH_ROUTE_OK";
+/** 未命中时页面渲染出的标识文本。 */
+export const HASH_ROUTE_MISS_MARKER = "VORTEX_FIXTURE_HASH_ROUTE_MISS";
+/** 页面里承载路由判定结果的元素 id。 */
+export const HASH_ROUTE_OUT_ID = "hash-route-out";
+
+/**
+ * hash 路由 fixture 页。
+ *
+ * 路由表由 TS 常量注入（唯一真值），页面脚本只做「精确匹配 → 渲染命中/未命中」。
+ * hashchange 要监听：第二次访问是同文档导航（只换 hash），不重载页面。
+ */
+function hashRouterPage(): string {
+  const routes = JSON.stringify([HASH_ROUTE_CORRECT]);
+  return `<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Vortex Fixture Hash Router</title></head>
+<body>
+<h1 id="hash-route-title">Vortex Fixture Hash Router</h1>
+<p id="${HASH_ROUTE_OUT_ID}" data-route="pending">PENDING</p>
+<script>
+  var ROUTES = ${routes};
+  function renderRoute() {
+    var hash = window.location.hash || '';
+    var ok = ROUTES.indexOf(hash) >= 0;
+    var el = document.getElementById(${JSON.stringify(HASH_ROUTE_OUT_ID)});
+    el.textContent = ok ? ${JSON.stringify(HASH_ROUTE_OK_MARKER)} : ${JSON.stringify(HASH_ROUTE_MISS_MARKER)};
+    el.setAttribute('data-route', ok ? 'matched' : 'missing');
+  }
+  window.addEventListener('hashchange', renderRoute);
+  renderRoute();
+</script>
+</body>
+</html>`;
+}
+
 function homePage(port: number): string {
   return `<!doctype html>
 <html lang="en">
@@ -111,6 +157,7 @@ function sendHtml(res: ServerResponse, status: number, body: string): void {
  * - `/child`    子页（iframe 目标）
  * - `/404`      明确错误页（404 状态 + `FIXTURE_NOT_FOUND_MARKER` 标识）
  * - `/occluded` 被覆盖层盖住的目标页（造 OBSCURED 失败路径）
+ * - `/hash-router` hash 路由 fixture（大小写敏感的路由命中/未命中）
  * - `/slow?ms=N` 延迟 N ms 才响应（造后台 tab 的慢请求，测事件隔离）
  */
 export async function startFixture(): Promise<Fixture> {
@@ -123,6 +170,7 @@ export async function startFixture(): Promise<Fixture> {
     if (path === "/child") return sendHtml(res, 200, childPage());
     if (path === "/404") return sendHtml(res, 404, notFoundPage());
     if (path === "/occluded") return sendHtml(res, 200, occludedPage());
+    if (path === "/hash-router") return sendHtml(res, 200, hashRouterPage());
     if (path === "/slow") {
       const ms = Number.parseInt(url.searchParams.get("ms") ?? "3000", 10);
       const delay = Number.isFinite(ms) && ms > 0 ? Math.min(ms, 60_000) : 3000;
