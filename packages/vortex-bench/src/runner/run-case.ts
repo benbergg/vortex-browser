@@ -8,6 +8,12 @@ export interface RunCaseOptions {
   mcpBin: string;
   playgroundUrl: string;
   /**
+   * 本条用例的基址（缺省 = playgroundUrl）。
+   * suite A：等于 playgroundUrl（用例按 playgroundPath 挂在 playground 路由下）。
+   * suite B：等于自包含 fixture 的 URL（用例省略 playgroundPath，直接用基址导航）。
+   */
+  baseUrl?: string;
+  /**
    * Issue #21 — runner-level arg injection for sweep mode. Merged
    * (shallow, override-wins) into the args of every `ctx.call(name, ...)`
    * whose tool name matches a key. Lets us A/B-compare bench cases under
@@ -108,6 +114,7 @@ export async function runCase(def: CaseDefinition, opts: RunCaseOptions): Promis
 
   const ctx: CaseContext = {
     playgroundUrl: opts.playgroundUrl,
+    baseUrl: opts.baseUrl ?? opts.playgroundUrl,
     async call(name, args) {
       return callTool(name, args);
     },
@@ -137,9 +144,13 @@ export async function runCase(def: CaseDefinition, opts: RunCaseOptions): Promis
     try {
       // 每个 case 开头固定动作：先 about:blank 卸载旧组件，再 navigate 到目标
       // （同 URL navigate 在 Vue hash router 下不会重 mount，导致跨次 state 残留）
+      // suite B（自包含 fixture）省略 playgroundPath —— 直接导航到基址。
+      const startUrl = def.playgroundPath
+        ? opts.playgroundUrl + def.playgroundPath
+        : (opts.baseUrl ?? opts.playgroundUrl);
       await ctx.call("vortex_navigate", { url: "about:blank" });
       await ctx.call("vortex_navigate", {
-        url: opts.playgroundUrl + def.playgroundPath,
+        url: startUrl,
       });
       await ctx.call("vortex_wait_for", {
         mode: "idle",
@@ -252,6 +263,8 @@ function buildMetrics(
   if (failureClass !== undefined) m.failureClass = failureClass;
   if (Object.keys(customMetrics).length > 0) m.customMetrics = { ...customMetrics };
   if (def.tier !== undefined) m.tier = def.tier; // 评测门 P2.2:透传难度档供 eval 分档聚合
+  // 套件归属：缺省视为 "a"。报告按它分组（suite B = 自包含失败路径用例）。
+  m.suite = def.suite ?? "a";
   return m;
 }
 

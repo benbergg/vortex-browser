@@ -70,6 +70,12 @@ export interface CaseMetrics {
    * 分母为 0（本次运行没有任何带 target 的调用）时本字段**不写入**。
    */
   refReuseRate?: number;
+  /**
+   * 用例所属套件（从 CaseDefinition.suite 透传，缺省视为 "a"）。
+   * 报告里按它分档：suite A = 既有组件库用例（依赖 playground），
+   * suite B = 自包含的失败路径用例（依赖进程内 fixture）。
+   */
+  suite?: "a" | "b";
 }
 
 export interface CaseContext {
@@ -79,6 +85,12 @@ export interface CaseContext {
    * process.env 导致 env 名漂移。
    */
   readonly playgroundUrl: string;
+  /**
+   * 本条用例的**基址**：suite A 等于 playgroundUrl，suite B 等于自包含 fixture 的 URL。
+   * suite B 的用例自包含（不依赖 vite playground），一律用此字段导航；
+   * suite A 的用例两者同值，可继续用 playgroundUrl。
+   */
+  readonly baseUrl: string;
   /** 直接调 MCP 工具，自动计数 callCount */
   call(name: string, args: Record<string, unknown>): Promise<unknown>;
   /** evaluate 兜底，callCount++ 且 fallbackToEvaluate++ */
@@ -93,11 +105,14 @@ export interface CaseContext {
 
 export interface CaseDefinition {
   name: string;
-  /** playground 路由路径，e.g. '/#/el-dropdown'；synth 任务指向 '/synth/<snapshot>.html' */
-  playgroundPath: string;
+  /**
+   * playground 路由路径，e.g. '/#/el-dropdown'；synth 任务指向 '/synth/<snapshot>.html'。
+   * suite B（自包含用例）**省略**此字段 —— 它们的基址来自 ctx.baseUrl（fixture URL）。
+   */
+  playgroundPath?: string;
   /**
    * 用例套件归属，缺省视为 "a"。A 层 = 组件能力基线，B 层 = 端到端任务。
-   * 本字段目前只做声明：suite 过滤由后续任务实现，缺省行为不变。
+   * bench CLI 的 `--suite a|b|all` 按本字段过滤（读 def.suite，不靠文件名约定）。
    */
   suite?: "a" | "b";
   /** 难度档，与 SynthManifest.tier 对齐；eval 命令按此分档聚合任务通过率。缺省视为 medium。 */
@@ -110,6 +125,11 @@ export interface CaseDefinition {
 export interface BenchReport {
   generatedAt: string;
   playgroundUrl: string;
+  /**
+   * suite B 自包含 fixture 的基址（仅当本次运行启动了 fixture 时写入）。
+   * 报告里 suite B 的用例独立成组，其导航基址就是它（不是 playgroundUrl）。
+   */
+  fixtureUrl?: string;
   cases: CaseMetrics[];
 }
 
