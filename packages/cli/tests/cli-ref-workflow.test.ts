@@ -19,6 +19,7 @@ vi.mock("../src/client.js", async (importOriginal) => {
 
 import { formatCliError } from "../src/client.js";
 import { createProgram } from "../src/index.js";
+import { installFakeHub, type FakeHub } from "./helpers/fake-hub.js";
 
 const OBSERVE_RESULT = {
   snapshotId: "snap_abc123",
@@ -46,11 +47,14 @@ const COMPACT_RESULT = {
 let stateDir: string;
 let stdout: string[];
 let stderr: string[];
+let hub: FakeHub;
 
 beforeEach(() => {
   stateDir = mkdtempSync(join(tmpdir(), "vortex-cli-ref-"));
   process.env.VORTEX_CLI_STATE_DIR = stateDir;
   sendRequestMock.mockReset();
+  // 假传输层：tab.list 回答 session 当前 tab（快照按实际 tab 身份绑定要用）
+  hub = installFakeHub(sendRequestMock);
   stdout = [];
   stderr = [];
   vi.spyOn(console, "log").mockImplementation((...args: unknown[]) => {
@@ -91,17 +95,11 @@ function registeredRefs(): string[] {
 
 describe("vortex observe 的 ref 提取", () => {
   it("把服务端返回的 ref 提取出来并打印 [refs] 行", async () => {
-    sendRequestMock.mockResolvedValue({
-      action: "observe.snapshot",
-      id: "cli-1",
-      result: OBSERVE_RESULT,
-    });
+    hub.ok(OBSERVE_RESULT);
 
     await run(["observe"]);
 
-    expect(sendRequestMock).toHaveBeenCalledTimes(1);
-    const [action] = sendRequestMock.mock.calls[0];
-    expect(action).toBe("observe.snapshot");
+    expect(hub.actionCalls().map((call) => call[0])).toEqual(["observe.snapshot"]);
 
     const output = combinedOutput();
     expect(output).toContain("[refs]");
@@ -110,11 +108,7 @@ describe("vortex observe 的 ref 提取", () => {
   });
 
   it("stdout 默认是可读输出，--json 时保持 NDJSON（可直接喂 jq），[refs] 行不污染 stdout", async () => {
-    sendRequestMock.mockResolvedValue({
-      action: "observe.snapshot",
-      id: "cli-1",
-      result: OBSERVE_RESULT,
-    });
+    hub.ok(OBSERVE_RESULT);
 
     await run(["observe"]);
 
@@ -125,6 +119,7 @@ describe("vortex observe 的 ref 提取", () => {
 
     // --json：一行 NDJSON，jq 能直接吃
     stdout = [];
+    hub.ok(OBSERVE_RESULT);
     await run(["observe", "--json"]);
     expect(stdout.length).toBeGreaterThan(0);
     expect(() => JSON.parse(stdout.join("\n"))).not.toThrow();
@@ -144,11 +139,7 @@ describe("vortex observe 的 ref 提取", () => {
   });
 
   it("compact 返回不登记任何 ref", async () => {
-    sendRequestMock.mockResolvedValue({
-      action: "observe.snapshot",
-      id: "cli-1",
-      result: COMPACT_RESULT,
-    });
+    hub.ok(COMPACT_RESULT);
 
     await run(["observe", "--detail", "compact"]);
 
@@ -158,35 +149,30 @@ describe("vortex observe 的 ref 提取", () => {
     expect(registeredRefs()).toEqual([]);
   });
 
-  it("上下文里没有该 ref 时同样报错且不发请求", async () => {
+  it("上下文里没有该 ref 时同样报错且不发动作请求", async () => {
     const exit = vi.spyOn(process, "exit").mockImplementation((() => {
       throw new Error("__exit__");
     }) as never);
-    sendRequestMock.mockResolvedValue({
-      action: "observe.snapshot",
-      id: "cli-1",
-      result: COMPACT_RESULT,
-    });
+    hub.ok(COMPACT_RESULT);
     await run(["observe", "--detail", "compact"]);
-    sendRequestMock.mockReset();
 
     await expect(run(["act", "--action", "click", "--target", "@e12"])).rejects.toThrow("__exit__");
 
-    expect(sendRequestMock).not.toHaveBeenCalled();
+    expect(hub.actionCalls().map((call) => call[0])).toEqual(["observe.snapshot"]);
     expect(stderr.join("\n")).toContain("vortex observe");
     exit.mockRestore();
   });
 });
 
 describe("vortex act 的 ref 目标", () => {
-  it("未知 ref 直接报错提示先跑 observe，不发请求", async () => {
+  it("未知 ref 直接报错提示先跑 observe，不发动作请求", async () => {
     const exit = vi.spyOn(process, "exit").mockImplementation((() => {
       throw new Error("__exit__");
     }) as never);
 
     await expect(run(["act", "--action", "click", "--target", "@e12"])).rejects.toThrow("__exit__");
 
-    expect(sendRequestMock).not.toHaveBeenCalled();
+    expect(hub.actionCalls()).toEqual([]);
     const err = stderr.join("\n");
     expect(err).toContain("INVALID_PARAMS");
     expect(err).toContain("@e12");
@@ -195,17 +181,13 @@ describe("vortex act 的 ref 目标", () => {
   });
 
   it("observe 之后用同一个 ref 能带上 index 与 snapshotId", async () => {
-    sendRequestMock.mockResolvedValueOnce({
-      action: "observe.snapshot",
-      id: "cli-3",
-      result: OBSERVE_RESULT,
-    });
+    hub.ok(OBSERVE_RESULT);
     await run(["observe"]);
 
-    sendRequestMock.mockResolvedValueOnce({ action: "dom.click", id: "cli-4", result: { ok: true } });
+    hub.ok({ ok: true });
     await run(["act", "--action", "click", "--target", "@e12"]);
 
-    const [action, params] = sendRequestMock.mock.calls[1];
+    const [action, params] = hub.actionCalls()[1];
     expect(action).toBe("dom.click");
     expect(params.target).toBe("@e12");
     expect(params.index).toBe(12);
@@ -214,11 +196,9 @@ describe("vortex act 的 ref 目标", () => {
   });
 
   it("CSS selector 落到 selector 字段", async () => {
-    sendRequestMock.mockResolvedValue({ action: "dom.click", id: "cli-5", result: { ok: true } });
-
     await run(["act", "--action", "click", "--target", "button.save"]);
 
-    const [action, params] = sendRequestMock.mock.calls[0];
+    const [action, params] = hub.actionCalls()[0];
     expect(action).toBe("dom.click");
     expect(params.target).toBe("button.save");
     expect(params.selector).toBe("button.save");
@@ -231,7 +211,7 @@ describe("vortex act 的 ref 目标", () => {
 
     await expect(run(["act", "--action", "nope", "--target", "@e12"])).rejects.toThrow("__exit__");
 
-    expect(sendRequestMock).not.toHaveBeenCalled();
+    expect(hub.actionCalls()).toEqual([]);
     expect(stderr.join("\n")).toContain("INVALID_PARAMS");
     exit.mockRestore();
   });
@@ -241,21 +221,15 @@ describe("vortex act 的 ref 目标", () => {
       throw new Error("__exit__");
     }) as never);
     // 先 observe 登记 ref，请求才真的发得出去（未知 ref 会在客户端就被拦下）。
-    sendRequestMock.mockResolvedValueOnce({
-      action: "observe.snapshot",
-      id: "cli-6",
-      result: OBSERVE_RESULT,
-    });
+    hub.ok(OBSERVE_RESULT);
     await run(["observe"]);
 
-    sendRequestMock.mockRejectedValue(
-      new Error(formatCliError({
-        code: "STALE_SNAPSHOT",
-        message: "ref 已过期",
-        hint: "重新 observe 再试",
-        recoverable: true,
-      })),
-    );
+    hub.fail(new Error(formatCliError({
+      code: "STALE_SNAPSHOT",
+      message: "ref 已过期",
+      hint: "重新 observe 再试",
+      recoverable: true,
+    })));
 
     await expect(run(["act", "--action", "click", "--target", "@e12"])).rejects.toThrow("__exit__");
 

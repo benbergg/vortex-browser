@@ -10,6 +10,7 @@ import { sendRequest, formatCliError } from "../client.js";
 import { printSequenceResult, exitWithError } from "../output.js";
 import { getGlobalOpts } from "./helpers.js";
 import { buildActParams } from "./act-params.js";
+import { resolveTargetTab } from "./session-tab.js";
 
 const ON_FAILURE_VALUES = ["stop", "continue"] as const;
 
@@ -91,6 +92,18 @@ export function registerSequenceCommand(program: Command): void {
         }));
       }
 
+      // @ref 目标要按**实际 tab 身份**校验快照 ⇒ 先解析这次请求真正会落到的 tab
+      // （显式 --tab 就是它；没指定就是该 session 当时的当前 tab）。定向修复轮 Important ①。
+      const needsTab = steps.some((step) => step.target.startsWith("@"));
+      let targetTab: number | undefined = tab;
+      if (needsTab) {
+        try {
+          targetTab = await resolveTargetTab({ port, session, tab });
+        } catch (err: unknown) {
+          exitWithError(err instanceof Error ? err.message : String(err));
+        }
+      }
+
       const report = await runSequence(steps, onFailure, async (step) => {
         try {
           const { extensionAction, params } = buildActParams(
@@ -101,9 +114,9 @@ export function registerSequenceCommand(program: Command): void {
               // click/hover 的自证只能靠副作用信号，不开就恒退化成 unknown
               observeEffect: step.action === "click" || step.action === "hover",
             },
-            { session, tab, frameId },
+            { session, tab: targetTab, frameId },
           );
-          const resp = await sendRequest(extensionAction, params, { port, session, tabId: tab });
+          const resp = await sendRequest(extensionAction, params, { port, session, tabId: targetTab });
           const { value, diagnosis } = splitDiagnosis(resp.result);
           return {
             ok: true,
@@ -121,5 +134,6 @@ export function registerSequenceCommand(program: Command): void {
       } else {
         printSequenceResult(report, { pretty });
       }
+
     });
 }

@@ -91,6 +91,17 @@ vortex sequence --on-failure continue --steps '[...]'
 ```
 
 `@ref` 来自最近一次 `vortex observe`，**与 tab 绑定**：换了 tab 就要重新 observe。
+
+**tab 身份怎么算**（`@ref` 的校验口径）：快照按**解析后的实际 tab**登记与校验 ——
+不是按「有没有传 `--tab`」。
+
+- `observe --tab 5` ⇒ 快照属于 tab 5；
+- `observe`（没传 `--tab`）⇒ 请求落在**该 session 当时的当前 tab**上，快照就属于那个 tab；
+- `act --tab 5`（与 observe 同一个 tab）⇒ 放行；
+- `act`（没传 `--tab`）但当前 tab 已经换人 ⇒ 报错并提示「先对该 tab 重新 observe」，
+  **不会**沿用旧 tab 的快照（旧 snapshotId 会被扩展按 `boundTabId` 打在旧 tab 上）；
+- 实际 tab 判不出来时宁可报错，也不沿用可能属于别的 tab 的快照。
+
 `sequence` 的每步判定口径与 MCP 的 `vortex_sequence` 同源（`@vortex-browser/shared` 的
 `sequence.ts`），两条路给出的 verified / unverified 结论一致。
 
