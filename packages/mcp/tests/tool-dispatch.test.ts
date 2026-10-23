@@ -59,6 +59,44 @@ describe("dispatchNewTool", () => {
     expect(params).not.toHaveProperty("idleMs");
   });
 
+  // ── vortex_wait_for(mode=idle) 分派路由 ────────────────────────────────
+  // 公开 description 推荐 value=net/xhr/dom，但分派层此前只认 "network"，
+  // 其余非 dom 值一律落到 page.waitForXhrIdle ⇒ 公开推荐的 net 实际拿到的是
+  // XHR 语义（description 推荐 ≠ 实际语义，模型会按错语义等页面）。
+  // 四个值都要锁死；"network" 保留向后兼容。
+  it("vortex_wait_for(mode=idle, value=net) → page.waitForNetworkIdle", () => {
+    const { action } = dispatchNewTool("vortex_wait_for", { mode: "idle", value: "net" })!;
+    expect(action).toBe("page.waitForNetworkIdle");
+  });
+
+  it("vortex_wait_for(mode=idle, value=network) → page.waitForNetworkIdle（向后兼容）", () => {
+    const { action } = dispatchNewTool("vortex_wait_for", { mode: "idle", value: "network" })!;
+    expect(action).toBe("page.waitForNetworkIdle");
+  });
+
+  it("vortex_wait_for(mode=idle, value=xhr) → page.waitForXhrIdle", () => {
+    const { action } = dispatchNewTool("vortex_wait_for", { mode: "idle", value: "xhr" })!;
+    expect(action).toBe("page.waitForXhrIdle");
+  });
+
+  it("vortex_wait_for(mode=idle, value=dom) → dom.waitSettled", () => {
+    const { action } = dispatchNewTool("vortex_wait_for", { mode: "idle", value: "dom" })!;
+    expect(action).toBe("dom.waitSettled");
+  });
+
+  // 收窄等待范围的两个公开参数必须原样透传到 extension handler
+  // (handler page.ts 读 args.urlPattern / args.minRequests)。
+  it("vortex_wait_for(mode=idle) 透传 urlPattern / minRequests", () => {
+    const { params } = dispatchNewTool("vortex_wait_for", {
+      mode: "idle",
+      value: "net",
+      urlPattern: "/api/",
+      minRequests: 2,
+    })!;
+    expect(params.urlPattern).toBe("/api/");
+    expect(params.minRequests).toBe(2);
+  });
+
   it("vortex_fill widget:cascader → dom.commit", () => {
     const { action } = dispatchNewTool("vortex_fill", { widget: "cascader", value: "x" })!;
     expect(action).toBe("dom.commit");

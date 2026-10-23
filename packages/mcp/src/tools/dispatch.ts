@@ -242,8 +242,11 @@ export function dispatchNewTool(
           return { action: "page.wait", params: next };
         }
         case "idle": {
-          // value: 'network' | 'xhr' | 'dom'
-          const action = value === "network"
+          // value: 'net' | 'network' | 'xhr' | 'dom'
+          // 公开 description 推荐 net(=network idle)；此前只认 "network"，
+          // 其余非 dom 值一律落到 waitForXhrIdle ⇒ 公开推荐的 net 实际是 XHR
+          // 语义（模型按错语义等页面）。net 与 network 等价，network 保留兼容。
+          const action = value === "network" || value === "net"
             ? "page.waitForNetworkIdle"
             : value === "dom"
             ? "dom.waitSettled"

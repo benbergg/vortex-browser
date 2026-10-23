@@ -252,12 +252,32 @@ export const PUBLIC_TOOLS: ToolDef[] = [
   {
     name: "vortex_wait_for",
     action: "L4.wait_for",
-    description: "Wait. mode=element|CSS, custom|JS, idle=net/xhr/dom, info.",
+    // idle 语义: 静默期(窗口内无新匹配请求即算 idle，即使还有请求未结束)。
+    // value=net 与 network 等价(都是 network idle)；xhr 只看 XHR/fetch；dom 看 DOM 静止。
+    // description 硬上限 60 char(见 tests/vortex-wait-for-description.test.ts)，
+    // 故省掉 "mode=" 前缀与冗余空格，把预算让给 idle 的静默期语义。
+    description: "Wait. element|CSS, custom|JS, idle(静默期)=net|xhr|dom, info.",
     schema: {
       type: "object",
       properties: {
         mode: { enum: ["element", "idle", "info", "custom"] },
-        value: { description: "element: CSS selector; custom: JS expression; idle: net|xhr|dom; info: omit" },
+        value: {
+          description:
+            "element: CSS selector; custom: JS expression; " +
+            "idle: net=all traffic|xhr=XHR/fetch|dom=DOM settled(静默期: 无新请求即 idle); " +
+            "info: omit",
+        },
+        // 收窄等待范围的两个可选参数(handler page.ts 读 args.urlPattern / args.minRequests)。
+        // 静默期语义下"全站无新请求"很容易在目标请求还没发出时就判定 idle，
+        // 模型需要能按 URL 盯住目标请求、并要求至少见到 N 个匹配请求。
+        urlPattern: {
+          type: "string",
+          description: "idle only: 只算 URL 含此串的请求；把等待范围收窄到某条请求",
+        },
+        minRequests: {
+          type: "number",
+          description: "idle only: 至少看到 N 个匹配请求才算 idle（默认 0，防页面静止瞬间假 idle）",
+        },
         timeout: { type: "number", maximum: MAX_INNER_TIMEOUT_MS },
         ...tabFields,
       },
