@@ -2,7 +2,7 @@
  * Author: qingwa
  * Description: 验证 vortex observe 的 ref 提取与 vortex act 的 ref 目标透传。
  */
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -28,6 +28,18 @@ const OBSERVE_RESULT = {
   elements: [
     { index: 12, ref: "@e12", frameId: 0, role: "button", name: "保存" },
     { index: 3, ref: "@f1e3", frameId: 1, role: "textbox", name: "备注" },
+  ],
+};
+
+/** compact 形态：元素只有 index，服务端没有给 ref。 */
+const COMPACT_RESULT = {
+  snapshotId: "snap_compact_1",
+  version: 2,
+  url: "https://example.com/",
+  title: "Example",
+  elements: [
+    { index: 12, frameId: 0, role: "button", name: "保存" },
+    { index: 3, frameId: 1, role: "textbox", name: "备注" },
   ],
 };
 
@@ -62,6 +74,19 @@ async function run(argv: string[]): Promise<void> {
 
 function combinedOutput(): string {
   return [...stdout, ...stderr].join("\n");
+}
+
+/** 快照上下文里登记过的 ref（空数组 = 没有登记任何 ref）。 */
+function registeredRefs(): string[] {
+  if (!existsSync(stateDir)) return [];
+  return readdirSync(stateDir)
+    .filter((file) => file.endsWith(".snapshot.json"))
+    .flatMap((file) => {
+      const context = JSON.parse(readFileSync(join(stateDir, file), "utf8")) as {
+        refs?: Record<string, unknown>;
+      };
+      return Object.keys(context.refs ?? {});
+    });
 }
 
 describe("vortex observe 的 ref 提取", () => {
@@ -109,19 +134,56 @@ describe("vortex observe 的 ref 提取", () => {
     expect(stderr.join("\n")).toContain("all-permitted");
     exit.mockRestore();
   });
+
+  it("compact 返回不登记任何 ref", async () => {
+    sendRequestMock.mockResolvedValue({
+      action: "observe.snapshot",
+      id: "cli-1",
+      result: COMPACT_RESULT,
+    });
+
+    await run(["observe", "--detail", "compact"]);
+
+    // compact 元素没有服务端 ref：不打印、不登记
+    expect(combinedOutput()).not.toContain("[refs]");
+    expect(combinedOutput()).not.toContain("@e12");
+    expect(registeredRefs()).toEqual([]);
+  });
+
+  it("上下文里没有该 ref 时同样报错且不发请求", async () => {
+    const exit = vi.spyOn(process, "exit").mockImplementation((() => {
+      throw new Error("__exit__");
+    }) as never);
+    sendRequestMock.mockResolvedValue({
+      action: "observe.snapshot",
+      id: "cli-1",
+      result: COMPACT_RESULT,
+    });
+    await run(["observe", "--detail", "compact"]);
+    sendRequestMock.mockReset();
+
+    await expect(run(["act", "--action", "click", "--target", "@e12"])).rejects.toThrow("__exit__");
+
+    expect(sendRequestMock).not.toHaveBeenCalled();
+    expect(stderr.join("\n")).toContain("vortex observe");
+    exit.mockRestore();
+  });
 });
 
 describe("vortex act 的 ref 目标", () => {
-  it("target 原样是 ref，不是 CSS selector", async () => {
-    sendRequestMock.mockResolvedValue({ action: "dom.click", id: "cli-2", result: { ok: true } });
+  it("未知 ref 直接报错提示先跑 observe，不发请求", async () => {
+    const exit = vi.spyOn(process, "exit").mockImplementation((() => {
+      throw new Error("__exit__");
+    }) as never);
 
-    await run(["act", "--action", "click", "--target", "@e12"]);
+    await expect(run(["act", "--action", "click", "--target", "@e12"])).rejects.toThrow("__exit__");
 
-    expect(sendRequestMock).toHaveBeenCalledTimes(1);
-    const [action, params] = sendRequestMock.mock.calls[0];
-    expect(action).toBe("dom.click");
-    expect(params.target).toBe("@e12");
-    expect(params.selector).toBeUndefined();
+    expect(sendRequestMock).not.toHaveBeenCalled();
+    const err = stderr.join("\n");
+    expect(err).toContain("INVALID_PARAMS");
+    expect(err).toContain("@e12");
+    expect(err).toContain("vortex observe");
+    exit.mockRestore();
   });
 
   it("observe 之后用同一个 ref 能带上 index 与 snapshotId", async () => {
@@ -140,6 +202,7 @@ describe("vortex act 的 ref 目标", () => {
     expect(params.target).toBe("@e12");
     expect(params.index).toBe(12);
     expect(params.snapshotId).toBe("snap_abc123");
+    expect(params.selector).toBeUndefined();
   });
 
   it("CSS selector 落到 selector 字段", async () => {
@@ -169,6 +232,14 @@ describe("vortex act 的 ref 目标", () => {
     const exit = vi.spyOn(process, "exit").mockImplementation((() => {
       throw new Error("__exit__");
     }) as never);
+    // 先 observe 登记 ref，请求才真的发得出去（未知 ref 会在客户端就被拦下）。
+    sendRequestMock.mockResolvedValueOnce({
+      action: "observe.snapshot",
+      id: "cli-6",
+      result: OBSERVE_RESULT,
+    });
+    await run(["observe"]);
+
     sendRequestMock.mockRejectedValue(
       new Error(formatCliError({
         code: "STALE_SNAPSHOT",

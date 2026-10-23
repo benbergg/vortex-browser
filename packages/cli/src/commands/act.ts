@@ -70,14 +70,22 @@ export function registerActCommand(program: Command): void {
 
       if (target.startsWith("@")) {
         // @ref：靠最近一次 observe 的快照上下文翻成 index + snapshotId。
+        // 查不到就地报错，绝不把孤立 target 发给服务端 —— 那只能换来
+        // 「缺 selector / index+snapshotId」这种没法自解释的错误。
         const context = loadSnapshotContext(session);
         const entry = context?.refs[target];
-        if (context && entry) {
+        if (!context || !entry) {
+          exitWithError(formatCliError({
+            code: VtxErrorCode.INVALID_PARAMS,
+            message: `act: unknown ref "${target}": not in the latest vortex observe snapshot`,
+            hint: "Run `vortex observe` first to get a fresh ref, then act with `vortex act --action <action> --target @eN`.",
+            recoverable: true,
+          }));
+        } else {
           params.index = entry.index;
           params.snapshotId = context.snapshotId;
           if (entry.frameId != null && entry.frameId !== 0) params.frameId = entry.frameId;
         }
-        // 上下文缺失时只发 target，让服务端如实报「缺 selector / index+snapshotId」。
       } else {
         // CSS selector：扩展端 resolveTarget 只读 selector。
         params.selector = target;

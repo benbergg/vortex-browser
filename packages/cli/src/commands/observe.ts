@@ -105,14 +105,12 @@ export function loadSnapshotContext(session: string): SnapshotContext | undefine
 }
 
 /**
- * 没有 ref 字段时按扩展 full 路径的同一公式补一个
- * （主 frame @eN，跨 frame @fNeN，见 packages/extension/src/handlers/observe.ts）。
+ * 从 observe 返回的 elements 里抽出 ref 列表。
+ *
+ * 只认服务端**明确给出**的非空 `ref`：compact 形态的元素没有 ref 字段，
+ * 自行按 index 推导等于造一个服务端没承诺过的引用 —— 那样的 ref 落不到
+ * 扩展的快照里，act 拿着它只会打空。
  */
-function deriveRef(index: number, frameId?: number): string {
-  return frameId === undefined || frameId === 0 ? `@e${index}` : `@f${frameId}e${index}`;
-}
-
-/** 从 observe 返回的 elements 里抽出 ref 列表（服务端给的优先，缺失才推导）。 */
 export function extractRefs(elements: unknown): Array<{ ref: string; entry: RefEntry }> {
   if (!Array.isArray(elements)) return [];
   const out: Array<{ ref: string; entry: RefEntry }> = [];
@@ -120,11 +118,10 @@ export function extractRefs(elements: unknown): Array<{ ref: string; entry: RefE
   for (const raw of elements) {
     if (!raw || typeof raw !== "object") continue;
     const element = raw as ObserveElement;
+    if (typeof element.ref !== "string" || element.ref.length === 0) continue;
     if (typeof element.index !== "number") continue;
     const frameId = typeof element.frameId === "number" ? element.frameId : undefined;
-    const ref = typeof element.ref === "string" && element.ref.length > 0
-      ? element.ref
-      : deriveRef(element.index, frameId);
+    const ref = element.ref;
     if (seen.has(ref)) continue;
     seen.add(ref);
     out.push({
@@ -177,6 +174,8 @@ export function registerObserveCommand(program: Command): void {
           console.error(`[refs] ${refs.map((item) => item.ref).join(" ")}`);
         }
         if (typeof result?.snapshotId === "string" && result.snapshotId) {
+          // 上下文永远反映「最近一次 observe」：compact 形态没有服务端 ref，
+          // refs 就是空的，act 拿任何 ref 来都会命中「未知 ref」分支。
           const failed = saveSnapshotContext(session, {
             snapshotId: result.snapshotId,
             capturedAt: Date.now(),
