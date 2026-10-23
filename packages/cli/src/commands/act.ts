@@ -7,7 +7,7 @@ import { VtxErrorCode } from "@vortex-browser/shared";
 import { sendRequest, formatCliError } from "../client.js";
 import { printResponse, exitWithError } from "../output.js";
 import { getGlobalOpts } from "./helpers.js";
-import { loadSnapshotContext } from "./observe.js";
+import { loadSnapshotContext, findRefContext } from "./observe.js";
 
 /**
  * act 动作 → 扩展 action（与 packages/mcp/src/tools/dispatch.ts 的 ACT_TO_V05 保持一致）。
@@ -72,9 +72,29 @@ export function registerActCommand(program: Command): void {
         // @ref：靠最近一次 observe 的快照上下文翻成 index + snapshotId。
         // 查不到就地报错，绝不把孤立 target 发给服务端 —— 那只能换来
         // 「缺 selector / index+snapshotId」这种没法自解释的错误。
-        const context = loadSnapshotContext(session);
+        //
+        // 快照上下文带 tab 维度：只认「请求目标 tab」那个槽位。
+        // ref 属于别的 tab 时报可恢复错误，绝不跨 tab 沿用旧 snapshotId
+        // （扩展 resolveTarget 的 boundTabId 优先于请求里的 tab，沿用就会点在别的 tab 上）。
+        const targetTab = typeof tab === "number" ? tab : null;
+        const context = loadSnapshotContext(session, targetTab);
         const entry = context?.refs[target];
         if (!context || !entry) {
+          const owner = findRefContext(session, target);
+          if (owner) {
+            const ownerTab = owner.tabId == null ? "未指定 tab" : `tab ${owner.tabId}`;
+            const wantTab = targetTab == null ? "未指定 tab" : `tab ${targetTab}`;
+            exitWithError(formatCliError({
+              code: VtxErrorCode.STALE_SNAPSHOT,
+              message:
+                `act: ref "${target}" belongs to ${ownerTab}, but this request targets ${wantTab}` +
+                " (snapshot context is bound to one tab)",
+              hint:
+                "先对目标 tab 执行 `vortex observe` 重新取得 ref（快照与 tab 绑定，不能跨 tab 沿用旧 snapshotId）" +
+                (owner.tabId != null ? `；或用 --tab ${owner.tabId} 指定同一个 tab。` : "。"),
+              recoverable: true,
+            }));
+          }
           exitWithError(formatCliError({
             code: VtxErrorCode.INVALID_PARAMS,
             message: `act: unknown ref "${target}": not in the latest vortex observe snapshot`,
