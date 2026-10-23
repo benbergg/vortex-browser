@@ -108,6 +108,9 @@ class ExtensionSim {
       .map((r) => ({
         url: r.url,
         type: "Fetch",
+        // CDP 记的条目 method 非空（扩展侧 Resource Timing 回填的条目 method 为空）——
+        // 用例靠这个区分"CDP 域真的开着"与"只有页面自己记得"。
+        method: "GET",
         startTime: r.startTime,
         ...(r.endTime === undefined ? {} : { endTime: r.endTime }),
       }));
@@ -139,7 +142,8 @@ class ExtensionSim {
 
     // 发探针：`window.fetch("<url>")`（前台 tab，秒回）
     if (code.includes("window.fetch(")) {
-      this.calls.push("evaluate:probe");
+      // 后台订阅探针带专属 token，用来跟前台探针区分（两者都是 fetch）
+      this.calls.push(code.includes("bg-probe") ? "evaluate:bgprobe" : "evaluate:fgprobe");
       const url = /fetch\("([^"]+)"\)/.exec(code)?.[1];
       if (!url) return toolText("no-fetch");
       this.issueRequest(tabId, url, 5);
@@ -292,7 +296,10 @@ describe("事件隔离用例：时序与隔离性", () => {
     // 先开前台 idle 监听，再触发后台慢请求（探针也在窗口内）
     const waitIdx = sim.calls.indexOf("wait_for");
     expect(waitIdx).toBeGreaterThanOrEqual(0);
-    expect(waitIdx).toBeLessThan(sim.calls.indexOf("evaluate:probe"));
+    // 后台订阅探针必须在前台 idle 监听之前（订阅没开就没有隔离可测）
+    expect(sim.calls.indexOf("evaluate:bgprobe")).toBeLessThan(waitIdx);
+    // 前台探针与后台慢请求都必须在监听窗口内
+    expect(waitIdx).toBeLessThan(sim.calls.indexOf("evaluate:fgprobe"));
     expect(waitIdx).toBeLessThan(sim.calls.indexOf("evaluate:slow"));
   });
 

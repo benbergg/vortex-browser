@@ -68,6 +68,40 @@ function parseJsonObject(text: string): Record<string, unknown> | null {
   }
 }
 
+/** 等一会儿（毫秒）。 */
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** 网络日志条目（扩展 NetworkEntry 的关键字段）。 */
+interface LogEntry {
+  url?: string;
+  /** CDP 记的条目 method 非空；Resource Timing 回填的条目 method 为空。 */
+  method?: string;
+}
+
+/**
+ * 从工具返回文本里抠出日志条目数组。
+ *
+ * 两种形态都要认：非空时是裸数组 `[{...}]`；空时是自陈信封
+ * `{"__vtxDiagnosis":"...","value":[]}`。
+ */
+function parseLogEntries(text: string): LogEntry[] {
+  const start = text.indexOf("[");
+  const end = text.lastIndexOf("]");
+  if (start >= 0 && end > start) {
+    try {
+      const parsed: unknown = JSON.parse(text.slice(start, end + 1));
+      if (Array.isArray(parsed)) return parsed as LogEntry[];
+    } catch {
+      // 落到下面按对象解析
+    }
+  }
+  const obj = parseJsonObject(text);
+  const value = obj?.value;
+  return Array.isArray(value) ? (value as LogEntry[]) : [];
+}
+
 /** 等后台 tab 的文档加载完成（tab.status 说文档，不说页面里的 fetch）。 */
 async function waitForTabLoaded(
   ctx: { call: (name: string, args: Record<string, unknown>) => Promise<unknown> },
@@ -115,16 +149,63 @@ const def: CaseDefinition = {
         // ── ② 后台网络监听先启用 ────────────────────────────────────────────
         // debug_read(source=network) 会 ensureSubscribed → CDP Network.enable，
         // 之后后台 tab 的请求才会产生 requestWillBeSent 事件。
-        await ctx.call("vortex_debug_read", {
-          source: "network",
-          pattern: "slow",
+        const bgSubscribe = extractText(
+          await ctx.call("vortex_debug_read", {
+            source: "network",
+            pattern: "slow",
+            tabId: bgTabId,
+          }),
+        );
+        ctx.assert(
+          !/Error \[/.test(bgSubscribe),
+          `后台网络订阅调用不应报错，实际: ${bgSubscribe.slice(0, 200)}`,
+        );
+
+        // ── ②' 后台订阅探针：发一个快请求，确认它真的进了 CDP 网络日志 ──────
+        // 光「调用没报错」不够：订阅没生效的话后台请求压根不产生 CDP 事件，
+        // 本用例就整段落空（假绿）。探针的日志条目必须有 method（CDP 记的）——
+        // Resource Timing 回填的条目 method 是空的，靠这个区分二者。
+        const bgProbeToken = "vortex-bg-probe";
+        await ctx.call("vortex_evaluate", {
           tabId: bgTabId,
+          code: `(function(){
+            try {
+              window.fetch(${JSON.stringify(`${ctx.baseUrl}/child?${bgProbeToken}=1`)}).catch(function(){});
+              return "probe";
+            } catch (e) {
+              return "failed";
+            }
+          })()`,
         });
+        let subscribed = false;
+        for (let i = 0; i < 30 && !subscribed; i++) {
+          const entries = parseLogEntries(
+            extractText(
+              await ctx.call("vortex_debug_read", {
+                source: "network",
+                pattern: bgProbeToken,
+                tabId: bgTabId,
+              }),
+            ),
+          );
+          subscribed = entries.some((e) => typeof e.method === "string" && e.method.length > 0);
+          if (!subscribed) await sleep(100);
+        }
+        if (!subscribed) {
+          lastReason = "后台 tab 的 CDP 网络订阅未生效（探针请求没进网络日志）";
+          continue;
+        }
 
         // ── ③ 前台也先把 Network 域打开 ─────────────────────────────────────
         // awaitIdle 里那句 enableDomain 于是变成同步空操作：监听器在同一个 tick
         // 内注册完，不会和「后台慢请求发出」抢先后（抢输了就等于没测）。
-        await ctx.call("vortex_debug_read", { source: "network", pattern: "slow" });
+        const fgSubscribe = extractText(
+          await ctx.call("vortex_debug_read", { source: "network", pattern: "slow" }),
+        );
+        ctx.assert(
+          !/Error \[/.test(fgSubscribe),
+          `前台网络订阅调用不应报错，实际: ${fgSubscribe.slice(0, 200)}`,
+        );
 
         // ── ④ 前台页面记下开监听前的时刻（浏览器时钟，与慢请求发起时刻同轴）──
         const t0 = extractEvalJson<number>(
