@@ -294,6 +294,7 @@ describe("I15: tools/list budget + count + internalized grep", () => {
       "vortex_sequence.steps[].target": "序列步骤复用 vortex_act 的 target 语义",
       "vortex_sequence.steps[].value": "序列步骤复用 vortex_act 的 value 语义",
       "vortex_sequence.onFailure": "序列失败策略需要明确 stop 或 continue",
+      "vortex_tab_create.active": "模型不知道 active=false 会发生什么:后台 tab 不夺取 session current",
     };
 
     const found: string[] = [];

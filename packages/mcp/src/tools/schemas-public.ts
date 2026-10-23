@@ -146,12 +146,12 @@ export const PUBLIC_TOOLS: ToolDef[] = [
   {
     name: "vortex_tab_create",
     action: "tab.create",
-    description: "Open a new browser tab.",
+    description: "Open a tab; active:false opens it in the background.",
     schema: {
       type: "object",
       properties: {
         url: { type: "string" },
-        active: { type: "boolean" },
+        active: { type: "boolean", description: "false = 后台打开，不夺取 session 的当前 tab" },
       },
     },
   },
