@@ -10,7 +10,7 @@ import { VtxErrorCode } from "@vortex-browser/shared";
 import { sendRequest, formatCliError } from "../client.js";
 import { printResponse, printObserveResult, exitWithError } from "../output.js";
 import { getGlobalOpts } from "./helpers.js";
-import { resolveSessionCurrentTab } from "./session-tab.js";
+import { resolveObserveTargetTab } from "./session-tab.js";
 
 /** observe 的枚举参数，取值与公开工具契约一致（packages/mcp/src/tools/schemas-public.ts）。 */
 const DETAIL_VALUES = ["compact", "full"] as const;
@@ -49,7 +49,8 @@ export interface RefEntry {
  * 最近一次 observe 的快照上下文，act 用它把 @ref 翻成 index + snapshotId。
  *
  * `tabId` 是快照的**实际归属 tab**（不是「用户有没有传 --tab」）：
- * 未指定 tab 时，observe 落在**该 session 当时的当前 tab**上，落盘时就记成那个 tab 的 id。
+ * 未指定 tab 时，observe 落在**请求发出前解析出的那个 tab**上
+ * （该 session 当时的当前 tab），落盘时就记成那个 tab 的 id。
  * 快照与 tab 绑定：同一个 session 里换 tab 观察，旧 ref 不许被新 tab 沿用
  * （最终整体评审 Important 1：扩展 resolveTarget 的 boundTabId 优先于请求里的 tab，
  *  沿用旧 snapshotId 会真的点在另一个 tab 上；定向修复轮 Important ① 把它收紧成
@@ -252,7 +253,13 @@ export function registerObserveCommand(program: Command): void {
         if (opts.timeout != null) params.timeout = opts.timeout;
         if (frameId != null) params.frameId = frameId;
 
-        const resp = await sendRequest("observe.snapshot", params, { port, session, tabId: tab });
+        // **请求发出前**解析出这次 observe 的目标 tab（定向修复轮 Important ①）：
+        // 「先发请求、后查 tab」有竞态 —— 请求执行期间（或响应回来之后、查 tab 之前），
+        // 同 session 的另一个请求把 current tab 切走，A 的快照就会被登记到 B 上。
+        // 提前解析出**一个**身份，请求（显式 tabId）与快照登记都用它 ⇒ 同源，不会错位。
+        const targetTab = await resolveObserveTargetTab({ port, session, tab });
+
+        const resp = await sendRequest("observe.snapshot", params, { port, session, tabId: targetTab });
         if (opts.json) {
           printResponse(resp, { pretty, quiet });
         } else {
@@ -269,28 +276,17 @@ export function registerObserveCommand(program: Command): void {
           // refs 就是空的，act 拿任何 ref 来都会命中「未知 ref」分支。
           //
           // 快照按**实际 tab 身份**登记（定向修复轮 Important ①）：
-          // - 显式 --tab ⇒ 就是它；
-          // - 没指定 tab ⇒ 这次请求落在该 session 当时的当前 tab 上，
-          //   请求刚回来、hub 已经回填过 tabId，此时读回来的 current 就是扩展真正观察的那个 tab。
-          // 判不出实际 tab 时**不落盘**：宁可下次 act 报「未知 ref」，也不沿用可能属于别的 tab 的快照。
-          const actualTab = typeof tab === "number"
-            ? tab
-            : await resolveSessionCurrentTab(port, session);
-          if (actualTab === undefined) {
-            console.error(
-              "[vortex-cli] cannot determine the session's current tab; snapshot context not saved" +
-              " (re-run `vortex observe` to bind a fresh snapshot)",
-            );
-          } else {
-            const failed = saveSnapshotContext(session, {
-              snapshotId: result.snapshotId,
-              capturedAt: Date.now(),
-              tabId: actualTab,
-              refs: Object.fromEntries(refs.map((item) => [item.ref, item.entry])),
-            });
-            if (failed) {
-              console.error(`[vortex-cli] observe snapshot context not saved: ${failed}`);
-            }
+          // 登记的就是 `targetTab` —— 请求参数里带的那个显式 tabId，
+          // 也就是请求发出前解析出的那个身份。请求与登记同源，
+          // 中途同 session 切了 current tab 也不会把 A 的快照登记到 B 上。
+          const failed = saveSnapshotContext(session, {
+            snapshotId: result.snapshotId,
+            capturedAt: Date.now(),
+            tabId: targetTab,
+            refs: Object.fromEntries(refs.map((item) => [item.ref, item.entry])),
+          });
+          if (failed) {
+            console.error(`[vortex-cli] observe snapshot context not saved: ${failed}`);
           }
         }
       } catch (err: any) {
