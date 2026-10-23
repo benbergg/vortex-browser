@@ -6,6 +6,8 @@ import { Command } from "commander";
 import { resolveSessionName } from "./session.js";
 import { readNearestVersion } from "./version.js";
 import { registerShortcuts } from "./commands/shortcuts.js";
+import { registerObserveCommand } from "./commands/observe.js";
+import { registerActCommand } from "./commands/act.js";
 import { registerTabCommands } from "./commands/tab.js";
 import { registerPageCommands } from "./commands/page.js";
 import { registerDomCommands } from "./commands/dom.js";
@@ -45,6 +47,10 @@ export function createProgram(): Command {
 
   // Register shortcut commands.
   registerShortcuts(program);
+
+  // Register observe / act commands.
+  registerObserveCommand(program);
+  registerActCommand(program);
 
   // Register namespace commands.
   registerTabCommands(program);
