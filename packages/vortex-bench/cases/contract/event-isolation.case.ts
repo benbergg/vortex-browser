@@ -12,6 +12,12 @@
 //   而 tab status 说的是**文档**加载状态，跟页面里的 fetch 无关 —— 前提本身是假的。
 //
 // 现在的时序：
+//   ⓪ **先记下前台 tab 是哪个**（在建后台 tab 之前）
+//      —— hub 的 tab.create 会把 session 的当前 tab 切到新建的 tab
+//      （packages/hub/src/router.ts 的 updateTabState → claimTab(makeCurrent=true)），
+//      所以「不带 tabId 的调用」在建完后台 tab 之后会落到**后台** tab 上：
+//      那样测的就不是「前台 idle 不被后台拖住」，而是「后台自己不被自己拖住」。
+//      办法：建后台 tab 之前先问清楚前台 tab 是哪个，之后所有前台调用都**显式带上它**。
 //   ① 后台 tab 建好、文档加载完成
 //   ② **后台网络监听先启用**（debug_read → network 订阅 → CDP Network 域 enable）
 //      —— 不开的话后台请求根本不产生 CDP 事件，测的就不是"隔离"而是"没监听"
@@ -109,15 +115,59 @@ async function waitForTabLoaded(
 ): Promise<boolean> {
   const deadline = Date.now() + BG_LOAD_TIMEOUT_MS;
   while (Date.now() < deadline) {
-    const tabs = JSON.parse(extractText(await ctx.call("vortex_tab_list", {}))) as Array<{
-      id?: number;
-      status?: string;
-    }>;
+    const tabs = parseTabList(extractText(await ctx.call("vortex_tab_list", {})));
     const tab = tabs.find((t) => t.id === tabId);
     if (tab?.status === "complete") return true;
     await new Promise((r) => setTimeout(r, 100));
   }
   return false;
+}
+
+/** tab.list 里的一个 tab（本用例用得到的字段）。 */
+interface TabInfo {
+  id?: number;
+  status?: string;
+  /** 浏览器侧：这个 tab 是不是所在窗口的 active tab。 */
+  active?: boolean;
+  /** 浏览器侧：所在窗口是不是聚焦窗口。 */
+  lastFocused?: boolean;
+  /** hub 标注：这个 tab 是不是该 session 的当前 tab（不带 tabId 的请求就落到它上面）。 */
+  current?: boolean;
+}
+
+/**
+ * 解析 tab.list 的返回（数组形态；多浏览器时 hub 会包成 {tabs:[...]}）。
+ */
+function parseTabList(text: string): TabInfo[] {
+  const start = text.indexOf("[");
+  const end = text.lastIndexOf("]");
+  if (start >= 0 && end > start) {
+    try {
+      const parsed: unknown = JSON.parse(text.slice(start, end + 1));
+      if (Array.isArray(parsed)) return parsed as TabInfo[];
+    } catch {
+      // 落到下面按对象解析
+    }
+  }
+  const obj = parseJsonObject(text);
+  const tabs = obj?.tabs;
+  return Array.isArray(tabs) ? (tabs as TabInfo[]) : [];
+}
+
+/**
+ * 找出「前台 tab」：不带 tabId 的请求真正会落到的那个 tab。
+ *
+ * 口径与 hub 一致：hub 给 session 的当前 tab 打 `current: true` 标注，
+ * 不带 tabId 的请求就路由到它。取不到再退回浏览器侧的 active tab
+ * （扩展解析 active tab 的口径是 `active && 聚焦窗口`）。
+ */
+function pickForegroundTab(tabs: TabInfo[]): number | null {
+  const current = tabs.find((t) => t.current === true && typeof t.id === "number");
+  if (current) return current.id as number;
+  const active =
+    tabs.find((t) => t.active === true && t.lastFocused === true && typeof t.id === "number") ??
+    tabs.find((t) => t.active === true && typeof t.id === "number");
+  return active ? (active.id as number) : null;
 }
 
 const def: CaseDefinition = {
@@ -130,6 +180,15 @@ const def: CaseDefinition = {
       lastReason = "";
       let bgTabId: number | null = null;
       try {
+        // ── ⓪ 先记下前台 tab（必须在建后台 tab **之前**）──────────────────────
+        // 建后台 tab 会把 session 的当前 tab 切过去（hub 的 tab.create → claimTab），
+        // 之后不带 tabId 的调用全落到后台 tab 上 —— 测的就不是「前台不被后台拖住」了。
+        const fgTabId = pickForegroundTab(parseTabList(extractText(await ctx.call("vortex_tab_list", {}))));
+        if (fgTabId == null) {
+          lastReason = "找不到前台 tab（tab.list 里既没有 session 当前 tab，也没有 active tab）";
+          continue;
+        }
+
         // ── ① 后台 tab（不激活，前台 tab 保持 active）────────────────────────
         const created = extractText(
           await ctx.call("vortex_tab_create", { url: `${ctx.baseUrl}/`, active: false }),
@@ -200,7 +259,7 @@ const def: CaseDefinition = {
         // awaitIdle 里那句 enableDomain 于是变成同步空操作：监听器在同一个 tick
         // 内注册完，不会和「后台慢请求发出」抢先后（抢输了就等于没测）。
         const fgSubscribe = extractText(
-          await ctx.call("vortex_debug_read", { source: "network", pattern: "slow" }),
+          await ctx.call("vortex_debug_read", { source: "network", pattern: "slow", tabId: fgTabId }),
         );
         ctx.assert(
           !/Error \[/.test(fgSubscribe),
@@ -210,6 +269,7 @@ const def: CaseDefinition = {
         // ── ④ 前台页面记下开监听前的时刻（浏览器时钟，与慢请求发起时刻同轴）──
         const t0 = extractEvalJson<number>(
           await ctx.call("vortex_evaluate", {
+            tabId: fgTabId,
             code: `return Date.now();`,
           }),
         );
@@ -219,6 +279,7 @@ const def: CaseDefinition = {
           mode: "idle",
           value: "network",
           timeout: IDLE_TIMEOUT_MS,
+          tabId: fgTabId,
         });
 
         // ── ⑥ 在监听窗口内：前台探针 + 后台慢请求 ───────────────────────────
@@ -228,6 +289,7 @@ const def: CaseDefinition = {
         const slowUrl = `${ctx.baseUrl}/slow?ms=${SLOW_MS}`;
         const probeUrl = `${ctx.baseUrl}/child`;
         const probePromise = ctx.call("vortex_evaluate", {
+          tabId: fgTabId,
           code: `(function(){
             window.fetch(${JSON.stringify(probeUrl)}).catch(function(){});
             return "probe";
