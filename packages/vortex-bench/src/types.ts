@@ -48,6 +48,28 @@ export interface CaseMetrics {
   customMetrics?: Record<string, number>;
   /** 评测门 P2.1：难度档，从 CaseDefinition.tier 透传，eval 报告分档聚合用。 */
   tier?: "easy" | "medium" | "hard";
+  /**
+   * 本次运行实际产生的断言次数（ctx.assert 调用数，失败的那次也计入）。
+   * 0 = 这个用例一条断言都没做 → 防假绿闸门把它判成 assertion_failure
+   * （"跑完了但什么都没验"是最危险的假绿）。
+   */
+  assertionCount?: number;
+  /**
+   * 有错误/诊断文本的工具调用里，错误文本带 hint 的比例 ∈ [0, 1]。
+   * 口径：分母 = 有错误文本的调用数（isError / 错误码 / `Error [CODE]:` 形状任一命中）；
+   * 分子 = 其中文本里出现 hint 的调用数。
+   * 分母为 0（本次运行没有任何错误文本）时本字段**不写入**（保持 report 形状稳定），
+   * 于是"字段存在"即表示"本次有错误"，字段值不会被"无错误"稀释。
+   */
+  hintPresentRate?: number;
+  /**
+   * 带 target 的调用里，target 形如 @ref（以 @ 开头）的比例 ∈ [0, 1]。
+   * 口径：分母 = 参数顶层 target 是非空字符串的调用数（vortex_act / vortex_fill /
+   * vortex_observe / vortex_screenshot / vortex_extract / vortex_drag 等）；
+   * 分子 = 其中 target 以 @ 开头的调用数（@e3 / @f1e2 / @<hash>:eN 等）。
+   * 分母为 0（本次运行没有任何带 target 的调用）时本字段**不写入**。
+   */
+  refReuseRate?: number;
 }
 
 export interface CaseContext {
@@ -73,6 +95,11 @@ export interface CaseDefinition {
   name: string;
   /** playground 路由路径，e.g. '/#/el-dropdown'；synth 任务指向 '/synth/<snapshot>.html' */
   playgroundPath: string;
+  /**
+   * 用例套件归属，缺省视为 "a"。A 层 = 组件能力基线，B 层 = 端到端任务。
+   * 本字段目前只做声明：suite 过滤由后续任务实现，缺省行为不变。
+   */
+  suite?: "a" | "b";
   /** 难度档，与 SynthManifest.tier 对齐；eval 命令按此分档聚合任务通过率。缺省视为 medium。 */
   tier?: "easy" | "medium" | "hard";
   /** 绑定的 synth 快照名（A 层 scan 与 B 层 task 同指一份冻结快照，便于交叉分诊）。 */

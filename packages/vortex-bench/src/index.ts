@@ -46,6 +46,9 @@ Commands:
   run --all              跑 cases/ 下全部
   run --repeats N        每个 case 跑 N 次，median 聚合 + majority-pass
                          （recommended for baseline refresh: N=3）
+  run --contract-metrics 额外写入契约指标 assertionCount / hintPresentRate /
+                         refReuseRate（默认关：单跑输出字节不变）
+                         （env 等价开关：VORTEX_BENCH_CONTRACT_METRICS=1）
   diff                   跟 reports/baseline.json 对比
   baseline               把最近一次 latest.json 存成 baseline.json
   compare-boxes [--all] [cases...]
@@ -177,6 +180,10 @@ async function cmdRun(args: string[]): Promise<number> {
     process.stderr.write("[vortex-bench] --repeats expects a positive integer (e.g. --repeats 3)\n");
     return 1;
   }
+  // 契约指标开关：默认关 ⇒ latest.json 形状与引入前逐字节一致（baseline 字节比对不受影响）。
+  // CLI flag 与 env var 等价，env 供脚本（Task 7 的 report 脚本）使用。
+  const contractMetrics =
+    args.includes("--contract-metrics") || process.env.VORTEX_BENCH_CONTRACT_METRICS === "1";
   const caseNames = runAll
     ? await listCaseNames()
     : args.filter((a) => !a.startsWith("-") && !/^\d+$/.test(a)); // 排除 --repeats 的 N 数值
@@ -197,7 +204,7 @@ async function cmdRun(args: string[]): Promise<number> {
     const def = await loadCase(name);
     const runs: CaseMetrics[] = [];
     for (let i = 0; i < repeats; i++) {
-      runs.push(await runCase(def, { mcpBin, playgroundUrl: url }));
+      runs.push(await runCase(def, { mcpBin, playgroundUrl: url, contractMetrics }));
     }
     const m = aggregate(runs);
     results.push(m);
