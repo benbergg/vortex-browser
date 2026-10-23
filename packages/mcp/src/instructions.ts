@@ -1,0 +1,93 @@
+/**
+ * instructions 生成器：把 `contract.ts` 的契约单一真值渲染成 MCP server 下发的正文。
+ *
+ * 为什么需要它：ref 的跨快照语义、fill 的值形状、query 的 mode 边界……
+ * 这些"必须靠猜才知道"的约束以前只活在源码注释里，模型看不到。
+ * 放进 tool description 会和 instructions 各说各话并逐渐漂移；放进 instructions
+ * 则由 server 在握手时同源下发，契约改一处即可（见 contract.ts）。
+ *
+ * 硬约束：
+ * - 正文**全中文**；**不写工具清单**（工具清单由 `tools/list` 负责，避免重复占体积）。
+ * - 首尾必须有哨兵（`SENTINEL_PREFIX` / `SENTINEL_SUFFIX`）+ 版本号：
+ *   消费端缺首或缺尾即判定正文被截断，应分片读取（见 contract.ts 注释）。
+ * - 体积受 `INSTRUCTIONS_TOKEN_BUDGET` 约束（由测试守住）。
+ * - 本模块**不引入任何依赖**（纯字符串拼装）。
+ */
+
+import {
+  CONTRACT_ITEMS,
+  SENTINEL_PREFIX,
+  SENTINEL_SUFFIX,
+  type ContractItem,
+} from "./contract.js";
+
+/**
+ * 工作流速览（≤ 5 行）：先给模型一条"该按什么顺序干活"的骨架，
+ * 细节约束逐条列在下面的契约要点里。
+ */
+const WORKFLOW_OVERVIEW: readonly string[] = [
+  "1. 先 vortex_observe 拿当前页面快照与元素 ref，再 vortex_act 操作；不要盲点。",
+  "2. ref 失效就重新 observe 换新 ref，别拿旧 ref 反复硬试。",
+  "3. 下结论前先取证：act 的 effect 信号、vortex_extract 的文本、vortex_debug_read 的网络与控制台输出。",
+  "4. 取不到证据就用 vortex_query 探测页面结构，而不是重复同一个动作。",
+];
+
+/**
+ * 10 条契约要点的正文（key 与 contract.ts 的 key 一一对应）。
+ *
+ * 正文里必须**逐字**带上该要点的 mustInclude 串——护栏测试
+ * （tests/instructions-e2e.test.ts）会逐条比对，缺一条即红。
+ */
+const DETAILS: Record<string, string> = {
+  workflow:
+    "observe 返回当前快照里的元素 ref（@ref），vortex_act 的 target 就填这个 ref。看不到目标元素就换 observe 的 scope/filter/frames 再看，别凭空编 ref。",
+  "ref-lifecycle":
+    "带 hash 的 ref（形如 @<hash>:eN）跨快照身份稳定；裸 ref（@eN）只绑定当前快照且已废弃。报 stale/invalid 就重新 observe 取新 ref。",
+  "fill-value-shape":
+    "值形状随控件变：普通输入框给字符串，daterange/datetimerange 需 {start,end}，cascader 需逐级路径数组。填错时按错误信息里给出的正确形状重填。",
+  "query-mode-boundary":
+    "sheet 只认 Lake Sheet，不认普通 DOM table（普通表格改用 vortex_extract）；component 返回 Vue 实例/props，selector 仍是 CSS。",
+  "wait-for-modes":
+    "mode=element 等元素出现（value 是 CSS selector）；mode=idle 等空闲（value=network|xhr|dom）；mode=info 返回页面信息概览（默认含全部标签页）；mode=custom 轮询 JS 表达式直到为真。",
+  "screenshot-target":
+    "target 可传 vortex_observe 给的 @ref，也可传 CSS selector；省略或传 null 表示整页截图。",
+  "extract-truncation":
+    "超长会截断并带 [VORTEX_TRUNCATED] 标记；要全文就缩小范围或分段取，别把截断当完整内容。",
+  "debug-read-params":
+    "filter 是平铺键，不要按 source 再嵌一层：console 用 level，network 用 pattern 必填 + statusMin/statusMax 过滤 HTTP 状态码区间；tail=N 取最近 N 条。",
+  "effect-signals":
+    "act 返回的信号（urlChanged、domMutations、networkRequests 等）只是观察到的证据；全阴性只说明没观察到阳性信号，不等于操作一定没生效。",
+  "path-case":
+    "hash 路由大小写敏感（/#/el-cascader 与 /#/El-Cascader 不是同一条）；页面打得开不等于应用内路由存在，可能落到空状态页。",
+};
+
+/**
+ * 取某条契约要点的正文。
+ *
+ * 兜底：新增契约要点若忘了写正文，至少保证其逐字串仍然进入 instructions
+ * （契约不丢），但正文说明会退化成串本身——补正文是新增要点时的应有动作。
+ */
+function detailOf(item: ContractItem): string {
+  const detail = DETAILS[item.key];
+  if (detail) return detail;
+  return item.mustInclude.join("、");
+}
+
+/**
+ * 生成 MCP server 下发的 instructions 正文。
+ *
+ * @param version 版本号（由调用方传入，通常是 MCP server 自身的版本）。
+ * @returns 带首尾哨兵与版本号的正文文本。
+ */
+export function buildInstructions(version: string): string {
+  const lines: string[] = [];
+  lines.push(`${SENTINEL_PREFIX}${version}`);
+  lines.push("使用契约：");
+  lines.push(...WORKFLOW_OVERVIEW);
+  lines.push("契约要点：");
+  for (const item of CONTRACT_ITEMS) {
+    lines.push(`- ${item.title}：${detailOf(item)}`);
+  }
+  lines.push(`${SENTINEL_SUFFIX}${version}`);
+  return lines.join("\n");
+}
