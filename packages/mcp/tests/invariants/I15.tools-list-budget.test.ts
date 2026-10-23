@@ -128,6 +128,12 @@
 // 一次调用跑多步且每步自证。日志实测 observe:evaluate=1:12,其中九成是无对应工具的
 // 批处理负载(58% 循环 / 17% 跨调用状态),这是那条缺口的正面补齐。
 // payload 实测 11005B。沿用"加能力调 cap 不压字符"惯例。
+//
+// 契约接线(Task 1): 11750 → 12000 B。给 4 处参数级 description 补契约要点
+// (fill.value / query.mode / extract.maxLength / debug_read.filter),补的是
+// "模型会填错或不知道能填什么"的说明,不是新增能力;公开工具集不变(仍 24 个)。
+// payload 实测 11837B,cap +250 留 163B 余量。沿用"加能力调 cap 不压字符"惯例——
+// 压掉这 4 段等于把契约要点从公开面抹掉(护栏见 tests/contract-gate.test.ts)。
 
 import { describe, it, expect, afterEach } from "vitest";
 import { COMMIT_KINDS } from "@vortex-browser/shared";
@@ -165,7 +171,12 @@ describe("I15: tools/list budget + count + internalized grep", () => {
     // 合并返回多维度),description 同步追加,并新增 dimensions 参数(十个维度名单
     // 只在参数说明里列一次,mode 说明不重复)。实测 11643B,cap +350 留 107B 余量。
     // 沿用"加能力调 cap 不压字符"惯例。
-    expect(toolsListPayload.length).toBeLessThanOrEqual(11750);
+    // 契约接线(Task 1): 11750 → 12000。给 4 处参数级 description 补契约要点
+    // (fill.value / query.mode / extract.maxLength / debug_read.filter),
+    // 补的是"模型会填错或不知道能填什么"的说明,不是新增能力。实测 11837B,
+    // cap +250 留 163B 余量。沿用"加能力调 cap 不压字符"惯例——压掉这 4 段
+    // 等于把契约要点从公开面抹掉(护栏见 tests/contract-gate.test.ts)。
+    expect(toolsListPayload.length).toBeLessThanOrEqual(12000);
   });
 
   it("公开工具数量 = 24（23 + vortex_sequence 多步序列）", () => {

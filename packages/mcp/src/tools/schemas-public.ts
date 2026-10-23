@@ -118,7 +118,7 @@ export const PUBLIC_TOOLS: ToolDef[] = [
         target: TargetOptional,
         depth: { type: "number" },
         include: { type: "array", items: { enum: ["text", "value", "attrs"] } },
-        maxLength: { type: "number", default: 10240, description: "default 10240; longer text is cut with a [VORTEX_TRUNCATED] marker" },
+        maxLength: { type: "number", default: 10240, description: "default 10240; longer text is cut with a [VORTEX_TRUNCATED] marker；超长会截断并带 [VORTEX_TRUNCATED] 标记" },
         scroll: { type: "boolean" },
         // REQ-NNN N0060 京东评测: include alt text from <img alt> elements
         // (京东自营 / 淘宝天猫角标). default true (向后兼容: false 时行为与
@@ -296,9 +296,14 @@ export const PUBLIC_TOOLS: ToolDef[] = [
         // V2 P0 修复 D16: filter 子字段文档化 (handler 已实现, LLM 此前不知可用)
         // console: { level: 'error'|'warn'|'all' }
         // network: { pattern: '<substr>', statusMin, statusMax }
+        // 契约接线(Task 1):statusMin/statusMax 是 filter 里的平铺键(handler 读
+        // args.filter.statusMin/Max),公开 schema 没有独立的 statusMin 参数
+        // (不得新增参数),故把语义补在本参数的 description 里 ——
+        // 与 contract.ts 的 debug-read-params 对齐。
         filter: {
           type: "object",
-          description: "flat keys, do not nest by source: {level} for console; {pattern,statusMin,statusMax} for network",
+          description:
+            "flat keys, do not nest by source: {level} for console; {pattern,statusMin,statusMax} for network；statusMin 配合 statusMax 过滤 HTTP 状态码区间",
         },
         tail: { type: "number" },
         ...tabFields,
@@ -462,7 +467,9 @@ export const PUBLIC_TOOLS: ToolDef[] = [
       type: "object",
       properties: {
         target: TargetRequired,
-        value: { description: "plain input: string; daterange/datetimerange: {start,end}; cascader: path array" },
+        // 契约接线(Task 1):补值形状要点,与 contract.ts 的 fill-value-shape 对齐。
+        // 中文追加而非替换:英文原说明覆盖 cascader 路径数组,追加不丢既有信息。
+        value: { description: "plain input: string; daterange/datetimerange: {start,end}; cascader: path array；按 widget 形状取值；daterange 需 {start,end}" },
         widget: { enum: [...COMMIT_KINDS] },
         force: { type: "boolean" },
         ...tabFields,
@@ -483,7 +490,9 @@ export const PUBLIC_TOOLS: ToolDef[] = [
           description:
             "component reads Vue/React instance state; sheet only reads Yuque Lake Sheet, NOT DOM tables (use extract for those); " +
             "schema=author-declared JSON-LD/Microdata/OGP (pattern=@type or '*'), may differ from visible content; " +
-            "css/component/geometry/style 的 pattern 也接受 vortex_observe 给的 @ref",
+            "css/component/geometry/style 的 pattern 也接受 vortex_observe 给的 @ref; " +
+            // 契约接线(Task 1):补 mode 语义边界要点,与 contract.ts 的 query-mode-boundary 对齐。
+            "sheet 只认 Lake Sheet，不认普通 DOM table；component 返回 Vue 实例/props，selector 仍是 CSS",
         },
         pattern: { type: "string" },
         dimensions: {
