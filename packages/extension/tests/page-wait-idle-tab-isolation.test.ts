@@ -4,7 +4,13 @@
  *
  * 扩展的 awaitIdle 只应跟踪**本 tab** 的 CDP 网络事件
  * （packages/extension/src/handlers/page.ts 的 `if (evtTabId !== tid) return;`）。
- * 本文件把这一行锁住：删掉它 ⇒ 用例变红（后台 tab 的慢请求会把前台 idle 拖住）。
+ * 本文件把这一行锁住：删掉它 ⇒ 用例变红（后台 tab 的请求会被算成前台的匹配请求，
+ * matchedRequests 从 0 变 1）。
+ *
+ * ★ **静默期语义**（2026-10-23 起）：idle 判定只看「最后一次匹配请求后是否已过
+ * idleTime」，**未结束的请求（pending）不再阻断 idle**，只作为诊断从 pendingRequests 透出。
+ * 因此「前台自己的请求仍在飞」在新语义下**会**判 idle——这与旧语义相反，
+ * 是有意的语义变更，不是回归。
  *
  * 配套的 bench 侧回归测试在
  * packages/vortex-bench/tests/event-isolation-case.test.ts（那边模拟扩展语义驱动真用例）。
@@ -115,7 +121,7 @@ describe("page.waitForNetworkIdle 的 tab 事件隔离", () => {
     expect(resp!.result).toMatchObject({ idle: true, matchedRequests: 0 });
   });
 
-  it("前台 tab 自己的请求仍被计入（过滤只挡别的 tab，不是关掉跟踪）", async () => {
+  it("前台 tab 自己的请求仍在飞：静默期到期判 idle，且 pendingRequests 可见", async () => {
     const p = router.dispatch(
       mkReq("page.waitForNetworkIdle", { idleTime: 200, timeout: 5000 }, FG_TAB),
     );
@@ -132,15 +138,19 @@ describe("page.waitForNetworkIdle 的 tab 事件隔离", () => {
     void p.then((r) => {
       resp = r;
     });
-    // 请求还在飞 → 不该 idle
+    // ★ 静默期语义：请求还在飞（没有 loadingFinished），但已连续 idleTime(200ms)
+    //   没有新的匹配请求 ⇒ 判 idle。旧语义下这里是 toBeNull()（pending 阻断 idle），
+    //   新语义下 pending 不再阻断，只作为诊断透出。
     await vi.advanceTimersByTimeAsync(250);
     await Promise.resolve();
-    expect(resp, "前台自己的请求未结束时不该判空闲").toBeNull();
-
-    dbg.fire(FG_TAB, "Network.loadingFinished", { requestId: "fg-1" });
-    await vi.advanceTimersByTimeAsync(250);
-    await Promise.resolve();
-    expect(resp).not.toBeNull();
-    expect(resp!.result).toMatchObject({ idle: true, matchedRequests: 1 });
+    expect(resp, "静默期已满 → 应判 idle（pending 请求不再阻断 idle 判定）").not.toBeNull();
+    expect(resp!.error).toBeUndefined();
+    // matchedRequests=1 ⇒ 前台自己的请求确实被计入（过滤只挡别的 tab，不是关掉跟踪）
+    // pendingRequests=1 ⇒ 该请求在 resolve 那一刻**仍未结束**，诊断如实透出
+    expect(resp!.result).toMatchObject({
+      idle: true,
+      matchedRequests: 1,
+      pendingRequests: 1,
+    });
   });
 });
