@@ -268,7 +268,12 @@ export const PUBLIC_TOOLS: ToolDef[] = [
         value: {
           description:
             "element: CSS selector; custom: JS expression; " +
-            "idle: net=all|xhr=XHR only 网络静默期(连续 idleTime 无新请求即 idle)|dom=DOM mutation 稳定判定; " +
+            // 静默期默认长度照实写：net/network = 500ms、xhr = 200ms
+            // （扩展 WAIT_FOR_NETWORK_IDLE / WAIT_FOR_XHR_IDLE 的默认值）。
+            // **不写 idleTime** —— 它不是公开参数，公开面提它会让人以为能传。
+            // XHR 口径盯的是 XHR **+Fetch**（扩展 requestTypes: ["XHR","Fetch"]）；
+            // 原文写 "XHR only" 与实现不符（2026-10-24 评审 F5 更正）。
+            "idle: net/network=全部请求 静默期(默认 500ms 无新请求即 idle)|xhr=XHR+Fetch 静默期(默认 200ms)|dom=DOM mutation 稳定判定; " +
             "info: omit",
         },
         // 收窄等待范围的两个可选参数(handler page.ts 读 args.urlPattern / args.minRequests)。

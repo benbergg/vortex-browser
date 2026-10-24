@@ -24,6 +24,11 @@ import { ActionRouter } from "../src/lib/router.js";
  * ★ 静默期语义(2026-10-23 起):idle 判定只看「最后一次匹配请求后是否已过 idleTime」,
  *   未结束的请求不再阻断 idle ⇒ 「永不达成」用例的模拟方式随之改为「请求持续不断到来」
  *   (间隔 < idleTime)。这是有意的语义变更,不是回归。
+ *
+ * ★ pending 诊断(2026-10-24 评审 F3):navigate 的 networkidle 分支必须在**两条**路径上
+ *   都透出 pending 数 —— ①「带未结束请求静默成功」⇒ pendingRequests ≥ 1;
+ *   ②「持续请求 ⇒ 降级(networkIdleTimedOut)」⇒ pendingRequests ≥ 1。
+ *   缺了任一条,agent 就分不清「网络真的空了」与「带着 N 个请求挂着的静默期」。
  */
 
 let updatedListeners: Array<(tabId: number, ci: { status?: string }) => void>;
@@ -126,9 +131,51 @@ describe("navigate waitUntil=networkidle 超时退化须 surface 信号", () => 
     }
 
     // 推进过 idleTimeout(innerCap=min(30000,25000))→ awaitIdle reject → catch → 信号。
-    const res = (await navP) as { result?: { networkIdleTimedOut?: boolean; url?: string } };
+    const res = (await navP) as { result?: { networkIdleTimedOut?: boolean; url?: string; pendingRequests?: number } };
     expect(res.result?.networkIdleTimedOut).toBe(true);
     expect(res.result?.url).toBe("https://x/#a");
+    // ★ 超时路径同样要透出 pending 诊断：agent 需要知道「超时那一刻还挂着几个请求」。
+    //   （extras.pending 是数量；awaitIdle 超时错误里带它 ⇒ navigate 的降级分支读得到。）
+    expect(res.result?.pendingRequests).toBeGreaterThanOrEqual(1);
+  });
+
+  it("带未结束请求静默成功 ⇒ 结果里 pendingRequests ≥ 1（不静默吞掉 pending 诊断）", async () => {
+    vi.useFakeTimers();
+    installChrome();
+    const dbg = makeDebuggerMgr();
+    const { registerPageHandlers } = await importPage();
+    const router = new ActionRouter();
+    registerPageHandlers(router, dbg);
+
+    const navP = router.dispatch({
+      type: "tool_request",
+      requestId: "3",
+      tool: "page.navigate",
+      args: { url: "https://x/#a", waitUntil: "networkidle" },
+      tabId: 100,
+    } as any);
+
+    await flush();
+    expect(onEventCb).toBeDefined();
+
+    // 一条**永不结束**的匹配请求：静默期语义下它不再阻断 idle，
+    // 但必须作为诊断从 navigate 结果里透出（pendingRequests ≥ 1）。
+    onEventCb!(100, "Network.requestWillBeSent", {
+      requestId: "pending-1",
+      request: { url: "https://x/api/longpoll" },
+      type: "Fetch",
+    });
+
+    // 之后没有新请求 ⇒ 静默期（idleTime=500ms）到期即 resolve
+    await vi.advanceTimersByTimeAsync(800);
+
+    const res = (await navP) as {
+      result?: { networkIdleTimedOut?: boolean; pendingRequests?: number };
+    };
+    // 没有超时信号（确实达成了静默期）
+    expect(res.result?.networkIdleTimedOut).toBeUndefined();
+    // ★ 关键断言：带着未结束请求达成 idle 也要透出 pending 数
+    expect(res.result?.pendingRequests).toBeGreaterThanOrEqual(1);
   });
 
   it("networkidle 达成(无挂起请求)→ 不设 networkIdleTimedOut(不误报)", async () => {

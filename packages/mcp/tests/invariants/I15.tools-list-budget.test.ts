@@ -145,6 +145,22 @@
 //
 // (口径更正: 上一条记的"payload 实测 11837B"已被 tab.create 的 active 语义说明
 // 那次提交冲掉 —— 本次改动前的真实基线是 11915B,故本次 +235B。)
+//
+// ★★ 口径更正（2026-10-24 评审 F2，阻断）：本文件此前断言的是 `payload.length`
+//   ——**字符数**，不是字节数。tools/list 真正要控的是 **UTF-8 字节**
+//   （中文 3 字节/字，公开 description 里中文占比很高 ⇒ 两者差得很远）。
+//   历史记的 "实测 12150B" 其实是 12150 **字符**；按 UTF-8 字节口径，
+//   更正前实测 12836 B，**已超 cap 12300 达 536 B**（评审 F2 实测）。
+//   ⇒ 断言改成 `Buffer.byteLength(payload, "utf8")`，并按真实字节重设 cap。
+//
+// cap 12300 → 13000 B。真实字节口径下实测 **12869 B**
+//   （含本次 F5 对 vortex_wait_for 的 value 文案更正：XHR 口径改为 XHR+Fetch、
+//    写明 net 默认 500ms / xhr 默认 200ms，且删掉非公开参数 idleTime，净 +33 B；
+//    更正前为 12836 B），cap 按实测 +~130 B 余量取整到百位（与历次同步长同量级）。
+//   **上调 cap 而非压缩文案**：沿用本文件历次惯例"加能力调 cap 不压字符"。
+//   差额主要来自 vortex_query（2026 B：8 个 mode 的真能力说明）、vortex_act
+//   （1324 B）、vortex_wait_for（891 B）这类**能力文档化**；压掉它们等于把能力
+//   从公开面抹掉（护栏见 tests/contract-gate.test.ts）。
 
 import { describe, it, expect, afterEach } from "vitest";
 import { COMMIT_KINDS } from "@vortex-browser/shared";
@@ -156,7 +172,12 @@ describe("I15: tools/list budget + count + internalized grep", () => {
     defs.map(d => ({ name: d.name, description: d.description, inputSchema: d.schema })),
   );
 
-  it("tools/list 字节 ≤ 12300 B (静默期等待范围后实测 12150 留 150B buffer)", () => {
+  it("tools/list UTF-8 字节 ≤ 13000 B (口径更正后实测 12869 留 131B buffer)", () => {
+    // ⚠️ 口径（2026-10-24 评审 F2）：必须是 **UTF-8 字节**，不是字符数。
+    //   本文件此前用 `payload.length`（字符数）判定，公开 description 里中文占比很高
+    //   （中文 3 字节/字）⇒ 字符数明显小于真实字节数，cap 形同虚设：
+    //   当时断言"12210 字符 ≤ 12300"是绿的，真实字节却是 12836 ⇒ 超 cap 536 B。
+    //   现在一律用 Buffer.byteLength(payload, "utf8")。
     // V2 P0 修复 D16: filter 子字段 description 是必要的文档化豁免
     // (handler 已实现 console.ts:160 level / network.ts:305-321 pattern+statusMin/Max),
     // 移除豁免会触发 V2 D16 真发现复发 (LLM 不知可用子字段)。
@@ -191,9 +212,12 @@ describe("I15: tools/list budget + count + internalized grep", () => {
     // (只算 URL 含此串的请求)+ minRequests(至少见到 N 个匹配请求才算 idle)两个
     // 可选参数,并把 idle 静默期语义写进公开 description。静默期语义下"全站无新
     // 请求"极易在目标请求发出前就判定 idle,模型必须能按 URL 收窄等待范围——
-    // 压掉这 2 段等于把该能力从公开面抹掉。实测 12150B,cap +300 留 150B 余量。
-    // 沿用"加能力调 cap 不压字符"惯例。
-    expect(toolsListPayload.length).toBeLessThanOrEqual(12300);
+    // 压掉这 2 段等于把该能力从公开面抹掉。沿用"加能力调 cap 不压字符"惯例。
+    // ★ 口径更正（2026-10-24 评审 F2）：上面的"实测 12150"是**字符数**，不是字节数。
+    //   按 UTF-8 字节口径，改 cap 前实测 12836 B（已超 cap 12300 达 536 B）。
+    //   本次含 F5 的 value 文案更正（+33 B）后真实字节 12869 B ⇒ cap 12300 → 13000
+    //   （上调 cap 而非压文案，沿用本文件历次惯例，理由见文件头）。
+    expect(Buffer.byteLength(toolsListPayload, "utf8")).toBeLessThanOrEqual(13000);
   });
 
   it("公开工具数量 = 24（23 + vortex_sequence 多步序列）", () => {
