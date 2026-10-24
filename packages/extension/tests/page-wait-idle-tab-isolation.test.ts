@@ -115,7 +115,10 @@ describe("page.waitForNetworkIdle 的 tab 事件隔离", () => {
     await vi.advanceTimersByTimeAsync(250);
     await Promise.resolve();
 
-    // 删掉 tab 事件过滤后，后台请求会被算进 tracked → 前台不再 idle → 这里为 null
+    // ★ 静默期语义（2026-10-24 评审 F5 更正）：**单个后台 pending 不再阻断 idle**
+    //   （pending 不参与 idle 判定）。即便删掉 tab 事件过滤，后台请求也只会把
+    //   matched 从 0 抬到 1、把静默期重置**一次**，前台照样会判出 idle ——
+    //   真正的判别点在下面的 matchedRequests: 0（而不是「不再 idle」）。
     expect(resp, "后台 tab 的慢请求不应拖住前台的 idle 判定").not.toBeNull();
     expect(resp!.error).toBeUndefined();
     expect(resp!.result).toMatchObject({ idle: true, matchedRequests: 0 });

@@ -514,6 +514,18 @@ interface AwaitIdleResult {
 const PENDING_DETAIL_LIMIT = 10;
 
 /**
+ * 一条未结束请求的结构化明细。
+ *
+ * requestId 必须带上：它才是 agent 能拿去和 `vortex_debug_read(source=network)`
+ * 的日志对上的**唯一**句柄（URL 可能重复、类型可能相同）。
+ */
+interface PendingDetail {
+  requestId: string;
+  url: string;
+  type: string;
+}
+
+/**
  * 通用网络 idle 等待。抽离自 WAIT_FOR_NETWORK_IDLE，供它和 WAIT_FOR_XHR_IDLE 复用。
  *
  * **静默期语义**（旧语义 = 「tracked 清空」+「最近 idleTime 内无新发起」两个条件同时成立）：
@@ -521,8 +533,11 @@ const PENDING_DETAIL_LIMIT = 10;
  * - 未结束的请求（pending）**不再阻断 idle**，但必须作为诊断透出（pendingRequests），
  *   否则 agent 会把「带着 N 个请求挂着的静默期」误读成「网络真的空了」。
  * - **静默计时器随每个新匹配请求重启**（见 onEvent 的 requestWillBeSent 分支）：
- *   只在开始时 arm 一次的话，「请求持续不断」的页面永远判不出 idle，
- *   navigate 的 networkIdleTimedOut 降级信号也随之失效。
+ *   只在开始时 arm 一次的话，计时器会在「第一次静默期」到点时照常 resolve ⇒
+ *   **提前判 idle**（请求还在源源不断 arriving 也照样判成已静默），
+ *   navigate 的 networkIdleTimedOut 降级信号随之永远不触发。
+ *   （2026-10-24 评审更正：此处原写「永远判不出 idle」是反的——计时器只 arm 一次
+ *   会**提前** resolve，而不是判不出。）
  * - **结束事件（loadingFinished/loadingFailed）只更新诊断集合，不碰计时器**：
  *   静默期的截止时间只由「匹配的新请求」推进，结束事件若也重启计时器，
  *   截止时间会被推后（甚至撞上超时），且 tracked 又会间接影响 idle 判定。
@@ -549,30 +564,44 @@ async function awaitIdle(
 
     const timeoutTimer = setTimeout(() => {
       cleanup();
+      // ★ 诊断必须在**错误 message 文本**里（MCP 侧 formatDispatchError 不序列化
+      //   extras，extras 只有程序读得到，agent 看不到）。
+      //   A6 要求 agent 能看到：requestId / url / type / lastMatchedAgoMs / idleTime。
+      const lastMatchedAgoMs = Date.now() - lastMatchedAt;
+      const pendingDetails = pendingDetailList();
       reject(
         vtxError(
           VtxErrorCode.TIMEOUT,
-          `Network not idle after ${timeout}ms (${tracked.size} matching requests pending, ${matched} seen) pending: ${pendingDetailText()}`,
+          `Network not idle after ${timeout}ms (${tracked.size} matching requests pending, ${matched} seen) ` +
+            `idleTime=${idleTime}ms lastMatchedAgoMs=${lastMatchedAgoMs}ms ` +
+            `pending: ${pendingDetailText(pendingDetails)}`,
           {
             extras: {
+              // 兼容字段：pending 仍是**数量**（下游 pendingFromError 按 number 读它）。
               pending: tracked.size,
+              // 结构化明细数组（每项含 requestId / url / type）。
+              pendingDetails,
               matched,
               urlPattern,
               requestTypes,
               idleTime,
-              lastMatchedAgoMs: Date.now() - lastMatchedAt,
+              lastMatchedAgoMs,
             },
           },
         ),
       );
     }, timeout);
 
+    /** pending 明细（结构化）：每项含 requestId / url / type。 */
+    function pendingDetailList(): PendingDetail[] {
+      return [...tracked.entries()].map(([requestId, { url, type }]) => ({ requestId, url, type }));
+    }
+
     // pending 明细文本。**必须拼进 message**：MCP 侧错误格式化不序列化 extras，
     // 只放 extras 的话 agent 永远看不到「到底哪些请求还挂着」。
-    function pendingDetailText(): string {
-      const all = [...tracked.values()].map(({ url, type }) => ({ url, type }));
-      const shown = all.slice(0, PENDING_DETAIL_LIMIT);
-      const rest = all.length - shown.length;
+    function pendingDetailText(details: PendingDetail[]): string {
+      const shown = details.slice(0, PENDING_DETAIL_LIMIT);
+      const rest = details.length - shown.length;
       return `${JSON.stringify(shown)}${rest > 0 ? ` (+${rest} more)` : ""}`;
     }
 
@@ -616,7 +645,8 @@ async function awaitIdle(
         matched++;
         lastMatchedAt = Date.now();
         // ★ 本次改动的要害：静默计时器随每个新匹配请求重启。
-        // 少了这一步，「请求持续不断」的页面永远不会被判 idle（降级信号随之失效）。
+        // 少了这一步（只在开始时 arm 一次），计时器到点就照常 resolve ⇒ **提前判 idle**，
+        // 「请求持续不断」的页面也会被误判成已静默（降级信号随之失效）。
         checkIdle();
       } else if (
         method === "Network.loadingFinished" ||
