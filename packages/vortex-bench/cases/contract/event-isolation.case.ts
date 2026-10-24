@@ -150,12 +150,24 @@ function parsePayload(res: unknown): { ok: boolean; value: unknown; reason: stri
 }
 
 /**
+ * 工具是否**报错**（MCP 响应的标准字段 `isError`）。
+ *
+ * ⚠️ **必须先看 `isError`**：工具报错时，载荷文本**可能**恰好是可解析的数组
+ * （例如 `[]`），此时文本里既没有 `Error [`，载荷又能 JSON.parse ⇒ 只靠文本判定
+ * 会把「读取失败」当成「读取成功」⇒ B1 假绿（读不到被冒充成「没有 /slow」）。
+ */
+function isToolError(res: unknown): boolean {
+  return (res as { isError?: boolean } | null | undefined)?.isError === true;
+}
+
+/**
  * 严格读一次 network 日志。
  *
- * 「严格」= 三件事都过才算读到：
- *   1. 工具**没报错**（`Error [...]` 形态）；
- *   2. 载荷块**能被 JSON.parse**；
- *   3. 载荷**是个数组**（network.getLogs 的返回形状）。
+ * 「严格」= 四件事都过才算读到：
+ *   1. 响应**没有** `isError: true`（MCP 的标准报错字段）；
+ *   2. 文本里**没有** `Error [...]` 形态（防御：非标准形态的报错）；
+ *   3. 载荷块**能被 JSON.parse**；
+ *   4. 载荷**是个数组**（network.getLogs 的返回形状）。
  * 任何一条不过 ⇒ ok=false。**读不到 ≠ 没有条目** —— 读不到时用例必须判前提不成立，
  * 绝不能顺势断言「日志里没有 /slow」。
  */
@@ -165,12 +177,19 @@ async function readNetworkLog(
   pattern: string,
 ): Promise<NetworkLogRead> {
   const res = await ctx.call("vortex_debug_read", { source: "network", pattern, tabId });
+  // ① 标准报错字段：载荷可能恰好是可解析的数组（例如 `[]`），不能当成「读取成功」。
+  if (isToolError(res)) {
+    return { ok: false, entries: [], reason: `工具报错(isError): ${extractText(res).slice(0, 160)}` };
+  }
   const text = extractText(res);
+  // ② 非标准形态的报错（文本里带 `Error [`）。
   if (/Error \[/.test(text)) {
     return { ok: false, entries: [], reason: `工具报错: ${text.slice(0, 160)}` };
   }
+  // ③ 载荷可解析。
   const parsed = parsePayload(res);
   if (!parsed.ok) return { ok: false, entries: [], reason: parsed.reason };
+  // ④ 载荷是数组。
   if (!Array.isArray(parsed.value)) {
     return { ok: false, entries: [], reason: `载荷不是数组: ${JSON.stringify(parsed.value).slice(0, 160)}` };
   }
@@ -470,7 +489,11 @@ const def: CaseDefinition = {
         const idleText = extractText(idleRes);
         // 前台 idle 调用**自身**的耗时：取 idle 判定返回的时刻，不是「读到结果的时刻」。
         const idleElapsed = (idleSettledAt > 0 ? idleSettledAt : Date.now()) - idleIssuedAt;
-        const idleParsed = parsePayload(idleRes);
+        // 同一类错误：报错响应的载荷可能恰好是可解析的对象 ⇒ 必须先看 isError，
+        // 否则会把「idle 报错了」读成「idle 有结果」。
+        const idleParsed = isToolError(idleRes)
+          ? { ok: false, value: null, reason: "工具报错(isError)" }
+          : parsePayload(idleRes);
         const idleResult =
           idleParsed.ok && idleParsed.value && typeof idleParsed.value === "object"
             ? (idleParsed.value as Record<string, unknown>)
@@ -478,8 +501,9 @@ const def: CaseDefinition = {
         ctx.recordMetric("fgIdleWallMs", idleElapsed);
 
         // 前台 idle **不该**报错：被后台持续请求拖到超时 = 隔离失效（负向验证的红）。
+        // （既看标准字段 isError，也看非标准形态的 `Error [` 文本。）
         ctx.assert(
-          !/Error \[/.test(idleText),
+          !isToolError(idleRes) && !/Error \[/.test(idleText),
           `前台 idle 判定不应报错（被后台慢请求拖到超时），实际: ${idleText.slice(0, 200)}`,
         );
 

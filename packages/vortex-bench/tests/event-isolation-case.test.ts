@@ -58,6 +58,22 @@ interface SimOptions {
   tabFilter: boolean;
   /** awaitIdle 的 idleTime（与扩展一致：500ms）。 */
   idleTime?: number;
+  /**
+   * 让**前台** tab 的 network 日志读取返回一个「标准报错但载荷恰好可解析」的响应：
+   * `{ isError: true, content: [{ type: "text", text: "[]" }] }`。
+   *
+   * 这是 MCP 的真实形态之一：文本里**没有** `Error [`，载荷又能 JSON.parse ⇒
+   * 只靠文本判定会把「读取失败」当成「读取成功、日志是空的」。
+   */
+  fgNetworkReadIsError?: boolean;
+  /**
+   * 让 wait_for 返回一个「标准报错但载荷恰好是**看起来成功**的对象」的响应：
+   * `{ isError: true, content: [{ type: "text", text: '{"idle":true,...}' }] }`。
+   *
+   * 同一类错误：文本里没有 `Error [`，载荷又能 JSON.parse ⇒ 只看文本的旧判定会
+   * 把「idle 报错了」读成「idle 有结果」⇒ 用例假绿。
+   */
+  idleResultIsError?: boolean;
 }
 
 /** MCP 工具返回的文本形态。 */
@@ -174,6 +190,10 @@ class ExtensionSim {
   readNetwork(args: Record<string, unknown>): unknown {
     this.calls.push("debug_read");
     const tabId = this.resolveTab(args, "debug_read");
+    // 故障注入：前台读取返回「isError=true + 载荷恰好是可解析空数组」的响应。
+    if (this.opts.fgNetworkReadIsError && tabId === FG_TAB) {
+      return { isError: true, content: [{ type: "text", text: "[]" }] };
+    }
     const pattern = String(args.pattern ?? "");
     const entries = this.requests
       .filter((r) => r.tabId === tabId && r.url.includes(pattern))
@@ -278,6 +298,18 @@ class ExtensionSim {
     const tabId = this.resolveTab(args, "wait_for");
     const timeout = Number(args.timeout ?? 30000);
     const idleTime = this.opts.idleTime ?? DEFAULT_IDLE_TIME;
+    // 故障注入：返回一个「isError=true + 载荷看起来成功」的 idle 结果。
+    if (this.opts.idleResultIsError) {
+      return Promise.resolve({
+        isError: true,
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({ idle: true, waitedMs: 1, matchedRequests: 1, pendingRequests: 0 }),
+          },
+        ],
+      });
+    }
     // tracked 只做诊断：requestId → {url, type}，供 pending 明细用。
     const tracked = new Map<number, { url: string; type: string }>();
     let matched = 0;
@@ -586,6 +618,34 @@ describe("模拟器建模的 awaitIdle 语义（静默期）", () => {
     expect(res.waitedMs).toBeLessThan(1000);
     expect(res.matchedRequests).toBe(0);
     expect(res.pendingRequests).toBe(0);
+  });
+
+  it("B1 的读取失败**不得**冒充「无泄漏」：isError=true + 载荷恰是可解析空数组 ⇒ 判读取失败", async () => {
+    // 故障注入：前台 tab 的 debug_read 返回 {isError:true, 载荷:"[]"} ——
+    // 文本里没有 `Error [`，载荷又能 JSON.parse ⇒ 只看文本/载荷的旧判定会
+    // 把它当成「读取成功、日志是空的」⇒ B1 假绿。
+    const sim = new ExtensionSim({ tabFilter: true, fgNetworkReadIsError: true });
+    const p = eventIsolation.run(makeCtx(sim));
+    const assertion = expect(p).rejects.toThrow(/B1 前置不成立/);
+    await vi.advanceTimersByTimeAsync(20_000);
+    await assertion;
+
+    // 前台 idle 本身是好的（失败点只在日志读取这一条路上）。
+    expect(sim.idleResolutions.length).toBeGreaterThan(0);
+  });
+
+  it("idle 的报错同样不得冒充「有结果」：isError=true + 载荷恰是可解析对象 ⇒ 判失败", async () => {
+    // 故障注入：wait_for 返回 {isError:true, 载荷:"{\"idle\":true,...}"} ——
+    // 文本里没有 `Error [`，载荷又能 JSON.parse ⇒ 只看文本/载荷的旧判定会
+    // 把它当成「idle 判成功了」⇒ 用例假绿。
+    const sim = new ExtensionSim({ tabFilter: true, idleResultIsError: true });
+    const p = eventIsolation.run(makeCtx(sim));
+    const assertion = expect(p).rejects.toThrow(/前台 idle 判定不应报错/);
+    await vi.advanceTimersByTimeAsync(20_000);
+    await assertion;
+
+    // 关键：一次 idle 都没判成功过（idleResolutions 为空 —— 返回的是报错，不是结果）。
+    expect(sim.idleResolutions).toHaveLength(0);
   });
 
   it("能力边界：页面侧链式 fetch 模拟器建模不了 —— 明确失败，绝不假装成功", async () => {
