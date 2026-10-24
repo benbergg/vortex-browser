@@ -321,15 +321,17 @@ const def: CaseDefinition = {
         // ── ② 后台网络监听先启用 ────────────────────────────────────────────
         // debug_read(source=network) 会 ensureSubscribed → CDP Network.enable，
         // 之后后台 tab 的请求才会产生 requestWillBeSent 事件。
-        const bgSubscribe = extractText(
-          await ctx.call("vortex_debug_read", {
-            source: "network",
-            pattern: "slow",
-            tabId: bgTabId,
-          }),
-        );
+        // ★ 保留**原始响应对象**：MCP 报错的形态有两种 —— isError 标记、或文本里的
+        //   `Error [CODE]:` 形状。只靠文本判定会漏掉「isError=true 但文本里没有
+        //   `Error [`」的形态 ⇒ 订阅其实失败了，却被当成「调用没报错」。
+        const bgSubscribeRes = await ctx.call("vortex_debug_read", {
+          source: "network",
+          pattern: "slow",
+          tabId: bgTabId,
+        });
+        const bgSubscribe = extractText(bgSubscribeRes);
         ctx.assert(
-          !/Error \[/.test(bgSubscribe),
+          !isToolError(bgSubscribeRes) && !/Error \[/.test(bgSubscribe),
           `后台网络订阅调用不应报错，实际: ${bgSubscribe.slice(0, 200)}`,
         );
 
@@ -372,11 +374,15 @@ const def: CaseDefinition = {
         // ── ③ 前台也先把 Network 域打开 ─────────────────────────────────────
         // awaitIdle 里那句 enableDomain 于是变成同步空操作：监听器在同一个 tick
         // 内注册完，不会和「后台慢请求发出」抢先后（抢输了就等于没测）。
-        const fgSubscribe = extractText(
-          await ctx.call("vortex_debug_read", { source: "network", pattern: "slow", tabId: fgTabId }),
-        );
+        // ★ 同上：保留原始响应对象，先判 isError，再判文本形状。
+        const fgSubscribeRes = await ctx.call("vortex_debug_read", {
+          source: "network",
+          pattern: "slow",
+          tabId: fgTabId,
+        });
+        const fgSubscribe = extractText(fgSubscribeRes);
         ctx.assert(
-          !/Error \[/.test(fgSubscribe),
+          !isToolError(fgSubscribeRes) && !/Error \[/.test(fgSubscribe),
           `前台网络订阅调用不应报错，实际: ${fgSubscribe.slice(0, 200)}`,
         );
 

@@ -29,7 +29,12 @@
  * 于是返回可识别的 `no-fetch(...)` 标记并且**不发出任何请求**。
  * 这意味着：本护栏**只能**覆盖用例当前用的「Node 侧 MCP 循环逐个发字面量 fetch」那一种
  * 持续发请求的形态；**不要**在这里写「页面侧链式 fetch」的用例 —— 模拟器会静默地
- * 少发请求，用例就会**假绿**。真机上那种形态由 bench 实跑（suite B）覆盖。
+ * 少发请求，用例就会**假绿**。
+ * ★（2026-10-24 评审 F5 更正）**suite B（bench 实跑）同样不覆盖页面侧链式 fetch**：
+ *   suite B 的后台持续请求用的也是**页面侧字面量 URL 的 fetch**
+ *   （`window.fetch("<字面量 URL>")`，由 Node 侧 MCP 循环按间隔反复 evaluate 发出），
+ *   与本模拟器建模的形态一致。链式 fetch（`window.fetch(u)`）目前**哪儿都没覆盖** ——
+ *   模拟器建模不了，suite B 也没写。别再把它说成「由 bench 实跑覆盖」。
  *
  * 扩展侧的真实过滤由 packages/extension/tests/page-wait-idle-tab-isolation.test.ts
  * 单独锁住（那边直接驱动真的 page.waitForNetworkIdle）。
@@ -64,8 +69,19 @@ interface SimOptions {
    *
    * 这是 MCP 的真实形态之一：文本里**没有** `Error [`，载荷又能 JSON.parse ⇒
    * 只靠文本判定会把「读取失败」当成「读取成功、日志是空的」。
+   *
+   * ★ 只注入**B1 的日志读取**那一次（前台 idle 判定之后的那次读取）：前台另一个
+   *   debug_read 是**订阅调用**（在 idle 判定之前），用例对它也判 isError
+   *   （2026-10-24 评审 F5）—— 两处都注入的话用例会在订阅那步就红，
+   *   反而覆盖不到「B1 读取失败不得冒充无泄漏」这条路径。
    */
   fgNetworkReadIsError?: boolean;
+  /**
+   * 让**前台**的**订阅调用**（前台 idle 判定之前的那次 debug_read）返回 `isError: true`，
+   * 且文本里**故意不带** `Error [`（载荷给 `[]`）—— 测用例对订阅调用的判定是否**只看文本**
+   * （漏判 isError ⇒ 订阅其实失败了却被当成「调用没报错」）。
+   */
+  fgSubscribeIsError?: boolean;
   /**
    * 让 wait_for 返回一个「标准报错但载荷恰好是**看起来成功**的对象」的响应：
    * `{ isError: true, content: [{ type: "text", text: '{"idle":true,...}' }] }`。
@@ -134,6 +150,8 @@ class ExtensionSim {
   readonly idleTimeouts: Array<{ tabId: number; timeout: number; matched: number; pending: number }> = [];
 
   private nextRequestId = 1;
+  /** 本轮 attempt 里，前台的 idle 是否已经判出过（订阅调用在前、B1 日志读取在后）。 */
+  private fgIdleJudged = false;
   private idleListeners: Array<{
     tabId: number;
     onRequest: (req: FakeRequest) => void;
@@ -167,6 +185,9 @@ class ExtensionSim {
   createTab(args: Record<string, unknown>): unknown {
     this.calls.push("tab_create");
     const id = BG_TAB;
+    // 用例每轮 attempt 都先建后台 tab ⇒ 这里就是 attempt 的边界：
+    // 重置「本轮前台 idle 是否已判出」（故障注入按阶段区分时要用）。
+    this.fgIdleJudged = false;
     this.tabs.set(id, {
       id,
       url: String(args.url ?? ""),
@@ -190,8 +211,18 @@ class ExtensionSim {
   readNetwork(args: Record<string, unknown>): unknown {
     this.calls.push("debug_read");
     const tabId = this.resolveTab(args, "debug_read");
-    // 故障注入：前台读取返回「isError=true + 载荷恰好是可解析空数组」的响应。
-    if (this.opts.fgNetworkReadIsError && tabId === FG_TAB) {
+    // 前台有**两个阶段**的 debug_read：①订阅调用（开 Network 域，在前台 idle 判定**之前**）
+    // ②B1 的日志读取（在前台 idle 判定**之后**）。故障注入按阶段区分，不按调用序号 ——
+    // 序号会被用例的重试（MAX_ATTEMPTS）打乱；阶段标志按 attempt 重置（见 createTab）。
+    const afterFgIdle = this.fgIdleJudged;
+    // 故障注入①：**订阅调用**返回 isError=true，且文本里**故意不带** `Error [` ⇒
+    // 只看文本的判定会漏掉它（订阅其实失败了，却被当成「调用没报错」）。
+    if (this.opts.fgSubscribeIsError && tabId === FG_TAB && !afterFgIdle) {
+      return { isError: true, content: [{ type: "text", text: "[]" }] };
+    }
+    // 故障注入②：**日志读取**返回 isError=true + 载荷恰是可解析空数组 ⇒
+    // 读取失败不得冒充「无泄漏」。
+    if (this.opts.fgNetworkReadIsError && tabId === FG_TAB && afterFgIdle) {
       return { isError: true, content: [{ type: "text", text: "[]" }] };
     }
     const pattern = String(args.pattern ?? "");
@@ -352,6 +383,9 @@ class ExtensionSim {
             pendingRequests: tracked.size,
           };
           this.idleResolutions.push({ tabId, ...result });
+          // 本轮（attempt）里前台 idle 已判出 ⇒ 之后的**前台** debug_read 是
+          // B1 的日志读取，不是订阅调用（见 readNetwork 的阶段区分）。
+          if (tabId === FG_TAB) this.fgIdleJudged = true;
           resolve(toolText(result));
         }, idleTime);
       };
@@ -620,6 +654,18 @@ describe("模拟器建模的 awaitIdle 语义（静默期）", () => {
     expect(res.pendingRequests).toBe(0);
   });
 
+  it("订阅调用返回 isError=true（文本里没有 `Error [`）⇒ 必须判订阅失败，不得当成调用成功", async () => {
+    // 2026-10-24 评审 F5：订阅调用的判定**不能只看文本**。MCP 的报错形态之一是
+    // `{isError:true, 载荷:"[]"}` —— 文本里没有 `Error [`，只看文本会判成
+    // 「调用没报错」⇒ 用例带着一个失败的订阅继续跑（后续「探针没进日志」只是碰巧兜住）。
+    // 这里把故障直接打在**订阅调用**上：用例必须立刻判订阅失败。
+    const sim = new ExtensionSim({ tabFilter: true, fgSubscribeIsError: true });
+    const p = eventIsolation.run(makeCtx(sim));
+    const assertion = expect(p).rejects.toThrow(/前台网络订阅调用不应报错/);
+    await vi.advanceTimersByTimeAsync(20_000);
+    await assertion;
+  });
+
   it("B1 的读取失败**不得**冒充「无泄漏」：isError=true + 载荷恰是可解析空数组 ⇒ 判读取失败", async () => {
     // 故障注入：前台 tab 的 debug_read 返回 {isError:true, 载荷:"[]"} ——
     // 文本里没有 `Error [`，载荷又能 JSON.parse ⇒ 只看文本/载荷的旧判定会
@@ -658,6 +704,7 @@ describe("模拟器建模的 awaitIdle 语义（静默期）", () => {
     expect(payloadOf(res)).toContain("no-fetch");
     // 关键：**没有**发出任何请求（少发请求会让用例假绿）。
     expect(sim.requests).toHaveLength(0);
-    // 本护栏因此只覆盖「字面量 URL 的 fetch」这一形态；页面侧链式 fetch 由 bench 实跑覆盖。
+    // 本护栏因此只覆盖「页面侧字面量 URL 的 fetch」这一形态（suite B 实跑用的也是这一形态）；
+    // 页面侧链式 fetch（window.fetch(u)）目前模拟器与 suite B 都没有覆盖。
   });
 });
