@@ -36,8 +36,7 @@
 //   ⑤ **前台开始 idle 监听**（不 await）
 //   ⑥ 前台发一个探针请求 ⇒ 证明监听器确实已经武装（matchedRequests ≥ 1）
 //   ⑦ **后台慢请求**（/slow?ms=6000，页面里记下发起时刻）
-//      **+ 后台持续发请求**（间隔 < idleTime，持续到前台 idle 返回为止）
-//      —— 持续发请求是 B3′ 的放大器：静默期会被不断推后
+//      **+ 后台持续发请求**（间隔 < idleTime，覆盖整个超时窗口）
 //   ⑧ 等前台 idle 判定返回 ⇒ 跑 B1 / B2 / 前提校验
 //
 // 时刻口径：发起时刻取**页面时钟**（浏览器进程），idle 判定时刻用
@@ -55,21 +54,40 @@ const SLOW_MS = 6000;
  */
 const IDLE_TIMEOUT_MS = 4000;
 /**
- * 后台「持续发请求」的间隔（ms）。
+ * 扩展 network idle 的**默认 idleTime**（静默期长度，500ms）——
+ * packages/extension/src/handlers/page.ts 的 WAIT_FOR_NETWORK_IDLE 默认值。
  *
- * **必须 < 扩展的 idleTime**（network idle 默认 500ms）：静默期语义下，静默计时器
- * 随每个新的匹配请求**重启**。后台请求间隔只要小于 idleTime，前台的静默期就一直
- * 被推后 ⇒ 前台永远判不出 idle（负向验证的放大器）。
+ * 判别力的一切都挂在这个数上：后台请求之间的间隔必须 **< idleTime**，
+ * 前台的静默期才会被持续推后（否则前台在空档里本来就会 idle ⇒ 负向验证失去判别力）。
+ * 公开 schema 没有暴露 idleTime 参数（Task 3 的 Minor 遗留项），用例只能按扩展的
+ * 默认值断言。
+ */
+const IDLE_TIME_MS = 500;
+/**
+ * 后台「持续发请求」的调度间隔（ms）。**必须 < IDLE_TIME_MS**（见上）。
+ *
  * 反过来，间隔 ≥ idleTime 时两次请求之间静默期会到期 ⇒ 前台照样 idle ⇒ 又是假绿。
+ * 注意：这是**调度**间隔；真实间隔受 MCP 往返时延影响，用例事后会用日志里的
+ * **实际请求发起时刻**重新算一遍（前提校验），不采信这个调度值。
  */
 const BG_BURST_INTERVAL_MS = 120;
 /**
  * 后台持续请求的**响应**时长（短）。只有**请求发起时刻**影响静默期，响应快慢无关；
- * 取短值是为了让这些请求很快进网络日志（B1 的阳性对照要用它们）。
+ * 取短值是为了让这些请求很快进网络日志（B1 的阳性对照与间隔校验都要用它们）。
  */
 const BG_BURST_URL_MS = 100;
-/** 后台持续请求的次数上限（安全网：前台 idle 最多等 IDLE_TIMEOUT_MS）。 */
-const BG_BURST_MAX = 60;
+/**
+ * 后台持续请求要**覆盖**的时长：前台 idle 的超时窗口 + 余量。
+ *
+ * 为什么不止「持续到前台 idle 返回为止」：判别力取决于「后台请求之间的**实际**
+ * 间隔是否一直 < idleTime」。若某个请求被 MCP 往返拖到 idleTime 之外，它落地的
+ * 时刻在**前台 idle 返回之后** —— 只盯着前台窗口内的请求就**看不见**这个空档，
+ * 于是「间隔 < idleTime」只能验成愿望。让持续请求跑完整个超时窗口，那个被拖后的
+ * 请求就会进日志，空档才暴露得出来（⇒ 判前提失败并重试，而不是判绿）。
+ */
+const BG_BURST_COVER_MS = IDLE_TIMEOUT_MS + 800;
+/** 后台持续请求的次数上限（安全网：真正的时间界限是 BG_BURST_COVER_MS）。 */
+const BG_BURST_MAX = 200;
 /** 前提不成立时的重试次数（环境抖动不该直接判死）。 */
 const MAX_ATTEMPTS = 3;
 /** 等后台 tab 文档加载完成的时限。 */
@@ -81,6 +99,82 @@ interface SlowRequestState {
   start: number | null;
   /** 回读时刻。 */
   now: number;
+}
+
+/** 网络日志条目（扩展 NetworkEntry 的关键字段）。 */
+interface LogEntry {
+  url?: string;
+  /** CDP 记的条目 method 非空；Resource Timing 回填的条目 method 为空。 */
+  method?: string;
+  /** 请求发起时刻（epoch ms）。CDP 与 Resource Timing 回填的条目都有。 */
+  startTime?: number;
+}
+
+/** 一次 network 日志读取的结果。ok=false ⇒ **读不到**（绝不等价于「日志是空的」）。 */
+interface NetworkLogRead {
+  ok: boolean;
+  entries: LogEntry[];
+  /** 读不到的原因（ok=false 时有值）。 */
+  reason: string;
+}
+
+/**
+ * 取工具返回的**首个文本块**（载荷块）。
+ *
+ * MCP 把自陈（`[vortex-diagnosis] …`）拆成**独立的第二块**，载荷块本身是干净的
+ * JSON。用「把两块拼起来再扫括号」的老办法解析空日志会踩坑：
+ * 拼出来的文本是 `[]\n\n[vortex-diagnosis] …`，`lastIndexOf("]")` 落在自陈块里，
+ * JSON.parse 直接失败 ⇒ 老解析器**静默返回空数组** ⇒ 「读不到」被误判成
+ * 「日志里没有 /slow」（B1 恒真）。所以这里只取载荷块、严格 JSON.parse。
+ */
+function payloadText(res: unknown): string {
+  const content = (res as { content?: unknown }).content;
+  if (!Array.isArray(content)) return "";
+  for (const item of content) {
+    if (item && typeof item === "object" && "text" in item) {
+      return String((item as { text: unknown }).text);
+    }
+  }
+  return "";
+}
+
+/** 严格解析工具的载荷块：必须是可解析的 JSON。 */
+function parsePayload(res: unknown): { ok: boolean; value: unknown; reason: string } {
+  const payload = payloadText(res);
+  if (!payload.trim()) return { ok: false, value: null, reason: "载荷块为空" };
+  try {
+    return { ok: true, value: JSON.parse(payload), reason: "" };
+  } catch {
+    return { ok: false, value: null, reason: `载荷不可解析: ${payload.slice(0, 160)}` };
+  }
+}
+
+/**
+ * 严格读一次 network 日志。
+ *
+ * 「严格」= 三件事都过才算读到：
+ *   1. 工具**没报错**（`Error [...]` 形态）；
+ *   2. 载荷块**能被 JSON.parse**；
+ *   3. 载荷**是个数组**（network.getLogs 的返回形状）。
+ * 任何一条不过 ⇒ ok=false。**读不到 ≠ 没有条目** —— 读不到时用例必须判前提不成立，
+ * 绝不能顺势断言「日志里没有 /slow」。
+ */
+async function readNetworkLog(
+  ctx: { call: (name: string, args: Record<string, unknown>) => Promise<unknown> },
+  tabId: number,
+  pattern: string,
+): Promise<NetworkLogRead> {
+  const res = await ctx.call("vortex_debug_read", { source: "network", pattern, tabId });
+  const text = extractText(res);
+  if (/Error \[/.test(text)) {
+    return { ok: false, entries: [], reason: `工具报错: ${text.slice(0, 160)}` };
+  }
+  const parsed = parsePayload(res);
+  if (!parsed.ok) return { ok: false, entries: [], reason: parsed.reason };
+  if (!Array.isArray(parsed.value)) {
+    return { ok: false, entries: [], reason: `载荷不是数组: ${JSON.stringify(parsed.value).slice(0, 160)}` };
+  }
+  return { ok: true, entries: parsed.value as LogEntry[], reason: "" };
 }
 
 /** 从工具返回文本里抠出 JSON 对象（自陈块会拼在后面，故不能直接 parse 全文）。 */
@@ -99,37 +193,6 @@ function parseJsonObject(text: string): Record<string, unknown> | null {
 /** 等一会儿（毫秒）。 */
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-/** 网络日志条目（扩展 NetworkEntry 的关键字段）。 */
-interface LogEntry {
-  url?: string;
-  /** CDP 记的条目 method 非空；Resource Timing 回填的条目 method 为空。 */
-  method?: string;
-  /** 请求发起时刻（epoch ms）。CDP 与 Resource Timing 回填的条目都有。 */
-  startTime?: number;
-}
-
-/**
- * 从工具返回文本里抠出日志条目数组。
- *
- * 两种形态都要认：非空时是裸数组 `[{...}]`；空时是自陈信封
- * `{"__vortexDiagnosis":"...","value":[]}`。
- */
-function parseLogEntries(text: string): LogEntry[] {
-  const start = text.indexOf("[");
-  const end = text.lastIndexOf("]");
-  if (start >= 0 && end > start) {
-    try {
-      const parsed: unknown = JSON.parse(text.slice(start, end + 1));
-      if (Array.isArray(parsed)) return parsed as LogEntry[];
-    } catch {
-      // 落到下面按对象解析
-    }
-  }
-  const obj = parseJsonObject(text);
-  const value = obj?.value;
-  return Array.isArray(value) ? (value as LogEntry[]) : [];
 }
 
 /** 挑出 URL 里带 /slow 的条目（B1 的判定对象）。 */
@@ -267,21 +330,22 @@ const def: CaseDefinition = {
             }
           })()`,
         });
-        let subscribed = false;
-        for (let i = 0; i < 30 && !subscribed; i++) {
-          const entries = parseLogEntries(
-            extractText(
-              await ctx.call("vortex_debug_read", {
-                source: "network",
-                pattern: bgProbeToken,
-                tabId: bgTabId,
-              }),
-            ),
-          );
-          subscribed = entries.some((e) => typeof e.method === "string" && e.method.length > 0);
-          if (!subscribed) await sleep(100);
+        let probeSeen = false;
+        let probeReadError = "";
+        for (let i = 0; i < 30 && !probeSeen; i++) {
+          const read = await readNetworkLog(ctx, bgTabId, bgProbeToken);
+          if (!read.ok) {
+            probeReadError = read.reason;
+            break;
+          }
+          probeSeen = read.entries.some((e) => typeof e.method === "string" && e.method.length > 0);
+          if (!probeSeen) await sleep(100);
         }
-        if (!subscribed) {
+        if (probeReadError) {
+          lastReason = `后台 network 日志读不到（订阅探针轮询）：${probeReadError}`;
+          continue;
+        }
+        if (!probeSeen) {
           lastReason = "后台 tab 的 CDP 网络订阅未生效（探针请求没进网络日志）";
           continue;
         }
@@ -313,14 +377,15 @@ const def: CaseDefinition = {
           timeout: IDLE_TIMEOUT_MS,
           tabId: fgTabId,
         });
-        // 持续发请求的循环靠这个标记退出（「持续到前台 idle 返回为止」）。
-        let idleSettled = false;
+        // idle **判定返回**的时刻必须在这里取：后面还要跑持续发请求的覆盖窗口，
+        // 等到那时再取会把「持续发请求的时长」算进前台的 idle 耗时里（B2 就废了）。
+        let idleSettledAt = 0;
         void idlePromise.then(
           () => {
-            idleSettled = true;
+            idleSettledAt = Date.now();
           },
           () => {
-            idleSettled = true;
+            idleSettledAt = Date.now();
           },
         );
 
@@ -360,7 +425,13 @@ const def: CaseDefinition = {
         // ── ⑦' 后台**持续**发请求（B3′ 的放大器）────────────────────────────
         // 单个慢请求只重置一次静默计时 ⇒ 前台照样 idle（假绿）。必须让后台**源源不断**
         // 地发请求（间隔 < idleTime），静默计时器才会被不断推后 ⇒ 前台等不到 idle。
-        // 不 await 每次调用：调度节奏由本地的间隔决定，不受 MCP 往返时延影响。
+        //
+        // 调度**不 await** 单次调用：节奏由本地的间隔决定，不受 MCP 往返时延影响
+        // （在途请求上限 4，避免堆积）。
+        //
+        // 持续到**覆盖整个超时窗口**为止（不止「前台 idle 返回为止」）：判别力取决于
+        // 「后台请求之间的**实际**间隔是否一直 < idleTime」，而被拖后的那个请求落在
+        // 前台 idle 返回**之后** —— 窗口太短就看不见那个空档（前提校验会漏判）。
         const burstUrl = `${ctx.baseUrl}/slow?ms=${BG_BURST_URL_MS}`;
         const burstCode = `(function(){
           try {
@@ -370,9 +441,10 @@ const def: CaseDefinition = {
             return "failed";
           }
         })()`;
+        const burstStartedAt = Date.now();
         let burstCount = 0;
         let burstInFlight = 0;
-        while (!idleSettled && burstCount < BG_BURST_MAX) {
+        while (Date.now() - burstStartedAt < BG_BURST_COVER_MS && burstCount < BG_BURST_MAX) {
           if (burstInFlight < 4) {
             burstInFlight++;
             burstCount++;
@@ -387,15 +459,23 @@ const def: CaseDefinition = {
           }
           await sleep(BG_BURST_INTERVAL_MS);
         }
-        // 排空在途请求（别让它们在 tab 关掉之后还在飞）。
+        // 排空在途请求（别让它们在 tab 关掉之后还在飞），并给最后几个响应一点时间，
+        // 让它们的日志条目落进来（条目是在 responseReceived 时才记的）。
         await Promise.allSettled(pendingBurst);
+        await sleep(300);
+        ctx.recordMetric("bgBurstCount", burstCount);
 
         // ── ⑧ 等前台 idle 判定 ─────────────────────────────────────────────
-        const idleText = extractText(await idlePromise);
-        const idleElapsed = Date.now() - idleIssuedAt;
-        const idleResult = parseJsonObject(idleText) ?? {};
+        const idleRes = await idlePromise;
+        const idleText = extractText(idleRes);
+        // 前台 idle 调用**自身**的耗时：取 idle 判定返回的时刻，不是「读到结果的时刻」。
+        const idleElapsed = (idleSettledAt > 0 ? idleSettledAt : Date.now()) - idleIssuedAt;
+        const idleParsed = parsePayload(idleRes);
+        const idleResult =
+          idleParsed.ok && idleParsed.value && typeof idleParsed.value === "object"
+            ? (idleParsed.value as Record<string, unknown>)
+            : {};
         ctx.recordMetric("fgIdleWallMs", idleElapsed);
-        ctx.recordMetric("bgBurstCount", burstCount);
 
         // 前台 idle **不该**报错：被后台持续请求拖到超时 = 隔离失效（负向验证的红）。
         ctx.assert(
@@ -428,7 +508,68 @@ const def: CaseDefinition = {
           `B2 前台 idle 调用本身不应被拖到后台慢请求的时长（实际 ${idleElapsed}ms，应 < ${SLOW_MS}ms）`,
         );
 
-        // ── 前提校验：慢请求确实落在监听窗口内 ────────────────────────────────
+        // ── 前提校验①：后台持续请求的**实际间隔**必须 < idleTime，且覆盖窗口 ────
+        // 这一条是 B3′ 的判别力前提：若后台请求之间出现 ≥ idleTime 的空档，
+        // 前台在那个空档里**本来就会**判出 idle（哪怕没有 tab 过滤）⇒ 负向验证
+        // 根本不成立，用例会「恒绿」。所以必须从日志里的**实际请求发起时刻**算间隔，
+        // 不满足 ⇒ 判前提不成立并重试（绝不判绿）。
+        //
+        // 读日志之前先等持续发请求**覆盖完整个超时窗口**（BG_BURST_COVER_MS）：
+        // 被拖后的那个请求落在前台 idle 返回**之后**，窗口太短就看不见那个空档。
+        const coverWaitMs = t0 + BG_BURST_COVER_MS - Date.now();
+        if (coverWaitMs > 0) await sleep(coverWaitMs);
+        const bgLog = await readNetworkLog(ctx, bgTabId, "slow");
+        if (!bgLog.ok) {
+          lastReason = `后台 network 日志读不到（持续请求的前提校验）：${bgLog.reason}`;
+          continue;
+        }
+        const bgSlow = slowEntries(bgLog.entries);
+        ctx.recordMetric("bgBurstCount", bgSlow.length);
+        // B1 的阳性对照：后台 tab 的日志里**必须**有 /slow 条目。
+        // 没有 ⇒ 后台请求压根没进日志（订阅没生效 / 请求没发出）⇒ B1 的「前台没有」
+        // 就是空洞的真（假绿）。
+        if (bgSlow.length === 0) {
+          lastReason = "后台 tab 的网络日志里没有 /slow 条目（请求没进日志，B1 无对照）";
+          continue;
+        }
+        const bgStarts = bgSlow
+          .map((e) => e.startTime)
+          .filter((t): t is number => typeof t === "number")
+          .sort((a, b) => a - b);
+        if (bgStarts.length < 2) {
+          lastReason = `后台持续请求在日志里只留下 ${bgStarts.length} 个请求发起时刻（至少要 2 个才能算间隔），前提不成立`;
+          continue;
+        }
+        let maxGap = 0;
+        for (let i = 1; i < bgStarts.length; i++) {
+          const gap = bgStarts[i] - bgStarts[i - 1];
+          if (gap > maxGap) maxGap = gap;
+        }
+        const firstOffset = bgStarts[0] - t0;
+        const lastOffset = bgStarts[bgStarts.length - 1] - t0;
+        ctx.recordMetric("bgBurstMaxGapMs", maxGap);
+        ctx.recordMetric("bgBurstFirstOffsetMs", firstOffset);
+        ctx.recordMetric("bgBurstLastOffsetMs", lastOffset);
+        if (maxGap >= IDLE_TIME_MS) {
+          lastReason =
+            `后台持续请求出现 ${maxGap}ms 的空档（≥ idleTime ${IDLE_TIME_MS}ms）——` +
+            `前台在那个空档里本来就会判出 idle，负向验证没有判别力`;
+          continue;
+        }
+        if (firstOffset > IDLE_TIME_MS) {
+          lastReason =
+            `后台持续请求的第一个请求在 t0+${firstOffset}ms 才发起（> idleTime ${IDLE_TIME_MS}ms），` +
+            `前台监听窗口的起点没被覆盖`;
+          continue;
+        }
+        if (lastOffset < IDLE_TIMEOUT_MS - IDLE_TIME_MS) {
+          lastReason =
+            `后台持续请求最后一个请求在 t0+${lastOffset}ms 就发完了（没活到超时窗口末尾 ` +
+            `t0+${IDLE_TIMEOUT_MS - IDLE_TIME_MS}ms），前台监听窗口的终点没被覆盖`;
+          continue;
+        }
+
+        // ── 前提校验②：慢请求确实落在监听窗口内 ────────────────────────────────
         const state = extractEvalJson<SlowRequestState>(
           await ctx.call("vortex_evaluate", {
             tabId: bgTabId,
@@ -460,40 +601,18 @@ const def: CaseDefinition = {
         // ── B1：无跨 tab 泄漏 ───────────────────────────────────────────────
         // network 日志由 handlers/network.ts **按 tab 独立维护**，与 awaitIdle 的
         // tab 过滤是**两条独立的链路** —— 所以 B1 单独锁「日志不串台」。
-        const fgNetText = extractText(
-          await ctx.call("vortex_debug_read", { source: "network", pattern: "slow", tabId: fgTabId }),
-        );
-        const fgSlow = slowEntries(parseLogEntries(fgNetText));
+        // 前置：日志必须**读得到**（工具没报错 + 载荷可解析 + 载荷是数组）；
+        // 读不到 ⇒ 判前提不成立，**不能**当成「日志里没有 /slow」。
+        const fgLog = await readNetworkLog(ctx, fgTabId, "slow");
+        if (!fgLog.ok) {
+          lastReason = `B1 前置不成立：前台 network 日志读不到（${fgLog.reason}）`;
+          continue;
+        }
+        const fgSlow = slowEntries(fgLog.entries);
         ctx.assert(
           fgSlow.length === 0,
           `B1 前台 tab 的网络日志不应出现后台的 /slow 条目（跨 tab 泄漏），实际 ${fgSlow.length} 条: ${JSON.stringify(fgSlow).slice(0, 300)}`,
         );
-
-        // B1 的阳性对照：后台 tab 的日志里**必须**有 /slow 条目。
-        // 没有 ⇒ 后台请求压根没进日志（订阅没生效 / 请求没发出）⇒ B1 的「前台没有」
-        // 就是空洞的真（假绿）。这里等一小会儿让请求进日志（响应本身有 100ms 延迟）。
-        let bgSlow: LogEntry[] = [];
-        for (let i = 0; i < 20 && bgSlow.length === 0; i++) {
-          const bgNetText = extractText(
-            await ctx.call("vortex_debug_read", { source: "network", pattern: "slow", tabId: bgTabId }),
-          );
-          bgSlow = slowEntries(parseLogEntries(bgNetText));
-          if (bgSlow.length === 0) await sleep(100);
-        }
-        if (bgSlow.length === 0) {
-          lastReason = "后台 tab 的网络日志里没有 /slow 条目（请求没进日志，B1 无对照）";
-          continue;
-        }
-
-        // 前提校验：后台的持续请求确实落在前台 idle 的监听窗口内 ——
-        // 否则「后台持续发请求」这件事本身没发生，B3′ 的放大器就不成立。
-        const burstInWindow = bgSlow.filter(
-          (e) => typeof e.startTime === "number" && e.startTime >= t0 && e.startTime <= idleDecidedAt,
-        );
-        if (burstInWindow.length === 0) {
-          lastReason = `后台持续请求没有落在前台 idle 的监听窗口内（t0=${t0} ~ 判定=${idleDecidedAt}，日志里的 /slow 起点: ${JSON.stringify(bgSlow.map((e) => e.startTime))}）`;
-          continue;
-        }
 
         return;
       } finally {
