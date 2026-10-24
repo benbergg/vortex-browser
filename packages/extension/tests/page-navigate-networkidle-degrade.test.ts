@@ -20,6 +20,10 @@ import { ActionRouter } from "../src/lib/router.js";
  *
  * 修复:networkidle catch 设 networkIdleTimedOut=true,return 透出(与 load-degrade
  *   的 degraded 信号对齐,让 agent 知晓「网络在超时时仍活跃」可选择重试/继续)。
+ *
+ * ★ 静默期语义(2026-10-23 起):idle 判定只看「最后一次匹配请求后是否已过 idleTime」,
+ *   未结束的请求不再阻断 idle ⇒ 「永不达成」用例的模拟方式随之改为「请求持续不断到来」
+ *   (间隔 < idleTime)。这是有意的语义变更,不是回归。
  */
 
 let updatedListeners: Array<(tabId: number, ci: { status?: string }) => void>;
@@ -101,15 +105,27 @@ describe("navigate waitUntil=networkidle 超时退化须 surface 信号", () => 
     // loadPromise 经 update→complete resolve;awaitIdle enableDomain await 后注册 onEvent。
     await flush();
     expect(onEventCb).toBeDefined();
-    // fire 一个永不 finish 的请求 → tracked.size=1 永不空闲,idleTimer 被清,只剩 timeout。
-    onEventCb!(100, "Network.requestWillBeSent", {
-      requestId: "busy-1",
-      request: { url: "https://x/busy" },
-      type: "Fetch",
-    });
-    // 推进过 idleTimeout(innerCap=min(30000,25000))→ awaitIdle reject → catch → 信号。
-    await vi.advanceTimersByTimeAsync(26_000);
 
+    // ★ 静默期语义（2026-10-23 起）：idle 判定只看「最后一次匹配请求后是否已过
+    //   idleTime」，未结束的请求**不再**阻断 idle ⇒ 「一个挂着的请求」在新语义下
+    //   **会**达成 idle（没有新请求就没有打断），根本走不到 timeout 分支。
+    //   要让 networkidle 永不达成，必须让匹配请求**持续不断到来**（间隔 < idleTime=500ms）：
+    //   每个新请求都把静默计时器往后推 ⇒ 永远等不到静默期 ⇒ 只能等 timeout。
+    let settled = false;
+    void navP.then(() => {
+      settled = true;
+    });
+    const STEP = 100; // < idleTime(500ms)：请求间隔短于静默期 ⇒ 持续打断
+    for (let t = 0; t < 26_000 && !settled; t += STEP) {
+      onEventCb!(100, "Network.requestWillBeSent", {
+        requestId: `busy-${t}`,
+        request: { url: `https://x/busy/${t}` },
+        type: "Fetch",
+      });
+      await vi.advanceTimersByTimeAsync(STEP);
+    }
+
+    // 推进过 idleTimeout(innerCap=min(30000,25000))→ awaitIdle reject → catch → 信号。
     const res = (await navP) as { result?: { networkIdleTimedOut?: boolean; url?: string } };
     expect(res.result?.networkIdleTimedOut).toBe(true);
     expect(res.result?.url).toBe("https://x/#a");
