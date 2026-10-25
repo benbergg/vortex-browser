@@ -79,12 +79,17 @@ beforeEach(() => {
 
 afterEach(async () => {
   // 先数残留定时器（切回真实定时器后就数不到了），再清理状态。
-  expect(vi.getTimerCount(), "用例结束后仍有未清理的定时器").toBe(0);
-  vi.useRealTimers();
-  // 清掉 loader 的已加载模块缓存，避免跨用例污染（_resetPageSideLoader 为导出）
-  loaderModule?._resetPageSideLoader();
-  loaderModule = undefined;
-  delete (globalThis as any).chrome;
+  // 用 try/finally 包住：timer 断言失败时后续清理仍要执行，否则会跳过
+  // useRealTimers() 与 chrome mock 的拆除，污染后续用例。
+  try {
+    expect(vi.getTimerCount(), "用例结束后仍有未清理的定时器").toBe(0);
+  } finally {
+    vi.useRealTimers();
+    // 清掉 loader 的已加载模块缓存，避免跨用例污染（_resetPageSideLoader 为导出）
+    loaderModule?._resetPageSideLoader();
+    loaderModule = undefined;
+    delete (globalThis as any).chrome;
+  }
 });
 
 describe("page-side 注入超时的 hint 合同", () => {
@@ -141,20 +146,20 @@ describe("page-side 注入超时的 hint 合同", () => {
 /**
  * Task 3 —— 注入超时的结构化证据。
  *
- * 背景（7 天日志分析）：历史上 5 次 PAGE_NOT_READY 只有 client 侧 transcript 可查，
- * 服务端零原始日志（hub 启动时只写一行 listening）。agent 与运维都看不到
- * `context.extras` 里的诊断信息 ⇒ 底层诱因（为什么 files 注入 >3s 不 settle）
- * 至今无法定性。
+ * 背景（历史采样）：这类 PAGE_NOT_READY 历史上只有 client 侧 transcript 可查，
+ * 历史采样未见服务端工具错误的结构化日志（当前没有通用的工具响应日志 sink）。
+ * agent 与运维都看不到 `context.extras` 里的诊断信息 ⇒ 底层诱因（为什么 files 注入
+ * >3s 不 settle）至今无法定性。
  *
  * 本组用例锁的是「证据契约」：错误信封里必须带得上 module/tabId/frameId/timeoutMs，
- * 且**不改变** agent 可见的 message 与 hint 文案（落盘只增不改可见面）。
+ * 且**不改变** agent 可见的 message 与 hint 文案（向 stderr 输出证据只是额外通道）。
  */
 describe("page-side 注入超时的 context.extras 结构化证据", () => {
   it("context.extras 带齐 module / tabId / frameId / timeoutMs", async () => {
     const { err } = await captureInjectTimeout({ tabId: 42, frameId: 7 });
 
     const extras = err.extra?.context?.extras;
-    expect(extras, "context.extras 缺失，服务端就无从落盘取证").toBeTypeOf("object");
+    expect(extras, "context.extras 缺失，服务端就无从输出取证信息").toBeTypeOf("object");
     expect(extras).toMatchObject({
       module: "dom-resolve",
       tabId: 42,

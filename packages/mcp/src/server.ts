@@ -87,26 +87,45 @@ function formatError(err: unknown): string {
 }
 
 /**
- * 注入超时(PAGE_NOT_READY)的结构化证据落 stderr：单行 JSON，可 grep。
+ * 注入超时(PAGE_NOT_READY)的结构化证据：向 stderr 输出一行 JSON，可 grep。
  *
- * 为什么需要这条额外通道：MCP 渲染层(formatDispatchError)不输出 context，agent 只拿到
- * `Error [CODE]: message` + `Hint:`；而服务端此前**零工具级原始日志**(hub 启动时只写
- * 一行 listening，见 packages/hub/src/paths.ts)，于是这类失败的取证只能靠 client 侧
- * transcript 转述，运维与 DAST 无法交叉核对(7 天日志分析里最大的取证缺口)。
+ * 为什么需要这条额外通道：**当前 MCP 错误文本**(formatDispatchError)不输出 context，
+ * agent 只拿到 `Error [CODE]: message` + `Hint:`；历史采样未见工具错误的结构化日志
+ * (hub 启动时在 packages/hub/src/main.ts:32 写一行 listening，且 packages/hub/src/spawn.ts:88-95
+ * 把 hub 的 stdout/stderr 一并重定向进该文件，故该文件并非"永远只有一行"；要害是**当前没有
+ * 通用的工具响应日志 sink**)，于是这类失败的取证只能靠 client 侧 transcript 转述，
+ * 运维与 DAST 无法交叉核对。
  *
- * 边界：只落 extras 里已有的诊断字段(module/tabId/frameId/timeoutMs)+ code + ts；
- * 不写 message(可能含页面内容)、不写 selector/snapshotId；非 PAGE_NOT_READY 不写，
- * 避免噪音。**不改动**返回给 agent 的文本——落盘是额外通道，不是把内部字段泄给 agent。
+ * **留存边界**：这里只向 stderr 输出一行。该行**是否被持久留存取决于 MCP 客户端对子进程
+ * stderr 的处理**（MCP stdio 规范允许客户端捕获、转发或忽略）；本项目**未内置日志文件
+ * sink**，本轮**也未验证客户端侧的留存行为**。
+ *
+ * 字段边界：只取 extras 里已有的四个诊断字段(module/tabId/frameId/timeoutMs)并逐个做类型
+ * 校验；固定字段(code/ts/vortex/source)完全由代码构造，**不被 extras 里的同名键覆盖**；
+ * message(可能含页面内容)、selector/snapshotId 以及 extras 中的任何多余键**一律不输出**；
+ * 非 PAGE_NOT_READY 不输出，避免噪音。
+ * **不改动**返回给 agent 的文本——这是额外通道，不是把内部字段泄给 agent。
  */
 function logInjectTimeoutEvidence(err: { code: string; context?: { extras?: unknown } }): void {
   if (err.code !== "PAGE_NOT_READY") return;
   const extras = err.context?.extras;
-  if (!extras || typeof extras !== "object") return;
+  // 数组也是 object，排除掉：extras 的契约是键值对
+  if (!extras || typeof extras !== "object" || Array.isArray(extras)) return;
+  const rec = extras as Record<string, unknown>;
+  // 先做类型校验再输出：module 与 timeoutMs 缺任一，说明这不是 page-side 注入超时
+  // (未来别的 PAGE_NOT_READY 生产者可能不带这些字段)，输出了会污染注入超时的统计。
+  if (typeof rec.module !== "string") return;
+  if (typeof rec.timeoutMs !== "number") return;
   const line = JSON.stringify({
+    // 固定字段在此构造，且下面只按名字取四个白名单字段 → extras 的同名键无法覆盖它们
     vortex: "page_not_ready",
+    source: "page-side-loader",
     ts: new Date().toISOString(),
     code: err.code,
-    ...(extras as Record<string, unknown>),
+    module: rec.module,
+    tabId: typeof rec.tabId === "number" ? rec.tabId : null,
+    frameId: typeof rec.frameId === "number" ? rec.frameId : null,
+    timeoutMs: rec.timeoutMs,
   });
   process.stderr.write(`${line}\n`);
 }
@@ -955,7 +974,7 @@ export async function handleCallTool(
 
     // Action 执行错误
     if (resp.error) {
-      // 注入超时额外落一行结构化证据(stderr)；agent 可见文本不变
+      // 注入超时额外向 stderr 输出一行结构化 JSON；agent 可见文本不变
       logInjectTimeoutEvidence(resp.error);
       return {
         isError: true,
