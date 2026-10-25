@@ -6,17 +6,22 @@
  * - 注入超时抛的 PAGE_NOT_READY，其 hint 必须与 shared 的 PAGE_NOT_READY_INJECT_HINT
  *   **恒等**（单一真源）。此前 loader 内联写死了一段 hint 文案，与 shared 的 hint 表
  *   不是同一真源，且未登记进 OVERRIDE_HINTS ⇒ 绕过了 I19/I20 的 hint 质量契约。
- * - agent 只能看到 `Error [CODE]: message` + `Hint:`（MCP 渲染层不输出 context，
- *   见 packages/mcp/src/lib/dispatch-error.ts:13-32 与 packages/mcp/src/server.ts:81-87），
- *   所以 hint 不得把人引向 context.extras 这类收不到的字段，也不得承诺「重试一定成功」。
+ * - **经当前 MCP 错误文本渲染的调用者**只拿到 `Error [CODE]: message` + `Hint:`
+ *   （MCP 渲染层不输出 context，见 packages/mcp/src/lib/dispatch-error.ts:13-32 与
+ *   packages/mcp/src/server.ts:81-87），所以 hint 不得把人引向 context.extras 这类
+ *   读不到的字段，也不得承诺「重试一定成功」。
+ *   范围限定：CLI（packages/cli/src/client.ts:85-93）会渲染 context JSON，内部/结构化
+ *   消费者也读得到 ⇒ 这里约束的是 MCP 错误文本这一路，不是禁掉 payload 本身。
  *
  * 本文件与 packages/extension/tests/page-side-loader-inject-timeout-code.test.ts 同源
- * （错误分类 / message 形态），但断言的是 hint 合同，二者互补。
+ * （错误分类 / message 关键片段），但断言的是 hint 合同，二者互补。
  */
 import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from "vitest";
 import { type VtxError, VtxErrorCode } from "@vortex-browser/shared";
 
 let executeScriptMock: Mock;
+/** 最近一次动态 import 的 loader 模块：afterEach 用它清已加载模块缓存。 */
+let loaderModule: typeof import("../src/adapter/page-side-loader.js") | undefined;
 
 /** 注入超时阈值，与 loader 的 INJECT_TIMEOUT_MS 对齐（页面端超时 3000ms）。 */
 const INJECT_TIMEOUT_MS = 3000;
@@ -38,6 +43,7 @@ async function importLoaderWithHangingInject() {
 
   const loader = await import("../src/adapter/page-side-loader.js");
   const shared = await import("@vortex-browser/shared");
+  loaderModule = loader;
   return { ...loader, shared };
 }
 
@@ -64,11 +70,18 @@ async function captureInjectTimeout() {
 describe("page-side 注入超时的 hint 合同", () => {
   beforeEach(() => {
     delete (globalThis as any).chrome;
+    loaderModule = undefined;
     vi.useFakeTimers();
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    // 先数残留定时器（切回真实定时器后就数不到了），再清理状态。
+    expect(vi.getTimerCount(), "用例结束后仍有未清理的定时器").toBe(0);
     vi.useRealTimers();
+    // 清掉 loader 的已加载模块缓存，避免跨用例污染（_resetPageSideLoader 为导出）
+    loaderModule?._resetPageSideLoader();
+    loaderModule = undefined;
+    delete (globalThis as any).chrome;
   });
 
   it("错误码为 PAGE_NOT_READY 且 recoverable", async () => {
@@ -87,7 +100,7 @@ describe("page-side 注入超时的 hint 合同", () => {
     expect(err.extra?.hint).toBe(shared.PAGE_NOT_READY_INJECT_HINT);
   });
 
-  it("hint 不引向 agent 收不到的 context.extras", async () => {
+  it("hint 不引向调用方读不到的 context.extras", async () => {
     const { err } = await captureInjectTimeout();
 
     const hint = err.extra?.hint ?? "";
@@ -112,9 +125,10 @@ describe("page-side 注入超时的 hint 合同", () => {
     expect(hint).toContain("vortex_navigate");
   });
 
-  it("message 形态不变：保留模块名与 SW/navigation 诊断信息", async () => {
+  it("message 保留关键诊断片段（模块名与 SW/navigation）", async () => {
     const { err } = await captureInjectTimeout();
 
+    // 只锁关键诊断片段，不声称整条 message 逐字不变（逐字不变由 git diff 佐证）。
     expect(err.message).toContain("dom-resolve");
     expect(err.message).toContain("SW/navigation");
   });
