@@ -7,7 +7,7 @@ tags: [plan, vortex, extract, page-not-ready, hint]
 
 # vortex_extract 注入前置依赖治理 + hint 修正 实施计划
 
-**Goal:** 让 `vortex_extract`（`content.getText`）在**没有 selector** 时不再依赖 `dom-resolve` page-side 模块注入，从而消除本次 7 天日志分析中唯一确认的 Vortex 侧缺陷（5 次 `PAGE_NOT_READY` 全部命中"无 selector 的 extract"路径）；同时修掉 agent 永远看不到的 `context.extras` 悬空 hint 引用，并给注入超时补上可落盘的结构化证据。
+**Goal:** 让 `vortex_extract`（`content.getText`）在**没有 selector** 时不再依赖 `dom-resolve` page-side 模块注入（历史上 5 次 `PAGE_NOT_READY` 全部命中"无 selector 的 extract"路径——**这是相关性，不是已确认根因**；本次移除的是一处无谓依赖，真机修复效果待 DAST 验证）；同时修掉 MCP 错误文本里 agent 永远收不到的 `context.extras` 悬空 hint 引用，并给注入超时补上可落盘的结构化证据。
 
 **Architecture:** 改动集中在三处，彼此独立、可分别回滚：
 1. `packages/extension/src/handlers/content.ts` —— GET_TEXT 的 page-side 预加载改为**按需**（只有解析出 `selector` 才注入 `dom-resolve`）。
@@ -40,6 +40,7 @@ tags: [plan, vortex, extract, page-not-ready, hint]
 - **本轮不改业务语义**：除 Task 1 的"何时注入"外，GET_TEXT 的取值、截断、shadow 文本、include/attrs、scroll 行为一律不动。
 - **本轮明确不做**（codex 复核结论：暂缓，见文末《暂缓清单》）：page-side-loader 内部重试、MCP 层自动重试、GET_HTML 的同款 guard 清理、MCP 入参 schema 校验、注入超时接入共享超时阶梯。
 - **真机 DAST 是唯一真 bug 判据**（`docs/audit-ledger.md`）：未在真机复现的，只能写"静态去依赖，修复有效性待验证"，不得写成"已根治"。
+- **证据等级纪律（codex 复核追加）**：代码注释、测试注释、报告都**不得**把"历史上 5 次 `PAGE_NOT_READY` 全部落在无 selector 的 extract"写成"已确认根因"。允许的表述是"历史上无 selector 请求曾出现该错误；本次移除的是无谓依赖；底层诱因与真机修复效果待验证"。
 
 ## Review Focus（最易咬人的五个点，每条都配了对应测试）
 
@@ -80,7 +81,7 @@ tags: [plan, vortex, extract, page-not-ready, hint]
   - `ContentActions.GET_TEXT === "content.getText"`（`packages/shared/src/actions.ts:58`）
 - Produces: 无新导出。**行为契约**：无 `selector` 的 `content.getText` **不**触发 `files: ["page-side/dom-resolve.js"]` 注入；有 `selector`（含 index/@ref 反查出的）时**仍**先注入再执行 func。
 
-**为什么这样改（根因，已源码级确认）:** 注入的 func 只有在 `sel` 非空时才用 `window.__vortexDomResolve.queryDeep(sel)`（`content.ts:208-210`）；`sel` 为空时 root 取 `document.body`（`:210`），open shadow 文本由 `collectShadowText` 自己遍历 `el.shadowRoot` 拿（`:225-241`），**不依赖 dom-resolve 模块**。而 `:35` 的预加载是无条件硬失败：`files` 注入 3s 不 settle 就抛 `PAGE_NOT_READY`，把一次本可成功的 extract 打断。近 7 天 5 次 `PAGE_NOT_READY` **全部**落在无 selector 的 extract 上。
+**为什么这样改（源码级事实；**底层诱因未定性**）:** 注入的 func 只有在 `sel` 非空时才用 `window.__vortexDomResolve.queryDeep(sel)`（`content.ts:208-210`）；`sel` 为空时 root 取 `document.body`（`:210`），open shadow 文本由 `collectShadowText` 自己遍历 `el.shadowRoot` 拿（`:225-241`），**不依赖 dom-resolve 模块**。而 `:35` 的预加载是无条件硬失败：`files` 注入 3s 不 settle 就抛 `PAGE_NOT_READY`，**会提前终止这次提取**。近 7 天 5 次 `PAGE_NOT_READY` **全部**落在无 selector 的 extract 上（同期同 tab 也有无 selector 的 extract 成功过）⇒ **只能证明相关性**，不能证明同态的 func 注入当时会成功（那 5 次调用在预加载阶段就中止，func 从未执行）；底层诱因与真机恢复效果**待 DAST 验证**。
 
 - [ ] **Step 1: 写失败测试**（新建 `packages/extension/tests/content-get-text-preload.test.ts`，真实 dispatch）
   - 用 `vi.resetModules()` + 动态 `import`（同 `packages/extension/tests/page-side-loader-inject-timeout-code.test.ts` 的做法，避免 `instanceof` 因模块重复求值而失效）。
@@ -96,7 +97,7 @@ tags: [plan, vortex, extract, page-not-ready, hint]
   - 跑：`pnpm --filter @vortex-browser/extension exec vitest run tests/content-get-text-preload.test.ts --maxWorkers=2 --minWorkers=1`
 - [ ] **Step 2: 跑出 RED**（用例 1/4/5 必须红；用例 2/6 必须绿）
 - [ ] **Step 3: 最小实现**
-  - `packages/extension/src/handlers/content.ts:35` 改为按需注入，并把原因写进中文注释：注入的 func 只在有 `selector` 时用 `window.__vortexDomResolve`，无 selector 时 root 取 `document.body`、shadow 文本由 `collectShadowText` 自遍历，**不需要 dom-resolve**；预加载是无条件硬失败，会让本可成功的 extract 被注入超时打断。
+  - `packages/extension/src/handlers/content.ts:35` 改为按需注入，并把原因写进中文注释：注入的 func 只在有 `selector` 时用 `window.__vortexDomResolve`，无 selector 时 root 取 `document.body`、shadow 文本由 `collectShadowText` 自遍历，**不需要 dom-resolve**；预加载是无条件硬失败，注入超时会提前终止这次提取（历史上无 selector 请求曾出现该错误；底层诱因待验证）。
   - **不要**动 `:38` 之后的 func、截断、include/attrs、scroll、alt 逻辑。
 - [ ] **Step 4: 跑出 GREEN**（新文件 + 既有 `content-extract-shadow-text.test.ts` / `content-extract-include.test.ts` / `content-extract-maxlength.test.ts` / `content-extract-scroll.test.ts` / `extract-img-alt.test.ts` 全绿）
 - [ ] **Step 5: 提交** `fix(extension): extract 无 selector 时不再预加载 dom-resolve 模块`
@@ -187,11 +188,12 @@ tags: [plan, vortex, extract, page-not-ready, hint]
   - T6 所有 agent 可见 hint 不含 `context.extras`（新不变量 I21）。
   - T7 `PAGE_NOT_READY` 错误的 hint 与 `PAGE_NOT_READY_INJECT_HINT` 单一真源一致，且不含未公开工具名。
 
-### 真机 DAST（按 `docs/audit-ledger.md`，必须原版先复现）
-- **前置**：在**未打补丁**的版本上复现 `PAGE_NOT_READY`（每种触发条件 ≥20 次冷态对照）⇒ 复现不出来，就只能写"静态去依赖，修复有效性待验证"。
-- **对照**：同一 tab、同一次导航后，files 注入与 func 注入各做 30 次配对。
-- **门槛**：修后累计 ≥300 次独立冷态调用 0 次 `PAGE_NOT_READY` **且** 0 次 `TIMEOUT`（0/300 的 95% 上界约 1%），单次 extract 总耗时不劣化。
-- **必须同时数 `TIMEOUT` 与总耗时**：因为"去掉 files 注入后，func 注入变成该 tab 的第一次注入，若底层诱因是注入顺序，风险会平移到 func 挂 ⇒ 变成 router 20s `TIMEOUT`"（codex 复核的明确警告）。
+### 真机 DAST（按 `docs/audit-ledger.md`，必须原版先复现；门槛按 codex 复核修订）
+- **前置**：在**未打补丁**的版本上复现 `PAGE_NOT_READY`（每种触发条件 ≥20 次冷态对照），并记录浏览器版本、构建戳、SW 实例、tab/frame/documentId、files/func 的起止与 settle 时刻，隔离 `active:false` 的 tab 并固定目标页 ⇒ 复现不出来，就只能写"静态去依赖，修复有效性待验证"。
+- **对照设计（修订）**：**不得**"先用 files 消耗首次坏态，再用同一热文档的 func 作对照"。改为两组**各自独立的新文档/新 SW** 冷态配对（files 首次一组、func 首次一组），每条件 ≥30 对，交错或随机顺序。
+- **门槛**：修后累计 ≥300 次独立冷态调用，**同时**记录 `PAGE_NOT_READY`、`TIMEOUT`、`JS_EXECUTION_ERROR`、其它注入错误，以及正文/controls 是否缺失；只许"错误码减少"不算通过。0 错只是统计门槛（0/300 的 95% 上界约 1%），**不证明根治**。
+- **耗时门槛（量化）**：本地普通非 scroll fixture 单次总耗时 < 3s；真站同条件对照成功耗时 P95 劣化 ≤ 10%；scroll 单列预算。任何迁移到约 20s 的 `TIMEOUT`、或正文缺失，一律判失败。
+- **必须同时数 `TIMEOUT` 与总耗时**：因为"去掉 files 注入后，func 注入变成该 tab 的第一次注入，若底层诱因是注入顺序，风险会平移成 router 20s `TIMEOUT`"（codex 复核的明确警告）。
 
 ---
 
