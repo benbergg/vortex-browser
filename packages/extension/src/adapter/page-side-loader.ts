@@ -7,7 +7,7 @@
 // - MAIN world: same as PR #1 pageQuery to avoid framework isolation
 // - module names centralized to avoid typos and aid grep
 
-import { VtxErrorCode, vtxError } from "@vortex-browser/shared";
+import { PAGE_NOT_READY_INJECT_HINT, VtxErrorCode, vtxError } from "@vortex-browser/shared";
 import { buildExecuteTarget } from "../lib/tab-utils.js";
 
 export type PageSideModule =
@@ -55,6 +55,8 @@ function injectWithTimeout(
     timer = setTimeout(() => {
       // 抛裸 Error 会冒到 router 兜底被归成 JS_EXECUTION_ERROR,hint 让人去查
       // "自己注入的 JS 和 selector"——调用方压根没注入 JS(2026-08-13 日志 3/60 次)
+      // hint 用 shared 的 PAGE_NOT_READY_INJECT_HINT:单一真源 + 受 I19/I20 契约扫描
+      // (此前这里内联写死文案,绕过了登记与扫描)。
       reject(
         vtxError(
           VtxErrorCode.PAGE_NOT_READY,
@@ -62,9 +64,7 @@ function injectWithTimeout(
             `(target tab likely in a bad SW/navigation state); cache evicted, retryable`,
           undefined,
           {
-            hint: "Vortex could not inject its own page-side helper: the tab is in a bad service-worker / " +
-              "navigation state. Call vortex_navigate to reload the tab, or retry after the page settles. " +
-              "This is not caused by your arguments.",
+            hint: PAGE_NOT_READY_INJECT_HINT,
             recoverable: true,
           },
         ),
