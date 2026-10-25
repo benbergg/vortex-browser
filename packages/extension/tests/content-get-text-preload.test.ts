@@ -1,18 +1,19 @@
 /**
+ * @vitest-environment jsdom
+ */
+/**
  * Author: mcode (MiniMax-M3.1-Flash)
  * Description: GET_TEXT 的 page-side 预加载必须按需——没有 selector 时不注入 dom-resolve。
  *
- * 背景(2026-10-25 近 7 天日志分析):366 次调用里 21 次失败,唯一确认的 Vortex 侧缺陷
- * 是 5 次 PAGE_NOT_READY,**全部**落在"没有 selector 的 vortex_extract"上。根因是
- * content.ts 里 GET_TEXT 无条件 `await loadPageSideModule(..., "dom-resolve")`,
- * 而 files 注入 3s 不 settle 就抛 PAGE_NOT_READY,把一次本可成功的 extract 打断。
+ * 证据等级（重要，勿越级断言）：历史上观察到 5 次**无 selector** 的 extract 请求返回
+ * PAGE_NOT_READY（同期同 tab 也有无 selector 的 extract 成功过）。这只能说明
+ * "无 selector 路径与该错误相关"，**不**证明底层注入故障的根因——那几次调用在预加载
+ * 阶段就中止了，同态的 func 注入当时并未执行；也**不**证明真机恢复（真机 DAST 未开展）。
+ * 本文件只验证一件事：**移除这处无用预加载**的行为契约（无 selector 时不再触发
+ * files 注入；func 本身不依赖 dom-resolve）。
  *
- * 注入的 func 只在 sel 非空时才用 `window.__vortexDomResolve.queryDeep(sel)`;
- * sel 为空时 root 取 document.body、open shadow 文本由 collectShadowText 自己遍历
- * el.shadowRoot 拿,**不依赖 dom-resolve 模块** ⇒ 无 selector 时预加载是纯负担。
- *
- * 本文件走真实 dispatch(ActionRouter + registerContentHandlers),只 mock chrome.*,
- * 不用源码正则匹配(改注释就能骗过正则测试)。
+ * 其它：真实 dispatch(ActionRouter + registerContentHandlers)，只 mock chrome.*，
+ * 不用源码正则匹配（改注释就能骗过正则测试）。
  */
 import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from "vitest";
 import type { NmRequest } from "@vortex-browser/shared";
@@ -42,6 +43,17 @@ interface Setup {
   VtxErrorCode: typeof import("@vortex-browser/shared").VtxErrorCode;
 }
 
+// jsdom 未实现 innerText（vortex 的注入 func 读 innerText，不是 textContent）。
+// 这里按 textContent 近似：测试只关心"能否取到文本 / 能否穿透 shadow"，不做 CSS 可见性模拟。
+if (!("innerText" in window.HTMLElement.prototype)) {
+  Object.defineProperty(window.HTMLElement.prototype, "innerText", {
+    configurable: true,
+    get(this: HTMLElement) {
+      return this.textContent;
+    },
+  });
+}
+
 /**
  * 每次 setup 都 resetModules + 动态 import:
  * - page-side-loader 的 loadedModules 是模块级缓存(注入成功后同一 tab 不再注入),
@@ -53,13 +65,17 @@ async function setup(files: FilesBehavior = "settle"): Promise<Setup> {
   vi.resetModules();
 
   const executeScript = vi.fn((injection: Injection) => {
-    // loader 注入(files):默认 settle;hang 复刻坏 SW/navigation 态下永不 settle
-    if (injection?.files) {
+    // loader 预加载(files):默认 settle;hang 复刻坏 SW/navigation 态下永不 settle
+    if (Array.isArray(injection?.files)) {
       if (files === "hang") return new Promise(() => {});
       return Promise.resolve([{ result: undefined }]);
     }
-    // 正文注入(func)
-    return Promise.resolve([{ result: { result: "TEXT" } }]);
+    // 正文注入(func):只有真的带 func 才给正文响应
+    if (typeof injection?.func === "function") {
+      return Promise.resolve([{ result: { result: "TEXT" } }]);
+    }
+    // 既没有 files 也没有 func:形状不认识 ⇒ 直接炸,不静默通过
+    throw new Error("Unexpected injection shape");
   });
 
   (globalThis as any).chrome = {
@@ -71,7 +87,8 @@ async function setup(files: FilesBehavior = "settle"): Promise<Setup> {
     },
     webNavigation: {
       onCommitted: { addListener: vi.fn() },
-      getAllFrames: vi.fn(async () => [{ frameId: 0 }]),
+      // ensureFrameAttached 用它判定 frame 是否还挂着
+      getAllFrames: vi.fn(async () => [{ frameId: 0 }, { frameId: 5 }, { frameId: 9 }]),
     },
   };
 
@@ -99,13 +116,73 @@ function splitCalls(executeScript: Mock): { files: Injection[]; funcs: Injection
 }
 
 /**
- * 让 handler 推进到真正调用 loader(创建 3s 定时器)为止。
- * loader 的定时器在 handler 的第 2 个 await 之后才创建,不预冲刷微任务的话
- * 3000ms 的推进窗口可能落在定时器创建之前,导致超时永远不 fire。
+ * 让 handler 推进到真正调用 loader 为止。
+ * loader 的 3s 定时器是在 `await loadPageSideModule(...)` 求值时于 loader 内部
+ * 同步创建的（injectWithTimeout 里 setTimeout 同步注册），但这次调用发生在 handler
+ * 入口 `getActiveTabId` 的异步续体之后 ⇒ 先冲刷该续体，定时器才能在推进 3000ms 前注册。
  */
 async function flushToLoaderCall(): Promise<void> {
   await vi.advanceTimersByTimeAsync(0);
 }
+
+/** 从 mock 里取出真实注入的正文 func（不自己抄一份） */
+function captureBodyFunc(executeScript: Mock): (...args: unknown[]) => Promise<unknown> {
+  const funcs = splitCalls(executeScript).funcs;
+  expect(funcs).toHaveLength(1);
+  return funcs[0].func as (...args: unknown[]) => Promise<unknown>;
+}
+
+/**
+ * 造一个**故意没有** window.__vortexDomResolve 的 DOM：
+ * 正文节点 + light DOM 的 input + 两层嵌套 open shadow（外层含 input，内层含文字）。
+ */
+function buildDomWithoutDomResolve(): void {
+  document.body.innerHTML = "";
+
+  const bodyText = document.createElement("div");
+  bodyText.id = "body-text";
+  bodyText.textContent = "Visible body text";
+  document.body.appendChild(bodyText);
+
+  const field = document.createElement("input");
+  field.id = "field";
+  field.type = "text";
+  field.setAttribute("value", "light-value");
+  field.setAttribute("data-role", "primary");
+  document.body.appendChild(field);
+
+  const outerHost = document.createElement("div");
+  outerHost.id = "outer-host";
+  document.body.appendChild(outerHost);
+  const outerRoot = outerHost.attachShadow({ mode: "open" });
+
+  const shadowField = document.createElement("input");
+  shadowField.id = "shadow-field";
+  shadowField.type = "text";
+  shadowField.setAttribute("value", "shadow-value");
+  outerRoot.appendChild(shadowField);
+
+  const outerText = document.createElement("p");
+  outerText.textContent = "Outer shadow text";
+  outerRoot.appendChild(outerText);
+
+  const innerHost = document.createElement("div");
+  innerHost.id = "inner-host";
+  outerRoot.appendChild(innerHost);
+  const innerRoot = innerHost.attachShadow({ mode: "open" });
+  const deep = document.createElement("span");
+  deep.id = "deep";
+  deep.textContent = "Deep shadow text";
+  innerRoot.appendChild(deep);
+}
+
+const DEFAULT_OPTS = {
+  wantValue: false,
+  wantAttrs: false,
+  maxDepth: 20,
+  scroll: false,
+  includeAlt: true,
+};
 
 describe("content.getText 的 page-side 预加载按需化", () => {
   beforeEach(() => {
@@ -168,12 +245,67 @@ describe("content.getText 的 page-side 预加载按需化", () => {
     expect(funcs[0].args?.[0]).toBe(".from-snapshot");
   });
 
+  it("index 路径绑定 snapshot 的 tabId(优先于请求里的 tabId)", async () => {
+    const { router, executeScript, setSnapshot } = await setup();
+    // snapshot 的 tabId=7 ≠ 请求里的 tabId=1 ⇒ 以 boundTabId 为准(content.ts:31)
+    setSnapshot("s_tab", {
+      tabId: 7,
+      capturedAt: Date.now(),
+      elements: [{ index: 0, selector: ".bound" }],
+    });
+
+    const resp = await router.dispatch(req({ index: 0, snapshotId: "s_tab" }));
+
+    expect(resp.error).toBeUndefined();
+    const { files, funcs } = splitCalls(executeScript);
+    expect(files[0].target).toEqual({ tabId: 7 });
+    expect(funcs[0].target).toEqual({ tabId: 7 });
+  });
+
+  it("index 路径取元素级 frameId(优先于 snapshot 级 frameId;0 是有效值)", async () => {
+    const { router, executeScript, setSnapshot } = await setup();
+    // 元素 frameId=0 优先于 snapshot frameId=5；`??` 不是 `||`,0 是有效 frame
+    setSnapshot("s_frame0", {
+      tabId: 1,
+      frameId: 5,
+      capturedAt: Date.now(),
+      elements: [{ index: 0, selector: ".bound", frameId: 0 }],
+    });
+
+    const resp = await router.dispatch(req({ index: 0, snapshotId: "s_frame0" }));
+
+    expect(resp.error).toBeUndefined();
+    const { files, funcs } = splitCalls(executeScript);
+    expect(files[0].target).toEqual({ tabId: 1, frameIds: [0] });
+    expect(funcs[0].target).toEqual({ tabId: 1, frameIds: [0] });
+  });
+
+  it("index 路径取元素级 frameId 的非零值", async () => {
+    const { router, executeScript, setSnapshot } = await setup();
+    setSnapshot("s_frame9", {
+      tabId: 1,
+      frameId: 5,
+      capturedAt: Date.now(),
+      elements: [{ index: 0, selector: ".bound", frameId: 9 }],
+    });
+
+    const resp = await router.dispatch(req({ index: 0, snapshotId: "s_frame9" }));
+
+    expect(resp.error).toBeUndefined();
+    const { files, funcs } = splitCalls(executeScript);
+    expect(files[0].target).toEqual({ tabId: 1, frameIds: [9] });
+    expect(funcs[0].target).toEqual({ tabId: 1, frameIds: [9] });
+  });
+
   it("index 路径拿不到 snapshot 时不注入任何模块,也不把异常抛给调用方", async () => {
     const { router, executeScript, VtxErrorCode } = await setup();
 
     const resp = await router.dispatch(req({ index: 0, snapshotId: "missing" }));
 
     expect(resp.error?.code).toBe(VtxErrorCode.STALE_SNAPSHOT);
+    // 失败信封必须带 hint 与 recoverable,agent 才知道下一步该干什么
+    expect(resp.error?.hint).toBeTruthy();
+    expect(resp.error?.recoverable).toBe(true);
     expect(executeScript).not.toHaveBeenCalled();
   });
 
@@ -185,6 +317,8 @@ describe("content.getText 的 page-side 预加载按需化", () => {
     // 真实行为:resolveTargetOptional 对空串走 resolveTarget 的兜底分支,
     // 抛 INVALID_PARAMS —— 空串不会走到 body 提取路径。
     expect(resp.error?.code).toBe(VtxErrorCode.INVALID_PARAMS);
+    expect(resp.error?.hint).toBeTruthy();
+    expect(resp.error?.recoverable).toBe(false);
     expect(executeScript).not.toHaveBeenCalled();
   });
 
@@ -218,13 +352,15 @@ describe("content.getText 的 page-side 预加载按需化", () => {
     const resp = await captured;
 
     expect(resp.error).toBeUndefined();
+    // 意图提示:内层预算(20s)超时会给 TIMEOUT 信封。前一行已断言整个 error 为 undefined,
+    // 这行不构成独立的反平移保障(真机是否退化成 TIMEOUT 需 DAST 验证)。
     expect(resp.error?.code).not.toBe("TIMEOUT");
     expect(resp.result).toBe("TEXT");
     const { files } = splitCalls(executeScript);
     expect(files).toHaveLength(0);
   });
 
-  it("有 selector 时注入挂死仍抛 PAGE_NOT_READY(错误不被吞)", async () => {
+  it("有 selector 时注入挂死仍抛 PAGE_NOT_READY(错误不被吞),且正文注入根本没发生", async () => {
     const { router, executeScript, VtxErrorCode } = await setup("hang");
 
     const pending = router.dispatch(req({ selector: ".x" }));
@@ -235,7 +371,75 @@ describe("content.getText 的 page-side 预加载按需化", () => {
 
     expect(resp.error?.code).toBe(VtxErrorCode.PAGE_NOT_READY);
     expect(resp.error?.message).toContain("dom-resolve");
-    const { files } = splitCalls(executeScript);
+    expect(resp.error?.hint).toBeTruthy();
+    expect(resp.error?.recoverable).toBe(true);
+    const { files, funcs } = splitCalls(executeScript);
     expect(files).toHaveLength(1);
+    // 预加载失败 ⇒ handler 直接中止,正文 func 一次都没注入
+    expect(funcs).toHaveLength(0);
+  });
+});
+
+describe("真实注入 func 的 DOM 级行为(不依赖 dom-resolve)", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    delete (globalThis as any).chrome;
+  });
+
+  it("没有 __vortexDomResolve 的 DOM 里,inline func 仍能取到正文与嵌套 open shadow 文本", async () => {
+    const { router, executeScript } = await setup();
+    // 触发一次注入,把**真实**的正文 func 捕获下来（不自己抄一份）
+    await router.dispatch(req({}));
+    const bodyFunc = captureBodyFunc(executeScript);
+
+    // 前提:DOM 里没有 dom-resolve 的 namespace
+    expect((window as any).__vortexDomResolve).toBeUndefined();
+    buildDomWithoutDomResolve();
+
+    const res = (await bodyFunc(null, DEFAULT_OPTS)) as { result?: string; error?: string };
+
+    // func 内部把异常吞成 {error},所以这里断言 error 不存在 + 文本齐全
+    expect(res.error).toBeUndefined();
+    expect(JSON.stringify(res)).not.toContain("__vortexDomResolve");
+    expect(res.result).toContain("Visible body text");
+    // open shadow 文本由 collectShadowText 自遍历 el.shadowRoot 拿到
+    expect(res.result).toContain("Outer shadow text");
+    // 嵌套 shadow:外层 shadow 的子节点 innerText 拿不到内层,靠继续下钻拿到
+    expect(res.result).toContain("Deep shadow text");
+  });
+
+  it("include:[\"value\",\"attrs\"] 时控件信息可读(light DOM 与 shadow 内的 input 都读得到)", async () => {
+    const { router, executeScript } = await setup();
+    await router.dispatch(req({}));
+    const bodyFunc = captureBodyFunc(executeScript);
+
+    expect((window as any).__vortexDomResolve).toBeUndefined();
+    buildDomWithoutDomResolve();
+
+    const res = (await bodyFunc(null, {
+      ...DEFAULT_OPTS,
+      wantValue: true,
+      wantAttrs: true,
+    })) as {
+      result?: {
+        text?: string;
+        controls?: Array<{ id?: string; value?: unknown; attrs?: Record<string, string> }>;
+      };
+      error?: string;
+    };
+
+    expect(res.error).toBeUndefined();
+    const controls = res.result?.controls ?? [];
+    const light = controls.find((c) => c.id === "field");
+    expect(light?.value).toBe("light-value");
+    expect(light?.attrs?.["data-role"]).toBe("primary");
+    // walkControls 自己下钻 open shadowRoot ⇒ shadow 内的 input 也在
+    const shadow = controls.find((c) => c.id === "shadow-field");
+    expect(shadow?.value).toBe("shadow-value");
+    expect(res.result?.text).toContain("Visible body text");
   });
 });
