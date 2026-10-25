@@ -40,7 +40,8 @@ export const VtxErrorCode = {
    *  不能用普通 DOM 原语（fill/type）安全提交值；需换用 vortex_dom_commit。 */
   UNSUPPORTED_TARGET: "UNSUPPORTED_TARGET",
   /** vortex_dom_commit 的 driver 在流程中途失败（picker 打不开、日期格找不到、校验不一致等）。
-   *  context.extras 会带 stage 字段标识失败阶段。*/
+   *  context.extras 会带 stage 字段标识失败阶段。该字段属结构化载荷:MCP 错误文本
+   *  （packages/mcp/src/lib/dispatch-error.ts）不渲染 context,内部/CLI 消费者才读得到。*/
   COMMIT_FAILED: "COMMIT_FAILED",
 
   // -- L2 Action layer (added in PR #2) --
@@ -65,7 +66,8 @@ export const VtxErrorCode = {
   DRAG_REQUIRES_CDP: "DRAG_REQUIRES_CDP",
   /** select action: 传入的 value 在 <select> 的 option 里既不匹配 value 属性、
    *  也不匹配可见文本(label)。避免静默选不中却返回 success。
-   *  context.extras.available 带可选项清单供 agent 重新选取。*/
+   *  context.extras.available 带可选项清单,供结构化消费者使用;MCP 调用者的错误文本
+   *  不渲染 context,需另行查询可选值。*/
   NO_MATCHING_OPTION: "NO_MATCHING_OPTION",
   /** 赋值/驱动类 act 原语(select 多选 / scroll / press 等)dispatch 后回读校验,
    *  发现副作用未真正发生(选项未选中 / 未滚动 / 状态未变)。避免 dispatch 即返回

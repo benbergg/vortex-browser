@@ -101,6 +101,28 @@ export const TIMEOUT_LIVENESS_META: Readonly<Record<TimeoutLiveness, VtxErrorMet
 });
 
 /**
+ * page-side 模块注入超时的 hint。
+ *
+ * 为什么必须放在 shared 且登记进 OVERRIDE_HINTS:
+ * - 此前 extension 的 page-side-loader 内联写死了一段同义文案,与这里的 hint 表不是
+ *   同一真源;内联文案又没登记进 OVERRIDE_HINTS ⇒ 绕过了 I19/I20 的 hint 质量契约
+ *   (长度/动词/工具名都不受扫描)。
+ * - 文案里不能出现 context.extras:**经当前 MCP 错误文本渲染的调用者**只拿到
+ *   `Error [CODE]: message` + `Hint:`(MCP 渲染层不输出 context,见
+ *   packages/mcp/src/lib/dispatch-error.ts:13-32 与 packages/mcp/src/server.ts:81-87),
+ *   任何"去看 context"都是死路。注意范围限定:CLI 会渲染 context JSON
+ *   (packages/cli/src/client.ts:85-93),内部/结构化消费者也读得到 ⇒
+ *   禁的是"经 MCP 错误文本渲染的调用者"这一路,不是禁掉 payload 本身。
+ *
+ * 3000ms 与 extension 侧 page-side-loader 的 INJECT_TIMEOUT_MS 对齐。两处是各自
+ * 的常量,改超时阈值时**必须同步改这里**,否则文案会与实际阈值不一致(待验证:
+ * 目前无自动化断言锁这个数字)。
+ */
+export const PAGE_NOT_READY_INJECT_HINT =
+  "Vortex could not inject its own page-side helper into the target tab within 3000ms. " +
+  "Call vortex_navigate to reload the tab and retry the same call; vortex_observe on the same tab may still work.";
+
+/**
  * 经 vtxError 第 4 参下发的 override hint 登记表。它们和 DEFAULT_ERROR_META 一样
  * 直达 LLM,故必须一起受 I19/I20 不变量扫描——不登记就是绕过契约。
  */
@@ -109,6 +131,7 @@ export const OVERRIDE_HINTS: Record<string, string> = {
   CDP_BUSY_ATTACH_HINT,
   CDP_BUSY_MOUSE_CLICK_HINT,
   NO_HIT_HINT,
+  PAGE_NOT_READY_INJECT_HINT,
   TIMEOUT_PAGE_ALIVE_HINT,
   TIMEOUT_PAGE_UNRESPONSIVE_HINT,
   TIMEOUT_PROBE_FAILED_HINT,
@@ -172,7 +195,7 @@ export const DEFAULT_ERROR_META: Record<VtxErrorCode, VtxErrorMeta> = {
 
   // -- 网络与标签 --
   NAVIGATION_FAILED: {
-    hint: "Navigation failed (network error, blocked URL, or invalid URL). Verify the url argument passed to vortex_navigate and retry; the context may carry the underlying browser error.",
+    hint: "Navigation failed (network error, blocked URL, or invalid URL). Verify the url argument passed to vortex_navigate and retry the navigation.",
     recoverable: true,
   },
   TAB_NOT_FOUND: {
@@ -190,7 +213,13 @@ export const DEFAULT_ERROR_META: Record<VtxErrorCode, VtxErrorMeta> = {
     recoverable: true,
   },
   JS_EXECUTION_ERROR: {
-    hint: "Injected JavaScript threw an error. Inspect the error message in context.extras and adjust the selector or action arguments before retrying.",
+    // 原文让人去查 context.extras —— 那是经 MCP 错误文本渲染的调用者读不到的字段
+    // (MCP 只渲染 message + hint;CLI 与内部消费者另有通道可读 context)。
+    // 注意本码**不总是**"调用者的 JS 抛异常":query.ts 的 "executeScript returned no result"、
+    // capture.ts 的 "Failed to compute clip"、platform-fonts.ts 读不到指纹/objectId、
+    // router.ts 把任意裸错误兜底映射到本码,都不含 JS 异常原文。
+    // 故这里只让调用方先读错误文本,既不承诺原文是 JS 异常,也不断言一定是参数问题。
+    hint: "Check the error text above for what went wrong. If it points at your code or arguments, adjust them and retry; otherwise call vortex_observe to re-read the page state, then try a different approach.",
     recoverable: false,
   },
   PERMISSION_DENIED: {
@@ -202,7 +231,7 @@ export const DEFAULT_ERROR_META: Record<VtxErrorCode, VtxErrorMeta> = {
     recoverable: true,
   },
   INTERNAL_ERROR: {
-    hint: "Unexpected error in the vortex runtime (server / mcp). Inspect context.extras for the underlying message and retry — transient errors often recover.",
+    hint: "Unexpected error in the vortex runtime (server / mcp); the message above carries the underlying reason. Retry the same call, and check the MCP server state if it keeps happening.",
     recoverable: true,
   },
 
@@ -226,11 +255,16 @@ export const DEFAULT_ERROR_META: Record<VtxErrorCode, VtxErrorMeta> = {
 
   // -- 组件 / 框架 --
   UNSUPPORTED_TARGET: {
-    hint: "Target is a framework-controlled component (e.g. Element Plus datetime-range picker). The runtime auto-routes to a commit driver via vortex_act; if the framework version is not yet covered, inspect context.extras.kind and pick a CSS selector outside the controlled region.",
+    // 不无条件断言"目标是框架组件":UNSUPPORTED_TARGET 的实际目标可能是 native select
+    // (commit-drivers/select.ts:89-91、handlers/dom.ts:1076-1078),而
+    // commit-drivers/select.ts:94-96 与 checkbox-group.ts:55-57 的 message 只说
+    // "不匹配 closestSelector",并不说明实际命中对象 ⇒ 不承诺 message 的内容,
+    // 改成"看错误文本再决定"的条件式指引。
+    hint: "This write was rejected as an unsupported target. Check the error text: if it reports a framework-controlled component and names a tool to use instead, use that tool; otherwise call vortex_observe to re-read the page and pick a different action or selector — do not repeat the same write.",
     recoverable: false,
   },
   COMMIT_FAILED: {
-    hint: "Commit driver failed mid-flow. Inspect context.extras.stage (open-picker / navigate-month / click-day / confirm / verify) to see which step broke; the page state may have changed or the framework version may not be matched by any driver.",
+    hint: "Commit driver failed mid-flow; the message above says which value or step did not settle. Call vortex_observe to re-read the page state, then retry the same action or pick a different selector.",
     recoverable: true,
   },
 
@@ -273,7 +307,7 @@ export const DEFAULT_ERROR_META: Record<VtxErrorCode, VtxErrorMeta> = {
     recoverable: false,
   },
   ACTION_FAILED_ALL_PATHS: {
-    hint: "All fallback paths exhausted (dispatchEvent → CDP → ...). context.extras.attemptedPaths lists what was tried. Inspect via vortex_screenshot, retry with a different selector, or check whether the element lives in a closed shadow root.",
+    hint: "All fallback paths exhausted (dispatchEvent → CDP → ...). Inspect via vortex_screenshot, retry with a different selector, or check whether the element lives in a closed shadow root.",
     recoverable: false,
   },
   DRAG_REQUIRES_CDP: {
@@ -321,7 +355,7 @@ export const DEFAULT_ERROR_META: Record<VtxErrorCode, VtxErrorMeta> = {
   },
 
   NO_MATCHING_OPTION: {
-    hint: "The select value matched no <option> by value attribute or visible text. Read the available options (listed in context.extras.available) and retry vortex_act select with an exact option value or label.",
+    hint: "The select value matched no <option> by value attribute or visible text; the message above names the select and the unmatched value. Call vortex_evaluate to list that select's option values and labels, then retry vortex_act with action='select' and one of the exact values.",
     recoverable: true,
   },
   NO_EFFECT: {

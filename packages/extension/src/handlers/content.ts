@@ -31,8 +31,17 @@ export function registerContentHandlers(router: ActionRouter): void {
       const tid = await getActiveTabId(__t?.boundTabId ?? (args.tabId as number | undefined) ?? tabId);
       const frameId = __t?.boundFrameId ?? (args.frameId as number | undefined);
       if (frameId != null) await ensureFrameAttached(tid, frameId);
-      // 加载 dom-resolve 模块，使 inline func 能通过 shadow 穿透解析 selector
-      await loadPageSideModule(tid, frameId, "dom-resolve");
+      // 按需加载 dom-resolve：只有解析出 selector 时才需要它。
+      // 注入的 func 仅在 sel 非空时才用 window.__vortexDomResolve.queryDeep(sel)；
+      // 无 selector 时 root 取 document.body、open shadow 文本由 collectShadowText
+      // 自己遍历 el.shadowRoot 拿，本来就不依赖 dom-resolve 模块。
+      // 预加载是无条件硬失败：files 注入 3s 不 settle 就抛 PAGE_NOT_READY，
+      // 会提前终止这次提取。历史上无 selector 的 extract 请求曾出现该错误
+      // （同期同 tab 也有无 selector 的 extract 成功过），本次移除的是一处无谓依赖；
+      // 真机是否因此恢复、底层诱因是什么，待 DAST 验证。
+      // selector 必须是**解析后**的值（含 index/@ref 从 snapshot 反查出的），
+      // 用 args.selector 判断会误伤 ref 路径的 shadow 穿透。
+      if (selector) await loadPageSideModule(tid, frameId, "dom-resolve");
       const results = await chrome.scripting.executeScript({
         target: buildExecuteTarget(tid, frameId),
         func: async (sel: string | null, opts: { wantValue: boolean; wantAttrs: boolean; maxDepth: number; scroll: boolean; includeAlt: boolean }) => {
