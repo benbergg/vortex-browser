@@ -86,6 +86,31 @@ function formatError(err: unknown): string {
   return (err as Error)?.message ?? String(err);
 }
 
+/**
+ * 注入超时(PAGE_NOT_READY)的结构化证据落 stderr：单行 JSON，可 grep。
+ *
+ * 为什么需要这条额外通道：MCP 渲染层(formatDispatchError)不输出 context，agent 只拿到
+ * `Error [CODE]: message` + `Hint:`；而服务端此前**零工具级原始日志**(hub 启动时只写
+ * 一行 listening，见 packages/hub/src/paths.ts)，于是这类失败的取证只能靠 client 侧
+ * transcript 转述，运维与 DAST 无法交叉核对(7 天日志分析里最大的取证缺口)。
+ *
+ * 边界：只落 extras 里已有的诊断字段(module/tabId/frameId/timeoutMs)+ code + ts；
+ * 不写 message(可能含页面内容)、不写 selector/snapshotId；非 PAGE_NOT_READY 不写，
+ * 避免噪音。**不改动**返回给 agent 的文本——落盘是额外通道，不是把内部字段泄给 agent。
+ */
+function logInjectTimeoutEvidence(err: { code: string; context?: { extras?: unknown } }): void {
+  if (err.code !== "PAGE_NOT_READY") return;
+  const extras = err.context?.extras;
+  if (!extras || typeof extras !== "object") return;
+  const line = JSON.stringify({
+    vortex: "page_not_ready",
+    ts: new Date().toISOString(),
+    code: err.code,
+    ...(extras as Record<string, unknown>),
+  });
+  process.stderr.write(`${line}\n`);
+}
+
 function normalizeReloadError(
   error: unknown,
   fallbackMessage: string,
@@ -930,6 +955,8 @@ export async function handleCallTool(
 
     // Action 执行错误
     if (resp.error) {
+      // 注入超时额外落一行结构化证据(stderr)；agent 可见文本不变
+      logInjectTimeoutEvidence(resp.error);
       return {
         isError: true,
         content: [{

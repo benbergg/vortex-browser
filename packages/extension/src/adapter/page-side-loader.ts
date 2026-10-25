@@ -46,6 +46,8 @@ function key(tabId: number, frameId: number | undefined, module: PageSideModule)
 function injectWithTimeout(
   target: ReturnType<typeof buildExecuteTarget>,
   module: PageSideModule,
+  tabId: number,
+  frameId: number | undefined,
 ): Promise<void> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const exec = chrome.scripting
@@ -57,12 +59,22 @@ function injectWithTimeout(
       // "自己注入的 JS 和 selector"——调用方压根没注入 JS(2026-08-13 日志 3/60 次)
       // hint 用 shared 的 PAGE_NOT_READY_INJECT_HINT:单一真源 + 受 I19/I20 契约扫描
       // (此前这里内联写死文案,绕过了登记与扫描)。
+      // context.extras 带结构化诊断字段:agent 侧渲染层不输出 context,若服务端也不
+      // 留痕,这类失败就只剩 client transcript 可查,运维无法交叉核对(7 天日志分析:
+      // 服务端零工具级原始日志)。只放诊断字段,不放页面内容。
       reject(
         vtxError(
           VtxErrorCode.PAGE_NOT_READY,
           `page-side module "${module}" injection timed out after ${INJECT_TIMEOUT_MS}ms ` +
             `(target tab likely in a bad SW/navigation state); cache evicted, retryable`,
-          undefined,
+          {
+            extras: {
+              module,
+              tabId,
+              frameId: frameId ?? null,
+              timeoutMs: INJECT_TIMEOUT_MS,
+            },
+          },
           {
             hint: PAGE_NOT_READY_INJECT_HINT,
             recoverable: true,
@@ -91,7 +103,7 @@ export async function loadPageSideModule(
   }
 
   const target = buildExecuteTarget(tabId, frameId);
-  const promise = injectWithTimeout(target, module)
+  const promise = injectWithTimeout(target, module, tabId, frameId)
     .then(() => {
       loadedModules.set(k, true);
     })
