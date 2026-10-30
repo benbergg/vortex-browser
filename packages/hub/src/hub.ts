@@ -15,6 +15,7 @@ import { BrowserRegistry, SessionRegistry, type SessionEntry } from "./registry.
 import { matchBrowser } from "./browser-match.js";
 import { HubRouter } from "./router.js";
 import { createHttpRoutes } from "./http-routes.js";
+import { jsonBodyErrorHandler } from "./json-body-error.js";
 import { WsHub } from "./ws-hub.js";
 import type { PendingTable } from "./pending.js";
 import { getOrCreateVirtualSession as getOrCreateVirtualSessionEntry } from "./virtual-session.js";
@@ -140,6 +141,9 @@ export async function createHub(options: HubOptions = {}): Promise<HubHandle> {
     virtualSessionIdleMs: options.virtualSessionIdleMs,
     virtualSessionRequestTimeoutMs: options.virtualSessionRequestTimeoutMs,
   }));
+  // 必须注册在路由之后：body-parser 的解析错误发生在 express.json() 那一步，
+  // 但 Express 的错误中间件只在它之后的栈里查找，故顺序不能颠倒。
+  app.use(jsonBodyErrorHandler);
   wsHub = new WsHub({ httpServer, sessions, browsers, router, now, hubVersion });
   const port = await listen(httpServer, options.port ?? 0);
   return {

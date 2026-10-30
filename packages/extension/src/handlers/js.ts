@@ -1,4 +1,12 @@
-import { JsActions, MAX_INNER_TIMEOUT_MS, VtxError, VtxErrorCode, vtxError } from "@vortex-browser/shared";
+import {
+  JsActions,
+  MAX_INNER_TIMEOUT_MS,
+  EVALUATE_TIMEOUT_HINT,
+  TIMEOUT_LIVENESS_META,
+  VtxError,
+  VtxErrorCode,
+  vtxError,
+} from "@vortex-browser/shared";
 import type { ActionRouter } from "../lib/router.js";
 import type { DebuggerManager } from "../lib/debugger-manager.js";
 import { getActiveTabId, buildExecuteTarget, ensureFrameAttached } from "../lib/tab-utils.js";
@@ -7,6 +15,7 @@ import {
   SERIALIZER_SOURCE,
   SERIALIZER_FN_NAME,
 } from "../lib/evaluate-serializer.js";
+import { probeLiveness } from "../lib/liveness-probe.js";
 
 /**
  * BUG-003: race a promise against a timeout. Only cancels the client-side wait —
@@ -17,20 +26,77 @@ import {
  * @param ms       Timeout in milliseconds
  * @param action   Tool name for error context
  */
-async function withTimeout<T>(promise: Promise<T>, ms: number, action: string): Promise<T> {
+async function withTimeout<T>(
+  promise: Promise<T>,
+  ms: number,
+  action: string,
+  attribution?: { tabId: number | undefined; frameId: number | undefined },
+): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
+  const plainError = (): VtxError =>
+    vtxError(VtxErrorCode.TIMEOUT,
+      `${action} timed out after ${ms}ms (no result returned; the page-side function may still be running)`,
+      undefined,
+      { hint: EVALUATE_TIMEOUT_HINT });
   const timeoutPromise = new Promise<never>((_, reject) => {
-    timer = setTimeout(
-      () => reject(vtxError(VtxErrorCode.TIMEOUT,
-        `${action} timed out after ${ms}ms (page-side func may still be running; set shorter timeout, simplify code, or use vortex_navigate to clear the tab)`)),
-      ms,
-    );
+    timer = setTimeout(() => {
+      if (!attribution) {
+        reject(plainError());
+        return;
+      }
+      // 归因要探一次页面活性（最多 300ms），拿到结果再拒；探针本身失败不改变结局
+      attributeEvaluateTimeout(attribution.tabId, attribution.frameId, ms, action).then(
+        (err) => reject(err),
+        () => reject(plainError()),
+      );
+    }, ms);
   });
   try {
     return await Promise.race([promise, timeoutPromise]);
   } finally {
     if (timer) clearTimeout(timer);
   }
+}
+
+/**
+ * 超时之后做一次**活性归因**：页内代码没结束 ≠ 页面卡死。
+ *
+ * 2026-10-30 一周日志分析：实测 10 次 evaluate 超时里 9 次是 loki 查询类调用
+ * （8 次多步串行 fetch 扫描 + 1 次同步查询表达式），1 次是 SQL 编辑器执行 + sleep 取文本；
+ * 预算序列 5/60/45/40/55/5/45/30/40/5 秒并非单调抬高，**日志只证明「预算内没拿到结果」**，
+ * 证明不了页内 promise 状态，也证明不了旧文案导致了加预算。
+ * 但旧文案（一句笼统建议）确实无法区分两种形态：
+ *   - 页面还活着 → 问题在本次调用的页内代码（拆任务 / 按需加预算）
+ *   - 页面不响应 → 主线程被长任务占住（等 idle / 换 tab / 重载）
+ *
+ * 这里复用 action 层已有的探针（lib/liveness-probe.ts，300ms 预算）与四态 hint 表
+ * （shared/errors.hints.ts 的 TIMEOUT_LIVENESS_META），不新造机制。
+ * 探针只打一个极短空脚本，正常路径零开销；探针自身失败一律记 probe-failed，
+ * 不谎报 page-alive。
+ */
+async function attributeEvaluateTimeout(
+  tabId: number | undefined,
+  frameId: number | undefined,
+  timeoutMs: number,
+  action: string,
+  message?: string,
+): Promise<ReturnType<typeof vtxError>> {
+  let liveness: "page-alive" | "page-unresponsive" | "probe-failed" | "tab-gone" = "probe-failed";
+  try {
+    liveness = await probeLiveness(tabId, undefined, frameId);
+  } catch {
+    liveness = "probe-failed";
+  }
+  const meta = TIMEOUT_LIVENESS_META[liveness];
+  // 页面还活着 → 保留 evaluate 专用的 hint（它更具体：拆任务 / 按需加预算）
+  const hint = liveness === "page-alive" ? EVALUATE_TIMEOUT_HINT : meta.hint;
+  const recoverable = liveness === "page-alive" ? true : meta.recoverable;
+  return vtxError(
+    VtxErrorCode.TIMEOUT,
+    message ?? `${action} timed out after ${timeoutMs}ms (no result returned; the page-side function may still be running)`,
+    { extras: { action, timeoutMs, liveness } },
+    { hint, recoverable },
+  );
 }
 
 /** Detect CDP "Script execution timed out" error (Chrome 99+). */
@@ -42,7 +108,7 @@ function jsTimeoutError(timeoutMs: number): ReturnType<typeof vtxError> {
   return vtxError(VtxErrorCode.TIMEOUT,
     `Script execution timed out after ${timeoutMs}ms (CDP Runtime.evaluate killed page-side)`,
     undefined,
-    { hint: "Avoid infinite loops or long-running operations. Set shorter timeout, simplify code, or split into multiple calls." });
+    { hint: EVALUATE_TIMEOUT_HINT });
 }
 
 /**
@@ -158,7 +224,16 @@ async function cdpEvaluate(
     // out"),外层 isTimeoutError 据此映射为干净 TIMEOUT(同步死循环 + 异步 pending 统一走此路)。
     // 非超时的真错(早于 timeout 的 reject:detached/协议错)原样抛 → 外层 jsExecutionError。
     if (e instanceof VtxError && e.code === VtxErrorCode.TIMEOUT) {
-      throw jsTimeoutError(timeoutMs);
+      // 统一走活性归因：页面还活着 → 拆任务；页面不响应/已消失 → 对应形态的 hint。
+      // 消息保持 “Script execution timed out …” 形态：外层 isTimeoutError 据此把
+      // CDP 回退路径的认死循环/异步 pending 稳定映射成 TIMEOUT（而不是 JS_EXECUTION_ERROR）。
+      throw await attributeEvaluateTimeout(
+        tabId,
+        undefined,
+        timeoutMs,
+        "evaluate",
+        `Script execution timed out after ${timeoutMs}ms (CDP Runtime.evaluate killed page-side)`,
+      );
     }
     throw e;
   }
@@ -293,7 +368,7 @@ export function registerJsHandlers(
         world: "MAIN",
       });
       // BUG-003: race executeScript against timeout
-      const results = await withTimeout(execPromise, timeout, "js.evaluate");
+      const results = await withTimeout(execPromise, timeout, "js.evaluate", { tabId: tid, frameId });
       const res = results[0]?.result as { result?: unknown; error?: string; autoIIFE?: boolean };
       if (res?.error) {
         // CSP 禁 unsafe-eval 或 TT policy 不可创建时回退 CDP Runtime.evaluate(仅主 frame——
@@ -320,6 +395,8 @@ export function registerJsHandlers(
                 false,
               );
             }
+            // 已做过活性归因的超时(带 extras.liveness)直接透传,保留归因与对应 hint
+            if (e instanceof VtxError && e.code === VtxErrorCode.TIMEOUT) throw e;
             if (isTimeoutError(m)) {
               throw jsTimeoutError(timeout);
             }
@@ -415,7 +492,7 @@ export function registerJsHandlers(
         world: "MAIN",
       });
       // BUG-003: race executeScript against timeout
-      const results = await withTimeout(execPromise, timeout, "js.evaluateAsync");
+      const results = await withTimeout(execPromise, timeout, "js.evaluateAsync", { tabId: tid, frameId });
       const res = results[0]?.result as { result?: unknown; error?: string };
       if (res?.error) {
         // CSP 禁 unsafe-eval 或 TT policy 不可创建时回退 CDP Runtime.evaluate(仅主 frame)。
@@ -447,10 +524,13 @@ export function registerJsHandlers(
               } catch (e2) {
                 const m2 = e2 instanceof Error ? e2.message : String(e2);
                 // 函数体重试若超时,保留 TIMEOUT 分类(否则被降级为 JS_EXECUTION_ERROR)。
+                if (e2 instanceof VtxError && e2.code === VtxErrorCode.TIMEOUT) throw e2;
                 if (isTimeoutError(m2)) throw jsTimeoutError(timeout);
                 throw jsExecutionError(m2);
               }
             }
+            // 已做过活性归因的超时(带 extras.liveness)直接透传,保留归因与对应 hint
+            if (e instanceof VtxError && e.code === VtxErrorCode.TIMEOUT) throw e;
             if (isTimeoutError(m)) {
               throw jsTimeoutError(timeout);
             }

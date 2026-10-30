@@ -1,0 +1,485 @@
+{
+  "schema": 2,
+  "window": {
+    "from": "2026-10-16T13:30:00.000Z",
+    "to": "2026-10-23T13:30:00.000Z",
+    "observedFrom": "2026-10-17T12:48:19.865Z",
+    "observedTo": "2026-10-23T12:14:36.471Z",
+    "activeDays": 4
+  },
+  "coverage": {
+    "window": {
+      "from": "2026-10-16T13:30:00.000Z",
+      "to": "2026-10-23T13:30:00.000Z"
+    },
+    "perSource": {
+      "claude": {
+        "filesScanned": 89,
+        "filesWithVortex": 7,
+        "filesUnreadable": 0,
+        "calls": 97,
+        "results": 97
+      },
+      "pi": {
+        "filesScanned": 195,
+        "filesWithVortex": 4,
+        "filesUnreadable": 0,
+        "calls": 0,
+        "results": 0
+      },
+      "codex": {
+        "filesScanned": 277,
+        "filesWithVortex": 2,
+        "filesUnreadable": 0,
+        "calls": 0,
+        "results": 0
+      }
+    },
+    "codexAux": {
+      "calls": 71,
+      "perTool": {
+        "browser": 3,
+        "tab_list": 2,
+        "observe": 12,
+        "act": 16,
+        "extract": 16,
+        "press": 1,
+        "screenshot": 1,
+        "evaluate": 16,
+        "mouse_click": 1,
+        "query": 2,
+        "navigate": 1
+      }
+    }
+  },
+  "totals": {
+    "calls": 97,
+    "ok": 84,
+    "errors": 13,
+    "settled": 97,
+    "unpaired": 0,
+    "unknown": 0,
+    "errorRate": 0.134,
+    "emptySuccess": 4,
+    "emptyUnknown": 0,
+    "emptyRate": 0.0476,
+    "unknownRate": 0,
+    "unpairedRate": 0
+  },
+  "cost": {
+    "resultChars": 188635,
+    "argsChars": 11241,
+    "medianDurationMs": 799,
+    "p95DurationMs": 11297,
+    "durationSamples": 97
+  },
+  "perTool": [
+    {
+      "tool": "evaluate",
+      "calls": 20,
+      "ok": 19,
+      "errors": 1,
+      "errorRate": 0.05,
+      "emptySuccess": 0,
+      "emptyUnknown": 0,
+      "emptyRate": 0,
+      "unpaired": 0,
+      "unknown": 0,
+      "resultChars": 11656,
+      "argsChars": 5977,
+      "medianDurationMs": 241,
+      "p95DurationMs": 14314,
+      "maxDurationMs": 14314,
+      "over5s": 1
+    },
+    {
+      "tool": "extract",
+      "calls": 15,
+      "ok": 9,
+      "errors": 6,
+      "errorRate": 0.4,
+      "emptySuccess": 0,
+      "emptyUnknown": 0,
+      "emptyRate": 0,
+      "unpaired": 0,
+      "unknown": 0,
+      "resultChars": 36963,
+      "argsChars": 621,
+      "medianDurationMs": 1175,
+      "p95DurationMs": 7813,
+      "maxDurationMs": 7813,
+      "over5s": 3
+    },
+    {
+      "tool": "query",
+      "calls": 13,
+      "ok": 12,
+      "errors": 1,
+      "errorRate": 0.0769,
+      "emptySuccess": 4,
+      "emptyUnknown": 0,
+      "emptyRate": 0.3333,
+      "unpaired": 0,
+      "unknown": 0,
+      "resultChars": 56505,
+      "argsChars": 1438,
+      "medianDurationMs": 1692,
+      "p95DurationMs": 4331,
+      "maxDurationMs": 4331,
+      "over5s": 0
+    },
+    {
+      "tool": "observe",
+      "calls": 12,
+      "ok": 12,
+      "errors": 0,
+      "errorRate": 0,
+      "emptySuccess": 0,
+      "emptyUnknown": 0,
+      "emptyRate": 0,
+      "unpaired": 0,
+      "unknown": 0,
+      "resultChars": 54075,
+      "argsChars": 597,
+      "medianDurationMs": 8942,
+      "p95DurationMs": 85097,
+      "maxDurationMs": 85097,
+      "over5s": 7
+    },
+    {
+      "tool": "navigate",
+      "calls": 7,
+      "ok": 6,
+      "errors": 1,
+      "errorRate": 0.1429,
+      "emptySuccess": 0,
+      "emptyUnknown": 0,
+      "emptyRate": 0,
+      "unpaired": 0,
+      "unknown": 0,
+      "resultChars": 1108,
+      "argsChars": 1018,
+      "medianDurationMs": 2077,
+      "p95DurationMs": 5755,
+      "maxDurationMs": 5755,
+      "over5s": 1
+    },
+    {
+      "tool": "mouse_click",
+      "calls": 7,
+      "ok": 6,
+      "errors": 1,
+      "errorRate": 0.1429,
+      "emptySuccess": 0,
+      "emptyUnknown": 0,
+      "emptyRate": 0,
+      "unpaired": 0,
+      "unknown": 0,
+      "resultChars": 1516,
+      "argsChars": 338,
+      "medianDurationMs": 658,
+      "p95DurationMs": 1607,
+      "maxDurationMs": 1607,
+      "over5s": 0
+    },
+    {
+      "tool": "tab_list",
+      "calls": 5,
+      "ok": 5,
+      "errors": 0,
+      "errorRate": 0,
+      "emptySuccess": 0,
+      "emptyUnknown": 0,
+      "emptyRate": 0,
+      "unpaired": 0,
+      "unknown": 0,
+      "resultChars": 22033,
+      "argsChars": 10,
+      "medianDurationMs": 534,
+      "p95DurationMs": 1838,
+      "maxDurationMs": 1838,
+      "over5s": 0
+    },
+    {
+      "tool": "screenshot",
+      "calls": 5,
+      "ok": 5,
+      "errors": 0,
+      "errorRate": 0,
+      "emptySuccess": 0,
+      "emptyUnknown": 0,
+      "emptyRate": 0,
+      "unpaired": 0,
+      "unknown": 0,
+      "resultChars": 1370,
+      "argsChars": 245,
+      "medianDurationMs": 353,
+      "p95DurationMs": 1194,
+      "maxDurationMs": 1194,
+      "over5s": 0
+    },
+    {
+      "tool": "act",
+      "calls": 4,
+      "ok": 2,
+      "errors": 2,
+      "errorRate": 0.5,
+      "emptySuccess": 0,
+      "emptyUnknown": 0,
+      "emptyRate": 0,
+      "unpaired": 0,
+      "unknown": 0,
+      "resultChars": 1257,
+      "argsChars": 350,
+      "medianDurationMs": 4177,
+      "p95DurationMs": 4987,
+      "maxDurationMs": 4987,
+      "over5s": 0
+    },
+    {
+      "tool": "wait_for",
+      "calls": 3,
+      "ok": 3,
+      "errors": 0,
+      "errorRate": 0,
+      "emptySuccess": 0,
+      "emptyUnknown": 0,
+      "emptyRate": 0,
+      "unpaired": 0,
+      "unknown": 0,
+      "resultChars": 184,
+      "argsChars": 149,
+      "medianDurationMs": 2636,
+      "p95DurationMs": 3516,
+      "maxDurationMs": 3516,
+      "over5s": 0
+    },
+    {
+      "tool": "debug_read",
+      "calls": 3,
+      "ok": 2,
+      "errors": 1,
+      "errorRate": 0.3333,
+      "emptySuccess": 0,
+      "emptyUnknown": 0,
+      "emptyRate": 0,
+      "unpaired": 0,
+      "unknown": 0,
+      "resultChars": 1776,
+      "argsChars": 330,
+      "medianDurationMs": 321,
+      "p95DurationMs": 526,
+      "maxDurationMs": 526,
+      "over5s": 0
+    },
+    {
+      "tool": "browser",
+      "calls": 1,
+      "ok": 1,
+      "errors": 0,
+      "errorRate": 0,
+      "emptySuccess": 0,
+      "emptyUnknown": 0,
+      "emptyRate": 0,
+      "unpaired": 0,
+      "unknown": 0,
+      "resultChars": 75,
+      "argsChars": 2,
+      "medianDurationMs": 112,
+      "p95DurationMs": 112,
+      "maxDurationMs": 112,
+      "over5s": 0
+    },
+    {
+      "tool": "tab_create",
+      "calls": 1,
+      "ok": 1,
+      "errors": 0,
+      "errorRate": 0,
+      "emptySuccess": 0,
+      "emptyUnknown": 0,
+      "emptyRate": 0,
+      "unpaired": 0,
+      "unknown": 0,
+      "resultChars": 50,
+      "argsChars": 104,
+      "medianDurationMs": 1583,
+      "p95DurationMs": 1583,
+      "maxDurationMs": 1583,
+      "over5s": 0
+    },
+    {
+      "tool": "fill",
+      "calls": 1,
+      "ok": 1,
+      "errors": 0,
+      "errorRate": 0,
+      "emptySuccess": 0,
+      "emptyUnknown": 0,
+      "emptyRate": 0,
+      "unpaired": 0,
+      "unknown": 0,
+      "resultChars": 67,
+      "argsChars": 62,
+      "medianDurationMs": 1731,
+      "p95DurationMs": 1731,
+      "maxDurationMs": 1731,
+      "over5s": 0
+    }
+  ],
+  "perSource": [
+    {
+      "src": "claude",
+      "calls": 97,
+      "ok": 84,
+      "errors": 13,
+      "errorRate": 0.134,
+      "emptySuccess": 4,
+      "unpaired": 0,
+      "unknown": 0
+    }
+  ],
+  "perSession": [
+    {
+      "session": "a7c841e7-f6ba-4b24-b8c5-20467abe7afb",
+      "calls": 49,
+      "ok": 46,
+      "errors": 3,
+      "errorRate": 0.0612
+    },
+    {
+      "session": "cae08c46-5e3c-4c5d-bb13-b2acdfdf626c",
+      "calls": 27,
+      "ok": 20,
+      "errors": 7,
+      "errorRate": 0.2593
+    },
+    {
+      "session": "16422695-cde2-4333-addc-a4f66754c158",
+      "calls": 12,
+      "ok": 9,
+      "errors": 3,
+      "errorRate": 0.25
+    },
+    {
+      "session": "f9b4d687-b036-42eb-ae8b-add4e778fea5",
+      "calls": 5,
+      "ok": 5,
+      "errors": 0,
+      "errorRate": 0
+    },
+    {
+      "session": "8b1beda7-3921-46bd-b5b2-a20d4fa68991",
+      "calls": 4,
+      "ok": 4,
+      "errors": 0,
+      "errorRate": 0
+    }
+  ],
+  "recovery": {
+    "nextOk": 9,
+    "nextError": 4,
+    "nextOther": 0,
+    "sessions": 5
+  },
+  "perDay": [
+    [
+      "2026-10-17",
+      49
+    ],
+    [
+      "2026-10-19",
+      27
+    ],
+    [
+      "2026-10-21",
+      4
+    ],
+    [
+      "2026-10-23",
+      17
+    ]
+  ],
+  "topErrors": [
+    {
+      "sig": "extract | Error [PAGE_NOT_READY]: page-side module \"dom-resolve\" injection timed out after Nms (target tab likely in a bad SW/navigation state); cache evicted, retryable ",
+      "count": 4
+    },
+    {
+      "sig": "extract | Error [ELEMENT_NOT_FOUND]: Element not found: .detail-content, #content, .main-content Hint: Element not found. Verify the selector or call vortex_observe to li",
+      "count": 1
+    },
+    {
+      "sig": "debug_read | Error [INTERNAL_ERROR]: Request not found: rt:<url> Hint: The requestId was not found in the network log. Use vortex_debug_read(source=network) to list requests",
+      "count": 1
+    },
+    {
+      "sig": "query | Error [INVALID_PARAMS]: vortex_query: mode must be 'text', 'css', 'component', 'elements', 'geometry', 'style', 'sheet', 'flow', 'chart', 'schema' or 'tokens', ",
+      "count": 1
+    },
+    {
+      "sig": "evaluate | Error [JS_EXECUTION_ERROR]: Unexpected token ')' Hint: Injected JavaScript threw an error. Inspect the error message in context.extras and adjust the selector o",
+      "count": 1
+    },
+    {
+      "sig": "navigate | Error [TAB_NOT_FOUND]: No tab with id: N. Hint: tabId argument does not exist. Call vortex_tab_create to open a new tab, or omit tabId to operate on the active ",
+      "count": 1
+    },
+    {
+      "sig": "mouse_click | Error [INVALID_PARAMS]: x and y are required Hint: Invalid parameters. Check the tool schema for required fields and value constraints, then retry with correcte",
+      "count": 1
+    },
+    {
+      "sig": "act | Error [UNSUPPORTED_ACTION]: act: action must be one of click|fill|type|select|scroll|hover, got undefined Hint: Verify the action argument matches one of vortex",
+      "count": 1
+    },
+    {
+      "sig": "extract | Error [ELEMENT_NOT_FOUND]: Element not found: .el-table Hint: Element not found. Verify the selector or call vortex_observe to list interactive elements with th",
+      "count": 1
+    },
+    {
+      "sig": "act | Error [SELECTOR_AMBIGUOUS]: Selector \".vxe-table--body-wrapper .vxe-body--row:first-child button:first-child\" matched N elements. Matched candidates: #N <button",
+      "count": 1
+    }
+  ],
+  "topErrorCodes": [
+    {
+      "code": "PAGE_NOT_READY",
+      "count": 4
+    },
+    {
+      "code": "ELEMENT_NOT_FOUND",
+      "count": 2
+    },
+    {
+      "code": "INVALID_PARAMS",
+      "count": 2
+    },
+    {
+      "code": "INTERNAL_ERROR",
+      "count": 1
+    },
+    {
+      "code": "JS_EXECUTION_ERROR",
+      "count": 1
+    },
+    {
+      "code": "TAB_NOT_FOUND",
+      "count": 1
+    },
+    {
+      "code": "UNSUPPORTED_ACTION",
+      "count": 1
+    },
+    {
+      "code": "SELECTOR_AMBIGUOUS",
+      "count": 1
+    }
+  ],
+  "routes": {
+    "vortex": 97,
+    "playwright": 0,
+    "vortexShare": 1
+  },
+  "label": "week-2026-10-23"
+}
