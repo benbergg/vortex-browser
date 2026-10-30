@@ -24,6 +24,14 @@ import { liftQueryRefToTarget } from "./lib/query-ref.js";
 import { applyFingerprint, extractSignals, shouldRecover, type FingerprintOpt } from "./lib/fingerprint-apply.js";
 import { runSequence, type SequenceStepInput, type OnFailure } from "./lib/sequence-run.js";
 import { formatDispatchError } from "./lib/dispatch-error.js";
+import {
+  appendUsage,
+  sanitizeClientId,
+  sanitizeErrorCode,
+  sanitizeToolName,
+  usageLogEnabled,
+} from "./usage-log.js";
+import { VtxErrorCode as VtxErrorCodes } from "@vortex-browser/shared";
 import { lookupIdentity } from "./lib/observe-render.js";
 import { pickOtherBrowsers, type HealthBrowser } from "./lib/other-browsers.js";
 import { ensureBrowserRunning, installedBrowsers } from "./lib/launch-browser.js";
@@ -280,13 +288,95 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
   inflight++;
   try {
-    const blocked = await precheckBrowser(request.params.name);
-    return blocked ?? await handleCallTool(request);
+    return await handleToolCallWithUsage(request);
   } finally {
     inflight--;
     maybeExitAfterDrain();
   }
 });
+
+/**
+ * 工具调用 + 使用遥测。抛出的异常也记一行（UNHANDLED）后原样抛出：
+ * 不记就等于丢掉最需要诊断的一类失败。
+ */
+async function handleToolCallWithUsage(
+  request: { params: { name: string; arguments?: unknown } },
+): Promise<{ content: ContentItem[]; isError?: boolean }> {
+  const started = Date.now();
+  try {
+    const blocked = await precheckBrowser(request.params.name);
+    const result = blocked ?? await handleCallTool(request);
+    recordUsage(request.params.name, request.params.arguments, result, Date.now() - started);
+    return result;
+  } catch (err) {
+    recordUsage(
+      request.params.name,
+      request.params.arguments,
+      { content: [{ type: "text", text: "" }], isError: true },
+      Date.now() - started,
+      "UNHANDLED",
+    );
+    throw err;
+  }
+}
+
+/**
+ * 落一行使用遥测（默认关，见 usage-log.ts）。
+ * 只在服务端真跑过一次调用时才有意义，故挂在 SDK 入口（handleCallTool 的所有出口都经过它）。
+ *
+ * 隐私边界（2026-10-30 codex 复核后收紧）：**tool / errorCode / client 三个字段
+ * 都是外部可控字符串**，直接落盘会把用户误填的 URL、客户端自报的敏感标识带进本机日志。
+ * 故：tool 只保留**已注册**的工具名，errorCode 只保留**已知错误码**，client 只保留
+ * 严格匹配 [A-Za-z0-9._-]{1,64} 的标识（否则归 unknown）。三个字段都不会原样落盘外部文本。
+ */
+function recordUsage(
+  toolName: string,
+  args: unknown,
+  result: { content?: Array<{ type: string; text?: string }>; isError?: boolean },
+  durationMs: number,
+  errorCode?: string | null,
+): void {
+  if (!usageLogEnabled()) return;
+  const text = (result.content ?? [])
+    .map((c) => (typeof c?.text === "string" ? c.text : ""))
+    .join("");
+  const codeMatch = /Error \[([A-Z_]+)\]/.exec(text);
+  let argLen = 0;
+  try {
+    argLen = JSON.stringify(args ?? {}).length;
+  } catch {
+    argLen = 0; // 不可序列化的入参不记长度，也不因此让调用失败
+  }
+  appendUsage({
+    ts: new Date().toISOString(),
+    tool: sanitizeToolName(toolName, (n) => Boolean(getToolDef(n))),
+    outcome: result.isError ? "error" : "ok",
+    // 只接受已知 vortex 错误码；未带错误码的失败（如 Unknown tool）标 UNKNOWN
+    errorCode: result.isError
+      ? sanitizeErrorCode(errorCode ?? (codeMatch ? codeMatch[1] : null), KNOWN_ERROR_CODES)
+      : null,
+    durationMs,
+    argLen,
+    resultLen: text.length,
+    client: clientId(),
+    pid: process.pid,
+  });
+}
+
+/** 已知 vortex 错误码集合（外部给的大写文本不在其中 → 归 UNKNOWN） */
+const KNOWN_ERROR_CODES = new Set<string>(Object.values(VtxErrorCodes));
+
+/** 客户端标识：只保留严格形态的 name@version，否则归 unknown（不落外部原文） */
+function clientId(): string | null {
+  try {
+    const v = (server as unknown as { getClientVersion?: () => { name?: string; version?: string } | undefined })
+      .getClientVersion?.();
+    const raw = v?.name ? (v.version ? `${v.name}@${v.version}` : v.name) : null;
+    return sanitizeClientId(raw);
+  } catch {
+    return null;
+  }
+}
 
 /**
  * 调用前确保有浏览器可用，没有就尝试拉起。

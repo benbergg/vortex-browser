@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { ActionRouter } from "../src/lib/router.js";
 import { registerJsHandlers } from "../src/handlers/js.js";
+import { EVALUATE_TIMEOUT_HINT, TIMEOUT_TAB_GONE_HINT } from "@vortex-browser/shared";
 
 /**
  * VORTEX_FEEDBACK v3.4 BUG-003: vortex_evaluate 死循环导致整个 vortex 栈 crash
@@ -43,7 +44,10 @@ describe("vortex_evaluate timeout 参数 (BUG-003)", () => {
       offEvent: vi.fn(),
     };
     vi.stubGlobal("chrome", {
-      tabs: { query: vi.fn().mockResolvedValue([{ id: 42 }]) },
+      tabs: {
+        query: vi.fn().mockResolvedValue([{ id: 42 }]),
+        get: vi.fn().mockResolvedValue({ id: 42 }),
+      },
       webNavigation: {
         getAllFrames: vi.fn().mockResolvedValue([
           { frameId: 0, parentFrameId: -1, url: "https://x/" },
@@ -74,7 +78,8 @@ describe("vortex_evaluate timeout 参数 (BUG-003)", () => {
     expect(out.error!.code).toBe("TIMEOUT");
     expect(out.error!.message).toMatch(/timed out/i);
     // 应在 ~100-200ms 内返回,而不是 30s
-    expect(elapsed).toBeLessThan(500);
+    // （超时后会补一次活性探测,最多再加 300ms，见下方「页面还活着」用例）
+    expect(elapsed).toBeLessThan(800);
   });
 
   it("不传 timeout 用默认 5000ms (但显式传 200ms 加速测试)", async () => {
@@ -89,8 +94,8 @@ describe("vortex_evaluate timeout 参数 (BUG-003)", () => {
     const elapsed = Date.now() - start;
 
     expect(out.error?.code).toBe("TIMEOUT");
-    // 应在 ~200-300ms 内 timeout
-    expect(elapsed).toBeLessThan(500);
+    // 应在 ~200-300ms 内 timeout（+ 最多 300ms 的超时后活性探测）
+    expect(elapsed).toBeLessThan(800);
     expect(elapsed).toBeGreaterThan(150);
   });
 
@@ -142,6 +147,47 @@ describe("vortex_evaluate timeout 参数 (BUG-003)", () => {
     const elapsed = Date.now() - start;
 
     expect(out.error?.code).toBe("TIMEOUT");
-    expect(elapsed).toBeLessThan(500);
+    expect(elapsed).toBeLessThan(800);
+  });
+
+  // 2026-10-30 一周日志分析：实测 10 次 evaluate 超时里 9 次是 loki 查询类调用、1 次是
+  // UI 执行 + sleep 取文本；旧文案却让 agent“set shorter timeout / vortex_navigate 清 tab”，
+  // 与这类形态相反。此处锁住新 hint。
+  it("超时错误带可执行的 hint（拆任务 / 按需加预算），不再让 agent 缩短超时", async () => {
+    // 探针(pageQuery)的 func 是 `() => 1`；页内求值的 func 是用户代码。
+    // 让探针秒回（页面还活着），让求值永不 settle（页内 promise 未结束）。
+    executeScript.mockImplementation((opts: { func?: unknown }) => {
+      const src = String(opts?.func ?? "");
+      if (src.includes("=> 1")) return Promise.resolve([{ result: 1 }]);
+      return new Promise(() => {});
+    });
+
+    const out = await router.dispatch(
+      mkReq("js.evaluate", { code: "await fetch('/x')", timeout: 100 }, 42),
+    ) as { error?: { code: string; message: string; hint?: string; context?: { extras?: Record<string, unknown> } } };
+
+    expect(out.error?.code).toBe("TIMEOUT");
+    const hint = out.error?.hint ?? "";
+    expect(hint).toBe(EVALUATE_TIMEOUT_HINT);
+    expect(hint).not.toMatch(/set shorter timeout/i);
+    expect(out.error?.message).not.toMatch(/set shorter timeout/i);
+    expect(out.error?.message).not.toMatch(/vortex_navigate to clear/i);
+    // 活性归因落进结构化证据（页面还活着 → 问题在本次调用自身路径）
+    expect(out.error?.context?.extras?.liveness).toBe("page-alive");
+  });
+
+  it("页面已消失时，超时归因到 tab-gone 而不是笼统 TIMEOUT", async () => {
+    (chrome.tabs.get as unknown as { mockRejectedValueOnce: (e: Error) => void }).mockRejectedValueOnce(
+      new Error("No tab with id: 42"),
+    );
+    executeScript.mockImplementation(() => new Promise(() => {}));
+
+    const out = await router.dispatch(
+      mkReq("js.evaluate", { code: "await fetch('/x')", timeout: 100 }, 42),
+    ) as { error?: { code: string; hint?: string; context?: { extras?: Record<string, unknown> } } };
+
+    expect(out.error?.code).toBe("TIMEOUT");
+    expect(out.error?.hint).toBe(TIMEOUT_TAB_GONE_HINT);
+    expect(out.error?.context?.extras?.liveness).toBe("tab-gone");
   });
 });

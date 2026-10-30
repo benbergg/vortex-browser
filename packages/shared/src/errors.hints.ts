@@ -123,6 +123,31 @@ export const PAGE_NOT_READY_INJECT_HINT =
   "Call vortex_navigate to reload the tab and retry the same call; vortex_observe on the same tab may still work.";
 
 /**
+ * page-side 脚本超时（js.evaluate / js.evaluateAsync / CDP 回退路径）的 hint。
+ *
+ * 为什么要换掉旧的硬编码文案（2026-10-30 一周日志分析）：
+ * - 旧文案写死“set shorter timeout … or use vortex_navigate to clear the tab”，
+ *   方向与实测形态相反：实测 10 次 evaluate 超时里 9 次是 **loki 查询类**调用
+ *   （8 次多步串行 fetch 扫描 + 1 次同步查询表达式），1 次是 SQL 编辑器执行 + sleep 取文本。
+ *   对这类“页内代码没在预算内结束”的形态，加预算通常不解决问题、拆任务才解决；
+ *   清 tab 更是重操作。
+ * - 旧文案断言“page-side func may still be running”是**未经证实**的：超时只说明
+ *   本次调用没拿到结果，不能证明页面还活着、也不能证明那个函数还在跑。
+ *   故新文案只陈述已知的（超时了），其余用条件句。
+ * - 不能引导“无脑重试”：超时后原代码可能仍在页内跑，重试会叠加副作用。
+ *
+ * 注意：日志只能证明“预算内没拿到结果”；**旧文案是否导致 agent 去加预算，日志证不了**
+ * （实测预算序列 5/60/45/40/55/5/45/30/40/5 秒并非单调抬高）。
+ *
+ * 约束：必须同时过 I19（50~300 字符、含 next-action 动词与工具/参数名）与
+ * I21（不得出现 context.extras 这类调用者读不到的字段）。
+ */
+export const EVALUATE_TIMEOUT_HINT =
+  "The page-side function did not finish within the timeout budget; no result was returned. " +
+  "Split the work into smaller vortex_evaluate calls, or set a larger timeout when the workload is known to be long. " +
+  "If the tab stops answering, call vortex_observe on another tab or vortex_navigate to reload it.";
+
+/**
  * 经 vtxError 第 4 参下发的 override hint 登记表。它们和 DEFAULT_ERROR_META 一样
  * 直达 LLM,故必须一起受 I19/I20 不变量扫描——不登记就是绕过契约。
  */
@@ -130,6 +155,7 @@ export const OVERRIDE_HINTS: Record<string, string> = {
   ANCESTOR_HIT_HINT,
   CDP_BUSY_ATTACH_HINT,
   CDP_BUSY_MOUSE_CLICK_HINT,
+  EVALUATE_TIMEOUT_HINT,
   NO_HIT_HINT,
   PAGE_NOT_READY_INJECT_HINT,
   TIMEOUT_PAGE_ALIVE_HINT,

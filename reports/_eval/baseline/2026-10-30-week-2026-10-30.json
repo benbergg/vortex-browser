@@ -1,0 +1,539 @@
+{
+  "schema": 2,
+  "window": {
+    "from": "2026-10-23T13:30:00.000Z",
+    "to": "2026-10-30T13:30:00.000Z",
+    "observedFrom": "2026-10-27T06:59:09.786Z",
+    "observedTo": "2026-10-30T08:41:14.512Z",
+    "activeDays": 3
+  },
+  "coverage": {
+    "window": {
+      "from": "2026-10-23T13:30:00.000Z",
+      "to": "2026-10-30T13:30:00.000Z"
+    },
+    "perSource": {
+      "claude": {
+        "filesScanned": 9,
+        "filesWithVortex": 2,
+        "filesUnreadable": 0,
+        "calls": 418,
+        "results": 418
+      },
+      "pi": {
+        "filesScanned": 195,
+        "filesWithVortex": 4,
+        "filesUnreadable": 0,
+        "calls": 137,
+        "results": 137
+      },
+      "codex": {
+        "filesScanned": 7,
+        "filesWithVortex": 0,
+        "filesUnreadable": 0,
+        "calls": 0,
+        "results": 0
+      }
+    },
+    "codexAux": {
+      "calls": 0,
+      "perTool": {}
+    }
+  },
+  "totals": {
+    "calls": 555,
+    "ok": 509,
+    "errors": 46,
+    "settled": 555,
+    "unpaired": 0,
+    "unknown": 0,
+    "errorRate": 0.0829,
+    "emptySuccess": 5,
+    "emptyUnknown": 29,
+    "emptyRate": 0.0104,
+    "unknownRate": 0,
+    "unpairedRate": 0
+  },
+  "cost": {
+    "resultChars": 838626,
+    "argsChars": 352375,
+    "medianDurationMs": 1297,
+    "p95DurationMs": 12852,
+    "durationSamples": 555
+  },
+  "perTool": [
+    {
+      "tool": "evaluate",
+      "calls": 382,
+      "ok": 356,
+      "errors": 26,
+      "errorRate": 0.0681,
+      "emptySuccess": 2,
+      "emptyUnknown": 20,
+      "emptyRate": 0.006,
+      "unpaired": 0,
+      "unknown": 0,
+      "resultChars": 538120,
+      "argsChars": 339815,
+      "medianDurationMs": 1382,
+      "p95DurationMs": 14372,
+      "maxDurationMs": 60533,
+      "over5s": 103
+    },
+    {
+      "tool": "act",
+      "calls": 35,
+      "ok": 28,
+      "errors": 7,
+      "errorRate": 0.2,
+      "emptySuccess": 0,
+      "emptyUnknown": 1,
+      "emptyRate": 0,
+      "unpaired": 0,
+      "unknown": 0,
+      "resultChars": 5600,
+      "argsChars": 2769,
+      "medianDurationMs": 1215,
+      "p95DurationMs": 3487,
+      "maxDurationMs": 8044,
+      "over5s": 1
+    },
+    {
+      "tool": "observe",
+      "calls": 32,
+      "ok": 29,
+      "errors": 3,
+      "errorRate": 0.0938,
+      "emptySuccess": 0,
+      "emptyUnknown": 4,
+      "emptyRate": 0,
+      "unpaired": 0,
+      "unknown": 0,
+      "resultChars": 121025,
+      "argsChars": 1681,
+      "medianDurationMs": 1451,
+      "p95DurationMs": 9357,
+      "maxDurationMs": 90470,
+      "over5s": 8
+    },
+    {
+      "tool": "navigate",
+      "calls": 32,
+      "ok": 28,
+      "errors": 4,
+      "errorRate": 0.125,
+      "emptySuccess": 0,
+      "emptyUnknown": 0,
+      "emptyRate": 0,
+      "unpaired": 0,
+      "unknown": 0,
+      "resultChars": 5253,
+      "argsChars": 4647,
+      "medianDurationMs": 1763,
+      "p95DurationMs": 12461,
+      "maxDurationMs": 63604,
+      "over5s": 6
+    },
+    {
+      "tool": "tab_list",
+      "calls": 16,
+      "ok": 16,
+      "errors": 0,
+      "errorRate": 0,
+      "emptySuccess": 1,
+      "emptyUnknown": 0,
+      "emptyRate": 0.0625,
+      "unpaired": 0,
+      "unknown": 0,
+      "resultChars": 41061,
+      "argsChars": 148,
+      "medianDurationMs": 1135,
+      "p95DurationMs": 8596,
+      "maxDurationMs": 8596,
+      "over5s": 1
+    },
+    {
+      "tool": "extract",
+      "calls": 16,
+      "ok": 13,
+      "errors": 3,
+      "errorRate": 0.1875,
+      "emptySuccess": 0,
+      "emptyUnknown": 2,
+      "emptyRate": 0,
+      "unpaired": 0,
+      "unknown": 0,
+      "resultChars": 31951,
+      "argsChars": 844,
+      "medianDurationMs": 640,
+      "p95DurationMs": 65936,
+      "maxDurationMs": 65936,
+      "over5s": 2
+    },
+    {
+      "tool": "debug_read",
+      "calls": 16,
+      "ok": 15,
+      "errors": 1,
+      "errorRate": 0.0625,
+      "emptySuccess": 0,
+      "emptyUnknown": 0,
+      "emptyRate": 0,
+      "unpaired": 0,
+      "unknown": 0,
+      "resultChars": 71065,
+      "argsChars": 1157,
+      "medianDurationMs": 1119,
+      "p95DurationMs": 2193,
+      "maxDurationMs": 2193,
+      "over5s": 0
+    },
+    {
+      "tool": "browser",
+      "calls": 15,
+      "ok": 15,
+      "errors": 0,
+      "errorRate": 0,
+      "emptySuccess": 0,
+      "emptyUnknown": 0,
+      "emptyRate": 0,
+      "unpaired": 0,
+      "unknown": 0,
+      "resultChars": 1083,
+      "argsChars": 266,
+      "medianDurationMs": 1261,
+      "p95DurationMs": 12820,
+      "maxDurationMs": 12820,
+      "over5s": 2
+    },
+    {
+      "tool": "query",
+      "calls": 7,
+      "ok": 6,
+      "errors": 1,
+      "errorRate": 0.1429,
+      "emptySuccess": 2,
+      "emptyUnknown": 1,
+      "emptyRate": 0.4,
+      "unpaired": 0,
+      "unknown": 0,
+      "resultChars": 22973,
+      "argsChars": 807,
+      "medianDurationMs": 573,
+      "p95DurationMs": 1187,
+      "maxDurationMs": 1187,
+      "over5s": 0
+    },
+    {
+      "tool": "screenshot",
+      "calls": 2,
+      "ok": 2,
+      "errors": 0,
+      "errorRate": 0,
+      "emptySuccess": 0,
+      "emptyUnknown": 1,
+      "emptyRate": 0,
+      "unpaired": 0,
+      "unknown": 0,
+      "resultChars": 174,
+      "argsChars": 101,
+      "medianDurationMs": 2865,
+      "p95DurationMs": 2865,
+      "maxDurationMs": 2865,
+      "over5s": 0
+    },
+    {
+      "tool": "press",
+      "calls": 1,
+      "ok": 1,
+      "errors": 0,
+      "errorRate": 0,
+      "emptySuccess": 0,
+      "emptyUnknown": 0,
+      "emptyRate": 0,
+      "unpaired": 0,
+      "unknown": 0,
+      "resultChars": 68,
+      "argsChars": 15,
+      "medianDurationMs": 1014,
+      "p95DurationMs": 1014,
+      "maxDurationMs": 1014,
+      "over5s": 0
+    },
+    {
+      "tool": "fill",
+      "calls": 1,
+      "ok": 0,
+      "errors": 1,
+      "errorRate": 1,
+      "emptySuccess": 0,
+      "emptyUnknown": 0,
+      "emptyRate": null,
+      "unpaired": 0,
+      "unknown": 0,
+      "resultChars": 253,
+      "argsChars": 125,
+      "medianDurationMs": 915,
+      "p95DurationMs": 915,
+      "maxDurationMs": 915,
+      "over5s": 0
+    }
+  ],
+  "perSource": [
+    {
+      "src": "claude",
+      "calls": 418,
+      "ok": 392,
+      "errors": 26,
+      "errorRate": 0.0622,
+      "emptySuccess": 3,
+      "unpaired": 0,
+      "unknown": 0
+    },
+    {
+      "src": "pi",
+      "calls": 137,
+      "ok": 117,
+      "errors": 20,
+      "errorRate": 0.146,
+      "emptySuccess": 2,
+      "unpaired": 0,
+      "unknown": 0
+    }
+  ],
+  "perSession": [
+    {
+      "session": "8ca2e797-36e4-44f2-bd98-14d9a640e041",
+      "calls": 385,
+      "ok": 359,
+      "errors": 26,
+      "errorRate": 0.0675
+    },
+    {
+      "session": "/Users/lg/.pi/agent/sessions/--Users-lg-workspace-Knowledge-Library-conductor-Athena--/2026-10-30T00-43-39-361Z_01a18a43-27df-75f9-ac4c-a1e7ae76cbc5.jsonl",
+      "calls": 90,
+      "ok": 81,
+      "errors": 9,
+      "errorRate": 0.1
+    },
+    {
+      "session": "/Users/lg/.pi/agent/sessions/--Users-lg-workspace-Knowledge-Library-conductor-Athena--/2026-10-30T07-40-59-014Z_01a18bc1-3b05-71d9-b7a4-ae5bfc8087c5.jsonl",
+      "calls": 36,
+      "ok": 30,
+      "errors": 6,
+      "errorRate": 0.1667
+    },
+    {
+      "session": "9b1f2b32-1ea0-4831-be37-012b42810ce0",
+      "calls": 33,
+      "ok": 33,
+      "errors": 0,
+      "errorRate": 0
+    },
+    {
+      "session": "/Users/lg/.pi/agent/sessions/--Users-lg-workspace-Knowledge-Library-conductor-Athena--/2026-10-30T08-38-56-246Z_01a18bf6-49f4-71d9-b7a4-ae5f4cd91aaa.jsonl",
+      "calls": 11,
+      "ok": 6,
+      "errors": 5,
+      "errorRate": 0.4545
+    }
+  ],
+  "recovery": {
+    "nextOk": 32,
+    "nextError": 14,
+    "nextOther": 0,
+    "sessions": 5
+  },
+  "perDay": [
+    [
+      "2026-10-27",
+      385
+    ],
+    [
+      "2026-10-29",
+      33
+    ],
+    [
+      "2026-10-30",
+      137
+    ]
+  ],
+  "topErrors": [
+    {
+      "sig": "evaluate | Error [TIMEOUT]: js.evaluateAsync timed out after Nms (page-side func may still be running; set shorter timeout, simplify code, or use vortex_navigate to clear ",
+      "count": 9
+    },
+    {
+      "sig": "navigate | Error [TAB_NOT_FOUND]: No tab with id: N. Hint: tabId argument does not exist. Call vortex_tab_create to open a new tab, or omit tabId to operate on the active ",
+      "count": 2
+    },
+    {
+      "sig": "evaluate | Error [JS_EXECUTION_ERROR]: Frame with ID N is showing error page Hint: Injected JavaScript threw an error. Inspect the error message in context.extras and adju",
+      "count": 2
+    },
+    {
+      "sig": "evaluate | Failed to call tool: data/async must be boolean, data/timeout must be number Expected parameters: code (string) *required* async (boolean) timeout (number) [max",
+      "count": 2
+    },
+    {
+      "sig": "act | Error: Error [OBSCURED]: Element is covered by <div#empty-state.h-full.flex> after Nms of retrying; hit-testing its center reaches that element, not the target ",
+      "count": 2
+    },
+    {
+      "sig": "observe | Failed to call tool: data/tabId must be number Expected parameters: scope (enum: \"viewport\", \"full\") filter (enum: \"interactive\", \"all\") frames (enum: \"main\", \"",
+      "count": 2
+    },
+    {
+      "sig": "evaluate | Failed to call tool: data/async must be boolean Expected parameters: code (string) *required* async (boolean) timeout (number) [maximum: N] [default: N] tabId (",
+      "count": 2
+    },
+    {
+      "sig": "act | Error [INVALID_SELECTOR]: target \"button:has-text(\"查询\")\" uses Playwright locator syntax (text= / >> / :has-text()), which is not supported. vortex_act target ac",
+      "count": 1
+    },
+    {
+      "sig": "evaluate | Error [JS_EXECUTION_ERROR]: Unexpected token 'h', \"the query t\"... is not valid JSON Hint: Injected JavaScript threw an error. Inspect the error message in cont",
+      "count": 1
+    },
+    {
+      "sig": "navigate | Error [TIMEOUT]: Action page.navigate exceeded its Nms budget Hint: The page's main thread is blocked by a long task, so it never answered within the action bud",
+      "count": 1
+    },
+    {
+      "sig": "navigate | Error [INVALID_PARAMS]: URL scheme not allowed: about: (must be one of http:, https:, file:) Hint: Invalid parameters. Check the tool schema for required fields",
+      "count": 1
+    },
+    {
+      "sig": "debug_read | Error [INTERNAL_ERROR]: Request not found: rt:<url> Hint: The requestId was not found in the network log. Use vortex_debug_read(source=network) to list requests",
+      "count": 1
+    },
+    {
+      "sig": "evaluate | Error [JS_EXECUTION_ERROR]: (intermediate value).map is not a function Hint: Check the error text above for what went wrong. If it points at your code or argume",
+      "count": 1
+    },
+    {
+      "sig": "evaluate | Error [PERMISSION_DENIED]: Cannot access a chrome:// URL Hint: Operation blocked by browser permission (cross-origin, file access, or extension permission). Ver",
+      "count": 1
+    },
+    {
+      "sig": "act | Error [OBSCURED]: Element is covered by <div.ant-modal-wrap> after Nms of retrying; hit-testing its center reaches that element, not the target Hint: Element hi",
+      "count": 1
+    },
+    {
+      "sig": "evaluate | Error [INVALID_PARAMS]: Missing required param: code Hint: Invalid parameters. Check the tool schema for required fields and value constraints, then retry with ",
+      "count": 1
+    },
+    {
+      "sig": "act | Error [JS_EXECUTION_ERROR]: b is not iterable Hint: Check the error text above for what went wrong. If it points at your code or arguments, adjust them and retr",
+      "count": 1
+    },
+    {
+      "sig": "act | Error [TIMEOUT]: Element is hidden (display:none / visibility:hidden) after Nms; vortex already tried to reveal it by hovering N ancestor candidate(s) (not-reve",
+      "count": 1
+    },
+    {
+      "sig": "act | The user doesn't want to proceed with this tool use. The tool use was rejected (eg. if it was a file edit, the new_string was NOT written to the file). STOP wha",
+      "count": 1
+    },
+    {
+      "sig": "evaluate | Error [JS_EXECUTION_ERROR]: Cannot read properties of undefined (reading 'indexOf') Hint: Injected JavaScript threw an error. Inspect the error message in conte",
+      "count": 1
+    },
+    {
+      "sig": "evaluate | Failed to call tool: data must have required property 'code', data/async must be boolean Expected parameters: code (string) *required* async (boolean) timeout (",
+      "count": 1
+    },
+    {
+      "sig": "evaluate | Error: Error [TIMEOUT]: js.evaluate timed out after Nms (page-side func may still be running; set shorter timeout, simplify code, or use vortex_navigate to clea",
+      "count": 1
+    },
+    {
+      "sig": "evaluate | Failed to call tool: data/timeout must be number Expected parameters: code (string) *required* async (boolean) timeout (number) [maximum: N] [default: N] tabId ",
+      "count": 1
+    },
+    {
+      "sig": "evaluate | Failed to call tool: data must have required property 'code' Expected parameters: code (string) *required* async (boolean) timeout (number) [maximum: N] [defaul",
+      "count": 1
+    },
+    {
+      "sig": "extract | Failed to call tool: data/maxLength must be number, data/scroll must be boolean Expected parameters: target - @ref from vortex_observe, or a CSS selector; null/",
+      "count": 1
+    },
+    {
+      "sig": "extract | Failed to call tool: data/maxLength must be number Expected parameters: target - @ref from vortex_observe, or a CSS selector; null/omit = whole page oneOf: - st",
+      "count": 1
+    },
+    {
+      "sig": "evaluate | Error: Error [JS_EXECUTION_ERROR]: Cannot read properties of undefined (reading 'items') Hint: Injected JavaScript threw an error. Inspect the error message in ",
+      "count": 1
+    },
+    {
+      "sig": "extract | Failed to call tool: data/depth must be number, data/tabId must be number Expected parameters: target - @ref from vortex_observe, or a CSS selector; null/omit =",
+      "count": 1
+    },
+    {
+      "sig": "observe | Failed to call tool: data/filter must be equal to one of the allowed values Expected parameters: scope (enum: \"viewport\", \"full\") filter (enum: \"interactive\", \"",
+      "count": 1
+    },
+    {
+      "sig": "fill | Error: Error [STALE_SNAPSHOT]: Ref bound to expired snapshot (hash mismatch) Hint: Snapshot is stale: the page may have changed, or a newer observe/query snapsh",
+      "count": 1
+    },
+    {
+      "sig": "query | Failed to call tool: data/dimensions must be string Expected parameters: mode (enum: \"text\", \"css\", \"component\", \"elements\", \"geometry\", \"style\", \"sheet\", \"flow",
+      "count": 1
+    },
+    {
+      "sig": "evaluate | Error: Error [JS_EXECUTION_ERROR]: await is only valid in async functions and the top level bodies of modules Hint: Injected JavaScript threw an error. Inspect ",
+      "count": 1
+    }
+  ],
+  "topErrorCodes": [
+    {
+      "code": "<no-code>",
+      "count": 15
+    },
+    {
+      "code": "TIMEOUT",
+      "count": 12
+    },
+    {
+      "code": "JS_EXECUTION_ERROR",
+      "count": 8
+    },
+    {
+      "code": "OBSCURED",
+      "count": 3
+    },
+    {
+      "code": "INVALID_PARAMS",
+      "count": 2
+    },
+    {
+      "code": "TAB_NOT_FOUND",
+      "count": 2
+    },
+    {
+      "code": "INVALID_SELECTOR",
+      "count": 1
+    },
+    {
+      "code": "INTERNAL_ERROR",
+      "count": 1
+    },
+    {
+      "code": "PERMISSION_DENIED",
+      "count": 1
+    },
+    {
+      "code": "STALE_SNAPSHOT",
+      "count": 1
+    }
+  ],
+  "routes": {
+    "vortex": 418,
+    "playwright": 5,
+    "vortexShare": 0.9882
+  },
+  "label": "week-2026-10-30"
+}
