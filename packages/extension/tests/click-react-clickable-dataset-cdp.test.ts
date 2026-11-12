@@ -111,20 +111,17 @@ describe("CLICK react-clickable dataset → CDP real mouse (BUG-010 N0060 方案
     expect(resp.result).toMatchObject({ mode: "realMouse" });
   });
 
-  it("契约 4: react-clickable 但 CDP 失败 → 回退合成 click (executeScript 重跑)", async () => {
-    executeScript
-      .mockResolvedValueOnce([{ result: { result: { deferToCdp: true, element: { tag: "div" } } } }])
-      .mockResolvedValueOnce([{ result: { result: { success: true, element: { tag: "div" } } } }]);
+  it("react-clickable 的 CDP 调用失败时返回错误，不合成重试", async () => {
+    executeScript.mockResolvedValueOnce([{ result: { result: { deferToCdp: true, element: { tag: "div" } } } }]);
     cdpClickElement.mockRejectedValue(new Error("CDP attach failed"));
 
     const resp = await router.dispatch(
       mkReq({ selector: "div._card_abc", action: "click", tabId: 42 }),
     );
 
-    expect(resp.error).toBeUndefined();
+    expect(resp.error).toMatchObject({ code: "JS_EXECUTION_ERROR", message: "CDP attach failed" });
     expect(cdpClickElement).toHaveBeenCalledTimes(1);
-    expect(executeScript).toHaveBeenCalledTimes(2);
-    expect(resp.result).toMatchObject({ success: true });
+    expect(executeScript).toHaveBeenCalledTimes(1);
   });
 });
 

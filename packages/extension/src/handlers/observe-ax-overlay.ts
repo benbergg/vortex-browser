@@ -151,17 +151,49 @@ interface CDPDomNode {
   children?: CDPDomNode[];
   shadowRoots?: CDPDomNode[];
   contentDocument?: CDPDomNode;
+  frameId?: string;
+}
+
+/** Match a scan nonce only inside its owning document, never its child documents. */
+export function resolveFrameDocument(root: CDPDomNode, token: string): { frameId: string; document: CDPDomNode } | undefined {
+  const matches: Array<{ frameId?: string; document: CDPDomNode }> = [];
+  const visitDocument = (document: CDPDomNode, frameId?: string): void => {
+    let count = 0;
+    const walk = (node: CDPDomNode): void => {
+      const attrs = node.attributes ?? [];
+      for (let i = 0; i + 1 < attrs.length; i += 2) {
+        if (attrs[i] === "data-vtx-frame-ax" && attrs[i + 1] === token) count++;
+      }
+      for (const child of node.children ?? []) walk(child);
+      for (const shadow of node.shadowRoots ?? []) walk(shadow);
+      if (node.contentDocument) visitDocument(node.contentDocument, node.frameId);
+    };
+    walk(document);
+    for (let i = 0; i < count; i++) matches.push({ frameId, document });
+  };
+  visitDocument(root);
+  const match = matches.length === 1 ? matches[0] : undefined;
+  return match?.frameId ? { frameId: match.frameId, document: match.document } : undefined;
 }
 
 /** 遍历 DOM.getDocument 树取 data-vtx-ax → backendNodeId。穿 shadowRoots,但**不**进
  *  contentDocument(iframe 内容)——v1 仅覆盖主 frame,避免子 frame 同值标记冲突。 */
-export function buildIndexToBackend(root: CDPDomNode): Map<number, number> {
+export function buildIndexToBackend(root: CDPDomNode, strict = false, token?: string): Map<number, number> {
   const map = new Map<number, number>();
+  const ambiguous = new Set<number>();
   const walk = (n: CDPDomNode): void => {
     const attrs = n.attributes ?? [];
     for (let i = 0; i < attrs.length; i += 2) {
       if (attrs[i] === "data-vtx-ax" && n.backendNodeId !== undefined) {
-        map.set(Number(attrs[i + 1]), n.backendNodeId);
+        const value = attrs[i + 1];
+        const rawIndex = token === undefined ? value : value?.startsWith(`${token}:`) ? value.slice(token.length + 1) : undefined;
+        if (rawIndex === undefined || (token !== undefined && !/^(0|[1-9]\d*)$/.test(rawIndex))) continue;
+        const index = Number(rawIndex);
+        if (token !== undefined && !Number.isSafeInteger(index)) continue;
+        if (strict && (map.has(index) || ambiguous.has(index))) {
+          map.delete(index);
+          ambiguous.add(index);
+        } else map.set(index, n.backendNodeId);
       }
     }
     for (const c of n.children ?? []) walk(c);
@@ -174,11 +206,13 @@ export function buildIndexToBackend(root: CDPDomNode): Map<number, number> {
 
 /** applyOverlay 原地改写所需的最小元素形(ScannedElement 的结构子集)。 */
 export interface OverlayableElement {
+  maskedContent?: boolean;
   role: string; name: string;
   state?: Record<string, unknown>;
   valueNow?: string;
   reactClickable?: true;
   nameSource?: string;
+  semanticSource?: "ax" | "dom" | "heuristic";
   compound?: {
     role: string;
     count?: number;
@@ -188,7 +222,7 @@ export interface OverlayableElement {
     max?: string;
     step?: string;
   };
-  controls?: number[]; owns?: number[]; errorMessage?: string; description?: string;
+  controls?: Array<{ index?: number; id?: string }>; owns?: Array<{ index?: number; id?: string }>; errorMessage?: string; description?: string;
   tag?: string;
   /** tree 展开/折叠 toggle(R25):page-side 已定 role=button/name=expand|collapse,
    *  CDP AX 视 caret 为 presentational(role=img/name="caret-down"),overlay 须跳过覆盖。 */
@@ -215,12 +249,21 @@ export function applyOverlay(
     const backendId = indexToBackend.get(i);
     const node = backendId !== undefined ? axByBackend.get(backendId) : undefined;
     if (!node) { el.nameSource = "heuristic"; continue; }
+    if (el.maskedContent) {
+      const state = computeAXOverlay({ backendId: backendId!, role: el.role, name: el.name }, node).state;
+      if (state) {
+        el.state = { ...(el.state ?? {}), ...state };
+        el.semanticSource = "ax";
+      }
+      continue;
+    }
     const ov = computeAXOverlay(
       { backendId: backendId!, role: el.role, name: el.name, heuristicInteractive: el.reactClickable === true },
       node,
     );
     // tree 展开/折叠 toggle:保留 page-side 的 role=button/name=expand|collapse,
     // 不被 CDP AX 的 presentational caret(role=img/name="caret-down")覆盖(R25)。
+    if ((!el.treeToggle && (ov.role || ov.name)) || ov.state || ov.valueNow !== undefined || ov.errorMessage || ov.description) el.semanticSource = "ax";
     if (ov.role && !el.treeToggle) el.role = ov.role;
     if (ov.name && !el.treeToggle) el.name = ov.name;
     el.nameSource = ov.nameSource ?? "heuristic";
@@ -239,7 +282,7 @@ export function applyOverlay(
         const idx = backendToIndex.get(b);
         if (idx != null) ctrlList.push({ index: idx });
       }
-      if (ctrlList.length) el.controls = ctrlList as unknown as number[];
+      if (ctrlList.length) { el.controls = ctrlList; el.semanticSource = "ax"; }
     }
     if (ov.owns) {
       // 同 controls 形状对齐修复
@@ -248,12 +291,12 @@ export function applyOverlay(
         const idx = backendToIndex.get(b);
         if (idx != null) ownList.push({ index: idx });
       }
-      if (ownList.length) el.owns = ownList as unknown as number[];
+      if (ownList.length) { el.owns = ownList; el.semanticSource = "ax"; }
     }
     if (ov.errorMessage) el.errorMessage = ov.errorMessage;
     if (ov.description) el.description = ov.description;
     const compound = extractCompound(node, axByNodeId);
-    if (compound) el.compound = compound;
+    if (compound) { el.compound = compound; el.semanticSource = "ax"; }
   }
 }
 

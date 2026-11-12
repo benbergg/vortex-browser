@@ -2,11 +2,13 @@
 // 不被 L2/L3/L4 import（depcruise 强制；见 .dependency-cruiser.cjs）。
 // PR #1 各 task 逐步迁入：clickBBox / cdpClickElement / 3 个 CDP driver。
 
+import { VtxError, VtxErrorCode, vtxError } from "@vortex-browser/shared";
 import { getIframeOffset } from "../lib/iframe-offset.js";
 import type { DebuggerManager } from "../lib/debugger-manager.js";
 import { pageQuery as nativePageQuery, mapPageError } from "./native.js";
 import type { ClickEffect } from "../page-side/click-effect.js";
 import { buildExecuteTarget } from "../lib/tab-utils.js";
+import { getSnapshotEntry } from "../lib/snapshot-store.js";
 
 // dialog 应答策略 arm/read 共享 helper(与 dom.ts 版本同源,因 cdp.ts 不能 import dom.ts 而本地重复)。
 async function armDialogPolicyCdp(
@@ -55,9 +57,15 @@ export async function clickBBox(
   tabId: number,
   x: number,
   y: number,
+  beforeDispatch?: () => Promise<void>,
+  afterMove?: () => Promise<void>,
+  onInputAttempt?: () => void,
 ): Promise<void> {
   await debuggerMgr.attach(tabId);
+  if (beforeDispatch) await beforeDispatch();
+  onInputAttempt?.();
   await debuggerMgr.sendCommand(tabId, "Input.dispatchMouseEvent", { type: "mouseMoved", x, y });
+  if (afterMove) await afterMove();
   await debuggerMgr.sendCommand(tabId, "Input.dispatchMouseEvent", {
     type: "mousePressed", x, y, button: "left", clickCount: 1,
   });
@@ -82,7 +90,7 @@ export async function cdpClickElement(
   // force=true skips occlusion check (ELEMENT_OCCLUDED only); disabled/detached/not_found/ambiguous still apply
   // observeEffect: GAP-G(N0062) 效果信号采集，需 caller 预注入 click-effect 模块；opt-in，默认关
   // onDialog/promptText: dialog 应答策略，arm 后 CDP 点击触发的 confirm/prompt 按此策略应答
-  options: { force?: boolean; observeEffect?: boolean; windowMs?: number; onDialog?: string; promptText?: string | null } = {},
+  options: { force?: boolean; observeEffect?: boolean; windowMs?: number; onDialog?: string; promptText?: string | null; pagination?: { snapshotId: string; nodeIndex: number } } = {},
 ): Promise<{
   success: true;
   element: { tag: string; text?: string };
@@ -92,7 +100,7 @@ export async function cdpClickElement(
   effect?: ClickEffect;
   dialogs?: Array<{ type: string; message: string }>;
 }> {
-  const { force = false, observeEffect = false, windowMs, onDialog, promptText } = options;
+  const { force = false, observeEffect = false, windowMs, onDialog, promptText, pagination } = options;
   // page-side 探测（与原 dom.ts useRealMouse 分支 L106-169 完全一致，逐行复制 func 字面量）
   const rectRes = await nativePageQuery<{
     result?: { x: number; y: number; tag: string; text?: string };
@@ -102,15 +110,17 @@ export async function cdpClickElement(
   }>(
     tabId,
     frameId,
-    (sel: string, force: boolean) => {
+    (sel: string, force: boolean, page?: { snapshotId: string; nodeIndex: number }) => {
       try {
+        const captured: Element | null = page ? (window as any).__vortexPageSnapshots?.[page.snapshotId]?.validate?.(page.nodeIndex, sel, true) ?? null : null;
+        if (page && !captured) return { errorCode: "STALE_SNAPSHOT", error: "Page changed since the snapshot was captured" };
         // === 探测 ===
         // 与门(dom.ts CLICK 同步路径)一致:经 __vortexDomResolve.queryAllDeep 穿 open
         // shadow,而非旧 light-DOM querySelectorAll——否则 shadow-internal ref 在此假阴
         // ELEMENT_NOT_FOUND,门却能解析,两路不一致(#14)。caller 已预加载 dom-resolve;
         // 万一未就绪(注入失败)回退 light-DOM,不崩。
         const resolve = (window as any).__vortexDomResolve;
-        const els: Element[] = resolve
+        const els: Element[] = captured ? [captured] : resolve
           ? (resolve.queryAllDeep(sel) as Element[])
           : Array.from(document.querySelectorAll(sel));
         if (els.length === 0) {
@@ -194,7 +204,7 @@ export async function cdpClickElement(
         return { error: err instanceof Error ? err.message : String(err) };
       }
     },
-    [selector, force],
+    pagination ? [selector, force, pagination] : [selector, force],
   );
 
   if (rectRes?.error) mapPageError(rectRes, selector);
@@ -230,9 +240,74 @@ export async function cdpClickElement(
   const dlgAnswer = onDialog === "accept" ? "accept" : "dismiss";
   await armDialogPolicyCdp(tabId, frameId, dlgAnswer, promptText ?? null);
   let dialogs: Array<{ type: string; message: string }> = [];
+  let inputAttempted = false;
   try {
     // CDP 真鼠标三连击（已 page-coords，clickBBox 内部不再算 offset）
-    await clickBBox(debuggerMgr, tabId, px, py);
+    await clickBBox(debuggerMgr, tabId, px, py, pagination ? async () => {
+      let valid = false;
+      try {
+        const result = await chrome.scripting.executeScript({
+          target: buildExecuteTarget(tabId, frameId), world: "MAIN",
+          func: (token: string, index: number, sel: string) => !!(window as any).__vortexPageSnapshots?.[token]?.validate?.(index, sel, true),
+          args: [pagination.snapshotId, pagination.nodeIndex, selector],
+        });
+        valid = result[0]?.result === true;
+      } catch (err) {
+        console.warn("[vortex.cdp] pagination validation failed", err);
+      }
+      if (!valid || !getSnapshotEntry(pagination.snapshotId)) throw vtxError(VtxErrorCode.STALE_SNAPSHOT, "Page changed since the snapshot was captured");
+    } : undefined, pagination ? async () => {
+      let valid = false;
+      try {
+        const result = await chrome.scripting.executeScript({
+          target: buildExecuteTarget(tabId, frameId), world: "MAIN",
+          func: (token: string, index: number, sel: string, x: number, y: number) => {
+            const node: Element | null = (window as any).__vortexPageSnapshots?.[token]?.validate?.(index, sel, true) ?? null;
+            const resolve = (window as any).__vortexDomResolve;
+            if (!node || !resolve?.deepElementFromPoint) return false;
+            const chain: HTMLIFrameElement[] = [];
+            let current: Window = window;
+            while (current !== current.top) {
+              const owner = current.frameElement;
+              if (!owner || owner.tagName !== "IFRAME") return false;
+              chain.unshift(owner as HTMLIFrameElement);
+              current = current.parent;
+            }
+            for (const owner of chain) {
+              const parent = owner.ownerDocument.defaultView;
+              if (!parent) return false;
+              // The offset and hit-test mapping do not account for iframe padding.
+              const ownerStyle = parent.getComputedStyle(owner);
+              if ([ownerStyle.paddingTop, ownerStyle.paddingRight, ownerStyle.paddingBottom, ownerStyle.paddingLeft].some((padding) => padding !== "0px")) return false;
+              for (let el: Element | null = owner; el; el = el.parentElement || (el.getRootNode() as ShadowRoot).host || null) {
+                const style = parent.getComputedStyle(el);
+                if (style.transform !== "none" || (style.translate && style.translate !== "none") ||
+                    (style.rotate && style.rotate !== "none") || (style.scale && style.scale !== "none") ||
+                    (style.zoom && style.zoom !== "1" && style.zoom !== "normal")) return false;
+              }
+              let hit: Element | null = owner.ownerDocument.elementFromPoint(x, y);
+              while (hit?.shadowRoot) {
+                const inner = hit.shadowRoot.elementFromPoint(x, y);
+                if (!inner || inner === hit) break;
+                hit = inner;
+              }
+              if (hit !== owner) return false;
+              const rect = owner.getBoundingClientRect();
+              x -= rect.left + owner.clientLeft;
+              y -= rect.top + owner.clientTop;
+            }
+            let hit: Node | null = resolve.deepElementFromPoint(x, y);
+            while (hit && hit !== node) hit = hit.parentNode || (hit as ShadowRoot).host || null;
+            return hit === node;
+          },
+          args: [pagination.snapshotId, pagination.nodeIndex, selector, px, py],
+        });
+        valid = result[0]?.result === true;
+      } catch (err) {
+        console.warn("[vortex.cdp] pagination hit validation failed", err);
+      }
+      if (!valid || !getSnapshotEntry(pagination.snapshotId)) throw vtxError(VtxErrorCode.STALE_SNAPSHOT, "Cannot verify the captured target and its frame chain at the mouse position; the page may have changed or the frame may be inaccessible");
+    } : undefined, () => { inputAttempted = true; });
 
     let effect: ClickEffect | undefined;
     if (observeEffect && effectToken) {
@@ -263,8 +338,17 @@ export async function cdpClickElement(
       ...(dialogs.length ? { dialogs } : {}),
     };
   } catch (err) {
-    // 即便 click 抛错也 disarm(guard against page-freeze)
-    try { await readDialogCapturedAndDisarmCdp(tabId, frameId); } catch { /* ignore */ }
-    throw err;
+    // 即便 click 抛错也 disarm；保留主错误并报告清理失败。
+    try { await readDialogCapturedAndDisarmCdp(tabId, frameId); } catch (cleanupError) { console.error("[vortex.cdp] dialog cleanup failed after click error", cleanupError); }
+    if (!pagination || !inputAttempted) throw err;
+    const message = err instanceof Error ? err.message : String(err);
+    const code = message.includes("No tab") ? VtxErrorCode.TAB_NOT_FOUND
+      : message.includes("Cannot access") ? VtxErrorCode.PERMISSION_DENIED : VtxErrorCode.JS_EXECUTION_ERROR;
+    const original = err instanceof VtxError ? err : vtxError(code, message);
+    throw new VtxError(original.code, original.message, {
+      ...original.extra,
+      context: { ...original.extra?.context, extras: { ...original.extra?.context?.extras, actionMayHaveExecuted: true } },
+      hint: "Action may have been executed; check the page state before deciding whether another action is needed; do not retry directly.",
+    });
   }
 }

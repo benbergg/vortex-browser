@@ -94,6 +94,52 @@ function registeredRefs(): string[] {
 }
 
 describe("vortex observe 的 ref 提取", () => {
+  it("forwards pagination and prints the continuation cursor", async () => {
+    hub.ok({ ...OBSERVE_RESULT, nextCursor: "snap_abc_1:80" });
+    await run(["observe", "--paginate"]);
+    expect(hub.actionCalls()[0][1]).toMatchObject({ paginate: true });
+    expect(combinedOutput()).toContain("snap_abc_1:80");
+    hub.ok({ ...OBSERVE_RESULT, elements: [{ index: 80, ref: "@e80", frameId: 0, role: "button", name: "next" }] });
+    await run(["observe", "--cursor", "snap_abc_1:80"]);
+    expect(hub.actionCalls()[1][1]).toEqual({ cursor: "snap_abc_1:80" });
+    hub.ok({ success: true });
+    await run(["act", "--action", "click", "--target", "@e12"]);
+    expect(hub.actionCalls()[2][1]).toMatchObject({ index: 12, snapshotId: "snap_abc123" });
+  });
+  it("shows the target hover limitation in readable output", async () => {
+    hub.ok({ ...OBSERVE_RESULT, frames: [{ hoverControlsUnavailable: "target-scope" }] });
+    await run(["observe", "--target", "#focus"]);
+    expect(combinedOutput()).toContain("hover reveal unavailable for target scope");
+  });
+
+  it("--target CSS 传到扩展的 selector", async () => {
+    vi.spyOn(process, "exit").mockImplementation((() => { throw new Error("__exit__"); }) as never);
+    hub.ok(OBSERVE_RESULT);
+    await run(["observe", "--target", "#focus"]);
+    const [action, params] = hub.actionCalls()[0];
+    expect(action).toBe("observe.snapshot");
+    expect(params.selector).toBe("#focus");
+  });
+
+  it("--target ref 使用上一份快照解析后再发送", async () => {
+    vi.spyOn(process, "exit").mockImplementation((() => { throw new Error("__exit__"); }) as never);
+    hub.ok(OBSERVE_RESULT);
+    await run(["observe"]);
+    hub.ok({ ...OBSERVE_RESULT, snapshotId: "snap_focused" });
+    await run(["observe", "--target", "@e12"]);
+    const [action, params] = hub.actionCalls()[1];
+    expect(action).toBe("observe.snapshot");
+    expect(params).toMatchObject({ index: 12, snapshotId: "snap_abc123" });
+  });
+
+  it('preserves explicit frameId when it conflicts with a ref', async () => {
+    hub.ok(OBSERVE_RESULT);
+    await run(['observe']);
+    hub.ok(OBSERVE_RESULT);
+    await run(['--frame-id', '2', 'observe', '--target', '@f1e3']);
+    expect(hub.actionCalls()[1][1]).toMatchObject({ frameId: 2, index: 3 });
+  });
+
   it("把服务端返回的 ref 提取出来并打印 [refs] 行", async () => {
     hub.ok(OBSERVE_RESULT);
 

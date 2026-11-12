@@ -11,6 +11,7 @@
     "dev:build": "vite build --watch && node scripts/build-page-side.mjs",
     "clean": "rm -rf dist",
     "test": "vitest run",
+    "test:browser": "vitest run --config vitest.browser.config.ts",
     "depcruise:check": "depcruise --config .dependency-cruiser.cjs --output-type err src",
     "depcruise:graph": "depcruise --config .dependency-cruiser.cjs --output-type dot src | dot -T svg > dep-graph.svg"
   },

@@ -234,6 +234,9 @@ export function registerObserveCommand(program: Command): void {
     .option("--frames <frames>", "main | all-same-origin | all-permitted | all", "main")
     .option("--filter <filter>", "interactive | all", "interactive")
     .option("--include-boxes", "include element bounding boxes")
+    .option("--paginate", "freeze a single-frame snapshot for paginated reading")
+    .option("--cursor <cursor>", "continue a paginated snapshot")
+    .option("--target <target>", "observe only this container: CSS selector or @ref (scoped observation)")
     .option("--timeout <ms>", "snapshot timeout in milliseconds", parseInt)
     .option("--json", "print the raw JSON response instead of the readable summary")
     .action(async (opts: any, cmd: Command) => {
@@ -243,12 +246,15 @@ export function registerObserveCommand(program: Command): void {
       const frames = requireEnum("--frames", opts.frames, FRAMES_VALUES);
       const filter = requireEnum("--filter", opts.filter, FILTER_VALUES);
       try {
-        const params: Record<string, unknown> = {
-          format: detail,
-          viewport: scope === "full" ? "full" : "visible",
-          frames,
-          filter,
-        };
+        const params: Record<string, unknown> = opts.cursor
+          ? { cursor: opts.cursor }
+          : { format: detail, viewport: scope === "full" ? "full" : "visible", frames, filter };
+        if (opts.cursor) {
+          for (const name of ["detail", "scope", "frames", "filter"]) {
+            if (cmd.getOptionValueSource(name) === "cli") throw new Error(`--cursor cannot be combined with --${name}`);
+          }
+        }
+        if (opts.paginate) params.paginate = true;
         if (opts.includeBoxes) params.includeBoxes = true;
         if (opts.timeout != null) params.timeout = opts.timeout;
         if (frameId != null) params.frameId = frameId;
@@ -258,6 +264,36 @@ export function registerObserveCommand(program: Command): void {
         // 同 session 的另一个请求把 current tab 切走，A 的快照就会被登记到 B 上。
         // 提前解析出**一个**身份，请求（显式 tabId）与快照登记都用它 ⇒ 同源，不会错位。
         const targetTab = await resolveObserveTargetTab({ port, session, tab });
+
+        // --target：目标局部观察（只观察该容器及其后代）。
+        // CSS selector 直接落 selector；@ref 用**上一份快照**翻成 index + snapshotId
+        // —— 扩展端只认 selector / index+snapshotId（CLI 直连扩展，没有 MCP 那层翻译）。
+        const observeTarget = typeof opts.target === "string" ? opts.target.trim() : "";
+        if (observeTarget) {
+          if (observeTarget.startsWith("@")) {
+            const context = loadSnapshotContext(session, targetTab);
+            const entry = context?.refs[observeTarget];
+            if (!context || !entry) {
+              const owner = findRefContext(session, observeTarget);
+              const ownerTab =
+                owner?.tabId == null ? "身份未知的 tab（旧格式快照）" : `tab ${owner.tabId}`;
+              throw new Error(formatCliError({
+                code: owner ? VtxErrorCode.STALE_SNAPSHOT : VtxErrorCode.INVALID_PARAMS,
+                message: owner
+                  ? `observe: ref "${observeTarget}" belongs to ${ownerTab}, but this request targets tab ${targetTab}`
+                  : `observe: unknown ref "${observeTarget}": not in the latest vortex observe snapshot`,
+                hint:
+                  "Run `vortex observe` first to get a fresh ref, then scope with --target @eN.",
+                recoverable: true,
+              }));
+            }
+            params.index = entry.index;
+            params.snapshotId = context.snapshotId;
+            if (params.frameId == null && entry.frameId != null && entry.frameId !== 0) params.frameId = entry.frameId;
+          } else {
+            params.selector = observeTarget;
+          }
+        }
 
         const resp = await sendRequest("observe.snapshot", params, { port, session, tabId: targetTab });
         if (opts.json) {
@@ -279,11 +315,15 @@ export function registerObserveCommand(program: Command): void {
           // 登记的就是 `targetTab` —— 请求参数里带的那个显式 tabId，
           // 也就是请求发出前解析出的那个身份。请求与登记同源，
           // 中途同 session 切了 current tab 也不会把 A 的快照登记到 B 上。
+          const previous = opts.cursor ? loadSnapshotContext(session, targetTab) : undefined;
           const failed = saveSnapshotContext(session, {
             snapshotId: result.snapshotId,
             capturedAt: Date.now(),
             tabId: targetTab,
-            refs: Object.fromEntries(refs.map((item) => [item.ref, item.entry])),
+            refs: {
+              ...(previous?.snapshotId === result.snapshotId ? previous.refs : {}),
+              ...Object.fromEntries(refs.map((item) => [item.ref, item.entry])),
+            },
           });
           if (failed) {
             console.error(`[vortex-cli] observe snapshot context not saved: ${failed}`);

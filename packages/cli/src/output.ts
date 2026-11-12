@@ -108,6 +108,12 @@ export function formatObserveReadable(result: unknown): string {
   const title = r.title ? ` · ${String(r.title)}` : "";
   lines.push(`snapshot ${String(r.snapshotId ?? "?")} · ${String(r.url ?? "?")}${title}`);
   lines.push(`${elements.length} elements`);
+  if (typeof r.nextCursor === "string") lines.push(`nextCursor: ${r.nextCursor}`);
+  const meta = asRecord(r.meta);
+  if (typeof meta.incomplete === "string") lines.push(`incomplete: ${meta.incomplete}`);
+  if (Array.isArray(r.frames) && r.frames.some((frame) => asRecord(frame).hoverControlsUnavailable === "target-scope")) {
+    lines.push("hover reveal unavailable for target scope");
+  }
   for (const el of elements) {
     const ref = typeof el.ref === "string" ? el.ref : "";
     const role = typeof el.role === "string" ? el.role : "";

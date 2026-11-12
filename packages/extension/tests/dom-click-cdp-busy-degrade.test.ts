@@ -183,26 +183,22 @@ describe("CLICK useRealMouse 在 CDP 被占时降级为合成路径", () => {
     expect((value as { effect?: unknown }).effect).toEqual({ domMutations: 2, urlChanged: false });
   });
 
-  it("deferToCdp 回退合成同样自陈:这条路才是 sequence/默认 click 的常走路", async () => {
+  it("deferToCdp 后 CDP_NOT_ATTACHED 不证明输入阶段，返回错误而不重试", async () => {
     deferWhenCdpAvailable = true;
     cdpClickElement.mockRejectedValue(BUSY);
     const resp = await router.dispatch(mkReq({ selector: "button#go", action: "click", tabId: 42 }));
-    const { value, diagnosis } = splitDiagnosis(resp.result);
-    expect(diagnosis).toBeTruthy();
-    expect(diagnosis).toMatch(/isTrusted/);
-    expect(diagnosis).toMatch(/held by another client/i);
-    expect(value).toMatchObject({ success: true, degraded: "cdp-busy-synthetic" });
-    expect((value as { effect?: unknown }).effect).toEqual({ domMutations: 2, urlChanged: false });
+    expect(resp.error).toMatchObject({ code: "CDP_NOT_ATTACHED", message: BUSY.message, context: { tabId: 42 }, recoverable: true });
+    expect(resp.error?.hint).toMatch(/may have.*executed.*check.*page.*do not.*retry/i);
+    expect(executeScript).toHaveBeenCalledTimes(1);
   });
 
-  it("deferToCdp 回退的失败不是 attach 类时不贴降级标签,不谎报", async () => {
+  it("deferToCdp 后 actionability 错误原样返回，不合成点击", async () => {
     deferWhenCdpAvailable = true;
     cdpClickElement.mockRejectedValue(
       vtxError(VtxErrorCode.ELEMENT_OCCLUDED, "Element button#go is covered by <div>", { tabId: 42 }),
     );
     const resp = await router.dispatch(mkReq({ selector: "button#go", action: "click", tabId: 42 }));
-    const { value, diagnosis } = splitDiagnosis(resp.result);
-    expect(diagnosis).toBeNull();
-    expect(value).toEqual({ success: true, element: { tag: "button", id: "go" } });
+    expect(resp.error).toMatchObject({ code: "ELEMENT_OCCLUDED" });
+    expect(executeScript).toHaveBeenCalledTimes(1);
   });
 });

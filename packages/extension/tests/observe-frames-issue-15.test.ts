@@ -76,7 +76,7 @@ describe("resolveTargetFrames — srcdoc inheritance (issue #15-1)", () => {
       { frameId: 1, parentFrameId: 0, url: "about:srcdoc" },
     ]);
     const out = await resolveTargetFrames(99, 1, "all-same-origin");
-    expect(out).toEqual([{ frameId: 1, url: "about:srcdoc", parentFrameId: 0 }]);
+    expect(out).toEqual([{ frameId: 1, url: "about:srcdoc", parentFrameId: 0, ancestorFrameIds: [0] }]);
   });
 
 });

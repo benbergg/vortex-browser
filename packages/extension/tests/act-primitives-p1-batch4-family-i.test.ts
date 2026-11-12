@@ -49,7 +49,7 @@ describe("族 I #25 — checkbox-group label 折叠内部空白匹配", () => {
 
 describe("族 I #23 — 原生 <select> 轮询等异步选项", () => {
   it("SELECT inline func 改 async", () => {
-    expect(SELECT_BLOCK).toMatch(/async \(sel: string, val: string \| string\[\], timeoutMs: number\)/);
+    expect(SELECT_BLOCK).toMatch(/async \(sel: string, val: string \| string\[\], timeoutMs: number(?:,|\))/);
   });
   it("有 allMatchable 判定与轮询重读 el.options", () => {
     expect(SELECT_BLOCK).toMatch(/allMatchable/);

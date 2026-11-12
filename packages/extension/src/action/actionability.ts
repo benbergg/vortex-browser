@@ -10,6 +10,7 @@
 // Public API:
 //   checkActionability(tabId, frameId, selector, options?) → ActionabilityResult
 
+import { VtxErrorCode, vtxError } from "@vortex-browser/shared";
 import { pageQuery as nativePageQuery, PageQueryTimeoutError } from "../adapter/native.js";
 import { loadPageSideModule } from "../adapter/page-side-loader.js";
 import type {
@@ -33,6 +34,7 @@ export interface CheckOptions {
    * 仅要求元素 attached。供 act options.force 绕过 actionability(2026-06-04 H 族)。
    */
   force?: boolean;
+  pagination?: { snapshotId: string; nodeIndex: number };
 }
 
 /**
@@ -52,23 +54,28 @@ export async function checkActionability(
   // 取 2000ms:正常探针 <100ms,20x 余量不误超时;且明显 < waitActionable 默认
   // 5000ms 预算,使预算能在 2~3 次重试内真正触发(2026-06-03 press-combo flake)。
   // alias pattern: closure-bind tabId/frameId for repeated probe calls
-  const probe = <T>(fn: (...args: unknown[]) => T, args: unknown[] = []) =>
-    nativePageQuery<T>(tabId, frameId, fn, args, PROBE_TIMEOUT_MS);
+  const probe = <T>(fn: (...args: unknown[]) => T | Promise<T>, args: unknown[] = []) =>
+    nativePageQuery<T | Promise<T>>(tabId, frameId, fn, args, PROBE_TIMEOUT_MS);
 
   // 探针超时(executeScript 永不 settle)→ 映射为可重试 NOT_ATTACHED,让
   // waitActionable 在预算内复查并最终抛**有界 TIMEOUT**,而非 30s 静默挂死。
-  let result: ActionabilityResult;
+  let result: ActionabilityResult | { stale: true };
   try {
-    result = await probe<ActionabilityResult>(
-      (sel: string, needsEditable: boolean, force: boolean) => {
+    result = await probe<ActionabilityResult | { stale: true }>(
+      async (sel: string, needsEditable: boolean, force: boolean, page: { snapshotId: string; nodeIndex: number } | null) => {
+        const getNode = () => page ? (window as any).__vortexPageSnapshots?.[page.snapshotId]?.validate?.(page.nodeIndex, sel, true) : null;
+        const node = getNode();
+        if (page && !node) return { stale: true } as const;
         const A = (window as any).__vortexActionability;
+        if (page && A?.version !== 3) return { stale: true } as const;
         if (!A?.probe) {
           // Bundle not loaded: treat as element-not-found (caller will retry via auto-wait).
           return { ok: false, reason: "NOT_ATTACHED" } as const;
         }
-        return A.probe(sel, needsEditable, force);
+        const result = await A.probe(sel, needsEditable, force, node, page ? () => getNode() === node : undefined);
+        return page && getNode() !== node ? { stale: true } as const : result;
       },
-      [selector, options.needsEditable ?? false, options.force ?? false],
+      [selector, options.needsEditable ?? false, options.force ?? false, options.pagination ?? null],
     );
   } catch (err) {
     // 只把「探针 executeScript 永不 settle 超时」映射为可重试 NOT_ATTACHED;
@@ -79,19 +86,25 @@ export async function checkActionability(
     throw err;
   }
 
+  if ("stale" in result) throw vtxError(VtxErrorCode.STALE_SNAPSHOT, "Page changed since the snapshot was captured");
   if (!result.ok) return result;
   // force:跳过 stable 复查(质量门已整体跳过,稳定性同属质量门)。
   if (options.skipStable || options.force) return result;
 
   // Stable re-check (two-step async)。同样加界:超时映射 NOT_STABLE(可重试)。
-  let stable: { ok: boolean };
+  let stable: { ok: boolean } | { stale: true };
   try {
-    stable = await probe<{ ok: boolean }>(
-      (sel: string) => {
+    stable = await probe<{ ok: boolean } | { stale: true }>(
+      async (sel: string, page: { snapshotId: string; nodeIndex: number } | null) => {
+        const getNode = () => page ? (window as any).__vortexPageSnapshots?.[page.snapshotId]?.validate?.(page.nodeIndex, sel, true) : null;
+        const node = getNode();
+        if (page && !node) return { stale: true } as const;
         const A = (window as any).__vortexActionability;
-        return A.probeStable(sel);
+        if (page && A?.version !== 3) return { stale: true } as const;
+        const result = await A.probeStable(sel, node);
+        return page && getNode() !== node ? { stale: true } as const : result;
       },
-      [selector],
+      [selector, options.pagination ?? null],
     );
   } catch (err) {
     if (err instanceof PageQueryTimeoutError) {
@@ -99,6 +112,7 @@ export async function checkActionability(
     }
     throw err;
   }
+  if ("stale" in stable) throw vtxError(VtxErrorCode.STALE_SNAPSHOT, "Page changed since the snapshot was captured");
   if (!stable.ok) {
     return { ok: false, reason: "NOT_STABLE" };
   }

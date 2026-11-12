@@ -14,14 +14,28 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { NmRequest } from "@vortex-browser/shared";
+import { JSDOM } from "jsdom";
 import { ActionRouter } from "../src/lib/router.js";
+import { getSnapshotEntry } from "../src/lib/snapshot-store.js";
 import { registerObserveHandlers, frameScanTimeout } from "../src/handlers/observe.js";
 
 function mkReq(tool: string, args: Record<string, unknown> = {}, tabId?: number): NmRequest {
   return { type: "tool_request", tool, args, requestId: "r-1", ...(tabId != null ? { tabId } : {}) };
 }
 
-type FrameRow = { frameId: number; parentFrameId: number; url: string };
+type FrameRow = { frameId: number; parentFrameId: number; url: string; documentId?: string };
+const realms: JSDOM[] = [];
+
+function pageRealm(page: ReturnType<typeof mkPage> | null) {
+  const dom = new JSDOM(`<!doctype html><body>${(page?.elements ?? []).map((el) => `<button data-i="${el.index}">${el.name}</button>`).join("")}</body>`, { url: "https://x/", runScripts: "outside-only" });
+  realms.push(dom);
+  const win = dom.window as any;
+  win.Date.now = () => Date.now();
+  win.CSS = { escape: (value: string) => value };
+  win.Element.prototype.getBoundingClientRect = () => ({ x: 10, y: 20, width: 80, height: 30, top: 20, left: 10, right: 90, bottom: 50 });
+  win.document.elementFromPoint = () => null;
+  return dom;
+}
 
 function mkPage(elementCount: number) {
   return {
@@ -57,27 +71,40 @@ function stubChrome(opts: {
 }) {
   const wedged = new Set(opts.wedgedFrames ?? []);
   const slow = opts.slowFrames ?? {};
-  const executeScript = vi.fn(({ target, args }: { target: { frameIds?: number[] }; args?: unknown[] }) => {
-    const frameId = target.frameIds?.[0] ?? 0;
-    const childUrl = args?.[0];
-    // getIframeOffset 调用:args[0] 是 URL 字符串,始终正常返回
-    if (typeof childUrl === "string" && childUrl.startsWith("http")) {
-      return Promise.resolve([{ result: { x: 0, y: 0 } }]);
+  const frames = opts.frames.map((frame) => ({ ...frame, documentId: frame.documentId ?? `budget-document-${frame.frameId}` }));
+  const documents = new Map<string, JSDOM>();
+  const scans: Array<{ details: any; result: unknown }> = [];
+  const executeScript = vi.fn(async (details: any) => {
+    const { target, args = [] } = details;
+    if (details.files) return [];
+    if (typeof args[0] === "string" && args[0].startsWith("http")) return [{ result: { x: 0, y: 0 } }];
+    const frame = target.documentIds
+      ? frames.find((candidate) => target.documentIds.includes(candidate.documentId))
+      : frames.find((candidate) => candidate.frameId === (target.frameIds?.[0] ?? 0));
+    if (!frame) return [];
+    const key = `${target.tabId}:${frame.documentId}`;
+    if (!documents.has(key)) documents.set(key, pageRealm(opts.scanResults[frame.frameId] ?? null));
+    const win = documents.get(key)!.window as any;
+    const owner = win.document.__vortexScanOwner;
+    const scanned = owner?.scanned;
+    const result = [{ frameId: frame.frameId, documentId: frame.documentId,
+      result: win.eval(`(${String(details.func)})`)(...structuredClone(args)) }];
+    // Identify the actual function consuming the document lease, not its arity.
+    // Run it in the renderer, then withhold/delay only its executeScript reply.
+    if (owner && !scanned && owner === win.document.__vortexScanOwner && owner.scanned === true) {
+      scans.push({ details, result });
+      if (wedged.has(frame.frameId)) return new Promise(() => {});
+      if (slow[frame.frameId] != null) return new Promise((resolve) => setTimeout(() => resolve(result), slow[frame.frameId]));
     }
-    if (wedged.has(frameId)) return new Promise(() => {}); // 永不 settle
-    if (slow[frameId] != null) {
-      return new Promise((resolve) =>
-        setTimeout(() => resolve([{ result: opts.scanResults[frameId] ?? null }]), slow[frameId]),
-      );
-    }
-    return Promise.resolve([{ result: opts.scanResults[frameId] ?? null }]);
+    return result;
   });
   vi.stubGlobal("chrome", {
     tabs: { query: vi.fn().mockResolvedValue([{ id: 42 }]) },
-    webNavigation: { getAllFrames: vi.fn().mockResolvedValue(opts.frames) },
+    webNavigation: { getAllFrames: vi.fn().mockResolvedValue(frames) },
     scripting: { executeScript },
     runtime: { getManifest: vi.fn().mockReturnValue({ host_permissions: ["<all_urls>"] }) },
   });
+  return { documents, scans };
 }
 
 // 阈值来自真实日志(2026-08-11,123 次成功 observe):P90=9.3s、P99=25.6s、MAX=28s,
@@ -108,12 +135,58 @@ describe("observe 跨 frame 扫描降级", () => {
 
   beforeEach(() => {
     vi.unstubAllGlobals();
+    vi.stubGlobal("chrome", { webNavigation: {} });
     router = new ActionRouter();
     registerObserveHandlers(router);
   });
 
   afterEach(() => {
+    for (const dom of realms.splice(0)) dom.window.close();
     vi.useRealTimers();
+  });
+
+  it("一个 tab 的扫描卡住时，另一 tab 仍可完成", async () => {
+    vi.useFakeTimers();
+    stubChrome({
+      frames: [{ frameId: 0, parentFrameId: -1, url: "https://x/" }],
+      scanResults: { 0: mkPage(1) },
+    });
+    const execute = vi.mocked(chrome.scripting.executeScript);
+    const original = execute.getMockImplementation()!;
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    execute.mockImplementation(async (details: any) => {
+      if (details.target.tabId === 42) await gate;
+      return original(details);
+    });
+    let firstSettled = false;
+    const first = router.dispatch(mkReq("observe.snapshot", {}, 42)).then(() => { firstSettled = true; });
+    await vi.advanceTimersByTimeAsync(1);
+    const second = router.dispatch(mkReq("observe.snapshot", {}, 43));
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect((await second).error).toBeUndefined();
+    expect(firstSettled).toBe(false);
+    release();
+    await vi.advanceTimersByTimeAsync(1_000);
+    await first;
+  });
+
+  it("同 tab 前次页面注入永不结束时，排队请求也在传输超时前返回", async () => {
+    vi.useFakeTimers();
+    stubChrome({
+      frames: [{ frameId: 0, parentFrameId: -1, url: "https://x/" }],
+      scanResults: {},
+      wedgedFrames: [0],
+    });
+    const first = router.dispatch(mkReq("observe.snapshot", {}, 42));
+    await vi.advanceTimersByTimeAsync(25_000);
+    expect((await first).error?.code).toBe("TIMEOUT");
+    const callsAfterFirst = vi.mocked(chrome.scripting.executeScript).mock.calls.length;
+    let secondResult: Awaited<ReturnType<typeof router.dispatch>> | undefined;
+    void router.dispatch(mkReq("observe.snapshot", {}, 42)).then((result) => { secondResult = result; });
+    await vi.advanceTimersByTimeAsync(29_000);
+    expect(secondResult?.error?.code).toBe("TIMEOUT");
+    expect(chrome.scripting.executeScript).toHaveBeenCalledTimes(callsAfterFirst);
   });
 
   it("单个 frame 的 executeScript 永不 settle 时,observe 仍在预算内返回(不挂到 30s 传输超时)", async () => {
@@ -227,25 +300,151 @@ describe("observe 跨 frame 扫描降级", () => {
       frames: [{ frameId: 0, parentFrameId: -1, url: "https://x/" }],
       scanResults: { 0: mkPage(5) },
     });
+    const dom = pageRealm(mkPage(5));
+    const win = dom.window as any;
+    win.Date.now = () => Date.now();
+    const documentId = "listener-timeout-document";
+    vi.mocked(chrome.webNavigation.getAllFrames).mockResolvedValue([{ frameId: 0, parentFrameId: -1, url: "https://x/", documentId }] as any);
+    const execute = vi.mocked(chrome.scripting.executeScript);
+    const scan = execute.getMockImplementation()! as (details: any) => Promise<any>;
+    execute.mockImplementation(async (details: any) => {
+      if (!details.target.documentIds) return scan(details);
+      if (!details.target.documentIds.includes(documentId)) return [];
+      if (details.world !== "MAIN") throw new Error("Ownership injection must use MAIN world");
+      return [{ frameId: 0, documentId, result: await win.eval(`(${String(details.func)})`)(...structuredClone(details.args ?? [])) }] as any;
+    });
     // debuggerMgr 存在但 CDP 永不响应(冷附加卡住)
     const hangingDbg = {
-      attach: () => new Promise(() => {}),
-      enableDomain: () => new Promise(() => {}),
-      sendCommand: () => new Promise(() => {}),
+      attach: vi.fn(() => new Promise(() => {})),
+      enableDomain: vi.fn(() => new Promise(() => {})),
+      sendCommand: vi.fn(() => new Promise(() => {})),
     } as any;
     const r2 = new ActionRouter();
     registerObserveHandlers(r2, hangingDbg);
 
-    const p = r2.dispatch(mkReq("observe.snapshot", {}, 42));
-    await vi.advanceTimersByTimeAsync(21_000);
-    const resp = await p;
-    const r = resp.result as {
-      elements: unknown[];
-      meta: { degraded?: { listenerDiscovery?: string } };
-    };
+    try {
+      let settled = false;
+      const p = r2.dispatch(mkReq("observe.snapshot", { includeAX: false }, 42)).then((response) => { settled = true; return response; });
+      await vi.advanceTimersByTimeAsync(7_999);
+      expect(hangingDbg.attach).toHaveBeenCalledWith(42);
+      expect(hangingDbg.enableDomain).not.toHaveBeenCalled();
+      expect(settled).toBe(false);
+      const claim = execute.mock.calls.map(([details]: any) => details).find((details) => details.args?.[0] === "listener.claim");
+      expect(claim?.target.documentIds).toEqual([documentId]);
+      expect(win.document.__vortexListenerOwner.owner).toBe(claim!.args[1].token);
+      await vi.advanceTimersByTimeAsync(2);
+      const resp = await p;
+      expect(resp.error).toBeUndefined();
+      const r = resp.result as {
+        elements: unknown[];
+        meta: { degraded?: { listenerDiscovery?: string } };
+      };
 
-    expect(r.elements.length).toBe(5); // 扫描本身不受影响
-    expect(r.meta.degraded?.listenerDiscovery).toBe("timeout");
+      expect(r.elements.length).toBe(5); // 扫描本身不受影响
+      expect(r.meta.degraded?.listenerDiscovery).toBe("timeout");
+      expect(win.document.__vortexListenerOwner.owner).toBeNull();
+    } finally {
+      dom.window.close();
+    }
+  });
+
+  it("does not apply a delayed listener mark after the discovery timeout", async () => {
+    vi.useFakeTimers();
+    stubChrome({
+      frames: [{ frameId: 0, parentFrameId: -1, url: "https://x/" }],
+      scanResults: { 0: mkPage(1) },
+    });
+    let release!: () => void;
+    let entered!: () => void;
+    const waiting = new Promise<void>((resolve) => { entered = resolve; });
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const dom = pageRealm(mkPage(1));
+    dom.window.document.body.insertAdjacentHTML("beforeend", `<div id="listener">Late action</div>`);
+    const win = dom.window as any;
+    win.Date.now = () => Date.now();
+    const node = win.document.querySelector("#listener");
+    const setAttribute = vi.spyOn(node, "setAttribute");
+    const documentId = "late-listener-document";
+    vi.mocked(chrome.webNavigation.getAllFrames).mockResolvedValue([{ frameId: 0, parentFrameId: -1, url: "https://x/", documentId }] as any);
+    const execute = vi.mocked(chrome.scripting.executeScript);
+    const scan = execute.getMockImplementation()! as (details: any) => Promise<any>;
+    execute.mockImplementation(async (details: any) => {
+      if (!details.target.documentIds) return scan(details);
+      if (!details.target.documentIds.includes(documentId)) return [];
+      if (details.world !== "MAIN") throw new Error("Ownership injection must use MAIN world");
+      return [{ frameId: 0, documentId, result: await win.eval(`(${String(details.func)})`)(...structuredClone(details.args ?? [])) }] as any;
+    });
+    let markParams: any;
+    const writes: boolean[] = [];
+    const stamp = (params: any) => win.eval(`(${params.functionDeclaration})`).apply(node, structuredClone(params.arguments.map((arg: any) => arg.value)));
+    const dbg = {
+      attach: vi.fn(), enableDomain: vi.fn(),
+      sendCommand: vi.fn(async (_tab: number, method: string, params: any) => {
+        if (method === "Runtime.evaluate") return { result: { objectId: "doc" } };
+        if (method === "DOMDebugger.getEventListeners") return { listeners: [{ type: "click", backendNodeId: 7 }] };
+        if (method === "DOM.pushNodesByBackendIdsToFrontend") return { nodeIds: [7] };
+        if (method === "DOM.resolveNode") return { object: { objectId: "node" } };
+        if (method === "Runtime.callFunctionOn") {
+          markParams = params;
+          entered(); await gate;
+          const value = stamp(params);
+          writes.push(value);
+          return { result: { value } };
+        }
+        return {};
+      }),
+    };
+    const r2 = new ActionRouter();
+    registerObserveHandlers(r2, dbg as any);
+    try {
+      const pending = r2.dispatch(mkReq("observe.snapshot", { frames: "main", includeAX: false }, 42));
+      await waiting;
+      const claimCalls = () => execute.mock.calls.filter(([details]: any) => details.args?.[0] === "listener.claim");
+      expect(claimCalls()[0][0].target.documentIds).toEqual([documentId]);
+      const token = win.document.__vortexListenerOwner.owner;
+      expect(stamp(markParams)).toBe(true);
+      expect(node.getAttribute("data-vtx-listener")).toBe(token);
+      node.removeAttribute("data-vtx-listener");
+      setAttribute.mockClear();
+      const rendererClock = vi.spyOn(win.Date, "now").mockReturnValue(markParams.arguments[1].value);
+      try {
+        expect(stamp(markParams)).toBe(false);
+        expect(win.document.__vortexListenerOwner.owner).toBe(token);
+        expect(setAttribute).not.toHaveBeenCalled();
+      } finally { rendererClock.mockRestore(); }
+      await vi.advanceTimersByTimeAsync(8_001);
+      const resp: any = await pending;
+      expect(resp.result.meta.degraded.listenerDiscovery).toBe("timeout");
+      expect(win.document.__vortexListenerOwner.owner).toBeNull();
+      let nextSettled = false;
+      const next = r2.dispatch(mkReq("observe.snapshot", { frames: "main", includeAX: false }, 42)).then((result) => { nextSettled = true; return result; });
+      await vi.advanceTimersByTimeAsync(1);
+      expect(nextSettled).toBe(false);
+      expect(claimCalls()).toHaveLength(1);
+      release();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(writes[0]).toBe(false);
+      expect(setAttribute).not.toHaveBeenCalledWith("data-vtx-listener", token);
+      const nextResponse: any = await next;
+      expect(nextResponse.error).toBeUndefined();
+      expect(writes[1]).toBe(true);
+      expect(claimCalls()).toHaveLength(2);
+    } finally {
+      release();
+      dom.window.close();
+    }
+  });
+
+  it("reports listener discovery failure instead of claiming complete discovery", async () => {
+    stubChrome({
+      frames: [{ frameId: 0, parentFrameId: -1, url: "https://x/" }],
+      scanResults: { 0: mkPage(1) },
+    });
+    const dbg = { attach: vi.fn(), enableDomain: vi.fn(), sendCommand: vi.fn().mockRejectedValue(new Error("CDP unavailable")) };
+    const r2 = new ActionRouter();
+    registerObserveHandlers(r2, dbg as any);
+    const resp: any = await r2.dispatch(mkReq("observe.snapshot", { includeAX: false }, 42));
+    expect(resp.result.meta.degraded.listenerDiscovery).toBe("error");
   });
 
   it("无 frame 卡死时行为不变(不引入降级信息)", async () => {

@@ -22,6 +22,7 @@ export interface SnapshotElement {
   role?: string;
   /** descriptor 自愈：observe 计算的 accessible name；选择器失效时重匹配用。@since v0.10 */
   name?: string;
+  pageNodeIndex?: number;
 }
 
 export interface SnapshotEntry {
@@ -29,11 +30,12 @@ export interface SnapshotEntry {
   /** 向后兼容字段：单 frame snapshot 的 frameId hint；多 frame 时忽略，按 element.frameId 路由 */
   frameId?: number;
   capturedAt: number;
+  pagination?: boolean;
   elements: SnapshotElement[];
 }
 
 const snapshots = new Map<string, SnapshotEntry>();
-const SNAPSHOT_TTL_MS = 60_000;
+export const SNAPSHOT_TTL_MS = 60_000;
 let counter = 0;
 
 export function newSnapshotId(): string {
@@ -49,6 +51,10 @@ export function gcSnapshots(): void {
 
 export function setSnapshot(id: string, entry: SnapshotEntry): void {
   snapshots.set(id, entry);
+}
+
+export function deleteSnapshot(snapshotId: string): void {
+  snapshots.delete(snapshotId);
 }
 
 export function getSnapshotEntry(snapshotId: string): SnapshotEntry | undefined {

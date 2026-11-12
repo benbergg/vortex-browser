@@ -39,7 +39,7 @@ describe("observe label[for]→零尺寸 control 命名继承(source-lock)", () 
 
   it("name 取关联控件 aria-label 优先、value 兜底", () => {
     expect(OBSERVE_SRC).toMatch(
-      /getAttribute\("aria-label"\) \|\| \(h as HTMLInputElement\)\.value/,
+      /getAttribute\("aria-label"\) \|\| \(input\.type !== "password" && !isTextMasked\(h\) && !containsMaskedText\(el\) \? input\.value : ""\)/,
     );
   });
 

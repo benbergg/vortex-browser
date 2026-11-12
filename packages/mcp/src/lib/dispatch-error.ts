@@ -23,9 +23,9 @@ export function formatDispatchError(err: DispatchErrorLike): string {
     const meta = DEFAULT_ERROR_META[code as VtxErrorCode];
     if (meta?.hint) hintText = `\nHint: ${meta.hint}`;
   }
-  // surface code 是 TIMEOUT 但根因是 ref detach 时,额外拼 NOT_ATTACHED 的 hint（P0-3）
+  // 无远端 hint 时，TIMEOUT 的 ref detach 根因补 NOT_ATTACHED 指引；不覆盖远端安全指引。
   const lastReason = (err.context?.extras as { lastReason?: string } | undefined)?.lastReason;
-  if (code === "TIMEOUT" && lastReason === "NOT_ATTACHED") {
+  if (!err.hint && code === "TIMEOUT" && lastReason === "NOT_ATTACHED") {
     const notAttachedHint = DEFAULT_ERROR_META["NOT_ATTACHED" as VtxErrorCode]?.hint;
     if (notAttachedHint) hintText += `\nHint (lastReason=NOT_ATTACHED): ${notAttachedHint}`;
   }

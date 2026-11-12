@@ -7,7 +7,7 @@
  * → 对 observe 任何 filter 不可见 → ref-based vortex_drag 无合法 endRef 投放。
  *
  * 修复:扩展 discovery 标 data-vtx-dropzone,observe scan 把它当入池信号 + 渲染 [dropzone]。
- * scan 内联于 executeScript func,无法行为执行,故以源码锁保护接线不被回退。
+ * 此处锁接线;真实注入、请求隔离与 shadow 行为见 observe-listener-ownership.test.ts。
  * (marker 模块与渲染层的真行为测试见 observe-js-listener.test.ts。)
  */
 
@@ -18,11 +18,12 @@ import { dirname, join } from "node:path";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const OBSERVE_SRC = readFileSync(join(__dirname, "../src/handlers/observe.ts"), "utf8");
+const OWNERSHIP_SRC = readFileSync(join(__dirname, "../src/handlers/observe-listener-ownership.ts"), "utf8");
 
 describe("observe.ts 投放区发现接线(source-lock)", () => {
   it("入池信号:cursor!=pointer 分支纳入 data-vtx-dropzone(并集 framework/listener)", () => {
     // __hasDropzone 须参与 continue 守卫,否则仅 drop 监听的 div 被滤掉
-    expect(OBSERVE_SRC).toMatch(/__hasDropzone\s*=[\s\S]*?hasAttribute\("data-vtx-dropzone"\)/);
+    expect(OBSERVE_SRC).toMatch(/__hasDropzone\s*=[\s\S]*?hasListenerMarker\(el, "data-vtx-dropzone"\)/);
     expect(OBSERVE_SRC).toMatch(
       /if\s*\(\s*!hasFrameworkClick\(el\)\s*&&\s*!__hasDirectListener\s*&&\s*!__hasDropzone\s*\)\s*continue/,
     );
@@ -31,7 +32,7 @@ describe("observe.ts 投放区发现接线(source-lock)", () => {
   it("body/html 排除:全局 file-drop 监听绑文档根,不得把整页当投放区", () => {
     // 收集侧守卫
     expect(OBSERVE_SRC).toMatch(
-      /hasAttribute\("data-vtx-dropzone"\)\s*&&\s*el\.tagName\s*!==\s*"BODY"\s*&&\s*el\.tagName\s*!==\s*"HTML"/,
+      /hasListenerMarker\(el, "data-vtx-dropzone"\)\s*&&\s*el\.tagName\s*!==\s*"BODY"\s*&&\s*el\.tagName\s*!==\s*"HTML"/,
     );
   });
 
@@ -43,7 +44,7 @@ describe("observe.ts 投放区发现接线(source-lock)", () => {
     expect(OBSERVE_SRC).toMatch(/dropzoneInteractive:\s*true as const/);
     // entry 侧也带 body/html 守卫
     const entryGuard =
-      /hasAttribute\("data-vtx-dropzone"\)\s*&&[\s\S]{0,80}tagName\s*!==\s*"BODY"[\s\S]{0,40}tagName\s*!==\s*"HTML"[\s\S]{0,40}dropzoneInteractive/;
+      /hasListenerMarker\(htmlEl, "data-vtx-dropzone"\)\s*&&[\s\S]{0,80}tagName\s*!==\s*"BODY"[\s\S]{0,40}tagName\s*!==\s*"HTML"[\s\S]{0,40}dropzoneInteractive/;
     expect(OBSERVE_SRC).toMatch(entryGuard);
   });
 
@@ -54,6 +55,7 @@ describe("observe.ts 投放区发现接线(source-lock)", () => {
   });
 
   it("marker 清理含 data-vtx-dropzone(防标记残留)", () => {
-    expect(OBSERVE_SRC).toMatch(/querySelectorAll\("\[data-vtx-dropzone\]"\)/);
+    expect(OWNERSHIP_SRC).toMatch(/for \(const name of \[[^\]]*"data-vtx-dropzone"[^\]]*\]\)[\s\S]*?el\.getAttribute\(name\) !== request\.token[\s\S]*?item\.marker\(el, name, null\); else el\.removeAttribute\(name\)/);
+    expect(OWNERSHIP_SRC).toContain("if (el.shadowRoot) roots.push(el.shadowRoot)");
   });
 });

@@ -26,6 +26,19 @@ describe("captureAXNodeMap", () => {
 });
 
 describe("buildIndexToBackend", () => {
+  it("ignores stale AX markers from another observe, including in open shadow roots", () => {
+    const root = {
+      children: [
+        { backendNodeId: 10, attributes: ["data-vtx-ax", "old:0"] },
+        { shadowRoots: [{ children: [
+          { backendNodeId: 20, attributes: ["data-vtx-ax", "new:0"] },
+          { backendNodeId: 30, attributes: ["data-vtx-ax", "old:1"] },
+        ] }] },
+      ],
+    };
+    const indexes = (buildIndexToBackend as any)(root, true, "new");
+    expect([...indexes]).toEqual([[0, 20]]);
+  });
   it("取 data-vtx-ax → {index: backendId},穿 shadowRoots", () => {
     const root = {
       backendNodeId: 1, nodeName: "BODY", attributes: [],
@@ -58,6 +71,21 @@ describe("buildIndexToBackend", () => {
 
 describe("applyOverlay 命中覆盖", () => {
   const ax = (o: Partial<CDPAXNode>): CDPAXNode => ({ nodeId: "x", ...o });
+  it("does not add AX values or names to masked content but preserves ordinary overlays", () => {
+    const els = [{ role: "textbox", name: "Label", maskedContent: true }, { role: "textbox", name: "Other" }];
+    const node = ax({ role: { value: "textbox" }, name: { value: "PRIVATE_AX_NAME" }, value: { value: "PRIVATE_AX_VALUE" } });
+    applyOverlay(els, new Map([[0, 100], [1, 200]]), new Map([[100, node], [200, node]]), new Map());
+    expect(JSON.stringify(els[0])).not.toContain("PRIVATE_AX");
+    expect(els[1].name).toBe("PRIVATE_AX_NAME");
+  });
+  it("preserves AX mixed state without copying masked text or values", () => {
+    const els: any[] = [{ role: "checkbox", name: "Public", maskedContent: true }];
+    const node = ax({ role: { value: "checkbox" }, name: { value: "PRIVATE_AX_NAME" }, value: { value: "PRIVATE_AX_VALUE" },
+      properties: [{ name: "checked", value: { value: "mixed" } }, { name: "description", value: { value: "PRIVATE_AX_DESC" } }] });
+    applyOverlay(els, new Map([[0, 100]]), new Map([[100, node]]), new Map());
+    expect(els[0].state?.checked).toBe("mixed");
+    expect(JSON.stringify(els)).not.toContain("PRIVATE_AX");
+  });
   it("命中:role/name/state 覆盖;controls remap backendId→index", () => {
     const els = [
       { role: "div", name: "", reactClickable: true as const },

@@ -23,7 +23,7 @@
  *   一次拿整页（含 shadow / iframe）所有监听器，每条带 backendNodeId；筛点击类
  *   → `DOM.getDocument`（满足 push 的「文档须先请求」前置）→
  *   `DOM.pushNodesByBackendIdsToFrontend` 批量转 nodeId →
- *   `DOM.setAttributeValue` 逐节点打 data-vtx-listener 标记。
+ *   `DOM.resolveNode` + `Runtime.callFunctionOn` 在页侧检查 deadline 后打标记。
  *
  *   ⚠️ 为何不用 CommandLineAPI `getEventListeners`（browser-use 同款单评估）：
  *     live 实测 `typeof getEventListeners === 'undefined'`——该函数是 DevTools 前端
@@ -40,6 +40,7 @@
  */
 
 import type { DebuggerManager } from "../lib/debugger-manager.js";
+import type { ListenerRequest } from "./observe-listener-ownership.js";
 
 /** scan 用来识别「有 JS 点击监听器」元素的属性名（pre-scan 打、post-scan 清）。 */
 export const LISTENER_MARK_ATTR = "data-vtx-listener";
@@ -80,7 +81,7 @@ interface CdpEventListener {
 }
 
 /** 标记结果：命中数 + 实际生效的机制（供诊断 / 测试断言）。 */
-export type ListenerMechanism = "domDebugger" | "skipped-heavy" | "error";
+export type ListenerMechanism = "domDebugger" | "skipped-heavy" | "error" | "timeout";
 
 export interface ListenerMarkResult {
   /** 打了 data-vtx-listener 的点击类元素数。 */
@@ -95,7 +96,7 @@ export interface ListenerMarkResult {
  * 供随后的 page-side scan 当作入池信号（DISCOVER 漏网 addEventListener div）。
  *
  * 须在 page-side scan **之前**调用；标记在真 DOM 上，executeScript 扫描可见。
- * 调用方负责 scan 后清理 `data-vtx-listener`（与 data-vtx-ax 同批清）。
+ * 调用方先按 documentId claim，并在 scan 后/finally retire 自己 token 的标记。
  *
  * @param debuggerMgr DebuggerManager 实例（已 attach）
  * @param tabId       目标 tab（pierce:true 已覆盖子 frame 监听器读取）
@@ -104,7 +105,11 @@ export interface ListenerMarkResult {
 export async function markListenerElements(
   debuggerMgr: Pick<DebuggerManager, "sendCommand" | "attach" | "enableDomain">,
   tabId: number,
+  deadline = Infinity,
+  paginationSnapshotId?: string,
+  requests: ListenerRequest[] = [],
 ): Promise<ListenerMarkResult> {
+  if (requests.length === 0) return { count: 0, dropzoneCount: 0, mechanism: "error" };
   let docObjectId: string | undefined;
   try {
     if (typeof (debuggerMgr as DebuggerManager).attach === "function") {
@@ -134,6 +139,7 @@ export async function markListenerElements(
     const clickIds = new Set<number>();
     const dropIds = new Set<number>();
     for (const l of listeners) {
+      if (Date.now() >= deadline) return { count: 0, dropzoneCount: 0, mechanism: "timeout" };
       const t = l.type ?? "";
       if (typeof l.backendNodeId !== "number") continue;
       if (CLICK_EVENT_TYPES.includes(t)) clickIds.add(l.backendNodeId);
@@ -152,21 +158,57 @@ export async function markListenerElements(
     // 关注监听器(且 ≤cap)时才付此遍历代价。
     await debuggerMgr.sendCommand(tabId, "DOM.getDocument", { depth: -1, pierce: true });
 
-    // 单类标记:backendNodeId 集合 → nodeId → setAttributeValue。返回实际标记数。
+    // 页侧检查截止时间，避免排队中的 CDP 命令在超时后写入。
+    let incomplete = false;
     const markSet = async (ids: Set<number>, attr: string): Promise<number> => {
       if (ids.size === 0) return 0;
+      if (Date.now() >= deadline) { incomplete = true; return 0; }
       const pushResp = (await debuggerMgr.sendCommand(tabId, "DOM.pushNodesByBackendIdsToFrontend", {
         backendNodeIds: [...ids],
       })) as { nodeIds?: number[] } | undefined;
       const nodeIds = pushResp?.nodeIds ?? [];
       let n = 0;
       for (const nodeId of nodeIds) {
-        if (!nodeId) continue;
+        if (!nodeId) { incomplete = true; continue; }
+        if (Date.now() >= deadline) { incomplete = true; break; }
+        let objectId: string | undefined;
         try {
-          await debuggerMgr.sendCommand(tabId, "DOM.setAttributeValue", { nodeId, name: attr, value: "" });
-          n++;
+          const resolved = await debuggerMgr.sendCommand(tabId, "DOM.resolveNode", { nodeId }) as { object?: { objectId?: string } };
+          objectId = resolved?.object?.objectId;
+          if (!objectId) { incomplete = true; continue; }
+          if (Date.now() >= deadline) { incomplete = true; break; }
+          const response = await debuggerMgr.sendCommand(tabId, "Runtime.callFunctionOn", {
+            objectId,
+            functionDeclaration: `function (name, deadline, token, requests) {
+              if (Date.now() >= deadline) return false;
+              const doc = this.ownerDocument;
+              // pierce also returns child nodes when only the main frame was claimed.
+              if (requests.every(r => r.frameId === 0) && doc?.defaultView &&
+                  doc.defaultView !== doc.defaultView.top) return "not-target";
+              const owner = doc?.__vortexListenerOwner;
+              const request = requests.find(r => owner && owner.documentId === r.documentId && owner.frameId === r.frameId &&
+                owner.epoch === r.epoch && owner.highWater === r.order && owner.owner === r.token &&
+                !owner.retired && owner.deadline === r.deadline && Date.now() < r.deadline);
+              if (!request) return false;
+              const scan = doc.__vortexScanOwner;
+              if (!scan || scan.owner !== request.scanToken || scan.documentId !== request.documentId ||
+                  scan.frameId !== request.frameId || scan.retired || Date.now() >= scan.deadline) return false;
+              const item = token && doc.defaultView?.__vortexPageSnapshots?.[token];
+              if (item) item.marker(this, name, request.token, scan); else this.setAttribute(name, request.token);
+              return true;
+            }`,
+            arguments: [{ value: attr }, { value: Number.isFinite(deadline) ? deadline : Number.MAX_SAFE_INTEGER }, { value: paginationSnapshotId ?? null }, { value: requests }],
+            returnByValue: true,
+          }) as { result?: { value?: boolean | "not-target" }; exceptionDetails?: unknown };
+          if (!response?.exceptionDetails && response?.result?.value === true) n++;
+          else if (response?.exceptionDetails || response?.result?.value !== "not-target") incomplete = true;
         } catch {
-          // 单节点失败跳过（如节点已从 frontend map 失效），继续
+          incomplete = true;
+        } finally {
+          if (objectId) {
+            try { await debuggerMgr.sendCommand(tabId, "Runtime.releaseObject", { objectId }); }
+            catch { incomplete = true; }
+          }
         }
       }
       return n;
@@ -175,7 +217,7 @@ export async function markListenerElements(
     // 点击类先标(保序:既有测试断言首个 push 为点击集),投放区后标。
     const count = await markSet(clickIds, LISTENER_MARK_ATTR);
     const dropzoneCount = await markSet(dropIds, DROPZONE_MARK_ATTR);
-    return { count, dropzoneCount, mechanism: "domDebugger" };
+    return { count, dropzoneCount, mechanism: incomplete ? (Date.now() >= deadline ? "timeout" : "error") : "domDebugger" };
   } catch {
     return { count: 0, dropzoneCount: 0, mechanism: "error" };
   } finally {

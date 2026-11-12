@@ -72,6 +72,7 @@ describe("observe auto-fallback (shell+iframe sites)", () => {
 
   beforeEach(() => {
     vi.unstubAllGlobals();
+    vi.stubGlobal("chrome", { webNavigation: {} });
     router = new ActionRouter();
     registerObserveHandlers(router);
   });

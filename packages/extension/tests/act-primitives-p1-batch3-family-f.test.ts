@@ -17,10 +17,13 @@ const DOM_SRC = readFileSync(join(__dirname, "../src/handlers/dom.ts"), "utf8");
 
 // TYPE 的 input/textarea 分支区间(在 page-side-dispatch 路径内)
 const typeIdx = DOM_SRC.indexOf("input / textarea path");
-const TYPE_BLOCK = DOM_SRC.slice(typeIdx, typeIdx + 4200);
+const typeEnd = DOM_SRC.indexOf("if (res?.error) mapPageError(res, selector);", typeIdx);
+const TYPE_BLOCK = DOM_SRC.slice(typeIdx, typeEnd);
 
 describe("族 F #8 — TYPE 受控组件用原生 value setter 累加不被吞", () => {
   it("不再裸用 el.value += char,改原生 setter", () => {
+    expect(typeIdx).toBeGreaterThanOrEqual(0);
+    expect(typeEnd).toBeGreaterThan(typeIdx);
     expect(TYPE_BLOCK).not.toMatch(/el\.value \+= char/);
     expect(TYPE_BLOCK).toMatch(/const nativeSet = proto/);
     expect(TYPE_BLOCK).toMatch(/nativeSet\.call\(el, v\)/);

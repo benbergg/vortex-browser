@@ -35,7 +35,7 @@ export type ActionabilityResult =
     };
 
 (function () {
-  if ((window as any).__vortexActionability?.version === 2) return;
+  if ((window as any).__vortexActionability?.version === 3) return;
 
   function isAttached(el: Element): boolean {
     return el.isConnected;
@@ -197,7 +197,9 @@ export type ActionabilityResult =
     selector: string,
     needsEditable: boolean,
     force = false,
-  ): Promise<ActionabilityResult> {
+    captured?: Element | null,
+    validate?: () => boolean,
+  ): Promise<ActionabilityResult | { stale: true }> {
     // querySelector 对非法 CSS 抛 SyntaxError。此前一律 catch 成 el=null → NOT_ATTACHED
     // (可重试)，让 Playwright 语法(`text=` / `>>` / `:has-text()`)与自然语言 target 空转满
     // timeout 预算，最后抛出方向完全相反的 "Element detached from DOM" 诊断
@@ -206,7 +208,7 @@ export type ActionabilityResult =
     let el: Element | null;
     try {
       // light-DOM 优先；落空时穿 open shadow 兜底（Tier 2：shadow-internal 元素现可操作）。
-      el = document.querySelector(selector) ?? findInOpenShadow(selector);
+      el = captured ?? document.querySelector(selector) ?? findInOpenShadow(selector);
     } catch (err) {
       // 主判据是 `.name`：DOM spec 规定 querySelector 抛的是 **DOMException**（name
       // 为 "SyntaxError"），`instanceof SyntaxError` 恒 false（实测已确认）。保留
@@ -222,6 +224,7 @@ export type ActionabilityResult =
     }
     if (!isAttached(el)) return { ok: false, reason: "NOT_ATTACHED" };
     unskipIfContentVisibilityAuto(el); // cv-auto skip 死锁防护(R2):先滚动 un-skip
+    if (validate && !validate()) return { stale: true };
     // force:true → 跳过质量门(visible/enabled/editable/obscured),仍要求 attached(上面已查)、
     // 仍 scrollIntoView + 取 rect 供 CDP/合成派发用。对齐 Playwright force 语义,让公开 schema
     // options.force 诚实(2026-06-04 H 族补实现:此前 force 是 no-op)。
@@ -267,6 +270,7 @@ export type ActionabilityResult =
     const centerOffscreen =
       cx < 0 || cy < 0 || cx > window.innerWidth || cy > window.innerHeight;
     if (centerOffscreen && typeof (el as any).scrollIntoView === "function") {
+      if (validate && !validate()) return { stale: true };
       (el as Element).scrollIntoView({ block: "center", inline: "center" });
       r = el.getBoundingClientRect();
       cx = r.x + r.width / 2;
@@ -307,10 +311,10 @@ export type ActionabilityResult =
   }
 
   // Stable re-check: host-side calls this immediately after probe ok to confirm position is stable.
-  async function probeStable(selector: string): Promise<{ ok: boolean }> {
+  async function probeStable(selector: string, captured?: Element | null): Promise<{ ok: boolean }> {
     let el: Element | null;
     try {
-      el = document.querySelector(selector) ?? findInOpenShadow(selector);
+      el = captured ?? document.querySelector(selector) ?? findInOpenShadow(selector);
     } catch {
       el = null;
     }
@@ -320,7 +324,7 @@ export type ActionabilityResult =
   }
 
   (window as any).__vortexActionability = {
-    version: 2,
+    version: 3,
     probe,
     probeStable,
     // Atomic methods exposed for host-side direct use

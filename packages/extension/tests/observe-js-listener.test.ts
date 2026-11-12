@@ -5,12 +5,12 @@
  * data-vtx-listener，scan 当入池信号 → DISCOVER 漏网 vanilla/jQuery div。
  *
  * 机制（live 实测唯一可用）：DOMDebugger.getEventListeners(document, depth:-1, pierce:true)
- * → 筛点击类 backendNodeId → DOM.getDocument（满足 push 前置）→ push → setAttributeValue。
+ * → 筛点击类 backendNodeId → DOM.getDocument → push → 页侧条件标记。
  * CommandLineAPI getEventListeners 经 chrome.debugger 不暴露（typeof undefined），已移除。
  *
  * 测试覆盖：
  *   1. DOMDebugger 一次拿监听器 → 仅点击类 backendNodeId 被 push + 标记
- *   2. getEventListeners 用 depth:-1 + pierce:true；setAttributeValue 用 LISTENER_MARK_ATTR
+ *   2. getEventListeners 用 depth:-1 + pierce:true；页侧标记用 LISTENER_MARK_ATTR
  *   3. push **前**必调 DOM.getDocument（否则 "Document needs to be requested first"）
  *   4. 空 / 全非点击类监听器 → count 0
  *   5. CDP 抛错 / 无 document objectId → count 0 + mechanism=error（召回零回退）
@@ -20,12 +20,17 @@
 
 import { describe, it, expect, vi } from "vitest";
 import {
-  markListenerElements,
+  markListenerElements as discoverListeners,
   JS_LISTENER_ELEMENT_CAP,
   LISTENER_MARK_ATTR,
   DROPZONE_MARK_ATTR,
 } from "../src/handlers/observe-js-listener.js";
 import { renderObserveTree } from "../../mcp/src/lib/observe-render.js";
+
+// Routing/count unit tests use a confirmed request; realm-level ownership is
+// exercised separately in observe-listener-ownership.test.ts.
+const markListenerElements = (dbg: Parameters<typeof discoverListeners>[0], tabId: number, deadline = Infinity) =>
+  discoverListeners(dbg, tabId, deadline, undefined, [{ frameId: 0, documentId: "unit-document", epoch: "unit-epoch", order: 1, token: "unit-token", deadline: Number.isFinite(deadline) ? deadline : Number.MAX_SAFE_INTEGER }]);
 
 // --- 工具函数 ---
 
@@ -60,6 +65,8 @@ function makeDbg(config: DbgConfig): {
     if (method === "DOMDebugger.getEventListeners") {
       return Promise.resolve({ listeners: config.listeners ?? [] });
     }
+    if (method === "DOM.resolveNode") return Promise.resolve({ object: { objectId: String(params.nodeId) } });
+    if (method === "Runtime.callFunctionOn") return Promise.resolve({ result: { value: true } });
     if (method === "DOM.getDocument") {
       return Promise.resolve({ root: { nodeId: 1 } });
     }
@@ -78,6 +85,41 @@ function makeDbg(config: DbgConfig): {
 // ---- DOMDebugger 发现路径 ----
 
 describe("markListenerElements · DOMDebugger 发现", () => {
+  it("does not write a listener marker when the renderer executes after the deadline", async () => {
+    const dbg = makeDbg({ listeners: [{ type: "click", backendNodeId: 7 }], nodeIds: [70] });
+    const original = dbg.sendCommand.getMockImplementation()!;
+    const node = { setAttribute: vi.fn() };
+    let now = 100;
+    const clock = vi.spyOn(Date, "now").mockImplementation(() => now);
+    let release!: () => void;
+    let entered!: () => void;
+    const waiting = new Promise<void>((resolve) => { entered = resolve; });
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    dbg.sendCommand.mockImplementation(async (tabId: number, method: string, params: any) => {
+      if (method === "DOM.resolveNode") return { object: { objectId: "node-70" } };
+      if (method === "DOM.setAttributeValue" || method === "Runtime.callFunctionOn") {
+        entered(); await gate;
+        if (method === "DOM.setAttributeValue") node.setAttribute(params.name, params.value);
+        else {
+          const fn = new Function(`return (${params.functionDeclaration})`)();
+          return { result: { value: fn.apply(node, params.arguments.map((arg: any) => arg.value)) } };
+        }
+        return {};
+      }
+      return original(tabId, method, params);
+    });
+    try {
+      const pending = markListenerElements(dbg as any, 1, 200);
+      await waiting;
+      now = 200;
+      release();
+      const result = await pending;
+      expect(node.setAttribute).not.toHaveBeenCalled();
+      expect(result.count).toBe(0);
+      expect(result.mechanism).not.toBe("domDebugger");
+    } finally { clock.mockRestore(); }
+  });
+
   it("一次拿监听器,仅点击类 backendNodeId 被 push + 标记", async () => {
     const dbg = makeDbg({
       listeners: [
@@ -89,20 +131,21 @@ describe("markListenerElements · DOMDebugger 发现", () => {
     });
     const res = await markListenerElements(dbg as any, 1);
     expect(res.mechanism).toBe("domDebugger");
-    expect(res.count).toBe(2); // 两个 nodeId 各 setAttributeValue 一次
+    expect(res.count).toBe(2); // 两个节点均成功标记
     // 仅点击类 backendNodeId(11,13)进入 push,非点击类 12 被滤掉
     const pushCall = dbg.calls.find((c) => c.method === "DOM.pushNodesByBackendIdsToFrontend");
     expect(pushCall!.params.backendNodeIds.sort()).toEqual([11, 13]);
   });
 
-  it("getEventListeners 用 depth:-1 + pierce:true;setAttributeValue 用 LISTENER_MARK_ATTR", async () => {
+  it("getEventListeners 用 depth:-1 + pierce:true;页侧标记用 LISTENER_MARK_ATTR", async () => {
     const dbg = makeDbg({ listeners: [{ type: "click", backendNodeId: 7 }], nodeIds: [70] });
     await markListenerElements(dbg as any, 1);
     const leCall = dbg.calls.find((c) => c.method === "DOMDebugger.getEventListeners");
     expect(leCall!.params.depth).toBe(-1);
     expect(leCall!.params.pierce).toBe(true);
-    const setCall = dbg.calls.find((c) => c.method === "DOM.setAttributeValue");
-    expect(setCall!.params.name).toBe(LISTENER_MARK_ATTR);
+    const setCall = dbg.calls.find((c) => c.method === "Runtime.callFunctionOn");
+    expect(setCall!.params.arguments[0].value).toBe(LISTENER_MARK_ATTR);
+    expect(setCall!.params.arguments[3].value[0]).toMatchObject({ documentId: "unit-document", token: "unit-token" });
   });
 
   it("push **前**必调 DOM.getDocument(满足「文档须先请求」前置)", async () => {
@@ -183,8 +226,8 @@ describe("markListenerElements · dropzone 发现", () => {
     expect(res.mechanism).toBe("domDebugger");
     expect(res.dropzoneCount).toBe(1);
     expect(res.count).toBe(0); // 无点击类
-    const setCall = dbg.calls.find((c) => c.method === "DOM.setAttributeValue");
-    expect(setCall!.params.name).toBe(DROPZONE_MARK_ATTR);
+    const setCall = dbg.calls.find((c) => c.method === "Runtime.callFunctionOn");
+    expect(setCall!.params.arguments[0].value).toBe(DROPZONE_MARK_ATTR);
   });
 
   it("DROPZONE_MARK_ATTR 是 data-vtx-dropzone", () => {
@@ -215,11 +258,11 @@ describe("markListenerElements · dropzone 发现", () => {
     const res = await markListenerElements(dbg as any, 1);
     expect(res.count).toBe(1);
     expect(res.dropzoneCount).toBe(1);
-    const setCalls = dbg.calls.filter((c) => c.method === "DOM.setAttributeValue");
-    const listenerSet = setCalls.find((c) => c.params.name === LISTENER_MARK_ATTR);
-    const dropzoneSet = setCalls.find((c) => c.params.name === DROPZONE_MARK_ATTR);
-    expect(listenerSet!.params.nodeId).toBe(11);
-    expect(dropzoneSet!.params.nodeId).toBe(22);
+    const setCalls = dbg.calls.filter((c) => c.method === "Runtime.callFunctionOn");
+    const listenerSet = setCalls.find((c) => c.params.arguments[0].value === LISTENER_MARK_ATTR);
+    const dropzoneSet = setCalls.find((c) => c.params.arguments[0].value === DROPZONE_MARK_ATTR);
+    expect(listenerSet!.params.objectId).toBe("11");
+    expect(dropzoneSet!.params.objectId).toBe("22");
   });
 
   it("点击集先 push(保序,不破坏既有点击断言)", async () => {
@@ -300,6 +343,15 @@ describe("observe-render [dropzone] 标记", () => {
 // ---- 渲染层 [listener] 标记(未变,回归保护)----
 
 describe("observe-render [listener] 标记", () => {
+  it("renders listener discovery errors as degraded", () => {
+    const out = renderObserveTree({
+      snapshotId: "s", url: "https://example.com", elements: [],
+      meta: { degraded: { listenerDiscovery: "error" } },
+    } as any, null);
+    expect(out).toContain("listener discovery failed");
+    expect(out).toContain("results are partial");
+  });
+
   it("listenerInteractive=true → 渲染输出含 [listener]", () => {
     const data = {
       snapshotId: "s1",

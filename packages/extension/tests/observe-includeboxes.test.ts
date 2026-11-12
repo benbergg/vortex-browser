@@ -121,6 +121,7 @@ describe("observe handler — includeBoxes payload gate (Issue #21)", () => {
 
   beforeEach(() => {
     vi.unstubAllGlobals();
+    vi.stubGlobal("chrome", { webNavigation: {} });
     router = new ActionRouter();
     registerObserveHandlers(router);
   });

@@ -35,6 +35,7 @@ export interface CompactElement {
   href?: string;
   /** AX nameSource：名称来源(label/placeholder/title/heuristic 等)。@since ax-overlay */
   nameSource?: string;
+  semanticSource?: "ax" | "dom" | "heuristic";
   /** aria-controls / aria-owns 关联。@since B008: 指向已收集元素下标。
    *  @since B009: 加 id 字符串 fallback — 目标非 collectedEls(region/tabpanel)时
    *  用 {id:"ghost"} 暴露, agent 至少看到关联 id。 */
@@ -86,6 +87,10 @@ interface CompactFrame {
   frameId: number;
   parentFrameId: number;
   url: string;
+  title?: string;
+  viewport?: { width: number; height: number; scrollY: number; scrollHeight: number };
+  scanError?: string;
+  axStatus?: string;
   offset: { x: number; y: number };
   elementCount: number;
   truncated: boolean;
@@ -112,6 +117,7 @@ interface CompactFrame {
     controlName: string;
     controlCursor: string;
   }>;
+  hoverControlsUnavailable?: "target-scope";
   /** 空壳 SPA/渲染失败 frame 级信号。@since blank-shell */
   blankShell?: { root: string; rootLen: number; framework: string };
 }
@@ -121,6 +127,7 @@ export interface CompactObserve {
   url: string;
   title?: string;
   viewport?: { width: number; height: number; scrollY: number; scrollHeight: number };
+  mainMetadataStatus?: "unavailable";
   frames?: CompactFrame[];
   elements: CompactElement[];
   /**
@@ -138,7 +145,7 @@ export interface CompactObserve {
     degraded?: {
       timedOutFrames?: number[];
       budgetSkippedFrames?: number[];
-      listenerDiscovery?: "timeout";
+      listenerDiscovery?: "timeout" | "error" | "skipped-heavy";
       axOverlay?: "timeout";
     };
   };
@@ -156,8 +163,8 @@ function buildDegradedNote(data: CompactObserve): string | null {
   if (d.budgetSkippedFrames?.length)
     parts.push(`frames [${d.budgetSkippedFrames.join(", ")}] skipped (scan budget exhausted)`);
   // 元素数量不变但质量下降的两类,必须单独说清影响,否则看起来"结果齐全"
-  if (d.listenerDiscovery === "timeout")
-    parts.push("listener discovery timed out (plain div/jQuery click targets may be missing)");
+  if (d.listenerDiscovery)
+    parts.push(`listener discovery ${d.listenerDiscovery === "timeout" ? "timed out" : d.listenerDiscovery === "skipped-heavy" ? "skipped (too many listeners)" : "failed"} (plain div/jQuery click targets may be missing)`);
   if (d.axOverlay === "timeout")
     parts.push("AX overlay timed out (role/name fell back to heuristics)");
   if (parts.length === 0) return null;
@@ -464,6 +471,7 @@ function blindspotSummary(
 function hoverRevealSummary(frames?: CompactFrame[]): string | null {
   const parts: string[] = [];
   for (const f of frames ?? []) {
+    if (f.hoverControlsUnavailable === "target-scope") parts.push(`hover reveal unavailable for target scope${f.frameId !== 0 ? ` (frame ${f.frameId})` : ""}`);
     for (const p of f.hoverControls ?? []) {
       const fr = f.frameId !== 0 ? ` (frame ${f.frameId})` : "";
       const label = p.controlName ? `"${escapeName(p.controlName)}"` : p.controlTag;
@@ -505,6 +513,19 @@ function pushTruncationNotes(frames: CompactFrame[] | undefined, scanNotes: stri
       );
     }
   }
+}
+
+function frameMetadataLines(data: CompactObserve): string[] {
+  const lines: string[] = [];
+  if (data.mainMetadataStatus === "unavailable") lines.push("# main page metadata unavailable");
+  for (const f of data.frames ?? []) {
+    if (f.frameId === 0) continue;
+    const details = [f.url && `url=${f.url}`, f.title && `title=${JSON.stringify(f.title)}`,
+      f.viewport && `viewport=${f.viewport.width}x${f.viewport.height}`,
+      f.scanError && `error=${f.scanError}`, f.axStatus && `ax=${f.axStatus}`].filter(Boolean);
+    if (details.length && (f.title !== undefined || f.viewport || f.scanError || f.axStatus)) lines.push(`# frame ${f.frameId} ${details.join(" ")}`);
+  }
+  return lines;
 }
 
 export function renderObserveCompact(
@@ -573,7 +594,7 @@ export function renderObserveCompact(
     const newPrefix = isNew ? "* " : "";
 
     lines.push(
-      `${newPrefix}${refOf(el, snapshotHash)} [${el.role}]${name}${lm}${lv}${stateFlags(el.state)}${comp}${valueSeg}${valueMinSeg}${valueMaxSeg}${keyshortcutsSeg}${dupCtxSeg}${offscreenSeg}${blindspotTag(el.blindspot)}${el.behindModal ? " [behind-modal]" : ""}${bboxSeg}`,
+      `${newPrefix}${refOf(el, snapshotHash)} [${el.role}]${name}${lm}${lv}${stateFlags(el.state)}${comp}${valueSeg}${valueMinSeg}${valueMaxSeg}${keyshortcutsSeg}${dupCtxSeg}${offscreenSeg}${el.semanticSource ? ` [source=${el.semanticSource}]` : ""}${blindspotTag(el.blindspot)}${el.behindModal ? " [behind-modal]" : ""}${bboxSeg}`,
     );
   }
 
@@ -626,7 +647,7 @@ export function renderObserveCompact(
   // T4-diff: 渲染完成后自动存储本次快照，供下次 prevSnapshotId 引用。
   autoStoreSnapshot(data.snapshotId, data.elements);
 
-  return lines.join("\n");
+  return [...lines, ...frameMetadataLines(data)].join("\n");
 }
 
 export function renderObserveTree(
@@ -739,7 +760,7 @@ export function renderObserveTree(
     const isNew = prevKeys !== null && !prevKeys.has(buildElementKey(e));
     const newPrefix = isNew ? "* " : "";
     lines.push(
-      `${indent}${newPrefix}- ${e.role}${name}${ref}${lm}${lv}${stateFlags(e.state)}${weak}${cursor}${listener}${dropzone}${draggable}${valueSeg}${valueMinSeg}${valueMaxSeg}${keyshortcutsSeg}${comp}${err}${ctrl}${desc}${dupCtx}${offscreenSeg}${blindspotTag(e.blindspot)}${e.behindModal ? " [behind-modal]" : ""}${bboxSeg}${hasChildren ? ":" : ""}`,
+      `${indent}${newPrefix}- ${e.role}${name}${ref}${lm}${lv}${stateFlags(e.state)}${weak}${cursor}${listener}${dropzone}${draggable}${valueSeg}${valueMinSeg}${valueMaxSeg}${keyshortcutsSeg}${comp}${err}${ctrl}${desc}${dupCtx}${offscreenSeg}${e.semanticSource ? ` [source=${e.semanticSource}]` : ""}${blindspotTag(e.blindspot)}${e.behindModal ? " [behind-modal]" : ""}${bboxSeg}${hasChildren ? ":" : ""}`,
     );
     if (hasUrl) lines.push(`${indent}  - /url: ${e.href}`);
     for (const k of kids) emit(k, depth + 1);
@@ -781,5 +802,5 @@ export function renderObserveTree(
   // T4-diff: 渲染完成后自动存储本次快照，供下次 prevSnapshotId 引用。
   autoStoreSnapshot(data.snapshotId, data.elements);
 
-  return lines.join("\n");
+  return [...lines, ...frameMetadataLines(data)].join("\n");
 }

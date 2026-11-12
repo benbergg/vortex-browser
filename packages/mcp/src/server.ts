@@ -688,18 +688,48 @@ export async function handleCallTool(
     toolDef.name === "vortex_observe" || toolDef.action === "observe.snapshot";
   if (isObserveTool) {
     const detail = (params.detail as "compact" | "full") ?? "compact";
-    const { scope, filter, tabId, timeout, ...rest } = params;
+    const { scope, filter, tabId, timeout, target, detail: _detail, ...rest } = params;
     // 专用路径曾把 timeout 摘走却没塞回 next，handler 拿不到内层预算，且传输与内层
     // 同 deadline 竞 race。与通用路径共用同一阶梯。
     const ladder = timeoutLadder(timeout as number | undefined, DEFAULT_TIMEOUT);
     // v0.6 schema 暴露 scope/filter 而非 v0.5 的 viewport/filter；在此 reshape，
     // 与 dispatch.ts case "vortex_observe" 保持等价（special path 会先 return，
     // 不会再落到 dispatchNewTool）。
-    const next: Record<string, unknown> = { ...rest, format: detail };
+    const next: Record<string, unknown> = { ...rest, ...(params.cursor === undefined ? { format: detail } : {}) };
     if (ladder.inner !== undefined) next.timeout = ladder.inner;
     if (scope === "full") next.viewport = "full";
     else if (scope === "viewport") next.viewport = "visible";
     if (filter !== undefined) next.filter = filter;
+    // 目标局部观察:target = CSS selector 或旧快照里的 @ref。
+    // ref 先用**当前活跃快照**解析成 index + snapshotId(旧 ref 在新快照前解析),
+    // CSS 原样落成 selector —— 扩展只认 selector / index+snapshotId。
+    if (typeof target === "string" && target !== "") {
+      const { resolveTargetParam } = await import("./lib/ref-parser.js");
+      const currentTabId = typeof tabId === "number" ? tabId : null;
+      let resolved: Awaited<ReturnType<typeof resolveTargetParam>>;
+      try {
+        resolved = resolveTargetParam(
+          target,
+          activeSnapshotId,
+          activeSnapshotHash,
+          activeSnapshotTabId,
+          currentTabId,
+          querySnapshotRegistered,
+        );
+      } catch (err) {
+        return {
+          isError: true,
+          content: [{ type: "text" as const, text: formatError(err) }],
+        };
+      }
+      if (resolved.selector) next.selector = resolved.selector;
+      if (resolved.index != null) {
+        next.index = resolved.index;
+        next.snapshotId = resolved.snapshotId;
+        // 保留显式 frameId，让扩展校验它与 ref 绑定的 frame 是否一致。
+        if (next.frameId == null && resolved.frameId != null && resolved.frameId !== 0) next.frameId = resolved.frameId;
+      }
+    }
     // 始终用显式 "observe.snapshot" 作为发到 extension 的 action（toolDef.action
     // 在 v0.6 是 "L4.observe"，extension 端无对应 handler）。
     // hub deadline 由 action 预算推导，不被调用方小 timeout 挤压
@@ -738,7 +768,10 @@ export async function handleCallTool(
       const resultWithDiff = prevSnapshotId
         ? { ...(resp.result as object), prevSnapshotId }
         : resp.result;
-      const text = renderObserveTree(resultWithDiff as any, activeSnapshotHash, includeBoxes);
+      let text = renderObserveTree(resultWithDiff as any, activeSnapshotHash, includeBoxes);
+      const page = resp.result as { nextCursor?: string; meta?: { incomplete?: string } };
+      if (page?.nextCursor) text += `\n# nextCursor: ${page.nextCursor}`;
+      if (page?.meta?.incomplete) text += `\n# incomplete: ${page.meta.incomplete}`;
       return withEvents([{ type: "text" as const, text }]);
     }
     // detail=full：原 JSON pretty（与 v0.4 行为一致）

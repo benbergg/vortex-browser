@@ -1,5 +1,5 @@
 import { VtxErrorCode, vtxError } from "@vortex-browser/shared";
-import { getSnapshotEntry } from "./snapshot-store.js";
+import { getSnapshotEntry, SNAPSHOT_TTL_MS } from "./snapshot-store.js";
 
 /**
  * handler 接受 `selector` 或 `{ index, snapshotId }` 两种元素定位方式，
@@ -12,9 +12,10 @@ export interface ResolvedTarget {
   boundFrameId?: number;
   /** stale 选择器自愈用；仅 index 路径且 snapshot 存了 role/name 时有值。@since v0.10 */
   descriptor?: { role?: string; name: string };
+  pagination?: { snapshotId: string; nodeIndex: number };
 }
 
-export function resolveTarget(args: Record<string, unknown>): ResolvedTarget {
+export function resolveTarget(args: Record<string, unknown>, allowPagination = false): ResolvedTarget {
   const selector = args.selector as string | undefined;
   const index = args.index as number | undefined;
   const snapshotId = args.snapshotId as string | undefined;
@@ -53,6 +54,9 @@ export function resolveTarget(args: Record<string, unknown>): ResolvedTarget {
         { snapshotId, index },
       );
     }
+    if (entry.pagination && (Date.now() - entry.capturedAt > SNAPSHOT_TTL_MS || !allowPagination || hit.pageNodeIndex === undefined)) {
+      throw vtxError(VtxErrorCode.STALE_SNAPSHOT, "Pagination target cannot be safely resolved for this action", { snapshotId, index });
+    }
     // name 非空时才带 descriptor，向后兼容（无 descriptor 的旧 snapshot 保持 undefined）
     const descriptor =
       hit.name != null && hit.name !== ""
@@ -63,7 +67,9 @@ export function resolveTarget(args: Record<string, unknown>): ResolvedTarget {
       boundTabId: entry.tabId,
       // 跨 frame snapshot 时 element.frameId 才是权威；回退到 entry.frameId（兼容旧单 frame snapshot）
       boundFrameId: hit.frameId ?? entry.frameId,
-      ...(descriptor ? { descriptor } : {}),
+      ...(entry.pagination && hit.pageNodeIndex !== undefined
+        ? { pagination: { snapshotId, nodeIndex: hit.pageNodeIndex } }
+        : descriptor ? { descriptor } : {}),
     };
   }
 

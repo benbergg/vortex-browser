@@ -44,6 +44,7 @@ describe("frame detach detection (v0.7.4 dogfood 卡点 #4)", () => {
 
   beforeEach(() => {
     vi.unstubAllGlobals();
+    stubChromeWithFrames([]);
     router = new ActionRouter();
     registerObserveHandlers(router);
     registerContentHandlers(router);

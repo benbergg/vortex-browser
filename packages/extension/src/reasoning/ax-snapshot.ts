@@ -217,7 +217,7 @@ export async function captureAXSnapshot(
 export async function captureAXNodeMap(
   debuggerMgr: DebuggerLike,
   tabId: number,
-  frameId = 0,
+  frameId: string | 0 = 0,
 ): Promise<{ byBackend: Map<number, CDPAXNode>; byNodeId: Map<string, CDPAXNode> }> {
   await debuggerMgr.enableDomain(tabId, "Accessibility");
   await debuggerMgr.enableDomain(tabId, "DOM");

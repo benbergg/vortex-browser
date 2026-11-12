@@ -103,11 +103,12 @@ export function mapPageError(
   // 保持与原 dom.ts 行为：selector 缺失时仅在有 extras 时附 context；都缺则不传 context。
   const hasContext = selector !== undefined || res?.extras !== undefined;
   const override = hitOwnershipOverride(res, selector);
+  const partialAction = res?.extras?.actionMayHaveExecuted === true;
   throw vtxError(
     code,
     override?.message ?? error,
     hasContext ? { selector, extras: res?.extras } : undefined,
-    override ? { hint: override.hint } : undefined,
+    partialAction ? { hint: "Action may have been executed; check the page state before deciding whether another action is needed; do not retry directly." } : override ? { hint: override.hint } : undefined,
   );
 }
 

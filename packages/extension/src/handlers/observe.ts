@@ -7,13 +7,20 @@ import { loadPageSideModule } from "../adapter/page-side-loader.js";
 import { raceTimeout, TIMED_OUT } from "../lib/race-timeout.js";
 import {
   gcSnapshots,
+  getSnapshotEntry,
+  deleteSnapshot,
   newSnapshotId,
   setSnapshot,
   type SnapshotElement,
 } from "../lib/snapshot-store.js";
+import { resolveTarget } from "../lib/resolve-target.js";
 import { captureAXNodeMap } from "../reasoning/ax-snapshot.js";
-import { buildIndexToBackend, applyOverlay, type OverlayableElement } from "./observe-ax-overlay.js";
+import { buildIndexToBackend, resolveFrameDocument, applyOverlay, type OverlayableElement } from "./observe-ax-overlay.js";
 import { markListenerElements } from "./observe-js-listener.js";
+import { updateListenerOwnership, type ListenerRequest } from "./observe-listener-ownership.js";
+import { recoverDocumentOwnership } from "./observe-ownership-recovery.js";
+import { updateScanOwnership, updatePageSnapshot, type ScanRequest } from "./observe-scan-ownership.js";
+
 import {
   collectHoverRevealPairs,
   type HoverRevealPair,
@@ -24,6 +31,11 @@ import {
   categoryOf,
   isContainerRole,
 } from "../reasoning/aria-taxonomy.js";
+
+const listenerEpoch = crypto.randomUUID();
+let listenerOrder = 0;
+const scanEpoch = crypto.randomUUID();
+let scanOrder = 0;
 
 /**
  * 仅供单测:复刻 inject 内联 getRole 真源(改一处须同步 inject 内联副本,
@@ -104,6 +116,14 @@ type FramesParam =
  * iframe 业务"在 testc.bytenew.com 不触发，迫使 caller 手动加 frames=all-permitted。
  */
 const FALLBACK_INTERACTIVE_THRESHOLD = 50;
+const PAGE_CAPTURE_LIMIT = 500;
+const PAGE_TTL_MS = 60_000;
+const observeGenerations = new Map<number, object>();
+const observeQueues = new WeakMap<object, Map<number, Promise<void>>>();
+const pageSnapshots = new Map<string, {
+  tabId: number; frameId: number; request: ScanRequest; capturedAt: number; pageSize: number;
+  result: { elements: unknown[]; meta: { returnedCount: number }; [key: string]: unknown };
+}>();
 
 /**
  * 轻量 MV3 match pattern 匹配器：支持 `<all_urls>` / `scheme://host-pattern/path-pattern`。
@@ -144,11 +164,75 @@ function isFrameInPermissions(url: string): boolean {
 
 interface FrameTarget {
   frameId: number;
+  documentId?: string;
+  documentLifecycle?: string;
   url: string;
   parentFrameId: number;
+  ancestorFrameIds: number[];
+}
+
+interface AXRequest {
+  scanToken?: string;
+  frameId: number;
+  ancestorFrameIds: number[];
+  documentId: string;
+  epoch: string;
+  order: number;
+  token: string;
+  deadline: number;
+}
+
+// Each worker sequences its own epoch; cross-epoch recovery requires document CAS.
+const axEpoch = crypto.randomUUID();
+let axOrder = 0;
+
+/** Serialized MAIN-world operation: no extension closures or asynchronous page work. */
+function updateAXOwnership(action: "claim" | "check" | "retire", request: AXRequest, paginationToken: string | null = null): boolean {
+  const doc = document as Document & {
+    __vortexAXOwner?: Partial<AXRequest> & { epoch: string; highWater: number; owner: string | null; deadline: number; retired?: boolean; revision?: number };
+    __vortexAXExitedEpochs?: Set<string>;
+  };
+  const old = doc.__vortexAXOwner;
+  if (doc.__vortexAXExitedEpochs?.has(request.epoch) || (old && (old.epoch !== request.epoch ||
+      (old.documentId !== undefined && old.documentId !== request.documentId) ||
+      (old.frameId !== undefined && old.frameId !== request.frameId)))) return false;
+  if (action === "check") {
+    return !!old && old.highWater === request.order && old.owner === request.token &&
+      old.deadline === request.deadline && Date.now() < old.deadline;
+  }
+  if (action === "claim") {
+    if (Date.now() >= request.deadline || (old && request.order <= old.highWater)) return false;
+    doc.__vortexAXOwner = { ...request, highWater: request.order, owner: request.token, deadline: request.deadline, retired: false, revision: (old?.revision ?? 0) + 1 };
+    return true;
+  }
+  // Retire can arrive before claim, or after expiry. Never erase the high-water tombstone.
+  if (!old || request.order > old.highWater || (request.order === old.highWater && old.owner === request.token)) {
+    doc.__vortexAXOwner = { ...request, highWater: request.order, owner: null, deadline: request.deadline, retired: true, revision: (old?.revision ?? 0) + 1 };
+  }
+  const scan = (document as any).__vortexScanOwner;
+  if (!scan || scan.owner !== request.scanToken || scan.documentId !== request.documentId ||
+      scan.frameId !== request.frameId || scan.retired || Date.now() >= scan.deadline) return false;
+  const item = paginationToken && (window as any).__vortexPageSnapshots?.[paginationToken];
+  const cleanupDeadline = Date.now() + 200;
+  const roots: Array<Document | ShadowRoot> = [document];
+  while (roots.length) {
+    for (const el of roots.pop()!.querySelectorAll("*") as NodeListOf<Element> & Iterable<Element>) {
+      if (Date.now() >= cleanupDeadline || (doc as any).__vortexScanOwner !== scan || Date.now() >= scan.deadline) return false;
+      if (el.shadowRoot) roots.push(el.shadowRoot);
+      for (const name of ["data-vtx-ax", "data-vtx-frame-ax"]) {
+        const value = el.getAttribute(name);
+        if (name === "data-vtx-ax" ? value?.startsWith(`${request.token}:`) : value === request.token) {
+          if ((doc as any).__vortexScanOwner !== scan || scan.owner !== request.scanToken || Date.now() >= scan.deadline) return false;
+          if (item) item.marker(el, name, null, scan); else el.removeAttribute(name);
+        }
+      }
+    }
+  }
+  return true;
 }
 
 interface ScannedElement {
+  maskedContent?: boolean;
   index: number;
   tag: string;
   role: string;
@@ -193,13 +277,14 @@ interface ScannedElement {
   offScreenActionable?: boolean;
   /** AX nameSource：名称来源(label/placeholder/title/heuristic 等)。@since ax-overlay */
   nameSource?: string;
+  semanticSource?: "ax" | "dom" | "heuristic";
   /** aria-controls / aria-owns 关联。@since B008: number[] 指向已收集元素下标。
    *  @since B009: 含 id 字符串 fallback — 当目标元素(region/tabpanel/listbox)非 interactive
    *  不在 collectedEls 时, 仍记 id 字符串, agent 至少看到关联 id 可 querySelector 找目标。
    *  type 改 Array<{id?: string; index?: number}> 保持 B008 ref + 加 id。 */
   controls?: Array<{ id?: string; index?: number }>;
   /** aria-owns 指向的 frame-local 元素下标列表。@since ax-overlay */
-  owns?: number[];
+  owns?: Array<{ id?: string; index?: number }>;
   /** aria-errormessage 或 aria-describedby(错误)关联文本。@since ax-overlay */
   errorMessage?: string;
   /** aria-describedby 关联描述文本。@since ax-overlay */
@@ -226,6 +311,8 @@ interface ScannedElement {
 }
 
 interface FramePageResult {
+  axIdentity?: AXRequest;
+  axStamped?: boolean;
   url: string;
   title: string;
   viewport: {
@@ -237,6 +324,7 @@ interface FramePageResult {
   elements: ScannedElement[];
   candidateCount: number;
   truncated: boolean;
+  monitorBudgetExceeded?: boolean;
   /** 虚拟列表 + 图表 canvas + 无 alt 图盲区(容器常不被 elements 收集,独立扫描)。@since blindspot */
   blindspots?: Array<
     | { kind: "virtual"; total: number; rendered: number; name: string; confidence?: "low" }
@@ -248,6 +336,8 @@ interface FramePageResult {
   modal?: { name: string; role: string; suppressed: number };
   /** 空壳 SPA/渲染失败 frame 级信号。@since blank-shell */
   blankShell?: { root: string; rootLen: number; framework: string };
+  /** scope 定位失败(找不到 / 命中多个 / 选择器非法):该帧没有有效结果,由上层报错。@since target-scope */
+  scopeError?: { code: string; message: string };
 }
 
 function safeOrigin(url: string | undefined): string | null {
@@ -284,6 +374,21 @@ function inheritedOrigin(
   return null;
 }
 
+function ancestorFrameIds(
+  frame: chrome.webNavigation.GetAllFrameResultDetails,
+  byId: Map<number, chrome.webNavigation.GetAllFrameResultDetails>,
+): number[] {
+  const ancestors: number[] = [];
+  const seen = new Set([frame.frameId]);
+  let parent: number | undefined = frame.parentFrameId;
+  while (parent != null && parent >= 0 && !seen.has(parent)) {
+    ancestors.push(parent);
+    seen.add(parent);
+    parent = byId.get(parent)?.parentFrameId;
+  }
+  return ancestors;
+}
+
 /** Exported for unit tests; production callers go through the snapshot handler. */
 export async function resolveTargetFrames(
   tabId: number,
@@ -291,9 +396,13 @@ export async function resolveTargetFrames(
   framesParam: FramesParam,
 ): Promise<FrameTarget[]> {
   const all = (await chrome.webNavigation.getAllFrames({ tabId })) ?? [];
+  const allById = new Map(all.map((f) => [f.frameId, f]));
   const asTargets = (ff: chrome.webNavigation.GetAllFrameResultDetails[]): FrameTarget[] =>
     ff.map((f) => ({
       frameId: f.frameId,
+      documentId: f.documentId,
+      documentLifecycle: f.documentLifecycle,
+      ancestorFrameIds: ancestorFrameIds(f, allById),
       url: f.url,
       parentFrameId: f.parentFrameId ?? 0,
     }));
@@ -1088,25 +1197,83 @@ export function bnCheckInfo(el: Element): { role: "checkbox"; checked: boolean }
 
 async function scanOneFrame(
   tabId: number,
-  frameId: number,
+  target: FrameTarget,
   maxElements: number,
   viewport: "visible" | "full",
   includeText: boolean,
   includeAX: boolean,
   filterMode: "interactive" | "all",
+  scopeSelector: string | null,
+  scopePagination: { snapshotId: string; nodeIndex: number } | null,
+  paginationToken: string | null,
+  deadline: number,
+  onPermissionDenied: () => void,
+  axRequests: AXRequest[],
+  listenerRequests: ListenerRequest[],
+  scanRequests: ScanRequest[],
+  track: <T>(promise: Promise<T>) => Promise<T>,
 ): Promise<FramePageResult | null> {
+  const { frameId } = target;
+  const scanRequest = scanRequests.find((request) => request.frameId === frameId && request.documentId === target.documentId);
+  if (!scanRequest) return null;
   try {
+    let axRequest: AXRequest | null = null;
+    if (includeAX && typeof target.documentId === "string" && target.documentId.trim() &&
+        (!target.documentLifecycle || target.documentLifecycle === "active")) {
+      const request: AXRequest = { frameId, ancestorFrameIds: target.ancestorFrameIds, documentId: target.documentId, epoch: axEpoch, order: ++axOrder, token: crypto.randomUUID(), deadline, scanToken: scanRequest.token };
+      // Register before sending: retire must be possible even when claim never returns.
+      axRequests.push(request);
+      try {
+        const claimed = await chrome.scripting.executeScript({
+          target: { tabId, documentIds: [request.documentId] }, world: "MAIN",
+          func: updateAXOwnership, args: ["claim", request],
+        });
+        if (claimed.length === 1 && claimed[0].documentId === request.documentId && claimed[0].frameId === frameId &&
+            (claimed[0].result === true || (claimed[0].result === false && await recoverDocumentOwnership("ax", tabId, request)))) axRequest = request;
+      } catch (err) {
+        console.warn(`[vortex.observe] AX claim skipped fid=${frameId}`, err);
+      }
+    }
     // 遮挡判定要用 dom-resolve 的 classifyHit;注入失败不拖垮整帧扫描
-    await loadPageSideModule(tabId, frameId, "dom-resolve").catch(() => {});
+    await loadPageSideModule(tabId, frameId, "dom-resolve", { request: scanRequest, track }).catch(() => {});
     const results = await chrome.scripting.executeScript({
-      target: buildExecuteTarget(tabId, frameId),
+      target: { tabId, documentIds: [scanRequest.documentId] },
       func: (
         max: number,
         mode: string,
         withText: boolean,
         withAX: boolean,
         filter: "interactive" | "all",
+        scopeSelector: string | null,
+        scopePagination: { snapshotId: string; nodeIndex: number } | null,
+        paginationToken: string | null,
+        deadline: number,
+        scanRequest: ScanRequest,
+        listenerRequest: ListenerRequest | null,
+        axRequest: AXRequest | null,
       ) => {
+        const scanDocument = document;
+        const ownsScan = (request = scanRequest) => {
+          const owner = (document as any).__vortexScanOwner;
+          return document === scanDocument && !!owner && owner.documentId === request.documentId && owner.frameId === request.frameId &&
+            owner.epoch === request.epoch && owner.highWater === request.order && owner.owner === request.token &&
+            !owner.retired && owner.deadline === request.deadline && Date.now() < request.deadline;
+        };
+        const owner = (document as any).__vortexScanOwner;
+        if (Date.now() >= deadline || !ownsScan() || owner.scanned) return null;
+        // Consume the capture once; duplicate scans cannot rebuild an existing item.
+        owner.scanned = true;
+        let scanInvalid = false;
+        const ownsListenerMarkers = () => {
+          const owner = (document as any).__vortexListenerOwner;
+          return !!listenerRequest && !!owner && owner.documentId === listenerRequest.documentId &&
+            owner.frameId === listenerRequest.frameId && owner.epoch === listenerRequest.epoch &&
+            owner.highWater === listenerRequest.order && owner.owner === listenerRequest.token &&
+            !owner.retired && owner.deadline === listenerRequest.deadline && Date.now() < listenerRequest.deadline;
+        };
+        const hasListenerMarker = (el: Element, name: string) =>
+          ownsListenerMarkers() && el.getAttribute(name) === listenerRequest!.token;
+        const listenerSelector = ownsListenerMarkers() ? `[data-vtx-listener="${listenerRequest!.token}"]` : ":not(*)";
         // Per-observe rid prefix used as identity fallback when buildSelector
         // can't produce a page-unique CSS selector (e.g. Element Plus v-for
         // groups with identical inner DOM). Ambiguous elements are stamped
@@ -1117,13 +1284,174 @@ async function scanOneFrame(
           .toString(36)
           .slice(2, 6)}_`;
         let ridCounter = 0;
+        const SHADOW_WALK_MAX_DEPTH = 8;
+        function querySelectorAllDeep(selector: string, root: Document | ShadowRoot | Element, depth = 0, walkDeadline = deadline): Element[] {
+          const acc: Element[] = root instanceof Element && root.matches(selector) ? [root] : [];
+          acc.push(...Array.from(root.querySelectorAll(selector)));
+          if (depth >= SHADOW_WALK_MAX_DEPTH) return acc;
+          if (root instanceof Element && root.shadowRoot) acc.push(...querySelectorAllDeep(selector, root.shadowRoot, depth + 1, walkDeadline));
+          for (const host of root.querySelectorAll('*')) {
+            if (Date.now() >= walkDeadline) throw new Error("Observe deadline expired");
+            if (host.shadowRoot) acc.push(...querySelectorAllDeep(selector, host.shadowRoot, depth + 1, walkDeadline));
+          }
+          return acc;
+        }
+        // 目标局部观察:先定位 scope 容器。**必须在清理 data-vortex-rid 之前**——
+        // 上一轮 observe 给歧义元素打的 rid 标记本身可能就是 scope 选择器。
+        let scopeEl: Element | null = null;
+        let scopeError: { code: string; message: string } | null = null;
+        if (scopeSelector && scopePagination) {
+          const item = (window as any).__vortexPageSnapshots?.[scopePagination.snapshotId];
+          try {
+            scopeEl = item?.check?.() ? item.validate?.(scopePagination.nodeIndex, scopeSelector) ?? null : null;
+          } catch (err) {
+            console.warn("[vortex.observe] pagination target validation failed", err);
+          }
+          if (!scopeEl) scopeError = { code: "STALE_SNAPSHOT", message: "Page changed since the snapshot was captured" };
+        } else if (scopeSelector) {
+          let matches: Element[] = [];
+          try {
+            matches = querySelectorAllDeep(scopeSelector, document);
+          } catch {
+            scopeError = {
+              code: "INVALID_SELECTOR",
+              message: `Invalid selector: ${scopeSelector}`,
+            };
+          }
+          if (!scopeError) {
+            if (matches.length === 0) {
+              scopeError = {
+                code: "ELEMENT_NOT_FOUND",
+                message: `Element not found: ${scopeSelector}`,
+              };
+            } else if (matches.length > 1) {
+              scopeError = {
+                code: "SELECTOR_AMBIGUOUS",
+                message: `Selector matched ${matches.length} elements: ${scopeSelector}`,
+              };
+            } else {
+              scopeEl = matches[0];
+            }
+          }
+        }
+        if (scopeError) {
+          return { url: location.href, title: document.title, viewport: { width: window.innerWidth, height: window.innerHeight, scrollY: window.scrollY, scrollHeight: document.documentElement.scrollHeight }, elements: [], candidateCount: 0, truncated: false, scopeError };
+        }
+        const scanRoot = scopeEl ?? document;
         // Clear stale rids from previous observes on this frame so the
         // attribute set never accumulates across long-lived SPA sessions
         // and stale snapshot refs can't silently resolve to mis-rendered
         // elements (review feedback on PR #19).
         for (const stale of document.querySelectorAll("[data-vortex-rid]")) {
+          if (Date.now() >= deadline || !ownsScan()) return null;
           stale.removeAttribute("data-vortex-rid");
         }
+        if (Date.now() >= deadline || !ownsScan()) return null;
+        if (paginationToken) {
+          const states = ((window as any).__vortexPageSnapshots ??= {});
+          let navigation = (window as any).__vortexNavigationIdentity;
+          if (!navigation || navigation.document !== document) {
+            navigation = { document, revision: 0 };
+            (window as any).__vortexNavigationIdentity = navigation;
+            for (const method of ["pushState", "replaceState"] as const) {
+              const original = window.history[method];
+              window.history[method] = function (...args: Parameters<History[typeof method]>) {
+                const result = original.apply(this, args);
+                navigation.revision++;
+                return result;
+              };
+            }
+            window.addEventListener("popstate", () => { navigation.revision++; });
+            window.addEventListener("hashchange", () => { navigation.revision++; });
+          }
+          const revision = navigation.revision;
+          const url = location.href;
+          const navigationValid = () => navigation.document === document && navigation.revision === revision && location.href === url;
+          const oldest = Object.keys(states);
+          if (oldest.length >= 16) {
+            const entry = states[oldest[0]];
+            clearTimeout(entry.timer);
+            entry.state.observer.disconnect();
+            delete states[oldest[0]];
+          }
+          const state = { changed: false, observer: null as MutationObserver | null,
+            hosts: [] as Array<{ element: Element; root: ShadowRoot | null }>,
+            controls: [] as Array<{ element: Element; value: string; checked: boolean; selected: boolean }> };
+          const expiresAt = Date.now() + 60_000;
+          const relevant = (records: MutationRecord[]) => records.length > 0;
+          if (!ownsScan()) return null;
+          const observer = new MutationObserver((records) => { if (relevant(records)) state.changed = true; });
+          state.observer = observer;
+          const roots: Array<Document | ShadowRoot> = [document];
+          const monitorDeadline = performance.now() + 200;
+          let exceeded = false;
+          let controlChars = 0;
+          while (roots.length && !exceeded) {
+            const root = roots.pop()!;
+            if (!ownsScan()) { observer.disconnect(); return null; }
+            observer.observe(root, { subtree: true, childList: true, attributes: true, characterData: true });
+            const walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT);
+            let node: Node | null;
+            while ((node = walker.nextNode())) {
+              if (Date.now() >= deadline || !ownsScan()) { observer.disconnect(); return null; }
+              if (state.hosts.length >= 10000 || performance.now() > monitorDeadline) { exceeded = true; break; }
+              const el = node as Element;
+              state.hosts.push({ element: el, root: el.shadowRoot });
+              if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement || el.tagName === "OPTION") {
+                const control = el as HTMLInputElement & HTMLOptionElement;
+                state.controls.push({ element: el, value: control.value, checked: !!control.checked, selected: !!control.selected });
+                controlChars += control.value.length;
+                if (controlChars > 1_000_000) { exceeded = true; break; }
+              }
+              if (el.shadowRoot) roots.push(el.shadowRoot);
+            }
+          }
+          if (exceeded) {
+            state.changed = true;
+            state.hosts.length = 0;
+            state.controls.length = 0;
+            observer.disconnect();
+          }
+          if (Date.now() >= deadline || !ownsScan()) { observer.disconnect(); return null; }
+          const timer = setTimeout(() => {
+            observer.disconnect();
+            if (document === scanDocument && states[paginationToken] === item) delete states[paginationToken];
+          }, 60_000);
+          const marker = (el: Element, name: string, value: string | null, request = scanRequest) => {
+            if (!ownsScan(request) || states[paginationToken] !== item || item.document !== document) throw new Error("Observe lease revoked");
+            if (relevant(observer.takeRecords())) state.changed = true;
+            if (value === null) el.removeAttribute(name); else el.setAttribute(name, value);
+            const records = observer.takeRecords();
+            const own = records.findIndex((r) => r.type === "attributes" && r.target === el && r.attributeName === name);
+            if (own >= 0) records.splice(own, 1);
+            if (relevant(records)) state.changed = true;
+          };
+          const check = (includeControls = true, ignoreValue?: Element) => {
+            const until = performance.now() + 200;
+            if (relevant(observer.takeRecords())) state.changed = true;
+            for (const host of state.hosts) {
+              if (performance.now() > until || host.element.shadowRoot !== host.root) { state.changed = true; break; }
+            }
+            for (const saved of includeControls ? state.controls : []) {
+              const el = saved.element as HTMLInputElement & HTMLOptionElement;
+              if (performance.now() > until || (el !== ignoreValue && el.value !== saved.value) || !!el.checked !== saved.checked || !!el.selected !== saved.selected) {
+                state.changed = true;
+                break;
+              }
+            }
+            return states[paginationToken] === item && item.document === document && Date.now() <= item.expiresAt && navigationValid() && !state.changed && !exceeded;
+          };
+          if (!ownsScan()) { clearTimeout(timer); observer.disconnect(); return null; }
+          const item = { state, relevant, exceeded, timer, expiresAt, marker, navigationValid, check,
+            document, documentId: scanRequest.documentId, frameId: scanRequest.frameId, captureToken: scanRequest.token };
+          states[paginationToken] = item;
+        }
+        const setMarker = (el: Element, name: string, value: string) => {
+          if (Date.now() >= deadline) throw new Error("Observe deadline expired");
+          if (!ownsScan()) { scanInvalid = true; throw new Error("Observe lease revoked"); }
+          const item = paginationToken && (window as any).__vortexPageSnapshots[paginationToken];
+          if (item) item.marker(el, name, value); else el.setAttribute(name, value);
+        };
 
 const INTERACTIVE_SELECTORS = [
           "button",
@@ -1185,7 +1513,7 @@ const INTERACTIVE_SELECTORS = [
           // [data-vtx-listener] 是 pre-scan CDP getEventListeners 标的纯 addEventListener
           // 元素(vanilla/jQuery 直绑 —— 见 observe-js-listener.ts)。data-vtx-listener
           // 必须独立选择器,无法被 [role] 或原生 tag 覆盖。
-          "[data-vtx-listener]",
+          listenerSelector,
         ].join(",");
 
         const COLLECTED_ATTRS = [
@@ -1232,7 +1560,8 @@ const INTERACTIVE_SELECTORS = [
           return { role: "checkbox", checked: !!status && status.classList.contains("checked") };
         };
 
-        function getRole(el: Element): string {
+        function getRole(el: Element, source?: { value: "dom" | "heuristic" }): string {
+          if (source) source.value = "dom";
           const explicit = el.getAttribute("role");
           if (explicit) {
             // ARIA role 是空格分隔的「回退角色列表」,浏览器取首个有效 token
@@ -1284,6 +1613,7 @@ const INTERACTIVE_SELECTORS = [
           // section 仅在有可及名称(aria-label/aria-labelledby)时为 region
           if (tag === "section" && (el.hasAttribute("aria-label") || el.hasAttribute("aria-labelledby"))) return "region";
           // 班牛 bnCheck 自定义勾选控件(无 role/无原生 input)→ checkbox(N0064 P2-1)。
+          if (source) source.value = "heuristic";
           if (bnCheckInfo(el)) return "checkbox";
           return tag;
         }
@@ -1623,20 +1953,60 @@ const INTERACTIVE_SELECTORS = [
         // 裁剪的文本(其 computed visibility 仍 visible,不排除),兼顾两者。
         // perf:叶子(无子元素)走 textContent 快路径;text 超 96(normName 截 80 留余量)
         // 或访问超 250 元素节点即停,防大容器/深树拖慢扫描热路径。
-        const visibleTextContent = (el: Element): string => {
-          if (el.childElementCount === 0) return el.textContent ?? "";
+        const isTextMasked = (el: Element): boolean => {
+          const value = getComputedStyle(el).getPropertyValue("-webkit-text-security");
+          return !!value && value !== "none";
+        };
+        const maskedSubtrees = new WeakMap<Element, boolean>();
+        const containsMaskedText = (root: Element): boolean => {
+          const stack: Array<{ el: Element; expanded: boolean }> = [{ el: root, expanded: false }];
+          const pending = new WeakSet<Element>();
+          while (stack.length) {
+            if (Date.now() >= deadline) throw new Error("Observe deadline expired");
+            const current = stack.pop()!;
+            if (maskedSubtrees.has(current.el)) continue;
+            if (isTextMasked(current.el)) { maskedSubtrees.set(current.el, true); continue; }
+            const ownerRoot = current.el.getRootNode() as Document | ShadowRoot;
+            const owned = ["aria-owns", "aria-labelledby"]
+              .flatMap((attr) => (current.el.getAttribute(attr) ?? "").split(/\s+/).filter(Boolean))
+              .map((id) => ownerRoot.getElementById(id));
+            if (owned.some((el) => !el)) { maskedSubtrees.set(current.el, true); continue; }
+            const children = [
+              ...Array.from(current.el.children),
+              ...Array.from(current.el.shadowRoot?.children ?? []),
+              ...(current.el.tagName === "SLOT" ? (current.el as HTMLSlotElement).assignedElements({ flatten: true }) : []),
+              ...owned.filter((el): el is HTMLElement => !!el),
+            ];
+            if (current.expanded) {
+              maskedSubtrees.set(current.el, children.some((child) => maskedSubtrees.get(child) !== false));
+              continue;
+            }
+            if (pending.has(current.el)) { maskedSubtrees.set(current.el, true); continue; }
+            pending.add(current.el);
+            stack.push({ el: current.el, expanded: true });
+            for (const child of children) if (!maskedSubtrees.has(child)) stack.push({ el: child, expanded: false });
+          }
+          return maskedSubtrees.get(root) !== false;
+        };
+        const maskedTextNode = (node: Node): boolean => {
+          const slot = (node as Text).assignedSlot;
+          return (slot ? isTextMasked(slot) : node.parentElement ? isTextMasked(node.parentElement) : true);
+        };
+        const visibleTextContent = (el: Element, excludeControls = false, forValue = false): string => {
           let out = "";
           let count = 0;
           const visit = (node: Node): void => {
             const kids = node.childNodes;
             for (let i = 0; i < kids.length; i++) {
-              if (out.length > 96 || count > 250) return;
+              if (forValue ? out.replace(/\s+/g, " ").trim().length >= 200 : out.length > 96 || count > 250) return;
+              if (forValue && Date.now() >= deadline) throw new Error("Observe deadline expired");
               const child = kids[i];
               if (child.nodeType === 3) {
-                out += child.nodeValue || "";
+                if (!maskedTextNode(child)) out += child.nodeValue || "";
                 continue;
               }
               if (child.nodeType !== 1) continue;
+              if (excludeControls && (child as Element).matches("input,textarea,select")) continue;
               count++;
               const cs = getComputedStyle(child as Element);
               if (cs.visibility === "hidden" || cs.display === "none") continue;
@@ -1665,7 +2035,8 @@ const INTERACTIVE_SELECTORS = [
           if (!ctrl) return "";
           const h = ctrl as HTMLElement;
           if (h.offsetWidth !== 0 || h.offsetHeight !== 0) return "";
-          return normName(h.getAttribute("aria-label") || (h as HTMLInputElement).value || "");
+          const input = h as HTMLInputElement;
+          return normName(h.getAttribute("aria-label") || (input.type !== "password" && !isTextMasked(h) && !containsMaskedText(el) ? input.value : "") || "");
         }
 
         // tree 展开/折叠 switcher 识别(R25)——模块级 isTreeExpandToggle 同名,改一处须同步。
@@ -1726,7 +2097,7 @@ const INTERACTIVE_SELECTORS = [
                 typeof (root as Document).getElementById === "function"
                   ? (root as Document).getElementById(id)
                   : document.getElementById(id);
-              if (label) parts.push(label.textContent ?? "");
+              if (label) parts.push(visibleTextContent(label));
             }
             if (parts.length) return normName(parts.join(" "));
           }
@@ -1741,13 +2112,13 @@ const INTERACTIVE_SELECTORS = [
             const id = el.id;
             if (id) {
               const lbl = document.querySelector(`label[for="${id}"]`);
-              if (lbl) return normName(lbl.textContent);
+              if (lbl) return normName(visibleTextContent(lbl));
             }
             // radio / checkbox 通常包在 <label> 里（Element Plus el-radio / el-checkbox 风格）
             const t = (el as HTMLInputElement).type;
             if (t === "radio" || t === "checkbox") {
               const wrapLabel = el.closest("label");
-              if (wrapLabel) return normName(wrapLabel.textContent);
+              if (wrapLabel) return normName(visibleTextContent(wrapLabel, true));
             }
             // AH: <input type=submit|button|reset|image> 的可访问名取 value 属性
             // (HTML-AAM)。表单提交/搜索/登录按钮极常见(saucedemo 登录/结账按钮都是
@@ -1760,7 +2131,7 @@ const INTERACTIVE_SELECTORS = [
                 const alt = el.getAttribute("alt");
                 if (alt) return normName(alt);
               }
-              const v = (el as HTMLInputElement).value;
+              const v = isTextMasked(el) ? "" : (el as HTMLInputElement).value;
               if (v) return normName(v);
               if (t === "submit") return "Submit";
               if (t === "reset") return "Reset";
@@ -1777,10 +2148,7 @@ const INTERACTIVE_SELECTORS = [
             {
               const wrapLabel = el.closest("label");
               if (wrapLabel) {
-                const clone = wrapLabel.cloneNode(true) as HTMLElement;
-                for (const ctrl of clone.querySelectorAll("input, textarea, select"))
-                  ctrl.remove();
-                const txt = normName(clone.textContent);
+                const txt = normName(visibleTextContent(wrapLabel, true));
                 if (txt) return txt;
               }
             }
@@ -1800,7 +2168,7 @@ const INTERACTIVE_SELECTORS = [
           const role = el.getAttribute("role");
           if (role === "treeitem") {
             const content = el.querySelector(":scope > .el-tree-node__content") as HTMLElement | null;
-            if (content) return normName(content.textContent);
+            if (content) return normName(visibleTextContent(content));
           }
           // <label> 包裹的 labelable 控件(input/select/textarea)若自带 aria-label,
           // 该 aria-label 即控件——也即这个可点 <label>——的可达名。label 的
@@ -1839,7 +2207,7 @@ const INTERACTIVE_SELECTORS = [
               // 字段一致, agent 拿名即可定位。
               const inp = wrapsCheckRadio as HTMLInputElement;
               const role = inp.type === "checkbox" ? "checkbox" : "radio";
-              const val = inp.value || "?";
+              const val = containsMaskedText(el) ? "?" : inp.value || "?";
               const rect = el.getBoundingClientRect();
               return `${role}=${val} @x=${Math.round(rect.left)},y=${Math.round(rect.top)}`;
             }
@@ -1941,7 +2309,7 @@ const INTERACTIVE_SELECTORS = [
         function stampRid(el: Element): string | null {
           const rid = ridPrefix + ridCounter++;
           try {
-            el.setAttribute("data-vortex-rid", rid);
+            setMarker(el, "data-vortex-rid", rid);
             return `[data-vortex-rid="${rid}"]`;
           } catch (err) {
             try {
@@ -2329,6 +2697,7 @@ const INTERACTIVE_SELECTORS = [
         }
         function getValueInfo(el: HTMLElement, role: string): string | undefined {
           const tag = el.tagName.toLowerCase();
+          if (isTextMasked(el)) return undefined;
           // AI: 原生 <select> 的当前选中项文本。select 名常无 label(saucedemo 排序
           // 下拉),其「当前选了什么」才是 agent 调它前最需要的信息。选项是有界标签
           // (非自由文本/非 password),安全暴露——与「不暴露 text/password value」不冲突。
@@ -2353,7 +2722,7 @@ const INTERACTIVE_SELECTORS = [
             return v !== "" ? v.slice(0, 200) : undefined;
           }
           if ((el as HTMLElement).isContentEditable) {
-            const v = (el as HTMLElement).textContent ?? "";
+            const v = visibleTextContent(el, false, true);
             return v !== "" ? v.replace(/\s+/g, " ").trim().slice(0, 200) : undefined;
           }
           const isNativeValue =
@@ -2481,20 +2850,6 @@ const INTERACTIVE_SELECTORS = [
         // (different code path from reasoning/ax-snapshot.ts which
         // I22 covers). Closed shadow roots remain invisible per the
         // CE spec — `element.shadowRoot` returns null for closed.
-        const SHADOW_WALK_MAX_DEPTH = 8;
-        function querySelectorAllDeep(
-          selector: string,
-          root: Document | ShadowRoot,
-          depth = 0,
-        ): Element[] {
-          const acc: Element[] = Array.from(root.querySelectorAll(selector));
-          if (depth >= SHADOW_WALK_MAX_DEPTH) return acc;
-          for (const host of root.querySelectorAll("*")) {
-            const sr = (host as HTMLElement).shadowRoot;
-            if (sr) acc.push(...querySelectorAllDeep(selector, sr, depth + 1));
-          }
-          return acc;
-        }
 
         // document.elementFromPoint 对 shadow-internal 元素返回其 shadow host(composed
         // 树顶,命中重定向到 shadow 边界)。逐级下钻 open shadow root 的 elementFromPoint
@@ -2517,7 +2872,7 @@ const INTERACTIVE_SELECTORS = [
         // 遮挡判定缺席要出声:注入快失败被吞掉时,整帧元素会静默翻成 visible:true
         let __hitOwnMissing = false;
 
-        const nodeList = querySelectorAllDeep(ROOT_SELECTORS, document);
+        const nodeList = querySelectorAllDeep(ROOT_SELECTORS, scanRoot);
 
         // AE: aria-activedescendant 指向的「虚拟焦点」目标元素集合。combobox /
         // listbox / tree / grid 用方向键导航时,DOM 焦点停在触发器(input/容器),
@@ -2530,7 +2885,7 @@ const INTERACTIVE_SELECTORS = [
         // 会误标无关元素;按 root 解析既 scope 正确、又天然滤掉悬空引用(评审 LOW)。
         // 用 querySelectorAllDeep 穿 open shadow 收集触发器,与主扫描一致(dogfood AE)。
         const activeDescendantEls = new Set<Element>();
-        for (const host of querySelectorAllDeep("[aria-activedescendant]", document)) {
+        for (const host of querySelectorAllDeep("[aria-activedescendant]", scanRoot)) {
           const id = host.getAttribute("aria-activedescendant");
           if (!id) continue;
           const root = host.getRootNode() as Document | ShadowRoot;
@@ -2565,7 +2920,7 @@ const INTERACTIVE_SELECTORS = [
         // cursor:pointer fallback path too.
         const fallbackPool = querySelectorAllDeep(
           "*:not(svg *):not(script):not(style):not(meta):not(link):not(head):not(head *)",
-          document,
+          scanRoot,
         );
         // SVG 内部交互元素补集:上面 `:not(svg *)` 把 svg 后代整类排除(防装饰 path/g
         // 刷屏),但带交互信号的 svg 子元素(role/onclick/直绑 listener/可聚焦)是真控件——
@@ -2574,8 +2929,8 @@ const INTERACTIVE_SELECTORS = [
         // act 侧 SVG click 崩溃的 observe 对偶)。仅选带信号者控开销,仍走下方同一入池门
         // (cursor/framework/listener + require-name)过滤装饰。
         const svgInteractivePool = querySelectorAllDeep(
-          "svg [role],svg [onclick],svg [data-vtx-listener],svg [tabindex]:not([tabindex='-1'])",
-          document,
+          `svg [role],svg [onclick],svg ${listenerSelector},svg [tabindex]:not([tabindex='-1'])`,
+          scanRoot,
         );
         const FALLBACK_CAP = 5000; // hard ceiling against pathological pages
         const docRoot = document.documentElement;
@@ -2784,13 +3139,13 @@ const INTERACTIVE_SELECTORS = [
             // __reactProps$/_vei) ② data-vtx-listener(pre-scan CDP getEventListeners
             // 标记的纯 addEventListener 元素,vanilla/jQuery 直绑——见 observe-js-listener.ts)。
             // 二者并集:framework 覆盖委托型、listener 覆盖直绑型,互补无盲区(T3 discovery)。
-            const __hasDirectListener = el.hasAttribute("data-vtx-listener");
+            const __hasDirectListener = hasListenerMarker(el, "data-vtx-listener");
             // 投放区(drop target)入池信号:pre-scan CDP 标的 data-vtx-dropzone(见
             // observe-js-listener.ts)。body/html 排除——全局 file-drop 监听常绑在
             // 文档根,不该把整页当 drop 区。drop 区不是点击目标,渲染 [dropzone] 而非
             // [listener](透传见下方 entry 构造)。
             const __hasDropzone =
-              el.hasAttribute("data-vtx-dropzone") && el.tagName !== "BODY" && el.tagName !== "HTML";
+              hasListenerMarker(el, "data-vtx-dropzone") && el.tagName !== "BODY" && el.tagName !== "HTML";
             if (!hasFrameworkClick(el) && !__hasDirectListener && !__hasDropzone) continue;
             // framework onClick 常挂事件委托的**容器**层;若内部已有更细 cursor:pointer
             // 子项(如多个 SKU 选项),让位给子项各自入池——否则下方择叶因容器文字最长
@@ -3085,7 +3440,7 @@ const INTERACTIVE_SELECTORS = [
         };
         const overlayRoots: Element[] = [];
         // 信号一:ARIA 弹层语义 role + 脱流定位(穿 open shadow,与主扫描一致)。
-        for (const el of querySelectorAllDeep("[role]", document)) {
+        for (const el of querySelectorAllDeep("[role]", scanRoot)) {
           const role = el.getAttribute("role")?.trim().split(/\s+/)[0];
           if (!role || !OVERLAY_POPUP_ROLES.has(role)) continue;
           if (isVisibleForOverlay(el) && isFloatingOverlay(el) && !isPersistentMenu(el, role)) overlayRoots.push(el);
@@ -3097,7 +3452,7 @@ const INTERACTIVE_SELECTORS = [
         // Cascader dogfood R24 实证)。「含交互后代」门用 OVERLAY_DESCENDANT_SELECTORS:在 ATOMIC
         // 基础上补 menuitemcheckbox/menuitemradio(Cascader/多选菜单弹层只含这两类 role,ATOMIC 漏),
         // 否则弹层因「无交互后代」被判装饰浮层而不前置。模块级 collectPortalOverlayRoots 同名,改一处须同步。
-        if (docBody) {
+        if (docBody && !scopeEl) {
           const portalCands: Element[] = [];
           for (const child of Array.from(docBody.children)) {
             portalCands.push(child);
@@ -3162,7 +3517,7 @@ const INTERACTIVE_SELECTORS = [
             baseCandidates = __kept;
             const __nm = __mRoot.getAttribute("aria-label")
               || (__mRoot.getAttribute("aria-labelledby")
-                  ? (document.getElementById(__mRoot.getAttribute("aria-labelledby")!)?.textContent || "")
+                  ? (() => { const label = document.getElementById(__mRoot.getAttribute("aria-labelledby")!); return label ? visibleTextContent(label) : ""; })()
                   : "")
               || "";
             __modalMeta = {
@@ -3227,6 +3582,7 @@ const INTERACTIVE_SELECTORS = [
           tag: string;
           role: string;
           name: string;
+          semanticSource?: "dom" | "heuristic";
           bbox: { x: number; y: number; w: number; h: number };
           visible: boolean;
           inViewport: boolean;
@@ -3253,6 +3609,7 @@ const INTERACTIVE_SELECTORS = [
         const __t0 = performance.now();
         let __timeBudgetHit = false;
         for (const el of allCandidates) {
+          if (Date.now() >= deadline) return null;
           if (elements.length >= max) break;
           if (performance.now() - __t0 > 8000) {
             __timeBudgetHit = true;
@@ -3406,8 +3763,18 @@ const INTERACTIVE_SELECTORS = [
             }
           }
 
+          const masked = isTextMasked(htmlEl);
+          const root = htmlEl.getRootNode() as Document | ShadowRoot;
+          const related = ["aria-labelledby", "aria-describedby", "aria-errormessage", "aria-owns"]
+            .flatMap((key) => (htmlEl.getAttribute(key) ?? "").split(/\s+/).filter(Boolean))
+            .map((id) => root.getElementById(id)).filter((el): el is HTMLElement => !!el);
+          if (htmlEl instanceof HTMLInputElement || htmlEl instanceof HTMLTextAreaElement || htmlEl instanceof HTMLSelectElement) {
+            related.push(...Array.from(htmlEl.labels ?? []));
+          }
+          const maskedContent = masked || containsMaskedText(htmlEl) || related.some(containsMaskedText);
           const attrs: Record<string, string> = {};
           for (const attrName of COLLECTED_ATTRS) {
+            if (maskedContent && attrName === "value") continue;
             const v = htmlEl.getAttribute(attrName);
             if (v) attrs[attrName] = v.slice(0, 160);
           }
@@ -3416,7 +3783,10 @@ const INTERACTIVE_SELECTORS = [
           // getAccessibleName 的 expand/collapse 分支。treeToggle 标记透传给 applyOverlay,使
           // AX overlay 不把 role/name 改回 img/"caret-down"(CDP AX 视 caret 为 presentational)。
           const isTreeTog = isTreeExpandToggle(htmlEl);
-          const role = isTreeTog ? "button" : withAX ? getRole(htmlEl) : htmlEl.tagName.toLowerCase();
+          const roleSource: { value: "dom" | "heuristic" } = { value: "heuristic" };
+          const domRole = getRole(htmlEl, roleSource);
+          const role = isTreeTog ? "button" : withAX ? domRole : htmlEl.tagName.toLowerCase();
+          const semanticSource = !isTreeTog && role === domRole ? roleSource.value : "heuristic";
           const name = withText ? getAccessibleName(htmlEl) : "";
 
           // 内容卡内「无文本 icon-link 子」(京东客服 16x16 ×60)是冗余噪声,且占
@@ -3491,7 +3861,7 @@ const INTERACTIVE_SELECTORS = [
             const __hasOnClickAttr = htmlEl.getAttribute("onclick") != null;
             const __isPointer = getComputedStyle(htmlEl).cursor === "pointer";
             if (__hasOnClickProp || __hasOnClickAttr || __isPointer) {
-              htmlEl.dataset.vortexReactClickable = "1";
+              setMarker(htmlEl, "data-vortex-react-clickable", "1");
               reactMarker = { reactClickable: true, clickHint: __vtxReactHint };
             }
           }
@@ -3553,9 +3923,11 @@ const INTERACTIVE_SELECTORS = [
             }
           }
           elements.push({
+            ...(maskedContent ? { maskedContent: true } : {}),
             index: elements.length,
             tag: htmlEl.tagName.toLowerCase(),
             role,
+            semanticSource,
             // 类名噪声在**入池之后**才置空:放到 getAccessibleName 里会让这些元素被
             // require-name 门丢掉,召回下降。这里只去名字不去元素,ref 仍可定位。
             name: shouldDropClassName(name, role, visibleTextContent(htmlEl)) ? "" : name,
@@ -3603,7 +3975,7 @@ const INTERACTIVE_SELECTORS = [
               : {}),
             // T3 discovery: pre-scan CDP getEventListeners 标记的纯 addEventListener
             // 元素带 data-vtx-listener → 渲染 [listener] 真值信号(此处属性尚存,清理在后)。
-            ...(htmlEl.hasAttribute("data-vtx-listener") ? { listenerInteractive: true as const } : {}),
+            ...(hasListenerMarker(htmlEl, "data-vtx-listener") ? { listenerInteractive: true as const } : {}),
             // R6 B015 修复:aria-errormessage 关联文本(错误信息)。
             // AX 路径(observe-ax-overlay.ts computeAXOverlay)读 CDP relatedNodes.text,
             // 但 Chrome CDP 经常不填该字段(实测)→ out.errorMessage 空。
@@ -3617,12 +3989,12 @@ const INTERACTIVE_SELECTORS = [
               const __id = __em.split(/\s+/).filter(Boolean)[0];
               if (!__id) return {};
               const __el = document.getElementById(__id);
-              const __txt = __el?.textContent?.replace(/\s+/g, " ").trim() ?? "";
+              const __txt = __el ? visibleTextContent(__el).replace(/\s+/g, " ").trim() : "";
               return __txt ? { errorMessage: __txt.slice(0, 200) } : {};
             })(),
             // 投放区:data-vtx-dropzone(drop/dragenter/dragover 监听)→ 渲染 [dropzone] 信号,
             // 与 [listener] 正交(同一元素可兼具)。body/html 排除全局 file-drop 误标。
-            ...(htmlEl.hasAttribute("data-vtx-dropzone") &&
+            ...(hasListenerMarker(htmlEl, "data-vtx-dropzone") &&
             htmlEl.tagName !== "BODY" &&
             htmlEl.tagName !== "HTML"
               ? { dropzoneInteractive: true as const }
@@ -3654,11 +4026,13 @@ const INTERACTIVE_SELECTORS = [
         {
           const __set = new Set(collectedEls);
           for (let i = 0; i < collectedEls.length; i++) {
+            if (Date.now() >= deadline) return null;
             let cur =
               collectedEls[i].parentElement ||
               (collectedEls[i].getRootNode() && collectedEls[i].getRootNode().host) ||
               null;
             while (cur) {
+              if (Date.now() >= deadline) return null;
               if (__set.has(cur)) {
                 elements[i].parentIndex = collectedEls.indexOf(cur);
                 break;
@@ -3706,40 +4080,398 @@ const INTERACTIVE_SELECTORS = [
             // 否则 <td>A</td><td>B</td> 会拼成 "AB"(live 实测)。
             let out = "";
             try {
-              const clone = anc.cloneNode(true) as Element;
-              for (const c of Array.from(
-                clone.querySelectorAll("a[href],button,input,select,textarea,[role=button]"),
-              )) c.remove();
               const parts: string[] = [];
               const walk = (n: Node): void => {
                 const kids = n.childNodes;
                 for (let i = 0; i < kids.length; i++) {
+                  if (Date.now() >= deadline) throw new Error("Observe deadline expired");
                   const c = kids[i];
-                  if (c.nodeType === 3) parts.push(c.nodeValue ?? "");
-                  else if (c.nodeType === 1) { parts.push(" "); walk(c); parts.push(" "); }
+                  if (c.nodeType === 3 && !maskedTextNode(c)) parts.push(c.nodeValue ?? "");
+                  else if (c.nodeType === 1 && !(c as Element).matches("a[href],button,input,select,textarea,[role=button]")) { parts.push(" "); walk(c); parts.push(" "); }
                 }
               };
-              walk(clone);
+              walk(anc);
               out = parts.join("").replace(/\s+/g, " ").trim().slice(0, 200);
-            } catch { out = ""; }
+            } catch {
+              if (Date.now() >= deadline) throw new Error("Observe deadline expired");
+              out = "";
+            }
             __ancCache.set(anc, out);
             return out;
           };
           const __chainOf = (el: Element): string[] => {
             const chain: string[] = [];
-            let cur = el.parentElement
+            let cur = el === scopeEl ? null : el.parentElement
               || ((el.getRootNode() as ShadowRoot | Document) as ShadowRoot).host
               || null;
             while (cur && chain.length < __DUP_HOPS) {
+              if (Date.now() >= deadline) throw new Error("Observe deadline expired");
               chain.push(__ancText(cur));
+              if (cur === scopeEl) break;
               cur = cur.parentElement
                 || ((cur.getRootNode() as ShadowRoot | Document) as ShadowRoot).host
                 || null;
             }
             return chain;
           };
+          // VXE 固定列行上下文(2026-11-09 计划第3步):固定列里的操作按钮在 DOM 上是
+          // 独立片段(fixed-left / fixed-right / body 三份 tbody),祖先链里只有固定列自己
+          // 的单元格文本 —— 每行一个「详情」时沿父链分不开。这里用同一 VxeTable 实例的
+          // rowid 把固定列行关联回主表体行,取该行可见文本作 ctx。
+          // 铁律:身份 / 唯一性 / 可见性任一证不出 → 显式降级标记,不按顺序或文本猜;
+          // 组件内部数据(fullData / getRowid)只用于身份判定,不进输出。
+          const __VXE_UNAVAILABLE = "[row-context-unavailable]";
+          const __vxeKeyOf = (inst: any, row: any): string | null => {
+            try {
+              const k = inst.getRowid(row);
+              return k === null || k === undefined ? null : String(k);
+            } catch {
+              return null;
+            }
+          };
+          // 完整当前平面行集合 → key 计数表。getRowid 算不出 key → null(证不出唯一性)。
+          const __vxeKeyIndex = new Map<any, Map<string, number> | null>();
+          const __vxeIndex = (inst: any): Map<string, number> | null => {
+            const cached = __vxeKeyIndex.get(inst);
+            if (cached !== undefined) return cached;
+            let map: Map<string, number> | null = null;
+            try {
+              const data = inst.getTableData();
+              const full = data?.fullData;
+              if (Array.isArray(full)) {
+                map = new Map<string, number>();
+                for (const row of full) {
+                  if (Date.now() >= deadline) throw new Error("Observe deadline expired");
+                  const k = __vxeKeyOf(inst, row);
+                  if (k === null) { map = null; break; }
+                  map.set(k, (map.get(k) ?? 0) + 1);
+                }
+              }
+            } catch {
+              if (Date.now() >= deadline) throw new Error("Observe deadline expired");
+              map = null;
+            }
+            __vxeKeyIndex.set(inst, map);
+            return map;
+          };
+          const __vxeIsTable = (inst: any): boolean =>
+            !!inst
+            && String(inst?.$options?.name ?? "").toLowerCase().replace(/-/g, "") === "vxetable"
+            && typeof inst.getTableData === "function"
+            && typeof inst.getRowid === "function";
+          // 所属 VxeTable 实例:最近的带 __vue__ 的祖先(Vue2 组件根元素带 __vue__)。
+          // 真实 VXE 层级里最近的 __vue__ 通常是 body 组件(VxeTableBody),VxeTable 实例
+          // 在 $parent 链上 —— 不能因「最近的 __vue__ 不是 VxeTable」就判定证不出实例。
+          // 证不出实例、但祖先有 vxe-* 类名 → vxeLike(只用于打降级标记)。
+          const __vxeTableOf = (inst: any): any => {
+            let cur = inst;
+            for (let i = 0; cur && i < 32; i++) {
+              if (Date.now() >= deadline) throw new Error("Observe deadline expired");
+              if (__vxeIsTable(cur)) return cur;
+              cur = cur.$parent;
+            }
+            return null;
+          };
+          // 本表根(.vxe-table):内嵌表的关联边界 —— 到这里还证不出实例就不许认领外表。
+          const __vxeParent = (el: Element): Element | null => el === scopeEl ? null : el.parentElement;
+          const __vxeClosest = (el: Element | null, selector: string): Element | null => {
+            while (el) {
+              if (Date.now() >= deadline) throw new Error("Observe deadline expired");
+              if (el.matches(selector)) return el;
+              el = __vxeParent(el);
+            }
+            return null;
+          };
+          const __vxeTableRoot = (el: Element): Element | null => __vxeClosest(el, ".vxe-table");
+          // Vue 3 production 保存组件树在应用容器的 _vnode,而非 DOM 的 __vue__。
+          // 只在应用容器位于观察范围内时检查组件树;表根必须与组件 DOM 完全相同。
+          const __vxeVue3Indexes = new Map<Element, Map<Element, any> | null>();
+          const __vxeVue3Table = (root: Element): any => {
+            let app: Element | null = root;
+            while (app && !(app as any).__vue_app__) {
+              if (Date.now() >= deadline) throw new Error("Observe deadline expired");
+              app = __vxeParent(app);
+            }
+            if (!app) return null;
+            let index = __vxeVue3Indexes.get(app);
+            if (index === undefined) {
+              index = new Map<Element, any>();
+              const pending = [(app as any)._vnode];
+              const seen = new Set<any>();
+              while (pending.length) {
+                if (Date.now() >= deadline) throw new Error("Observe deadline expired");
+                const vnode = pending.pop();
+                if (!vnode || typeof vnode !== "object" || seen.has(vnode)) continue;
+                seen.add(vnode);
+                if (seen.size > 20000) { index = null; break; }
+                const component = vnode.component;
+                if (component) {
+                  const element = component.subTree?.el;
+                  const instance = component.proxy;
+                  if (element?.nodeType === 1 && vnode.el === element && __vxeIsTable(instance)) {
+                    index.set(element, index.has(element) ? null : instance);
+                  }
+                  pending.push(component.subTree);
+                }
+                if (Array.isArray(vnode.children)) pending.push(...vnode.children);
+                if (vnode.suspense?.activeBranch) pending.push(vnode.suspense.activeBranch);
+              }
+              __vxeVue3Indexes.set(app, index);
+            }
+            return index?.get(root) ?? null;
+          };
+          // 归属校验:实例须由本表根提供;只有更外层表认得它 → 串表,拒绝认领。
+          const __vxeOwnedBy = (inst: any, root: Element): boolean => {
+            let a: Element | null = root;
+            while (a) {
+              if (Date.now() >= deadline) throw new Error("Observe deadline expired");
+              const vu = (a as any).__vue__;
+              if (vu && __vxeTableOf(vu) === inst) return a === root;
+              a = __vxeParent(a);
+            }
+            return true;   // 证不出归属 → 不拦
+          };
+          const __vxeScope = (el: Element): { root: Element | null; inst: any | null; vxeLike: boolean; boundary: Element | null } => {
+            const boundary = __vxeTableRoot(el);
+            let p: Element | null = el;
+            let vxeLike = false;
+            let inst: any | null = null;
+            while (p) {
+              if (Date.now() >= deadline) throw new Error("Observe deadline expired");
+              const vu = (p as any).__vue__;
+              // 最近的一个能证出表的实例说了算;但不走到底 —— vxeLike 要看完整条祖先链。
+              if (vu && !inst) {
+                const t = __vxeTableOf(vu);
+                if (t) inst = t;
+              }
+              if (!vxeLike && p.classList) {
+                for (const c of Array.from(p.classList)) {
+                  if (c.startsWith("vxe-table")) { vxeLike = true; break; }
+                }
+              }
+              p = __vxeParent(p);
+            }
+            // 串表防护:实例若只有外层表认得(内嵌表缺 __vue__)→ 不许认领,降级。
+            if (inst && boundary && !__vxeOwnedBy(inst, boundary)) inst = null;
+            const vue3 = !inst && boundary ? __vxeVue3Table(boundary) : null;
+            if (vue3) return vue3.treeConfig
+              ? { root: null, inst: null, vxeLike: true, boundary }
+              : { root: boundary, inst: vue3, vxeLike: true, boundary };
+            if (!inst) return { root: null, inst: null, vxeLike, boundary };
+            const tc = inst.treeConfig;
+            // 树表:行不是平面的,扁平集合证明不了唯一性 → 降级。
+            if (tc) return { root: null, inst: null, vxeLike: true, boundary };
+            // 作用域根:带同一实例的最近祖先元素(VXE 表格根容器,含固定列各片段)。
+            let root: Element | null = null;
+            let q: Element | null = el;
+            while (q) {
+              if (Date.now() >= deadline) throw new Error("Observe deadline expired");
+              if ((q as any).__vue__ === inst) { root = q; break; }
+              q = __vxeParent(q);
+            }
+            if (!root && inst.$el && inst.$el.nodeType === 1 && (!scopeEl || scopeEl.contains(inst.$el))) root = inst.$el as Element;
+            return { root, inst, vxeLike: true, boundary };
+          };
+          // overflow 容器(内容可能被裁掉)。jsdom 未设置时计算值是 ""(按「未设置」处理),
+          // 简写 overflow:hidden 不会拆到 overflowX/Y,三者都看。
+          const __vxeOverflow = (el: Element): boolean => {
+            const cs = getComputedStyle(el);
+            const cut = (v: string): boolean => !!v && v !== "visible";
+            return cut(cs.overflow) || cut(cs.overflowX) || cut(cs.overflowY);
+          };
+          // 可见性须检查 scope 外的祖先,但身份关联仍使用受 scope 限制的 __vxeParent。
+          const __vxeVisualParent = (el: Element): Element | null =>
+            el.assignedSlot || el.parentElement || ((el.getRootNode() as ShadowRoot | Document) as ShadowRoot).host || null;
+          // 逐层检查全部 overflow 裁剪祖先:内层没裁到不算,外层裁到就算。
+          const __vxeClipped = (el: Element, rect: DOMRect, hasRange: boolean): boolean => {
+            let p: Element | null = el;
+            const seen = new Set<Element>();
+            while (p) {
+              if (seen.has(p)) return true;
+              seen.add(p);
+              if (Date.now() >= deadline) throw new Error("Observe deadline expired");
+              if (__vxeOverflow(p)) {
+                const pr = p.getBoundingClientRect();
+                const box = p as HTMLElement;
+                let scale = 1;
+                if (hasRange) {
+                  const ancestors = new Set<Element>();
+                  for (let a: Element | null = p; a; a = __vxeVisualParent(a)) {
+                    if (ancestors.has(a)) return true;
+                    ancestors.add(a);
+                    if (Date.now() >= deadline) throw new Error("Observe deadline expired");
+                    const style = getComputedStyle(a);
+                    const zoom = style.zoom && style.zoom !== "normal" ? Number(style.zoom) : 1;
+                    if (!Number.isFinite(zoom) || zoom <= 0) return true;
+                    scale *= zoom;
+                    if ((style.scale && style.scale !== "none" && style.scale !== "1")
+                      || (style.rotate && style.rotate !== "none" && style.rotate !== "0deg")
+                      || (style.perspective && style.perspective !== "none")) return true;
+                    if (style.transform && style.transform !== "none") {
+                      const m = new DOMMatrixReadOnly(style.transform);
+                      if (!m.is2D || m.a !== 1 || m.b !== 0 || m.c !== 0 || m.d !== 1) return true;
+                    }
+                  }
+                }
+                // 无边框和占位滚动条时直接用精确边框盒;否则内缩整数 client* 的舍入误差。
+                const clipStyle = getComputedStyle(p);
+                const exactX = !hasRange || (parseFloat(clipStyle.borderLeftWidth) === 0 && parseFloat(clipStyle.borderRightWidth) === 0 && box.offsetWidth === box.clientWidth);
+                const exactY = !hasRange || (parseFloat(clipStyle.borderTopWidth) === 0 && parseFloat(clipStyle.borderBottomWidth) === 0 && box.offsetHeight === box.clientHeight);
+                const left = pr.left + (exactX ? 0 : (box.clientLeft + 1) * scale);
+                const top = pr.top + (exactY ? 0 : (box.clientTop + 1) * scale);
+                const width = exactX ? pr.width : (box.clientWidth - 2) * scale;
+                const height = exactY ? pr.height : (box.clientHeight - 2) * scale;
+                if (width <= 0 || height <= 0 || rect.left < left || rect.right > left + width
+                  || rect.top < top || rect.bottom > top + height) return true;
+              }
+              p = __vxeVisualParent(p);
+            }
+            return hasRange && (rect.left < 0 || rect.top < 0 || rect.right > window.innerWidth || rect.bottom > window.innerHeight);
+          };
+          // 可见性:排除 display:none / visibility:hidden / hidden / 折叠 details /
+          // 被 overflow 裁出盒子的文本。不用整行 textContent —— 那会把隐藏字段一起带出。
+          // 状态性不可见:display:none / visibility:hidden / hidden 属性 / 折叠 details。
+          const __vxeStateHidden = (el: Element): boolean => {
+            if (el.hasAttribute("hidden")) return true;
+            const cs = getComputedStyle(el);
+            if (cs.display === "none" || cs.visibility === "hidden" || cs.visibility === "collapse" || cs.opacity === "0") return true;
+            const det = __vxeClosest(el, "details");
+            // 折叠的 details 只有 summary 可见;details 容器自身照常下钻,逐个子节点判。
+            if (det && !(det as HTMLDetailsElement).open && el !== det) {
+              const sum = det.querySelector("summary");
+              if (!sum || !(sum === el || sum.contains(el))) return true;
+            }
+            return false;
+          };
+          // 形状裁剪(clip-path / CSS mask / 旧 clip):这些属性不走 overflow 几何,
+          // 只看 overflow 会漏出已被完全裁掉/遮掉的文本。形状边界无法证明 → 该文本不输出。
+          const __vxeShapeClipped = (cs: CSSStyleDeclaration): boolean =>
+            (!!cs.clipPath && cs.clipPath !== "none")
+            || (!!cs.maskImage && cs.maskImage !== "none")
+            || (!!cs.webkitMaskImage && cs.webkitMaskImage !== "none")
+            || (!!cs.clip && cs.clip !== "auto");
+          // 按文本片段检查几何位置,不能因为宽行被裁剪就丢弃整行。
+          const __vxeTextVisible = (text: Node, parent: Element): boolean => {
+            if (maskedTextNode(text)) return false;
+            const det = __vxeClosest(parent, "details");
+            if (det && !(det as HTMLDetailsElement).open) {
+              const sum = det.querySelector("summary");
+              if (!(sum && (sum === parent || sum.contains(parent)))) return false;
+            }
+            let p: Element | null = parent;
+            const seen = new Set<Element>();
+            while (p) {
+              if (seen.has(p)) return false;
+              seen.add(p);
+              if (Date.now() >= deadline) throw new Error("Observe deadline expired");
+              const cs = getComputedStyle(p);
+              if (p.hasAttribute("hidden") || cs.display === "none" || cs.visibility === "hidden"
+                || cs.visibility === "collapse" || cs.opacity === "0") return false;
+              // scope 外的折叠 details 不扫描其子树,无法证明文本可见时省略。
+              if (scopeEl && p !== scopeEl && !scopeEl.contains(p)
+                && p.tagName === "DETAILS" && !(p as HTMLDetailsElement).open) return false;
+              if (cs.textOverflow === "ellipsis" && __vxeOverflow(p)
+                && ((p as HTMLElement).clientWidth <= 0 || (p as HTMLElement).scrollWidth > (p as HTMLElement).clientWidth)) return false;
+              // 自身或祖先上的 clip-path / mask 同样裁掉文本:形状裁剪无法用几何证明可见。
+              if (__vxeShapeClipped(cs)) return false;
+              p = __vxeVisualParent(p);
+            }
+            const range = document.createRange();
+            range.selectNodeContents(text);
+            // jsdom 无 Range 布局,回退父盒供定向测试使用。
+            const hasRange = typeof range.getBoundingClientRect === "function";
+            const rect = hasRange ? range.getBoundingClientRect() : parent.getBoundingClientRect();
+            if (!rect.width || !rect.height) return false;
+            if (!hasRange && __vxeOverflow(parent) && !(parent as HTMLElement).clientWidth) return false;
+            return !__vxeClipped(parent, rect, hasRange);
+          };
+          // 候选片段的任一祖先状态性不可见 → 整个片段内容不得输出(整块 display:none 的固定列片段)。
+          // 只看状态,不看祖先的裁剪:祖先盒子被裁不等于片段不可见(片段可能落在可见区域内)。
+          const __vxeAncestorHidden = (el: Element): boolean => {
+            let p = __vxeParent(el);
+            while (p) {
+              if (Date.now() >= deadline) throw new Error("Observe deadline expired");
+              if (__vxeStateHidden(p)) return true;
+              p = __vxeParent(p);
+            }
+            return false;
+          };
+          const __vxeText = (root: Element, skip: Element | null): string => {
+            if (__vxeStateHidden(root) || __vxeAncestorHidden(root)) return "";
+            const rowTable = __vxeClosest(root, "table");
+            let out = "";
+            const walk = (node: Node): void => {
+              if (out.length > 200) return;
+              for (const child of Array.from(node.childNodes)) {
+                if (Date.now() >= deadline) throw new Error("Observe deadline expired");
+                if (child.nodeType === 3) {
+                  const p = node as Element;
+                  if (p.nodeType === 1 && !__vxeTextVisible(child, p)) continue;
+                  out += child.nodeValue || "";
+                  continue;
+                }
+                if (child.nodeType !== 1) continue;
+                const cel = child as Element;
+                if (skip && cel === skip) continue;
+                const tag = cel.tagName;
+                if (tag === "SCRIPT" || tag === "STYLE" || tag === "TEMPLATE") continue;
+                // 嵌套表(内含另一个 VXE 实例)的文本不并入外层行上下文。
+                if (__vxeClosest(cel, "table") !== rowTable) continue;
+                if (__vxeStateHidden(cel)) continue;
+                out += " ";
+                walk(cel);
+              }
+            };
+            walk(root);
+            return out.replace(/\s+/g, " ").trim();
+          };
+          // body wrapper 里的嵌套普通表不属于 VXE 行片段,即使 rowid 相同。
+          const __vxeFragmentRow = (row: Element): boolean => {
+            const table = __vxeClosest(row, "table");
+            const wrapper = __vxeClosest(table, ".vxe-table--body-wrapper");
+            if (!table || !wrapper) return false;
+            const outerTable = __vxeClosest(__vxeParent(table), "table");
+            return !outerTable || !wrapper.contains(outerTable);
+          };
+          // 所属表的行:只认本表根(.vxe-table)之内的 tr —— 不许跨到外层表的行。
+          const __vxeRowOf = (el: Element, scope: { boundary: Element | null }): Element | null => {
+            let p: Element | null = el;
+            while (p) {
+              if (Date.now() >= deadline) throw new Error("Observe deadline expired");
+              if (p.tagName === "TR") return p;
+              if (p === scope.boundary) return null;
+              p = __vxeParent(p);
+            }
+            return null;
+          };
+          const __vxeRowContext = (el: Element): { text?: string; unavailable: boolean } => {
+            const scope = __vxeScope(el);
+            // 非 VXE 表 → 不属本特性范围,交回旧祖先回退。
+            if (!scope.vxeLike) return { unavailable: false };
+            const tr = __vxeRowOf(el, scope);
+            // 不在行里(VXE 工具栏等)→ 不是行身份失败,保留原有祖先上下文。
+            if (!tr) return { unavailable: false };
+            const key = tr.getAttribute("rowid");
+            if (!__vxeFragmentRow(tr) || !scope.inst || !scope.root || key === null || key === "") {
+              return { unavailable: true };
+            }
+            // 唯一性:完整平面行集合里该 key 只对应一条 → 才允许关联。
+            const index = __vxeIndex(scope.inst);
+            if (!index || index.get(key) !== 1) return { unavailable: true };
+            const parts: string[] = [];
+            for (const cand of Array.from(scope.root.querySelectorAll("tr[rowid]"))) {
+              if (Date.now() >= deadline) throw new Error("Observe deadline expired");
+              if (cand.getAttribute("rowid") !== key || !__vxeFragmentRow(cand)) continue;
+              if (__vxeScope(cand).inst !== scope.inst) continue;   // 必须同一实例,嵌套表不混
+              const t = __vxeText(cand, el);
+              if (t) parts.push(t);
+            }
+            const text = parts.join(" ").replace(/\s+/g, " ").trim().slice(0, 200);
+            return text ? { text, unavailable: false } : { unavailable: true };
+          };
           const __groups = new Map<string, number[]>();
           for (let i = 0; i < elements.length; i++) {
+            if (Date.now() >= deadline) return null;
             const nm = (elements[i].name ?? "").replace(/\s+/g, " ").trim();
             if (!nm) continue;
             const k = `${elements[i].role} ${nm}`;
@@ -3747,13 +4479,21 @@ const INTERACTIVE_SELECTORS = [
             if (g) g.push(i); else __groups.set(k, [i]);
           }
           for (const idxs of __groups.values()) {
+            if (Date.now() >= deadline) throw new Error("Observe deadline expired");
             if (idxs.length < 2) continue;
             const chains = idxs.map((i) => __chainOf(collectedEls[i]));
             for (let a = 0; a < idxs.length; a++) {
+              if (Date.now() >= deadline) throw new Error("Observe deadline expired");
+              const i = idxs[a];
+              // 行上下文(能证明身份时)优先:祖先链在固定列表格里只有固定列自己的文本。
+              const vxe = __vxeRowContext(collectedEls[i]);
+              // 身份不可关联 → 显式降级标记优先,不回退祖先链(回退会把隐藏字段带出来)。
+              if (vxe.unavailable) { elements[i].dupContext = __VXE_UNAVAILABLE; continue; }
+              if (vxe.text) { elements[i].dupContext = vxe.text; continue; }
               const ctx = __pickDistinguishingContext(
-                chains[a], chains.filter((_, b) => b !== a), elements[idxs[a]].name ?? "",
+                chains[a], chains.filter((_, b) => b !== a), elements[i].name ?? "",
               );
-              if (ctx) elements[idxs[a]].dupContext = ctx;
+              if (ctx) elements[i].dupContext = ctx;
             }
           }
         }
@@ -3769,6 +4509,7 @@ const INTERACTIVE_SELECTORS = [
         {
           const __idSet = new Set<string>();
           for (let i = 0; i < collectedEls.length; i++) {
+            if (Date.now() >= deadline) return null;
             const __el = collectedEls[i];
             const __controlsAttr = __el.getAttribute("aria-controls");
             const __ownsAttr = __el.getAttribute("aria-owns");
@@ -3780,11 +4521,13 @@ const INTERACTIVE_SELECTORS = [
             const __seenIdx = new Set<number>();
             const __seenId = new Set<string>();
             for (const __id of __allIds) {
+              if (Date.now() >= deadline) return null;
               if (__idSet.has(__id) || __seenId.has(__id)) continue;
               // 在 collectedEls 中通过 id 找。注意 id 必须唯一(id-uniqueness 已在
               // observe-id-uniqueness.test.ts 锁),若重复取第一个。
               let __found = -1;
               for (let j = 0; j < collectedEls.length; j++) {
+                if (Date.now() >= deadline) return null;
                 if (collectedEls[j].id === __id) { __found = j; break; }
               }
               if (__found >= 0 && !__seenIdx.has(__found)) {
@@ -3801,10 +4544,21 @@ const INTERACTIVE_SELECTORS = [
           }
         }
 
-        // AX-overlay: 给每个收集元素打 frame-local 下标标记,供扩展侧 DOM.getDocument
-        // 关联到 backendDOMNodeId。与 observe-ax-overlay.ts STAMP_MARKERS 同语义(内联副本)。
-        for (let i = 0; i < collectedEls.length; i++) {
-          collectedEls[i].setAttribute("data-vtx-ax", String(i));
+        // Ownership check and each write stay in this synchronous page operation.
+        // A delayed frameIds scan in a replacement document must never claim ownership.
+        const ownsAX = () => {
+          const owner = (document as any).__vortexAXOwner;
+          return !!axRequest && owner?.epoch === axRequest.epoch && owner.highWater === axRequest.order &&
+            owner.owner === axRequest.token && owner.deadline === axRequest.deadline && Date.now() < owner.deadline;
+        };
+        let axStamped = false;
+        if (ownsAX()) {
+          setMarker(document.documentElement, "data-vtx-frame-ax", axRequest!.token);
+          for (let i = 0; i < collectedEls.length; i++) {
+            if (!ownsAX()) break;
+            setMarker(collectedEls[i], "data-vtx-ax", `${axRequest!.token}:${i}`);
+          }
+          axStamped = ownsAX();
         }
 
         // [inline detectBlindspot:virtual] 虚拟列表专扫:role=grid/listbox 等容器
@@ -3823,8 +4577,9 @@ const INTERACTIVE_SELECTORS = [
           pageBlindspots.push({ kind: "occlusion", name: "hit-ownership" });
         }
         {
-          const __vc = querySelectorAllDeep("[role=grid],[role=treegrid],[role=table],[role=listbox],[role=tree]", document);
+          const __vc = querySelectorAllDeep("[role=grid],[role=treegrid],[role=table],[role=listbox],[role=tree]", scanRoot);
           for (const c of __vc) {
+            if (Date.now() >= deadline) throw new Error("Observe deadline expired");
             const __cr = (c.getAttribute("role") || "").toLowerCase();
             const __rendered =
               __cr === "grid" || __cr === "treegrid" || __cr === "table"
@@ -3842,8 +4597,9 @@ const INTERACTIVE_SELECTORS = [
           // 真源 blindspot-detect.ts detectVirtualByScroll,改一处须改两处。
           // 强滚动(scrollH≥clientH×4) + estTotal(scrollH/rowH)>>渲染数(虚拟本质:只渲染窗口)。
           const __seenScrollers = new Set();
-          const __cands = querySelectorAllDeep("table,[role=grid],[role=listbox],[role=tree],ul,ol", document);
+          const __cands = querySelectorAllDeep("table,[role=grid],[role=listbox],[role=tree],ul,ol", scanRoot);
           for (const cand of __cands) {
+            if (Date.now() >= deadline) throw new Error("Observe deadline expired");
             if (cand.hasAttribute("aria-rowcount") || cand.hasAttribute("aria-setsize")) continue; // ARIA 路径已处理
             const __rows = cand.querySelectorAll("[role=row],tr,li");
             const __rendered = __rows.length;
@@ -3854,11 +4610,13 @@ const INTERACTIVE_SELECTORS = [
             let __scroller = null;
             let __cur = cand;
             for (let i = 0; i < 6 && __cur; i++) {
+              if (Date.now() >= deadline) throw new Error("Observe deadline expired");
               const __oy = getComputedStyle(__cur).overflowY;
               if ((__oy === "auto" || __oy === "scroll") && __cur.scrollHeight > __cur.clientHeight) {
                 __scroller = __cur;
                 break;
               }
+              if (__cur === scopeEl) break;
               __cur = __cur.parentElement;
             }
             if (!__scroller || __seenScrollers.has(__scroller)) continue;
@@ -3895,7 +4653,8 @@ const INTERACTIVE_SELECTORS = [
           // 真源 blindspot-detect.ts detectDivVirtualScroller,改一处须改两处。
           // 强滚动 div 容器 + 内部 ≥3 高度成簇重复子项 + estTotal>>渲染。廉价 scrollHeight 门先于 getComputedStyle。
           // 成簇用中位数 band[median×0.6,1.6] 替代严格等高:容纳 react-virtuoso 等变高虚拟列表(逐项测量行高不一)。
-          for (const __sc of querySelectorAllDeep("div", document)) {
+          for (const __sc of querySelectorAllDeep("div", scanRoot)) {
+            if (Date.now() >= deadline) throw new Error("Observe deadline expired");
             if (__seenScrollers.has(__sc)) continue;
             const __sh2 = (__sc as HTMLElement).scrollHeight;
             const __ch2 = (__sc as HTMLElement).clientHeight;
@@ -3905,9 +4664,13 @@ const INTERACTIVE_SELECTORS = [
             let __divRows = 0;
             let __divRowH = 0;
             for (const __w of Array.from((__sc as HTMLElement).querySelectorAll("div"))) {
+              if (Date.now() >= deadline) throw new Error("Observe deadline expired");
               const __kids = Array.from(__w.children);
               if (__kids.length < 3) continue;
-              const __heights = __kids.map((n) => n.getBoundingClientRect().height);
+              const __heights = __kids.map((n) => {
+                if (Date.now() >= deadline) throw new Error("Observe deadline expired");
+                return n.getBoundingClientRect().height;
+              });
               const __sorted = [...__heights].sort((a, b) => a - b);
               const __median = __sorted[Math.floor(__sorted.length / 2)];
               if (__median < 4) continue;
@@ -3931,7 +4694,8 @@ const INTERACTIVE_SELECTORS = [
           // 元素(ECharts 在 srcdoc 子 frame / 主 frame 非交互 canvas),独立扫一遍产 frame
           // 级条目。真源 blindspot-detect.ts detectChartCanvas,改一处须改两处。识别库:
           // echarts(data-zr-dom-id)/ G2(祖先 data-chart-source-type)/ Chart.js(Chart.getChart)。
-          for (const __cv of querySelectorAllDeep("canvas", document)) {
+          for (const __cv of querySelectorAllDeep("canvas", scanRoot)) {
+            if (Date.now() >= deadline) throw new Error("Observe deadline expired");
             const __cvEl = __cv as HTMLElement;
             let __clib: string | null = null;
             if (__cvEl.getAttribute("data-zr-dom-id") !== null) {
@@ -3960,7 +4724,8 @@ const INTERACTIVE_SELECTORS = [
           // 元素(⑨ 实证空树),独立扫一遍产 frame 级条目。真源 blindspot-detect.ts
           // detectImageBlindspot,改一处须改两处。排除:有意义 alt / alt=""(装饰)/ aria-label/
           // title / aria-hidden / role=presentation / 图标级小图(<80)。
-          for (const __im of querySelectorAllDeep("img", document)) {
+          for (const __im of querySelectorAllDeep("img", scanRoot)) {
+            if (Date.now() >= deadline) throw new Error("Observe deadline expired");
             const __imEl = __im as HTMLElement;
             const __altV = (__imEl.getAttribute("alt") || "").trim();
             if (__altV) continue;                                          // 有意义 alt → 可读
@@ -3984,7 +4749,7 @@ const INTERACTIVE_SELECTORS = [
           // .lake-sheet-canvas-container/.lake-sheet-editor → __reactFiber → memoizedState.sheet.model.data。
           // 每 frame 至多 push 一处(若内核存在)。
           if (pageBlindspots.every((__bs) => __bs.kind !== "sheet")) {
-            const __lsContainer = document.querySelector(".lake-sheet-canvas-container") || document.querySelector(".lake-sheet-editor");
+            const __lsContainer = querySelectorAllDeep(".lake-sheet-canvas-container,.lake-sheet-editor", scanRoot)[0];
             if (__lsContainer) {
               const __lsFk = Object.keys(__lsContainer as any).find(
                 (__k) => __k.startsWith("__reactInternalInstance") || __k.startsWith("__reactFiber"),
@@ -4016,7 +4781,7 @@ const INTERACTIVE_SELECTORS = [
         // 祖先噪声 + root 容器自身(F2:g2.antv 给 body 挂 cursor:pointer 致被收集,裸计数击穿);
         // F3:任一挂载点已渲染即不报(防 #root 空 portal + #app 已渲染误判)。
         let __blankShell: { root: string; rootLen: number; framework: string } | undefined;
-        if (document.readyState === "complete") {
+        if (!scopeEl && document.readyState === "complete") {
           let __fw = "";
           if ((window as any).React !== undefined) __fw = "react";
           else if ((window as any).Vue !== undefined) __fw = "vue";
@@ -4024,6 +4789,7 @@ const INTERACTIVE_SELECTORS = [
           else if (typeof (window as any).g_history !== "undefined" || (window as any).g !== undefined) __fw = "umi";
           else {
             for (const __s of Array.from(document.scripts)) {
+              if (Date.now() >= deadline) throw new Error("Observe deadline expired");
               if (/(?:umi|react|vue|angular|svelte|next|nuxt)/i.test((__s as HTMLScriptElement).src || "")) { __fw = "script-chunk"; break; }
             }
           }
@@ -4037,12 +4803,14 @@ const INTERACTIVE_SELECTORS = [
             // 视觉门(F3):canvas/video 类应用无交互 DOM 但已渲染,面积门与 canvas 盲区一致。
             let __hasVisual = false;
             for (const __v of Array.from(document.querySelectorAll("canvas, video"))) {
+              if (Date.now() >= deadline) throw new Error("Observe deadline expired");
               const __vr = (__v as Element).getBoundingClientRect();
               if (__vr.width * __vr.height > 200 * 150) { __hasVisual = true; break; }
             }
             if (!__hasContent && !__hasVisual) {
               let __blank: { sel: string; len: number } | null = null;
               for (const __sel of __mounts) {
+                if (Date.now() >= deadline) throw new Error("Observe deadline expired");
                 const __rt = document.querySelector(__sel);
                 if (!__rt) continue;
                 const __len = __rt.innerHTML.trim().length;
@@ -4060,6 +4828,21 @@ const INTERACTIVE_SELECTORS = [
           }
         }
 
+        if (Date.now() >= deadline || scanInvalid || !ownsScan()) return null;
+        if (paginationToken) {
+          const item = (window as any).__vortexPageSnapshots[paginationToken];
+          if (!item || item.document !== document || item.captureToken !== scanRequest.token || !ownsScan()) return null;
+          item.nodes = collectedEls;
+          item.validate = (index: number, selector: string, includeControls = false, ignoreTargetValue = false) => {
+            const node = item.nodes[index] as Element | undefined;
+            const valid = item.check(includeControls, ignoreTargetValue ? node : undefined);
+            if (!valid || Date.now() > item.expiresAt || item.document !== document || !node?.isConnected || node.ownerDocument !== document) return null;
+            const matches = querySelectorAllDeep(selector, document, 0, Date.now() + 200);
+            return matches.length === 1 && matches[0] === node ? node : null;
+          };
+          const records = item.state.observer.takeRecords();
+          if (item.relevant(records)) item.state.changed = true;
+        }
         return {
           url: location.href,
           title: document.title,
@@ -4070,22 +4853,32 @@ const INTERACTIVE_SELECTORS = [
             scrollHeight: document.documentElement.scrollHeight,
           },
           elements,
+          axStamped,
           candidateCount: allCandidates.length,
+          ...(paginationToken && (window as any).__vortexPageSnapshots[paginationToken].exceeded ? { monitorBudgetExceeded: true } : {}),
           // N0002 B004: truncated 双门 — max 截断 OR 时间预算命中。Agent 据此判断是
           // 正常 maxElements 限制还是大页性能降级,前者调小参数即可、后者需换 query 通道。
           truncated: elements.length >= max || __timeBudgetHit,
           blindspots: pageBlindspots,
           ...(__modalMeta ? { modal: __modalMeta } : {}),
           ...(__blankShell ? { blankShell: __blankShell } : {}),
+          ...(scopeError ? { scopeError } : {}),
         };
       },
-      args: [maxElements, viewport, includeText, includeAX, filterMode],
+      args: [maxElements, viewport, includeText, includeAX, filterMode, scopeSelector, scopePagination, paginationToken, deadline, scanRequest,
+        listenerRequests.find((request) => request.frameId === frameId && request.documentId === target.documentId) ?? null, axRequest],
       world: "MAIN",
     });
-    return (results[0]?.result as FramePageResult | undefined) ?? null;
+    if (results.length !== 1 || results[0].documentId !== scanRequest.documentId || results[0].frameId !== frameId) return null;
+    const page = (results[0]?.result as FramePageResult | undefined) ?? null;
+    if (page?.axStamped && axRequest && results.length === 1 && results[0].documentId === axRequest.documentId && results[0].frameId === frameId) {
+      page.axIdentity = axRequest;
+    }
+    return page;
   } catch (err) {
     // 跨源 iframe 无权限 / frame 已销毁：不 throw，返回 null 让上层标记为未扫
     console.warn(`[vortex.scanOneFrame] failed fid=${frameId} err=`, err);
+    if (/cannot access contents|permission|access denied/i.test(String(err))) onPermissionDenied();
     return null;
   }
 }
@@ -4113,6 +4906,8 @@ const FRAME_SCAN_MIN_TIMEOUT_MS = 8_000;
 const AX_OVERLAY_TIMEOUT_MS = 6_000;
 /** listener discovery 上限。失败即整页 [listener] 信号丢失,必须上报而非静默吞掉。 */
 const LISTENER_DISCOVERY_TIMEOUT_MS = 8_000;
+/** Claim/recovery must leave time for healthy frames to scan. */
+const SCAN_CLAIM_TIMEOUT_MS = 1_000;
 
 /**
  * 单 frame 超时 = 剩余预算按剩余 frame 数均摊,但不低于下限。
@@ -4125,11 +4920,14 @@ export function frameScanTimeout(remainingBudgetMs: number, remainingFrames: num
 }
 
 interface ScanEntry {
+  request?: ScanRequest;
   frameId: number;
   url: string;
   parentFrameId: number;
   offset: { x: number; y: number };
   page: FramePageResult | null;
+  axAvailable?: boolean;
+  scanError?: "permission-denied";
 }
 
 /** 跨两轮扫描(主循环 + auto-fallback)共享的预算与降级归因。 */
@@ -4145,7 +4943,7 @@ interface ScanBudget {
  */
 async function scanFramesWithBudget(
   tabId: number,
-  targets: Array<{ frameId: number; url: string; parentFrameId: number }>,
+  targets: FrameTarget[],
   budget: ScanBudget,
   scanArgs: {
     maxElements: number;
@@ -4153,12 +4951,21 @@ async function scanFramesWithBudget(
     includeText: boolean;
     includeAX: boolean;
     filterMode: "interactive" | "all";
+    /** 目标局部观察的 scope 选择器;null/缺省 = 整页。@since target-scope */
+    scopeSelector?: string | null;
+    scopePagination?: { snapshotId: string; nodeIndex: number } | null;
+    paginationToken?: string | null;
+    track: <T>(promise: Promise<T>) => Promise<T>;
+    axRequests: AXRequest[];
+    listenerRequests: ListenerRequest[];
+    scanRequests: ScanRequest[];
   },
 ): Promise<ScanEntry[]> {
   const out: ScanEntry[] = [];
   for (let i = 0; i < targets.length; i++) {
     const f = targets[i];
-    const base = { frameId: f.frameId, url: f.url, parentFrameId: f.parentFrameId };
+    const base = { frameId: f.frameId, url: f.url, parentFrameId: f.parentFrameId,
+      request: scanArgs.scanRequests.find((request) => request.frameId === f.frameId && request.documentId === f.documentId) };
     const remaining = SCAN_TOTAL_BUDGET_MS - (Date.now() - budget.startedAt);
     if (remaining <= 0) {
       budget.budgetSkippedFrames.push(f.frameId);
@@ -4176,16 +4983,26 @@ async function scanFramesWithBudget(
       out.push({ ...base, offset, page: null });
       continue;
     }
+    let permissionDenied = false;
     const pageR = await raceTimeout(
-      scanOneFrame(
+      scanArgs.track(scanOneFrame(
         tabId,
-        f.frameId,
+        f,
         scanArgs.maxElements,
         scanArgs.viewport,
         scanArgs.includeText,
         scanArgs.includeAX,
         scanArgs.filterMode,
-      ),
+        scanArgs.scopeSelector ?? null,
+        scanArgs.scopePagination ?? null,
+        scanArgs.paginationToken ?? null,
+        budget.startedAt + SCAN_TOTAL_BUDGET_MS,
+        () => { permissionDenied = true; },
+        scanArgs.axRequests,
+        scanArgs.listenerRequests,
+        scanArgs.scanRequests,
+        scanArgs.track,
+      )),
       Math.min(perFrame, afterOffset),
     );
     if (pageR === TIMED_OUT) {
@@ -4196,24 +5013,159 @@ async function scanFramesWithBudget(
     if (pageR === null) {
       console.warn(`[vortex.observe] scanOneFrame null fid=${f.frameId} url=${f.url}`);
     }
-    out.push({ ...base, offset, page: pageR });
+    out.push({ ...base, offset, page: pageR, ...(permissionDenied ? { scanError: "permission-denied" as const } : {}) });
   }
   return out;
 }
 
+/** 目标局部观察的 scope:只扫该容器及其后代。 */
+interface ObserveScope {
+  /** 页面内唯一定位 scope 容器的选择器。 */
+  selector: string;
+  /** scope 所在 frame。 */
+  frameId: number;
+  pagination?: { snapshotId: string; nodeIndex: number };
+}
+
+/**
+ * 解析 observe 的 scope 参数(目标局部观察)。
+ *
+ * - CSS selector(`selector` 或 `target`):scope 落在 explicitFrameId ?? 主 frame。
+ * - 旧 ref(`index` + `snapshotId`):走 resolveTarget 的既有语义取出元素选择器,
+ *   并按快照绑定的 tab/frame 校验 —— 跨 tab/frame 的 ref 一律报错,
+ *   绝不静默改成另一个目标(过期快照由 resolveTarget 报 STALE_SNAPSHOT)。
+ */
+function resolveObserveScope(
+  args: Record<string, unknown>,
+  tabId: number,
+  explicitFrameId: number | undefined,
+): ObserveScope | undefined {
+  const index = args.index as number | undefined;
+  const selectorArg =
+    typeof args.selector === "string" && args.selector !== ""
+      ? args.selector
+      : typeof args.target === "string" && args.target !== ""
+        ? args.target
+        : undefined;
+  if (index === undefined) {
+    if (!selectorArg) return undefined;
+    if (selectorArg.startsWith("@")) {
+      throw vtxError(
+        VtxErrorCode.INVALID_PARAMS,
+        `observe target "${selectorArg}" is a ref: resolve it to index + snapshotId before calling observe`,
+      );
+    }
+    return { selector: selectorArg, frameId: explicitFrameId ?? 0 };
+  }
+  if (selectorArg) {
+    throw vtxError(
+      VtxErrorCode.INVALID_PARAMS,
+      "observe accepts either a selector or index + snapshotId, not both",
+    );
+  }
+  const resolved = resolveTarget({
+    index,
+    snapshotId: args.snapshotId as string | undefined,
+  }, true);
+  if (resolved.boundTabId != null && resolved.boundTabId !== tabId) {
+    throw vtxError(
+      VtxErrorCode.STALE_SNAPSHOT,
+      `Ref is bound to tab ${resolved.boundTabId}, but this observe targets tab ${tabId} (re-run observe on the target tab)`,
+    );
+  }
+  const boundFrameId = resolved.boundFrameId ?? 0;
+  if (explicitFrameId != null && explicitFrameId !== boundFrameId) {
+    throw vtxError(
+      VtxErrorCode.STALE_SNAPSHOT,
+      `Ref is bound to frame ${boundFrameId}, but this observe targets frame ${explicitFrameId} (re-run observe to refresh the ref)`,
+    );
+  }
+  return { selector: resolved.selector, frameId: boundFrameId, ...(resolved.pagination ? { pagination: resolved.pagination } : {}) };
+}
+
 export function registerObserveHandlers(router: ActionRouter, debuggerMgr: DebuggerManager): void {
+  const navigation = new Map<number, Map<number, number>>();
+  const committedDocuments = new Map<number, Map<number, { documentId?: string; lastKnownDocumentId?: string; changes: number }>>();
+  const onNavigation = ({ tabId, frameId }: { tabId: number; frameId: number }) => {
+    let frames = navigation.get(tabId);
+    if (!frames) navigation.set(tabId, frames = new Map());
+    frames.set(frameId, (frames.get(frameId) ?? 0) + 1);
+    for (const [id, entry] of pageSnapshots) {
+      if (entry.tabId === tabId && (frameId === 0 || entry.frameId === frameId)) {
+        pageSnapshots.delete(id);
+        deleteSnapshot(id);
+      }
+    }
+  };
+  chrome.webNavigation?.onHistoryStateUpdated?.addListener(onNavigation);
+  chrome.webNavigation?.onReferenceFragmentUpdated?.addListener(onNavigation);
+  chrome.webNavigation?.onCommitted?.addListener((details) => {
+    let frames = committedDocuments.get(details.tabId);
+    if (!frames) committedDocuments.set(details.tabId, frames = new Map());
+    const previous = frames.get(details.frameId);
+    frames.set(details.frameId, { documentId: details.documentId,
+      lastKnownDocumentId: details.documentId || previous?.lastKnownDocumentId,
+      changes: (previous?.changes ?? 0) + (details.documentId && details.documentId !== previous?.lastKnownDocumentId ? 1 : 0) });
+    onNavigation(details);
+  });
   // debuggerMgr 用于 AX overlay pass + JS listener 信号（T3）
   router.registerAll({
     [ObserveActions.SNAPSHOT]: async (args, tabId) => {
+      const startedAt = Date.now();
+      const deadline = startedAt + SCAN_TOTAL_BUDGET_MS;
+      const checkDeadline = () => {
+        if (Date.now() >= deadline) throw vtxError(VtxErrorCode.TIMEOUT, "Observe deadline expired");
+      };
+      const work = async () => {
       gcSnapshots();
       const tid = await getActiveTabId(
         (args.tabId as number | undefined) ?? tabId,
       );
+      checkDeadline();
       const explicitFrameId = args.frameId as number | undefined;
+      const navigationAtStart = new Map(navigation.get(tid));
+      const committedAtStart = new Map(committedDocuments.get(tid));
+      for (const [id, entry] of pageSnapshots) {
+        if (Date.now() - entry.capturedAt > PAGE_TTL_MS) pageSnapshots.delete(id);
+      }
+      if (args.cursor !== undefined) {
+        if (Object.keys(args).some((key) => !["cursor", "tabId", "frameId"].includes(key))) {
+          throw vtxError(VtxErrorCode.INVALID_PARAMS, "A cursor cannot be combined with observe parameters");
+        }
+        const match = typeof args.cursor === "string" ? /^(snap_[a-z0-9]+_[0-9]+):(\d+)$/.exec(args.cursor) : null;
+        const entry = match ? pageSnapshots.get(match[1]) : undefined;
+        const offset = match ? Number(match[2]) : 0;
+        if (!entry || entry.tabId !== tid || (explicitFrameId !== undefined && entry.frameId !== explicitFrameId) ||
+            !Number.isSafeInteger(offset) || offset <= 0 || offset % entry.pageSize !== 0 || offset >= entry.result.elements.length) {
+          throw vtxError(VtxErrorCode.STALE_SNAPSHOT, "Invalid or expired pagination cursor");
+        }
+        let valid = false;
+        try {
+          const checked = await chrome.scripting.executeScript({
+            target: { tabId: tid, documentIds: [entry.request.documentId] }, world: "MAIN",
+            func: updatePageSnapshot, args: ["check", match![1], entry.request],
+          });
+          valid = checked.length === 1 && checked[0].documentId === entry.request.documentId && checked[0].frameId === entry.frameId && checked[0].result === true;
+        } catch (err) {
+          console.warn("[vortex.observe] pagination validation failed", err);
+        }
+        checkDeadline();
+        if (!valid || pageSnapshots.get(match![1]) !== entry) throw vtxError(VtxErrorCode.STALE_SNAPSHOT, "Page changed since the snapshot was captured");
+        const elements = entry.result.elements.slice(offset, offset + entry.pageSize);
+        return { ...entry.result, elements, meta: { ...entry.result.meta, returnedCount: elements.length },
+          ...(offset + entry.pageSize < entry.result.elements.length ? { nextCursor: `${match![1]}:${offset + entry.pageSize}` } : {}) };
+      }
+      const paginate = args.paginate === true;
+      const paginationToken = paginate ? newSnapshotId() : null;
+      // 目标局部观察:scope = 只扫某个容器及其后代(CSS selector 或旧快照 ref)。
+      const scope = resolveObserveScope(args, tid, explicitFrameId);
       if (explicitFrameId != null) await ensureFrameAttached(tid, explicitFrameId);
       const framesParamProvided = args.frames !== undefined;
       const framesParam = (args.frames as FramesParam | undefined) ?? "main";
       const maxElements = (args.maxElements as number | undefined) ?? 80;
+      if (paginate && (!Number.isSafeInteger(maxElements) || maxElements < 1 || maxElements > PAGE_CAPTURE_LIMIT)) {
+        throw vtxError(VtxErrorCode.INVALID_PARAMS, `maxElements must be between 1 and ${PAGE_CAPTURE_LIMIT}`);
+      }
       const viewport =
         (args.viewport as "visible" | "full" | undefined) ?? "visible";
       const includeText = (args.includeText as boolean | undefined) ?? true;
@@ -4237,7 +5189,13 @@ export function registerObserveHandlers(router: ActionRouter, debuggerMgr: Debug
       // creating a silent cross-layer inconsistency.
       const includeBoxes = args.includeBoxes === true;
 
-      const frameTargets = await resolveTargetFrames(tid, explicitFrameId, framesParam);
+      // scope 存在时只扫 scope 所在的 frame:局部观察不该把别的 frame 混进来。
+      const frameTargets = await resolveTargetFrames(
+        tid,
+        scope ? scope.frameId : explicitFrameId,
+        framesParam,
+      );
+      checkDeadline();
       if (frameTargets.length === 0) {
         throw vtxError(
           VtxErrorCode.IFRAME_NOT_READY,
@@ -4246,38 +5204,211 @@ export function registerObserveHandlers(router: ActionRouter, debuggerMgr: Debug
         );
       }
 
+      if (paginate && frameTargets.length !== 1) {
+        throw vtxError(VtxErrorCode.INVALID_PARAMS, "Pagination requires a single frame");
+      }
+      let queues = observeQueues.get(chrome.scripting);
+      if (!queues) { queues = new Map(); observeQueues.set(chrome.scripting, queues); }
+      const previous = queues.get(tid);
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => { release = resolve; });
+      const current = previous ? previous.then(() => gate) : gate;
+      queues.set(tid, current);
+      if (previous && await raceTimeout(previous, Math.max(0, SCAN_TOTAL_BUDGET_MS - (Date.now() - startedAt))) === TIMED_OUT) {
+        release();
+        void current.then(() => { if (queues.get(tid) === current) queues.delete(tid); });
+        throw vtxError(VtxErrorCode.TIMEOUT, "Previous observe is still running", { tabId: tid });
+      }
+      const pending = new Set<Promise<unknown>>();
+      const track = <T>(promise: Promise<T>): Promise<T> => {
+        pending.add(promise);
+        void promise.then(() => pending.delete(promise), () => pending.delete(promise));
+        return promise;
+      };
+      const axRequests: AXRequest[] = [];
+      const listenerRequests: ListenerRequest[] = [];
+      const claimedListeners: ListenerRequest[] = [];
+      const scanRequests: ScanRequest[] = [];
+      const claimedScans: ScanRequest[] = [];
+      const unclaimedFrames: number[] = [];
+      let scopeMonitorRequest: ScanRequest | undefined;
+      const retireScans = async () => {
+        await Promise.all(scanRequests.map(async (request) => {
+          try {
+            await raceTimeout(track(chrome.scripting.executeScript({ target: { tabId: tid, documentIds: [request.documentId] }, world: "MAIN",
+              func: updateScanOwnership, args: ["scan.retire", request] })), Math.min(1000, Math.max(0, deadline - Date.now())));
+          } catch (err) { console.warn("[vortex.observe] scan retire failed", err); }
+        }));
+      };
+      let listenersRetired = false;
+      const retireListeners = async () => {
+        if (listenersRetired) return;
+        listenersRetired = true;
+        await Promise.all(listenerRequests.map(async (request) => {
+          try {
+            const retired = await raceTimeout(track(chrome.scripting.executeScript({
+              target: { tabId: tid, documentIds: [request.documentId] }, world: "MAIN",
+              func: updateListenerOwnership, args: ["listener.retire", request, paginationToken],
+            })), Math.min(1000, Math.max(0, deadline - Date.now())));
+            if (retired === TIMED_OUT || retired.length !== 1 || retired[0].result !== true ||
+                retired[0].documentId !== request.documentId || retired[0].frameId !== request.frameId) {
+              console.warn(`[vortex.observe] listener retire incomplete fid=${request.frameId}`);
+            }
+          } catch (err) {
+            console.warn(`[vortex.observe] listener retire failed fid=${request.frameId}`, err);
+          }
+        }));
+      };
+      let axRetired = false;
+      const retireAX = async () => {
+        if (axRetired) return;
+        axRetired = true;
+        await Promise.all(axRequests.map(async (request) => {
+          try {
+            const retired = await raceTimeout(track(chrome.scripting.executeScript({
+              target: { tabId: tid, documentIds: [request.documentId] }, world: "MAIN",
+              func: updateAXOwnership, args: ["retire", request, paginationToken],
+            })), Math.min(1000, Math.max(0, deadline - Date.now())));
+            if (retired === TIMED_OUT || retired.length !== 1 || retired[0].result !== true ||
+                retired[0].documentId !== request.documentId || retired[0].frameId !== request.frameId) {
+              console.warn(`[vortex.observe] AX retire incomplete fid=${request.frameId}`);
+            }
+          } catch (err) {
+            console.warn(`[vortex.observe] AX retire failed fid=${request.frameId}`, err);
+          }
+        }));
+      };
+      try {
+      if (Date.now() - startedAt >= SCAN_TOTAL_BUDGET_MS) {
+        throw vtxError(VtxErrorCode.TIMEOUT, "Observe deadline expired while waiting", { tabId: tid });
+      }
+      if (scope?.pagination) {
+        const entry = pageSnapshots.get(scope.pagination.snapshotId);
+        if (!entry || entry.tabId !== tid || entry.frameId !== scope.frameId || Date.now() - entry.capturedAt > PAGE_TTL_MS || !getSnapshotEntry(scope.pagination.snapshotId)) {
+          throw vtxError(VtxErrorCode.STALE_SNAPSHOT, "Pagination target is expired or no longer available");
+        }
+        scopeMonitorRequest = entry.request;
+      }
+      const generation = {};
+      observeGenerations.set(tid, generation);
+      for (const [id, entry] of pageSnapshots) {
+        if (entry.tabId !== tid) continue;
+        checkDeadline();
+        pageSnapshots.delete(id);
+        deleteSnapshot(id);
+        if (id === scope?.pagination?.snapshotId) continue;
+        try {
+          await chrome.scripting.executeScript({
+            target: { tabId: tid, documentIds: [entry.request.documentId] }, world: "MAIN",
+            func: updatePageSnapshot, args: ["cleanup", id, entry.request],
+          });
+        } catch { /* A detached frame has already lost its monitor. */ }
+      }
+      checkDeadline();
       // 跨 frame：每个 frame 独立扫描；offset 用 getIframeOffset 算一次
       const scans: ScanEntry[] = [];
       const scanBudget: ScanBudget = {
-        startedAt: Date.now(),
+        startedAt,
         timedOutFrames: [],
         budgetSkippedFrames: [],
       };
-      // T3 discovery(pre-scan):CDP getEventListeners 给主 frame 内纯 addEventListener
-      // 点击元素打 data-vtx-listener,随后 scanOneFrame 把它当入池信号 → DISCOVER 漏网
-      // vanilla/jQuery div(无 cursor:pointer/role/框架 prop)。召回零回退:失败标 0 个,
-      // scan 退回现有启发式。属性在 scan 后随 data-vtx-ax 一并清理。
-      let listenerDiscoveryTimedOut = false;
+      let listenerDiscovery: "timeout" | "error" | "skipped-heavy" | undefined;
       let axOverlayTimedOut = false;
-      try {
-        // 同样加界:CDP 侧卡住不该吃掉整个扫描预算。超时=整页 [listener] 丢失,须上报。
-        const marked = await raceTimeout(
-          markListenerElements(debuggerMgr, tid),
-          LISTENER_DISCOVERY_TIMEOUT_MS,
-        );
-        if (marked === TIMED_OUT) listenerDiscoveryTimedOut = true;
-      } catch {
-        /* markListenerElements 内置兜底,理论不抛;防御性吞掉不阻断 observe */
-      }
+      const discoverListeners = async (targets: FrameTarget[]) => {
+        const claimDeadline = Date.now() + Math.min(SCAN_CLAIM_TIMEOUT_MS, Math.max(0, deadline - Date.now()) / 2);
+        await Promise.all(targets.map(async (target) => {
+          if (!target.documentId?.trim() || (target.documentLifecycle && target.documentLifecycle !== "active")) {
+            unclaimedFrames.push(target.frameId); return;
+          }
+          const request: ScanRequest = { frameId: target.frameId, documentId: target.documentId, ancestorFrameIds: target.ancestorFrameIds,
+            epoch: scanEpoch, order: ++scanOrder, token: crypto.randomUUID(), deadline };
+          scanRequests.push(request);
+          try {
+            const claimed = await raceTimeout(track(chrome.scripting.executeScript({ target: { tabId: tid, documentIds: [request.documentId] }, world: "MAIN",
+              func: updateScanOwnership, args: ["scan.claim", request] })), Math.max(0, claimDeadline - Date.now()));
+            if (claimed !== TIMED_OUT && claimed.length === 1 && claimed[0].documentId === request.documentId && claimed[0].frameId === request.frameId &&
+                (claimed[0].result === true || (claimed[0].result === false && await recoverDocumentOwnership("scan", tid, request,
+                  (work) => raceTimeout(track(work), Math.max(0, claimDeadline - Date.now())))))) claimedScans.push(request);
+            else unclaimedFrames.push(target.frameId);
+          } catch (err) { unclaimedFrames.push(target.frameId); console.warn("[vortex.observe] scan claim failed", err); }
+        }));
+        if (!debuggerMgr) return;
+        const listenerDeadline = Math.min(deadline, Date.now() + LISTENER_DISCOVERY_TIMEOUT_MS);
+        await Promise.all(targets.map(async (target) => {
+          const scanRequest = claimedScans.find((request) => request.frameId === target.frameId && request.documentId === target.documentId);
+          if (!scanRequest) return;
+          if (typeof target.documentId !== "string" || !target.documentId.trim() ||
+              (target.documentLifecycle && target.documentLifecycle !== "active")) {
+            listenerDiscovery ??= "error";
+            return;
+          }
+          const request: ListenerRequest = { frameId: target.frameId, documentId: target.documentId,
+            epoch: listenerEpoch, order: ++listenerOrder, token: crypto.randomUUID(), deadline, scanToken: scanRequest.token };
+          // Record before sending so a late claim can be tombstoned on every exit.
+          listenerRequests.push(request);
+          try {
+            const claimed = await raceTimeout(track(chrome.scripting.executeScript({
+              target: { tabId: tid, documentIds: [request.documentId] }, world: "MAIN",
+              func: updateListenerOwnership, args: ["listener.claim", request],
+            })), Math.max(0, listenerDeadline - Date.now()));
+            if (claimed !== TIMED_OUT && claimed.length === 1 &&
+                claimed[0].documentId === request.documentId && claimed[0].frameId === request.frameId &&
+                (claimed[0].result === true || (claimed[0].result === false && await recoverDocumentOwnership("listener", tid, request,
+                  (work) => raceTimeout(track(work), Math.max(0, listenerDeadline - Date.now())))))) claimedListeners.push(request);
+            else listenerDiscovery ??= claimed === TIMED_OUT || Date.now() >= listenerDeadline ? "timeout" : "error";
+          } catch (err) {
+            listenerDiscovery ??= "error";
+            console.warn(`[vortex.observe] listener claim skipped fid=${request.frameId}`, err);
+          }
+        }));
+        try {
+          const marked = await raceTimeout(
+            track(markListenerElements(debuggerMgr, tid, listenerDeadline, scope?.pagination?.snapshotId, claimedListeners)),
+            Math.max(0, listenerDeadline - Date.now()),
+          );
+          if (marked === TIMED_OUT || Date.now() >= listenerDeadline) listenerDiscovery = "timeout";
+          else if (marked.mechanism !== "domDebugger") listenerDiscovery ??= marked.mechanism;
+        } catch (err) {
+          listenerDiscovery ??= "error";
+          console.warn("[vortex.observe] listener discovery failed", err);
+        }
+      };
+      await discoverListeners(frameTargets);
+      checkDeadline();
+      if (claimedScans.length === 0) throw vtxError(VtxErrorCode.STALE_SNAPSHOT, "Target document ownership could not be acquired");
+      const primaryRequest = claimedScans.find((request) => request.frameId === frameTargets[0].frameId);
       scans.push(
         ...(await scanFramesWithBudget(tid, frameTargets, scanBudget, {
-          maxElements,
+          maxElements: paginate ? PAGE_CAPTURE_LIMIT : maxElements,
           viewport,
           includeText,
           includeAX,
           filterMode,
+          scopeSelector: scope?.selector ?? null,
+          scopePagination: scope?.pagination ?? null,
+          paginationToken,
+          track,
+          axRequests,
+          listenerRequests: claimedListeners,
+          scanRequests: claimedScans,
         })),
       );
+
+      checkDeadline();
+      // scope 定位失败(找不到 / 命中多个 / 选择器非法):直接报错,
+      // 不返回一份"看起来成功但其实没扫到目标"的快照。
+      const scopeFailure = scans.find((s) => s.page?.scopeError)?.page?.scopeError;
+      if (scope?.pagination && !scans.some((s) => s.page)) {
+        const code = scanBudget.timedOutFrames.length || scanBudget.budgetSkippedFrames.length
+          ? VtxErrorCode.TIMEOUT
+          : scans.some((s) => s.scanError === "permission-denied")
+            ? VtxErrorCode.PERMISSION_DENIED
+            : VtxErrorCode.STALE_SNAPSHOT;
+        throw vtxError(code, "Pagination target could not be validated");
+      }
+      if (scopeFailure) {
+        throw vtxError(scopeFailure.code as VtxErrorCode, scopeFailure.message);
+      }
 
       // Auto-fallback for shell+iframe sites (Zentao/JIRA Cloud/phpMyAdmin):
       // when caller didn't pin `frames` and main frame returns near-empty
@@ -4289,6 +5420,8 @@ export function registerObserveHandlers(router: ActionRouter, debuggerMgr: Debug
       if (
         !framesParamProvided &&
         explicitFrameId == null &&
+        scope == null &&
+        !paginate &&
         filterMode === "interactive"
       ) {
         const mainScan = scans.find((s) => s.frameId === 0);
@@ -4302,6 +5435,7 @@ export function registerObserveHandlers(router: ActionRouter, debuggerMgr: Debug
           // 复用一次 chrome.webNavigation.getAllFrames 调用同时做 child 检测和
           // all-permitted 过滤，避免 resolveTargetFrames 内部再次拉取（review 反馈）
           const allFrames = (await chrome.webNavigation.getAllFrames({ tabId: tid })) ?? [];
+          checkDeadline();
           const hasChildFrames = allFrames.some((f) => f.frameId !== 0);
           if (hasChildFrames) {
             // 同源 srcdoc(about:srcdoc)的 url 非 http,isFrameInPermissions 会拒掉。
@@ -4326,11 +5460,15 @@ export function registerObserveHandlers(router: ActionRouter, debuggerMgr: Debug
               .filter((f) => !scans.some((s) => s.frameId === f.frameId))
               .map((f) => ({
                 frameId: f.frameId,
+                documentId: f.documentId,
+                documentLifecycle: f.documentLifecycle,
+                ancestorFrameIds: ancestorFrameIds(f, byId),
                 url: f.url,
                 parentFrameId: f.parentFrameId ?? 0,
               }));
             if (newTargets.length > 0) {
               autoFallback = true;
+              await discoverListeners(newTargets);
               // 与主循环共享同一预算:fallback 是第二轮扫描,不该另起炉灶再吃 25s
               scans.push(
                 ...(await scanFramesWithBudget(tid, newTargets, scanBudget, {
@@ -4339,6 +5477,10 @@ export function registerObserveHandlers(router: ActionRouter, debuggerMgr: Debug
                   includeText,
                   includeAX,
                   filterMode,
+                  track,
+                  axRequests,
+                  listenerRequests: claimedListeners,
+                  scanRequests: claimedScans,
                 })),
               );
             }
@@ -4346,69 +5488,63 @@ export function registerObserveHandlers(router: ActionRouter, debuggerMgr: Debug
         }
       }
 
-      // AX 语义覆盖层(v1 仅主 frame frameId 0):采 AX tree + DOM.getDocument 关联 →
-      // 原地覆盖 role/name/state/value/关系。任一步失败该 frame 优雅回退纯启发式(不报错)。
-      if (includeAX) {
-        const mainScan = scans.find((s) => s.frameId === 0);
-        if (mainScan?.page && mainScan.page.elements.length > 0) {
+      checkDeadline();
+      // Strict token indexes, stable CDP mapping, then document-directed ownership check.
+      // Late CDP work only returns data; it must never mutate an already delivered result.
+      if (includeAX && debuggerMgr) {
+        await Promise.all(scans.filter((s) => s.page?.axIdentity && s.page.elements.length > 0).map(async (s) => {
+          const identity = s.page!.axIdentity!;
+          const budget = Math.min(AX_OVERLAY_TIMEOUT_MS, Math.max(0, deadline - Date.now()));
           try {
-            // CDP 冷附加 / 巨型 DOM 下 getFullAXTree + DOM.getDocument(depth=-1,pierce)
-            // 可能极慢甚至不返回,而它跑在扫描预算之外 —— 无界会直接顶穿 30s 传输超时。
-            const axDone = await raceTimeout(
-              (async () => {
-                const { byBackend, byNodeId } = await captureAXNodeMap(debuggerMgr, tid, 0);
-                const doc = (await debuggerMgr.sendCommand(tid, "DOM.getDocument", {
-                  depth: -1,
-                  pierce: true,
-                })) as { root?: unknown };
-                if (doc?.root) {
-                  const indexToBackend = buildIndexToBackend(doc.root as never);
-                  applyOverlay(
-                    mainScan.page!.elements as unknown as OverlayableElement[],
-                    indexToBackend,
-                    byBackend,
-                    byNodeId,
-                  );
-                }
-                return true;
-              })(),
-              AX_OVERLAY_TIMEOUT_MS,
-            );
-            if (axDone === TIMED_OUT) axOverlayTimedOut = true;
+            const result = await raceTimeout((async () => {
+              await debuggerMgr.enableDomain(tid, "DOM");
+              const getDocument = async () => (await debuggerMgr.sendCommand(tid, "DOM.getDocument", {
+                depth: -1, pierce: true,
+              })) as { root?: Parameters<typeof resolveFrameDocument>[0] };
+              const first = await getDocument();
+              const mapped = first.root && (s.frameId === 0
+                ? { document: first.root, frameId: 0 as const }
+                : resolveFrameDocument(first.root, identity.token));
+              if (!mapped) return null;
+              const indexes = buildIndexToBackend(mapped.document, true, identity.token);
+              if (indexes.size !== s.page!.elements.length || s.page!.elements.some((_, i) => !indexes.has(i))) return null;
+              const ax = await captureAXNodeMap(debuggerMgr, tid, mapped.frameId);
+              const second = await getDocument();
+              const verified = second.root && (s.frameId === 0
+                ? { document: second.root, frameId: 0 as const }
+                : resolveFrameDocument(second.root, identity.token));
+              if (!verified || verified.frameId !== mapped.frameId) return null;
+              const after = buildIndexToBackend(verified.document, true, identity.token);
+              if (indexes.size !== after.size || [...indexes].some(([i, id]) => after.get(i) !== id)) return null;
+              const alive = await chrome.scripting.executeScript({
+                target: { tabId: tid, documentIds: [identity.documentId] }, world: "MAIN",
+                func: updateAXOwnership, args: ["check", identity],
+              });
+              if (alive.length !== 1 || alive[0].result !== true || alive[0].documentId !== identity.documentId || alive[0].frameId !== s.frameId) return null;
+              return { indexes, ax };
+            })(), budget);
+            if (result === TIMED_OUT) { axOverlayTimedOut = true; return; }
+            // Use the enumerated lineage: a parent reload may detach this document
+            // after its check reply without emitting a child onCommitted event.
+            if (!result || Date.now() >= deadline ||
+                [0, s.frameId, ...identity.ancestorFrameIds].some((frameId) =>
+                  (navigation.get(tid)?.get(frameId) ?? 0) !== (navigationAtStart.get(frameId) ?? 0))) return;
+            applyOverlay(s.page!.elements as unknown as OverlayableElement[], result.indexes, result.ax.byBackend, result.ax.byNodeId);
+            s.axAvailable = true;
           } catch (err) {
-            console.warn(
-              `[vortex.observe] AX overlay skipped fid=0: ${err instanceof Error ? err.message : String(err)}`,
-            );
+            console.warn(`[vortex.observe] AX overlay skipped fid=${s.frameId}: ${err instanceof Error ? err.message : String(err)}`);
           }
-        }
+        }));
       }
       // 注:JS 监听器真值信号已迁移到 pre-scan discovery(markListenerElements,
       // 见上方 frame 循环前)——listenerInteractive 在 scan 输出构造时由
       // data-vtx-listener 属性直接生成,不再需要事后 CDP pass。
 
-      // marker 清理(无条件):data-vtx-ax(scan stamping)+ data-vtx-listener
-      // + data-vtx-dropzone(pre-scan discovery)。无条件打,故清理也须无条件,防标记残留。清理失败不致命。
-      try {
-        // 同样加界:坏 tab 态下这个"不致命"的清理会永不 settle,挂死整次 observe
-        await raceTimeout(
-          chrome.scripting.executeScript({
-            target: { tabId: tid, allFrames: true },
-            func: () => {
-              for (const el of document.querySelectorAll("[data-vtx-ax]")) el.removeAttribute("data-vtx-ax");
-              for (const el of document.querySelectorAll("[data-vtx-listener]"))
-                el.removeAttribute("data-vtx-listener");
-              for (const el of document.querySelectorAll("[data-vtx-dropzone]"))
-                el.removeAttribute("data-vtx-dropzone");
-            },
-          }),
-          // 清理也算进总预算,否则最坏 25s 扫描 + 8s 清理会突破 30s 传输超时。
-          // 预算耗尽时仍留 2s 尽力一试(标记残留会污染下轮 scan)。
-          Math.max(2_000, SCAN_TOTAL_BUDGET_MS - (Date.now() - scanBudget.startedAt)),
-        );
-      } catch {
-        /* 标记仅 observe 内部用,下轮 scan 覆盖 */
-      }
+      checkDeadline();
+      await retireAX();
+      await retireListeners();
 
+      checkDeadline();
       // password 防护:type=password 的 valueNow 剥除,防敏感值泄露进下一个 prompt。
       for (const s of scans) {
         for (const e of s.page?.elements ?? []) {
@@ -4421,8 +5557,9 @@ export function registerObserveHandlers(router: ActionRouter, debuggerMgr: Debug
       // 才知道「还有东西，只是要 hover 出来」——否则只能靠猜。
       const hoverControlsByFrame = new Map<number, HoverRevealPair[]>();
       for (const s of scans) {
-        if (!s.page || s.page.elements.length === 0) continue;
+        if (scope || !s.page || s.page.elements.length === 0) continue;
         const pairs = await collectHoverRevealPairs(tid, s.frameId);
+        checkDeadline();
         if (pairs.length) hoverControlsByFrame.set(s.frameId, pairs);
       }
 
@@ -4454,8 +5591,9 @@ export function registerObserveHandlers(router: ActionRouter, debuggerMgr: Debug
         href?: string;
         offScreenActionable?: boolean;
         nameSource?: string;
-        controls?: number[];
-        owns?: number[];
+        semanticSource?: "ax" | "dom" | "heuristic";
+        controls?: Array<{ id?: string; index?: number }>;
+        owns?: Array<{ id?: string; index?: number }>;
         errorMessage?: string;
         description?: string;
         compound?: {
@@ -4486,6 +5624,10 @@ export function registerObserveHandlers(router: ActionRouter, debuggerMgr: Debug
         frameId: number;
         parentFrameId: number;
         url: string;
+        title?: string;
+        viewport?: FramePageResult["viewport"];
+        scanError?: "permission-denied";
+        axStatus?: "unavailable";
         offset: { x: number; y: number };
         elementCount: number;
         truncated: boolean;
@@ -4506,6 +5648,7 @@ export function registerObserveHandlers(router: ActionRouter, debuggerMgr: Debug
         blankShell?: { root: string; rootLen: number; framework: string };
         /** hover 揭示控件（当前隐藏、hover 某祖先即显现）。@since hover-reveal */
         hoverControls?: HoverRevealPair[];
+        hoverControlsUnavailable?: "target-scope";
       }> = [];
 
       for (const s of scans) {
@@ -4518,6 +5661,8 @@ export function registerObserveHandlers(router: ActionRouter, debuggerMgr: Debug
             elementCount: 0,
             truncated: false,
             scanned: false,
+            ...(s.scanError ? { scanError: s.scanError } : {}),
+            ...(includeAX && s.frameId !== 0 ? { axStatus: "unavailable" as const } : {}),
           });
           continue;
         }
@@ -4530,6 +5675,8 @@ export function registerObserveHandlers(router: ActionRouter, debuggerMgr: Debug
           // a11y-tree: frame-local parentIndex → global parentIndex（globalParent = frameBase + localParent）。
           const globalParentIndex =
             e.parentIndex !== undefined ? frameBase + e.parentIndex : undefined;
+          const remapRelations = (relations?: Array<{ id?: string; index?: number }>) =>
+            relations?.map((relation) => relation.index === undefined ? relation : { ...relation, index: frameBase + relation.index });
           const centerX = e.bbox.x + Math.round(e.bbox.w / 2);
           const centerY = e.bbox.y + Math.round(e.bbox.h / 2);
           if (format === "compact") {
@@ -4578,8 +5725,9 @@ export function registerObserveHandlers(router: ActionRouter, debuggerMgr: Debug
               ...(globalParentIndex !== undefined ? { parentIndex: globalParentIndex } : {}),
               ...(e.href ? { href: e.href } : {}),
               ...(e.nameSource ? { nameSource: e.nameSource } : {}),
-              ...(e.controls ? { controls: e.controls } : {}),
-              ...(e.owns ? { owns: e.owns } : {}),
+              ...(e.semanticSource ? { semanticSource: e.semanticSource } : {}),
+              ...(e.controls ? { controls: remapRelations(e.controls) } : {}),
+              ...(e.owns ? { owns: remapRelations(e.owns) } : {}),
               ...(e.errorMessage ? { errorMessage: e.errorMessage } : {}),
               ...(e.description ? { description: e.description } : {}),
               ...(e.compound ? { compound: e.compound } : {}),
@@ -4637,8 +5785,9 @@ offScreenActionable: e.offScreenActionable,
               ...(globalParentIndex !== undefined ? { parentIndex: globalParentIndex } : {}),
               ...(e.href ? { href: e.href } : {}),
               ...(e.nameSource ? { nameSource: e.nameSource } : {}),
-              ...(e.controls ? { controls: e.controls } : {}),
-              ...(e.owns ? { owns: e.owns } : {}),
+              ...(e.semanticSource ? { semanticSource: e.semanticSource } : {}),
+              ...(e.controls ? { controls: remapRelations(e.controls) } : {}),
+              ...(e.owns ? { owns: remapRelations(e.owns) } : {}),
               ...(e.errorMessage ? { errorMessage: e.errorMessage } : {}),
               ...(e.description ? { description: e.description } : {}),
               ...(e.compound ? { compound: e.compound } : {}),
@@ -4658,6 +5807,7 @@ offScreenActionable: e.offScreenActionable,
           elementMap.push({
             index: globalIdx,
             selector: e._sel,
+            ...(paginate ? { pageNodeIndex: e.index } : {}),
             frameId: s.frameId,
             role: e.role,
             name: e.name,
@@ -4667,6 +5817,9 @@ offScreenActionable: e.offScreenActionable,
           frameId: s.frameId,
           parentFrameId: s.parentFrameId,
           url: s.page.url,
+          title: s.page.title,
+          viewport: s.page.viewport,
+          ...(includeAX && s.frameId !== 0 && !s.axAvailable ? { axStatus: "unavailable" as const } : {}),
           offset: s.offset,
           elementCount: s.page.elements.length,
           truncated: s.page.truncated,
@@ -4675,21 +5828,45 @@ offScreenActionable: e.offScreenActionable,
           ...(s.page.blindspots && s.page.blindspots.length ? { blindspots: s.page.blindspots } : {}),
           ...(s.page.modal ? { modal: s.page.modal } : {}),
           ...(s.page.blankShell ? { blankShell: s.page.blankShell } : {}),
+          ...(scope ? { hoverControlsUnavailable: "target-scope" as const } : {}),
           ...(hoverControlsByFrame.get(s.frameId)?.length
             ? { hoverControls: hoverControlsByFrame.get(s.frameId) }
             : {}),
         });
       }
 
-      const snapshotId = newSnapshotId();
+      if (paginate && frameTargets.some(({ frameId }) =>
+        (navigation.get(tid)?.get(0) ?? 0) !== (navigationAtStart.get(0) ?? 0) ||
+        (navigation.get(tid)?.get(frameId) ?? 0) !== (navigationAtStart.get(frameId) ?? 0))) {
+        throw vtxError(VtxErrorCode.STALE_SNAPSHOT, "Navigation occurred during snapshot capture");
+      }
+      if (observeGenerations.get(tid) !== generation) {
+        if (paginationToken) {
+          try {
+            await chrome.scripting.executeScript({ target: { tabId: tid, documentIds: [primaryRequest!.documentId] }, world: "MAIN",
+              func: updatePageSnapshot, args: ["cleanup", paginationToken, primaryRequest!] });
+          } catch { /* Frame no longer exists. */ }
+        }
+        throw vtxError(VtxErrorCode.STALE_SNAPSHOT, "A newer observe replaced this snapshot");
+      }
+      const capturedAt = Date.now();
+      if (paginationToken && scans.some((scan) => scan.page)) {
+        const checked = await chrome.scripting.executeScript({
+          target: { tabId: tid, documentIds: [primaryRequest!.documentId] }, world: "MAIN",
+          func: updatePageSnapshot, args: ["finalize", paginationToken, primaryRequest!, capturedAt, PAGE_TTL_MS],
+        });
+        if (checked.length !== 1 || checked[0].documentId !== primaryRequest!.documentId || checked[0].frameId !== primaryRequest!.frameId || checked[0].result !== true) throw vtxError(VtxErrorCode.STALE_SNAPSHOT, "Page changed since the snapshot was captured");
+      }
+      checkDeadline();
+      if (paginate && frameTargets.some(({ frameId }) =>
+        (navigation.get(tid)?.get(0) ?? 0) !== (navigationAtStart.get(0) ?? 0) ||
+        (navigation.get(tid)?.get(frameId) ?? 0) !== (navigationAtStart.get(frameId) ?? 0))) {
+        throw vtxError(VtxErrorCode.STALE_SNAPSHOT, "Navigation occurred during snapshot capture");
+      }
+      const snapshotId = paginationToken ?? newSnapshotId();
       // entry.frameId：单 frame 时保留向后兼容 hint；多 frame 时不填（路由走 element.frameId）
       const isSingleFrame = framesOut.length === 1;
-      setSnapshot(snapshotId, {
-        tabId: tid,
-        frameId: isSingleFrame ? framesOut[0].frameId : undefined,
-        capturedAt: Date.now(),
-        elements: elementMap,
-      });
+
 
       // Top-level url/title/viewport ALWAYS reflect the main frame, even
       // when its page-side scan failed. Issue #15-2: previously the
@@ -4703,12 +5880,29 @@ offScreenActionable: e.offScreenActionable,
       // fall back to empty / zeros so the renderer can still emit a
       // header without misrepresenting which origin we're on.
       const mainScan = scans.find((s) => s.frameId === 0);
+      let mainMetadata: Pick<FramePageResult, "url" | "title" | "viewport"> | undefined = mainScan?.page ?? undefined;
+      if (!mainScan) {
+        try {
+          const metadata = await raceTimeout(track(chrome.scripting.executeScript({
+            target: buildExecuteTarget(tid, 0), world: "MAIN",
+            func: () => ({ url: location.href, title: document.title, viewport: {
+              width: window.innerWidth, height: window.innerHeight, scrollY: window.scrollY,
+              scrollHeight: document.documentElement.scrollHeight,
+            } }),
+          })), Math.max(0, deadline - Date.now()));
+          if (metadata !== TIMED_OUT) mainMetadata = metadata[0]?.result as typeof mainMetadata;
+        } catch (err) {
+          console.warn("[vortex.observe] main metadata unavailable", err);
+        }
+      }
+      checkDeadline();
 
       // 降级归因:仅在扫描真被截断时出现,正常路径 meta 保持字节不变
       const degraded =
+        unclaimedFrames.length > 0 ||
         scanBudget.timedOutFrames.length > 0 ||
         scanBudget.budgetSkippedFrames.length > 0 ||
-        listenerDiscoveryTimedOut ||
+        listenerDiscovery ||
         axOverlayTimedOut
           ? {
               ...(scanBudget.timedOutFrames.length > 0
@@ -4718,7 +5912,8 @@ offScreenActionable: e.offScreenActionable,
                 ? { budgetSkippedFrames: scanBudget.budgetSkippedFrames }
                 : {}),
               // 这两项不减少元素数量,但静默降低召回/语义质量,不上报即 silent degradation
-              ...(listenerDiscoveryTimedOut ? { listenerDiscovery: "timeout" as const } : {}),
+              ...(unclaimedFrames.length ? { unclaimedFrames } : {}),
+              ...(listenerDiscovery ? { listenerDiscovery } : {}),
               ...(axOverlayTimedOut ? { axOverlay: "timeout" as const } : {}),
             }
           : undefined;
@@ -4731,21 +5926,44 @@ offScreenActionable: e.offScreenActionable,
         );
       }
 
-      return {
+      // Empty successful pages still contribute metadata; failed scans contribute no document data.
+      const contributors = claimedScans.filter((request) => scans.some((scan) => scan.page && scan.request === request));
+      const confirmations = await Promise.all(contributors.map(async (request) => {
+        const committed = committedDocuments.get(tid)?.get(request.frameId);
+        const checked = await raceTimeout(track(chrome.scripting.executeScript({ target: { tabId: tid, documentIds: [request.documentId] }, world: "MAIN",
+          func: updateScanOwnership, args: ["scan.check", request] })), Math.max(0, deadline - Date.now()));
+        return { request, committed, valid: checked !== TIMED_OUT && checked.length === 1 && checked[0].documentId === request.documentId && checked[0].frameId === request.frameId && checked[0].result === true };
+      }));
+      checkDeadline();
+      if (confirmations.some(({ valid }) => !valid) || observeGenerations.get(tid) !== generation || confirmations.some(({ request, committed: checkedCommit }) =>
+          [0, request.frameId, ...(request.ancestorFrameIds ?? [])].some((frameId) => {
+            const committed = committedDocuments.get(tid)?.get(frameId);
+            const before = committedAtStart.get(frameId);
+            // Missing identity can be revalidated only by a later real documentIds check.
+            // Retain known transitions so a later identity-less event cannot hide a replacement.
+            const sameDocument = frameId === request.frameId &&
+              // An identity-less restore can leave the entry's known identity in another realm.
+              (!before?.lastKnownDocumentId || before.lastKnownDocumentId === request.documentId) &&
+              (!committed?.lastKnownDocumentId || committed.lastKnownDocumentId === request.documentId) &&
+              (committed?.changes ?? 0) - (before?.changes ?? 0) <= 1 &&
+              (committed?.documentId === request.documentId || committed === checkedCommit);
+            return (committed !== before && !sameDocument) ||
+              (paginate && (navigation.get(tid)?.get(frameId) ?? 0) !== (navigationAtStart.get(frameId) ?? 0));
+          }))) {
+        throw vtxError(VtxErrorCode.STALE_SNAPSHOT, "Document ownership changed before snapshot publication");
+      }
+      setSnapshot(snapshotId, { tabId: tid, frameId: isSingleFrame ? framesOut[0].frameId : undefined, capturedAt,
+        ...(paginate ? { pagination: true } : {}), elements: elementMap });
+      const result = {
         snapshotId,
         version: 2,
-        url: mainScan?.page?.url ?? mainScan?.url ?? "",
-        title: mainScan?.page?.title ?? "",
-        viewport: mainScan?.page?.viewport ?? {
-          width: 0,
-          height: 0,
-          scrollY: 0,
-          scrollHeight: 0,
-        },
+        url: mainMetadata?.url ?? mainScan?.url ?? "",
+        title: mainMetadata?.title ?? "",
+        ...(mainMetadata ? { viewport: mainMetadata.viewport } : { mainMetadataStatus: "unavailable" as const }),
         frames: framesOut,
         elements: elementsOut,
         meta: {
-          capturedAt: Date.now(),
+          capturedAt,
           candidateCount: totalCandidates,
           returnedCount: elementsOut.length,
           truncated: anyTruncated,
@@ -4753,8 +5971,41 @@ offScreenActionable: e.offScreenActionable,
           scannedFrames: framesOut.filter((f) => f.scanned).length,
           ...(autoFallback ? { autoFallback: true as const } : {}),
           ...(degraded ? { degraded } : {}),
+          ...(paginate && scans.some((scan) => scan.page?.monitorBudgetExceeded)
+            ? { incomplete: "monitor-budget" as const }
+            : paginate && anyTruncated ? { incomplete: "capture-budget" as const } : {}),
         },
       };
+      if (!paginate) return result;
+      if (pageSnapshots.size >= 100) pageSnapshots.delete(pageSnapshots.keys().next().value!);
+      pageSnapshots.set(snapshotId, { tabId: tid, frameId: frameTargets[0].frameId, request: primaryRequest!, capturedAt, pageSize: maxElements, result });
+      const elements = result.elements.slice(0, maxElements);
+      return { ...result, elements, meta: { ...result.meta, returnedCount: elements.length },
+        ...((!("incomplete" in result.meta) || result.meta.incomplete !== "monitor-budget") && elements.length < result.elements.length ? { nextCursor: `${snapshotId}:${maxElements}` } : {}) };
+      } finally {
+        await retireAX();
+        await retireListeners();
+        await retireScans();
+        // A timed-out injection can still write to the page; keep the tab queue until it settles.
+        void Promise.allSettled([...pending]).then(async () => {
+          if (scope?.pagination && scopeMonitorRequest) {
+            try {
+              await chrome.scripting.executeScript({
+                target: { tabId: tid, documentIds: [scopeMonitorRequest.documentId] }, world: "MAIN",
+                func: updatePageSnapshot, args: ["cleanup", scope.pagination.snapshotId, scopeMonitorRequest],
+              });
+            } catch (err) {
+              console.warn("[vortex.observe] pagination cleanup failed", err);
+            }
+          }
+          if (queues.get(tid) === current) queues.delete(tid);
+          release();
+        });
+      }
+      };
+      const result = await raceTimeout(work(), Math.max(0, deadline - Date.now()));
+      if (result === TIMED_OUT) throw vtxError(VtxErrorCode.TIMEOUT, "Observe deadline expired");
+      return result;
     },
   });
 }

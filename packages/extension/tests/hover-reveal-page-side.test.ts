@@ -190,6 +190,22 @@ describe("hover-reveal page-side module", () => {
     expect(pairs[0].triggerText).not.toContain("HIDDEN-MENU");
   });
 
+  it("findRevealPairs omits masked text from trigger context", async () => {
+    const ns = await load();
+    document.head.innerHTML = `<style>.row:hover .ctl { display: block; } .ctl { cursor: pointer; }</style>`;
+    document.body.innerHTML = `<div class="row" data-rect="0,0,200,40">Visible <span style="-webkit-text-security:disc">HOVER_MASKED_528</span><span class="ctl" style="display:none" data-rect="0,0,0,0"></span></div>`;
+    const originalStyle = window.getComputedStyle.bind(window);
+    vi.spyOn(window, "getComputedStyle").mockImplementation((el) => {
+      const style = originalStyle(el);
+      if (el.textContent === "HOVER_MASKED_528") vi.spyOn(style, "getPropertyValue").mockImplementation((name) => name === "-webkit-text-security" ? "disc" : "");
+      return style;
+    });
+    const pairs = ns.findRevealPairs(8) as Array<{ triggerText: string }>;
+    expect(pairs).toHaveLength(1);
+    expect(pairs[0].triggerText).toContain("Visible");
+    expect(pairs[0].triggerText).not.toContain("HOVER_MASKED_528");
+  });
+
   it("findRevealPairs：子代组合符规则（> i）也能解析出控件", async () => {
     const ns = await load();
     document.head.innerHTML = `<style>

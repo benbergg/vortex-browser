@@ -38,6 +38,14 @@ function mkObserve(elements: CompactElement[]): CompactObserve {
   };
 }
 
+describe("target scope hover limitation", () => {
+  it("is visible in both text formats", () => {
+    const data = { ...mkObserve([]), frames: [{ frameId: 0, parentFrameId: -1, url: "https://example.com/", offset: { x: 0, y: 0 }, elementCount: 0, truncated: false, scanned: true, hoverControlsUnavailable: "target-scope" as const }] };
+    expect(renderObserveTree(data, null)).toContain("hover reveal unavailable for target scope");
+    expect(renderObserveCompact(data, null)).toContain("hover reveal unavailable for target scope");
+  });
+});
+
 describe("observe-render: aria-autocomplete 渲染 (N0002 R1 B003)", () => {
   it("combobox + state:{autocomplete:'list'} → 输出行含 [autocomplete=list]", () => {
     const out = renderObserveTree(

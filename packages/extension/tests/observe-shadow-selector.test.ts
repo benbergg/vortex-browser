@@ -20,7 +20,14 @@ describe("observe buildSelector shadow-aware 戳记 (Tier 2)", () => {
   });
 
   it("stampRid 仍写 data-vortex-rid 属性并带 setAttribute 失败回退", () => {
-    expect(OBSERVE_SRC).toMatch(/setAttribute\("data-vortex-rid"/);
-    expect(OBSERVE_SRC).toMatch(/\[data-vortex-rid="\$\{rid\}"\]/);
+    const start = OBSERVE_SRC.indexOf("function stampRid(");
+    const end = OBSERVE_SRC.indexOf("function buildSelector(", start);
+    expect(start).toBeGreaterThanOrEqual(0);
+    expect(end).toBeGreaterThan(start);
+    const stamp = OBSERVE_SRC.slice(start, end);
+    expect(stamp).toMatch(/setMarker\(el, "data-vortex-rid", rid\)/);
+    expect(OBSERVE_SRC).toMatch(/if \(item\) item\.marker\(el, name, value\); else el\.setAttribute\(name, value\)/);
+    expect(stamp).toMatch(/catch \(err\)[\s\S]*?return null/);
+    expect(stamp).toMatch(/\[data-vortex-rid="\$\{rid\}"\]/);
   });
 });

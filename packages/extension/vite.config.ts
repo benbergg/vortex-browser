@@ -4,6 +4,7 @@ import { crx } from "@crxjs/vite-plugin";
 import { readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import manifest from "./manifest.json";
+import { pageSideInstaller } from "./build/page-side-installer.js";
 
 const pkg = JSON.parse(
   readFileSync(new URL("./package.json", import.meta.url), "utf8"),
@@ -27,7 +28,7 @@ function buildStampFile(stamp: string): Plugin {
 }
 
 export default defineConfig({
-  plugins: [crx({ manifest: { ...manifest, version: pkg.version } }), buildStampFile(BUILD_STAMP)],
+  plugins: [pageSideInstaller(), crx({ manifest: { ...manifest, version: pkg.version } }), buildStampFile(BUILD_STAMP)],
   define: {
     __EXTENSION_VERSION__: JSON.stringify(pkg.version),
     __VORTEX_BUILD__: JSON.stringify(BUILD_STAMP),

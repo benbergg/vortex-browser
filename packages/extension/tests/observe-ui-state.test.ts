@@ -175,10 +175,11 @@ describe("observe UI state extraction (@since 0.4.0 O-8)", () => {
     // combobox/listbox/tree/grid 方向键导航时,高亮项焦点不在该项 DOM 上,只由
     // 触发器的 aria-activedescendant 指过来。把每个触发器的 IDREF 在其自身 root 内
     // 解析成真元素收进 Set,目标复用既有 [active] flag(虚拟焦点 ≡「一组里当前激活
-    // 那个」),不新增 flag 语法。集合用 querySelectorAllDeep 穿 open shadow 收触发器。
+    // 那个」),不新增 flag 语法。集合用 querySelectorAllDeep 从扫描范围穿 open shadow 收触发器。
     expect(OBSERVE_SRC).toMatch(/const activeDescendantEls = new Set<Element>\(\)/);
+    expect(OBSERVE_SRC).toMatch(/const scanRoot = scopeEl \?\? document/);
     expect(OBSERVE_SRC).toMatch(
-      /querySelectorAllDeep\("\[aria-activedescendant\]", document\)/,
+      /querySelectorAllDeep\("\[aria-activedescendant\]", scanRoot\)/,
     );
     // 必须在 host.getRootNode() 内解析 IDREF(scope 正确 + 滤悬空),不能全局按 id
     // 字符串匹配(跨 shadow/文档同名 id 会误标无关元素,评审 LOW)。

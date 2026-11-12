@@ -315,6 +315,9 @@ import { queryDeep } from "./shadow-walk.js";
     const walk = (node: Node) => {
       for (const child of Array.from(node.childNodes)) {
         if (child.nodeType === 3) {
+          const parent = (child as Text).assignedSlot ?? child.parentElement;
+          const security = parent ? computedStyle(parent)?.getPropertyValue("-webkit-text-security") : undefined;
+          if (security && security !== "none") continue;
           const t = (child.textContent ?? "").replace(/\s+/g, " ").trim();
           if (t) parts.push(t);
         } else if (child.nodeType === 1) {

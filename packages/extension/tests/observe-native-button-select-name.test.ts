@@ -27,7 +27,7 @@ describe("observe 原生 button/select 命名与取值(2026-06-02 saucedemo dogf
       /t === "submit" \|\| t === "button" \|\| t === "reset" \|\| t === "image"/,
     );
     // value 作名(normName 包装)。
-    expect(OBSERVE_SRC).toMatch(/const v = \(el as HTMLInputElement\)\.value;\s*\n\s*if \(v\) return normName\(v\);/);
+    expect(OBSERVE_SRC).toMatch(/const v = isTextMasked\(el\) \? "" : \(el as HTMLInputElement\)\.value;\s*\n\s*if \(v\) return normName\(v\);/);
     // 缺省回退:submit→Submit、reset→Reset、image→Submit Query。
     expect(OBSERVE_SRC).toMatch(/if \(t === "submit"\) return "Submit";/);
     expect(OBSERVE_SRC).toMatch(/if \(t === "reset"\) return "Reset";/);
@@ -45,7 +45,7 @@ describe("observe 原生 button/select 命名与取值(2026-06-02 saucedemo dogf
     const submitIdx = OBSERVE_SRC.search(
       /t === "submit" \|\| t === "button" \|\| t === "reset" \|\| t === "image"/,
     );
-    const valueIdx = OBSERVE_SRC.search(/const v = \(el as HTMLInputElement\)\.value;\s*\n\s*if \(v\) return normName\(v\);/);
+    const valueIdx = OBSERVE_SRC.search(/const v = isTextMasked\(el\) \? "" : \(el as HTMLInputElement\)\.value;\s*\n\s*if \(v\) return normName\(v\);/);
     expect(submitIdx).toBeGreaterThan(0);
     expect(valueIdx).toBeGreaterThan(submitIdx); // value 读取在白名单判断之内/之后
   });

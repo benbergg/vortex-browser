@@ -3,6 +3,7 @@ import type { ActionRouter } from "../lib/router.js";
 import { isDebuggerBusyMessage, type DebuggerManager } from "../lib/debugger-manager.js";
 import { getActiveTabId, buildExecuteTarget, ensureFrameAttached } from "../lib/tab-utils.js";
 import { resolveTarget, resolveTargetOptional } from "../lib/resolve-target.js";
+import { getSnapshotEntry } from "../lib/snapshot-store.js";
 import { pageQuery as nativePageQuery, mapPageError } from "../adapter/native.js";
 import { loadPageSideModule } from "../adapter/page-side-loader.js";
 import { clickBBox as cdpClickBBox, cdpClickElement } from "../adapter/cdp.js";
@@ -33,6 +34,29 @@ import {
   rankCandidates,
   type MatchedElementSummary,
 } from "../action/candidate-suggest.js";
+
+/** 分页输入错误保留原错误，并提示调用方检查页面状态。 */
+function withPaginationInputHint(handler: (args: Record<string, unknown>, tabId: number | undefined, markInputAttempted: () => void) => Promise<unknown>) {
+  return async (args: Record<string, unknown>, tabId?: number) => {
+    const pagination = typeof args.snapshotId === "string" && getSnapshotEntry(args.snapshotId)?.pagination === true;
+    let inputAttempted = false;
+    try {
+      return await handler(args, tabId, () => { inputAttempted = true; });
+    } catch (err) {
+      if (!pagination) throw err;
+      // 裸异常保持 ActionRouter 的 legacy code/message/recoverable 映射。
+      const message = err instanceof Error ? err.message : String(err);
+      const code = message.includes("No tab") ? VtxErrorCode.TAB_NOT_FOUND
+        : message.includes("Cannot access") ? VtxErrorCode.PERMISSION_DENIED : VtxErrorCode.JS_EXECUTION_ERROR;
+      const original = err instanceof VtxError ? err : vtxError(code, message);
+      throw new VtxError(original.code, original.message, {
+        ...original.extra,
+        ...(inputAttempted ? { context: { ...original.extra?.context, extras: { ...original.extra?.context?.extras, actionMayHaveExecuted: true } } } : {}),
+        hint: "Execution state is uncertain. Call vortex_observe to check the page state before deciding the next action; do not retry directly.",
+      });
+    }
+  };
+}
 
 /** 将页面侧候选 DTO 组装成最终错误正文，并移除不会渲染的候选副本。 */
 function enrichAmbiguousError(
@@ -212,10 +236,53 @@ async function buildNoMatchError(
   }
 }
 
-export const DOM_CLICK_PAGE_FUNC = async (sel: string, cdpAvailable: boolean, observeEffect: boolean, windowMs: number | undefined, dialogAnswer: string, dialogPromptText: string | null, force: boolean) => {
+async function validateInputPagination(tabId: number, frameId: number | undefined, selector: string, pagination?: { snapshotId: string; nodeIndex: number }, focused = false): Promise<void> {
+  if (!pagination) return;
+  let valid = false;
+  try {
+    const results = await chrome.scripting.executeScript({
+      target: buildExecuteTarget(tabId, frameId), world: "MAIN",
+      func: (token: string, index: number, sel: string, focus: boolean) => {
+        const el = (window as any).__vortexPageSnapshots?.[token]?.validate?.(index, sel) as Element | null;
+        return !!el && (!focus || (el.getRootNode() as Document | ShadowRoot).activeElement === el);
+      },
+      args: [pagination.snapshotId, pagination.nodeIndex, selector, focused],
+    });
+    valid = results[0]?.result === true;
+  } catch (err) {
+    console.warn("[vortex.dom] pagination validation failed", err);
+  }
+  if (!valid || !getSnapshotEntry(pagination.snapshotId)) throw vtxError(VtxErrorCode.STALE_SNAPSHOT, "Page changed since the snapshot was captured");
+}
+
+async function inputGate(tabId: number, frameId: number | undefined, selector: string, args: Record<string, unknown>, target: ReturnType<typeof resolveTarget>, debuggerMgr: DebuggerManager, needsEditable = true) {
+  if (!target.pagination) return healAwareGate(tabId, frameId, selector, { timeout: args.timeout as number | undefined, needsEditable }, args.force as boolean | undefined, target.descriptor, debuggerMgr);
+  const validate = () => validateInputPagination(tabId, frameId, selector, target.pagination);
+  await validate();
+  try {
+    const ok = await waitActionableAutoForce(tabId, frameId, selector, { timeout: args.timeout as number | undefined, needsEditable, pagination: target.pagination }, args.force as boolean | undefined);
+    await validate();
+    return { selector, healed: false, revealed: ok?.revealed };
+  } catch (err) {
+    await validate();
+    throw err;
+  }
+}
+
+export const DOM_CLICK_PAGE_FUNC = async (sel: string, cdpAvailable: boolean, observeEffect: boolean, windowMs: number | undefined, dialogAnswer: string, dialogPromptText: string | null, force: boolean, pagination?: { snapshotId: string; nodeIndex: number } | null) => {
+          let inputStarted = false;
           try {
+            const captured: Element | null = pagination ? (window as any).__vortexPageSnapshots?.[pagination.snapshotId]?.validate?.(pagination.nodeIndex, sel, true) ?? null : null;
+            const stale = () => pagination && (window as any).__vortexPageSnapshots?.[pagination.snapshotId]?.validate?.(pagination.nodeIndex, sel, true) !== captured;
+            let dialogArmed = false;
+            const staleError = () => {
+              const dialog = (window as any).__vortexDialogPolicy;
+              if (dialogArmed && dialog) { dialog.armed = false; dialog.until = Date.now() + 1000; }
+              return { errorCode: "STALE_SNAPSHOT", error: "Page changed since the snapshot was captured" + (inputStarted ? ". Action may have been executed; check the page state; do not retry directly." : ""), ...(inputStarted ? { extras: { actionMayHaveExecuted: true } } : {}) };
+            };
+            if (pagination && !captured) return staleError();
             // 探测阶段：逐项检查失败原因，细化错误码
-            const els = (window as any).__vortexDomResolve.queryAllDeep(sel) as Element[];
+            const els: Element[] = captured ? [captured] : (window as any).__vortexDomResolve.queryAllDeep(sel) as Element[];
             if (els.length === 0) {
               return { errorCode: "ELEMENT_NOT_FOUND", error: `Element not found: ${sel}` };
             }
@@ -284,6 +351,7 @@ export const DOM_CLICK_PAGE_FUNC = async (sel: string, cdpAvailable: boolean, ob
               rect0.bottom <= __vh && rect0.right <= __vw;
             if (!__fullyInView) {
               el.scrollIntoView({ block: "center", inline: "center" });
+              if (stale()) return staleError();
             }
             const rect = el.getBoundingClientRect();
             const cx = rect.left + rect.width / 2;
@@ -418,12 +486,14 @@ export const DOM_CLICK_PAGE_FUNC = async (sel: string, cdpAvailable: boolean, ob
             // 先 focus 再 click，保证后续 vortex_press 键盘事件能落在 active element 上
             // （JS .click() 不像真实鼠标那样顺带 focus，修掉这个行为差异）
             if (typeof (el as HTMLElement).focus === "function") {
+              inputStarted = true;
               try {
                 (el as HTMLElement).focus();
               } catch {
                 // swallow: focus 不是所有元素都支持
               }
             }
+            if (stale()) return staleError();
             // Dispatch full pointer/mouse event sequence so frameworks that
             // hook mousedown/mouseup (AngularJS Material $mdGesture/tapClick,
             // Hammer.js, Ant Design v3 Select, pre-3.0 Element UI Select)
@@ -444,6 +514,7 @@ export const DOM_CLICK_PAGE_FUNC = async (sel: string, cdpAvailable: boolean, ob
               answer: dialogAnswer === "accept" ? "accept" : "dismiss",
               promptText: dialogPromptText, captured: [],
             };
+            dialogArmed = true;
             const ptrInit: PointerEventInit = {
               bubbles: true, cancelable: true, composed: true, view: window,
               button: 0, buttons: 1, clientX: cx, clientY: cy,
@@ -457,10 +528,15 @@ export const DOM_CLICK_PAGE_FUNC = async (sel: string, cdpAvailable: boolean, ob
               bubbles: true, cancelable: true, composed: true, view: window,
               button: 0, buttons: 0, clientX: cx, clientY: cy,
             };
+            inputStarted = true;
             try { el.dispatchEvent(new PointerEvent("pointerdown", ptrInit)); } catch { /* PointerEvent unsupported */ }
+            if (stale()) return staleError();
             el.dispatchEvent(new MouseEvent("mousedown", mouseDown));
+            if (stale()) return staleError();
             try { el.dispatchEvent(new PointerEvent("pointerup", { ...ptrInit, buttons: 0 })); } catch { /* */ }
+            if (stale()) return staleError();
             el.dispatchEvent(new MouseEvent("mouseup", mouseUp));
+            if (stale()) return staleError();
             // 原生 .click() 仅 HTMLElement 有,SVGElement(<g role=slider>/<rect> 等)、MathML
             // 等无此方法 → 裸调抛 "X.click is not a function"(2026-06-22 APG multi-thumb
             // slider dogfood)。有则调(触发表单提交/锚点跳转等默认动作),无则派发合成 click
@@ -490,12 +566,17 @@ export const DOM_CLICK_PAGE_FUNC = async (sel: string, cdpAvailable: boolean, ob
               },
             };
           } catch (err) {
-            return { error: err instanceof Error ? err.message : String(err) };
+            const dialog = (window as any).__vortexDialogPolicy;
+            if (dialog?.armed) { dialog.armed = false; dialog.until = Date.now() + 1000; }
+            return { error: err instanceof Error ? err.message : String(err), ...(pagination && inputStarted ? { extras: { actionMayHaveExecuted: true } } : {}) };
           }
         };
 
-export const DOM_TYPE_PAGE_FUNC = (sel: string, selectAll: boolean) => {
-          const els = (window as any).__vortexDomResolve.queryAllDeep(sel) as Element[];
+export const DOM_TYPE_PAGE_FUNC = (sel: string, selectAll: boolean, pagination?: { snapshotId: string; nodeIndex: number } | null, delayMs = 0) => {
+          const captured: Element | null = pagination ? (window as any).__vortexPageSnapshots?.[pagination.snapshotId]?.validate?.(pagination.nodeIndex, sel, true) ?? null : null;
+          const stale = () => !!pagination && (!captured || (window as any).__vortexPageSnapshots?.[pagination.snapshotId]?.validate?.(pagination.nodeIndex, sel, true, true) !== captured);
+          if (stale()) return { errorCode: "STALE_SNAPSHOT", error: "Page changed since the snapshot was captured" };
+          const els = captured ? [captured] : (window as any).__vortexDomResolve.queryAllDeep(sel) as Element[];
           if (els.length === 0) {
             return { errorCode: "ELEMENT_NOT_FOUND", error: `Element not found: ${sel}` };
           }
@@ -532,6 +613,9 @@ export const DOM_TYPE_PAGE_FUNC = (sel: string, selectAll: boolean) => {
             };
           }
           const el = els[0] as HTMLElement;
+          if (pagination && delayMs > 0 && el.isContentEditable) {
+            return { errorCode: "INVALID_PARAMS", error: "Delayed typing into a contenteditable pagination target is unsafe; use delay=0" };
+          }
           // 探测 disabled 走门同款 isEnabled(含 aria-disabled),与 CLICK/FILL 一致(#26)。
           if (!(window as any).__vortexDomResolve.isEnabled(el)) {
             return { errorCode: "ELEMENT_DISABLED", error: `Element ${sel} is disabled` };
@@ -554,10 +638,12 @@ export const DOM_TYPE_PAGE_FUNC = (sel: string, selectAll: boolean) => {
               error: `Element ${sel} is outside the viewport`,
             };
           }
+          if (stale()) return { errorCode: "STALE_SNAPSHOT", error: "Page changed since the snapshot was captured" };
           // Pre-focus so the upcoming CDP insertText / dispatch
           // event chain has a focused element to land on. focus()
           // is idempotent if the element is already active.
           el.focus();
+          if (stale()) return { errorCode: "STALE_SNAPSHOT", error: "Page changed since the snapshot was captured", extras: { actionMayHaveExecuted: true } };
           // contentEditable clear-before:CDP Input.insertText 在选区/光标处插入,
           // 空选区时残留旧内容拼接(live 实测 type 一段文本得到 "NEWexisting")。
           // type 语义是「把这段文本写入字段」,故先全选已有内容,让 insertText 替换
@@ -582,10 +668,14 @@ export const DOM_TYPE_PAGE_FUNC = (sel: string, selectAll: boolean) => {
           };
         };
 
-export const DOM_FILL_PAGE_FUNC = (sel: string, val: string) => {
+export const DOM_FILL_PAGE_FUNC = (sel: string, val: string, pagination?: { snapshotId: string; nodeIndex: number } | null) => {
+          let inputStarted = false;
           try {
+            const captured: Element | null = pagination ? (window as any).__vortexPageSnapshots?.[pagination.snapshotId]?.validate?.(pagination.nodeIndex, sel, true) ?? null : null;
+            const stale = () => !!pagination && (!captured || (window as any).__vortexPageSnapshots?.[pagination.snapshotId]?.validate?.(pagination.nodeIndex, sel, true, true) !== captured);
+            if (stale()) return { errorCode: "STALE_SNAPSHOT", error: "Page changed since the snapshot was captured" };
             // === element probes (in sync with CLICK) ===
-            const els = (window as any).__vortexDomResolve.queryAllDeep(sel) as Element[];
+            const els = captured ? [captured] : (window as any).__vortexDomResolve.queryAllDeep(sel) as Element[];
             if (els.length === 0) {
               return { errorCode: "ELEMENT_NOT_FOUND", error: `Element not found: ${sel}` };
             }
@@ -676,6 +766,7 @@ export const DOM_FILL_PAGE_FUNC = (sel: string, val: string) => {
                 error: `Element ${sel} is a ${el.type}; use action "click" to toggle it instead of "fill"`,
               };
             }
+            if (stale()) return { errorCode: "STALE_SNAPSHOT", error: "Page changed since the snapshot was captured" };
             // === fill operation ===
             // 走原生 value setter 是为绕过 React 受控组件覆盖的 setter,但必须按元素
             // 实际类型取:textarea 用 HTMLTextAreaElement、input 用 HTMLInputElement。
@@ -691,12 +782,14 @@ export const DOM_FILL_PAGE_FUNC = (sel: string, val: string) => {
             const nativeValueSetter = valueProto
               ? Object.getOwnPropertyDescriptor(valueProto, "value")?.set
               : undefined;
+            inputStarted = true;
             if (nativeValueSetter) {
               nativeValueSetter.call(el, val);
             } else {
               el.value = val;
             }
             el.dispatchEvent(new Event("input", { bubbles: true }));
+            if (stale()) return { errorCode: "STALE_SNAPSHOT", error: "Page changed since the snapshot was captured", extras: { actionMayHaveExecuted: true } };
             el.dispatchEvent(new Event("change", { bubbles: true }));
             // 回读校验副作用真发生:type=number/date/email 等对非法格式的值,原生 setter
             // 静默置空(el.value="")。传了非空值却读回空 = 输入被拒,报 NO_EFFECT 而非
@@ -706,16 +799,18 @@ export const DOM_FILL_PAGE_FUNC = (sel: string, val: string) => {
               return {
                 errorCode: "NO_EFFECT",
                 error: `Element ${sel} rejected value "${String(val)}" (likely a format/type constraint, e.g. type=number/date); value is empty after fill`,
-                extras: { attempted: String(val), type: (el as HTMLInputElement).type },
+                extras: { attempted: String(val), type: (el as HTMLInputElement).type, ...(pagination ? { actionMayHaveExecuted: true } : {}) },
               };
             }
             // DESIGN-002 (N0063): fill 成功后显式 focus,让后续 vortex_press/Enter 落在 input 上。
             // 原生 value setter 不触发 focus,React 受控组件 click→fill 链路常使 activeElement
             // 停在 BODY(实测 bytenew 搜索框 fill 后 activeElement=BODY → 搜索+回车整类失效)。
             // preventScroll 避免 sticky 容器 fill 后视口跳变;不支持该选项的环境兜底裸 focus。
+            if (stale()) return { errorCode: "STALE_SNAPSHOT", error: "Page changed since the snapshot was captured", extras: { actionMayHaveExecuted: true } };
             if (typeof el.focus === "function") {
               try { el.focus({ preventScroll: true }); } catch { try { el.focus(); } catch { /* focus 非所有元素可用 */ } }
             }
+            if (stale()) return { errorCode: "STALE_SNAPSHOT", error: "Page changed since the snapshot was captured", extras: { actionMayHaveExecuted: true } };
             // focused 反映真实结果(focus 在 disabled/hidden 上不抛错但静默 no-op,review N0063):
             // 取 el 所在 root(穿 shadow)的 activeElement 是否就是 el,而非硬编码 true。
             const __root = (el.getRootNode?.() ?? el.ownerDocument) as Document | ShadowRoot;
@@ -729,14 +824,18 @@ export const DOM_FILL_PAGE_FUNC = (sel: string, val: string) => {
               },
             };
           } catch (err) {
-            return { error: err instanceof Error ? err.message : String(err) };
+            return { error: err instanceof Error ? err.message : String(err), ...(pagination && inputStarted ? { extras: { actionMayHaveExecuted: true } } : {}) };
           }
         };
 
-export const DOM_SELECT_PAGE_FUNC = async (sel: string, val: string | string[], timeoutMs: number) => {
+export const DOM_SELECT_PAGE_FUNC = async (sel: string, val: string | string[], timeoutMs: number, pagination?: { snapshotId: string; nodeIndex: number } | null) => {
           try {
+            const captured: Element | null = pagination ? (window as any).__vortexPageSnapshots?.[pagination.snapshotId]?.validate?.(pagination.nodeIndex, sel, true) ?? null : null;
+            const stale = () => !!pagination && (!captured || (window as any).__vortexPageSnapshots?.[pagination.snapshotId]?.validate?.(pagination.nodeIndex, sel) !== captured);
+            const staleError = () => ({ errorCode: "STALE_SNAPSHOT", error: "Page changed since the snapshot was captured" });
+            if (stale()) return staleError();
             // === 探测（与 CLICK 同步）===
-            const els = (window as any).__vortexDomResolve.queryAllDeep(sel) as Element[];
+            const els = captured ? [captured] : (window as any).__vortexDomResolve.queryAllDeep(sel) as Element[];
             if (els.length === 0) {
               return { errorCode: "ELEMENT_NOT_FOUND", error: `Element not found: ${sel}` };
             }
@@ -823,6 +922,7 @@ export const DOM_SELECT_PAGE_FUNC = async (sel: string, val: string | string[], 
               const deadline = Date.now() + Math.min(timeoutMs, 4000);
               while (Date.now() < deadline) {
                 await sleep(50);
+                if (stale()) return staleError();
                 opts = Array.from(el.options);
                 if (allMatchable()) break;
               }
@@ -875,6 +975,7 @@ export const DOM_SELECT_PAGE_FUNC = async (sel: string, val: string | string[], 
                   extras: { disabled: disabledMatched.map((m) => m.value || m.text) },
                 };
               }
+              if (stale()) return staleError();
               for (const o of opts) o.selected = false;
               for (const m of matched) m.selected = true;
               el.dispatchEvent(new Event("change", { bubbles: true }));
@@ -910,6 +1011,7 @@ export const DOM_SELECT_PAGE_FUNC = async (sel: string, val: string | string[], 
                 extras: { disabled: opt.value || opt.text },
               };
             }
+            if (stale()) return staleError();
             el.value = opt.value;
             el.dispatchEvent(new Event("change", { bubbles: true }));
             // 回读校验副作用真发生(对齐多选路径 selectedNow 校验):受控/约束 <select>
@@ -929,10 +1031,14 @@ export const DOM_SELECT_PAGE_FUNC = async (sel: string, val: string | string[], 
           }
         };
 
-export const DOM_HOVER_PAGE_FUNC = (sel: string) => {
+export const DOM_HOVER_PAGE_FUNC = (sel: string, pagination?: { snapshotId: string; nodeIndex: number } | null) => {
           try {
+            const captured: Element | null = pagination ? (window as any).__vortexPageSnapshots?.[pagination.snapshotId]?.validate?.(pagination.nodeIndex, sel, true) ?? null : null;
+            const stale = () => !!pagination && (!captured || (window as any).__vortexPageSnapshots?.[pagination.snapshotId]?.validate?.(pagination.nodeIndex, sel) !== captured);
+            const staleError = () => ({ errorCode: "STALE_SNAPSHOT", error: "Page changed since the snapshot was captured" });
+            if (stale()) return staleError();
             // === 探测（与 CLICK 同步；HOVER 不检查 disabled，disabled 元素仍可收 hover 事件）===
-            const els = (window as any).__vortexDomResolve.queryAllDeep(sel) as Element[];
+            const els = captured ? [captured] : (window as any).__vortexDomResolve.queryAllDeep(sel) as Element[];
             if (els.length === 0) {
               return { errorCode: "ELEMENT_NOT_FOUND", error: `Element not found: ${sel}` };
             }
@@ -985,7 +1091,9 @@ export const DOM_HOVER_PAGE_FUNC = (sel: string) => {
             // 合成事件供监听 page-side mouseover 的库即时反应;真实 CSS :hover 态由
             // handler 侧的 CDP mouseMoved 触发(合成 JS 事件不更新浏览器 hover 态)。
             // mouseenter 规范上不冒泡,用 bubbles:false 修正语义。
+            if (stale()) return staleError();
             el.dispatchEvent(new MouseEvent("mouseover", { bubbles: true, cancelable: true }));
+            if (stale()) return staleError();
             el.dispatchEvent(new MouseEvent("mouseenter", { bubbles: false, cancelable: true }));
             // 静态 tooltip 信息：CSS `title` 的 OS 级 tooltip 不依赖 JS 事件
             // 触发（需要鼠标在元素上真停留），JS 无法可靠等到。所以直接读
@@ -1162,12 +1270,19 @@ export function registerDomHandlers(
     },
 
     [DomActions.CLICK]: async (args, tabId) => {
-      const __t = resolveTarget(args);
+      const __t = resolveTarget(args, true);
       // let 声明：gate 自愈后用 __heal.selector 重绑，下游所有引用统一用 selector。
       let selector = __t.selector;
       const tid = await getActiveTabId(__t.boundTabId ?? (args.tabId as number | undefined) ?? tabId);
       const frameId = __t.boundFrameId ?? (args.frameId as number | undefined);
-      if (frameId != null) await ensureFrameAttached(tid, frameId);
+      if (frameId != null) {
+        try {
+          await ensureFrameAttached(tid, frameId);
+        } catch (err) {
+          if (__t.pagination) throw vtxError(VtxErrorCode.STALE_SNAPSHOT, "Snapshot frame is no longer attached");
+          throw err;
+        }
+      }
       const useRealMouse = args.useRealMouse as boolean | undefined;
       // flag-自适应:server 在 trusted Chrome(带 --silent-debugger-extension-api)下注入
       // trustedMode=true。此时 click 默认走 CDP trusted(无黄条、广覆盖 isTrusted-gated),
@@ -1184,17 +1299,38 @@ export function registerDomHandlers(
       // NOT_ATTACHED 自旋到 TIMEOUT 且有 descriptor 时，healAwareGate 按 descriptor
       // 重匹配元素、换选择器再跑一次 gate。无 descriptor 或非 stale 错误则原样抛。
       // NOT_STABLE 自动 force 重试逻辑在 waitActionableAutoForce 内已覆盖。
-      const __heal = await healAwareGate(
-        tid,
-        frameId,
-        selector,
-        // 不覆盖默认:未传 timeout 时透传 undefined,由 waitActionable 落到
-        // DEFAULT_TIMEOUT_MS(2000)。历史 `?? 5000` 覆盖让 perf 修复成死代码。
-        { timeout: args.timeout as number | undefined },
-        args.force as boolean | undefined,
-        __t.descriptor,
-        debuggerMgr,
-      );
+      const validatePagination = async () => {
+        if (!__t.pagination) return;
+        let valid = false;
+        try {
+          const results = await chrome.scripting.executeScript({
+            target: buildExecuteTarget(tid, frameId), world: "MAIN",
+            func: (token: string, index: number, sel: string) => !!(window as any).__vortexPageSnapshots?.[token]?.validate?.(index, sel),
+            args: [__t.pagination.snapshotId, __t.pagination.nodeIndex, selector],
+          });
+          valid = results[0]?.result === true;
+        } catch (err) {
+          console.warn("[vortex.dom] pagination validation failed", err);
+        }
+        if (!valid || !getSnapshotEntry(__t.pagination.snapshotId)) throw vtxError(VtxErrorCode.STALE_SNAPSHOT, "Page changed since the snapshot was captured");
+      };
+      await validatePagination();
+      let __heal: Awaited<ReturnType<typeof healAwareGate>>;
+      try {
+        if (__t.pagination) {
+          const ok = await waitActionableAutoForce(tid, frameId, selector,
+            { timeout: args.timeout as number | undefined, pagination: __t.pagination }, args.force as boolean | undefined);
+          __heal = { selector, healed: false, revealed: ok?.revealed };
+        } else {
+          __heal = await healAwareGate(tid, frameId, selector,
+            { timeout: args.timeout as number | undefined }, args.force as boolean | undefined,
+            __t.descriptor, debuggerMgr);
+        }
+      } catch (err) {
+        await validatePagination();
+        throw err;
+      }
+      await validatePagination();
       // 重绑 selector：若已自愈则改为 healed selector，下游所有路径（早返回/CDP/合成）统一引用。
       selector = __heal.selector;
 
@@ -1224,12 +1360,14 @@ export function registerDomHandlers(
         // 堵 shadow-internal ref 假阴 ELEMENT_NOT_FOUND(#14)。
         await loadPageSideModule(tid, frameId, "dom-resolve");
         if (observeEffect) await loadPageSideModule(tid, frameId, "click-effect");
+        await validatePagination();
         const cdpResult = attachDialogHandled(await cdpClickElement(debuggerMgr, tid, frameId, selector, {
           force: args.force as boolean | undefined,
           observeEffect,
           windowMs,
           onDialog: args.onDialog as string | undefined,
           promptText: (args.promptText as string | undefined) ?? null,
+          ...(__t.pagination ? { pagination: __t.pagination } : {}),
         }));
         return withGateEvidence(cdpResult as object, __heal);
       };
@@ -1247,13 +1385,13 @@ export function registerDomHandlers(
         try {
           return await cdpClickPath();
         } catch (err) {
-          if (!isCdpAttachFailure(err)) throw err;
+          if (!isCdpAttachFailure(err) || err.extra?.context?.extras?.actionMayHaveExecuted === true) throw err;
           degradeNote = noteFor(err);
         }
       }
 
       // 降级换了不等价做法,不给证据模型只能信一个可能是假的 success,故强制采效果信号
-      let effectOn = observeEffect || degradeNote !== null;
+      const effectOn = observeEffect || degradeNote !== null;
       const finishSynthetic = (r: unknown): unknown => {
         const healed = withGateEvidence(r as object, __heal);
         if (!degradeNote) return healed;
@@ -1268,9 +1406,12 @@ export function registerDomHandlers(
       await loadPageSideModule(tid, frameId, "dom-resolve");
       if (effectOn) await loadPageSideModule(tid, frameId, "click-effect");
       // 方案 A:可重跑闭包。cdpAvailable=true 时页内 func 对 submit-intent 元素返回
-      // deferToCdp(不合成点击)→ handler 改走 CDP trusted;CDP 失败时用 false 重跑合成。
+      // deferToCdp(不合成点击)→ handler 改走 CDP trusted。
       const runSyntheticClick = async (cdpAvailable: boolean, withEffect: boolean) => {
-      const results = await chrome.scripting.executeScript({
+      if (__t.pagination) await validatePagination();
+      let results: chrome.scripting.InjectionResult[];
+      try {
+        results = await chrome.scripting.executeScript({
         target: buildExecuteTarget(tid, frameId),
         func: DOM_CLICK_PAGE_FUNC,
         // BUG-001 (N0063): windowMs 缺省时为 undefined,chrome.scripting.executeScript 的
@@ -1279,9 +1420,18 @@ export function registerDomHandlers(
         // ——observeEffect=false 时该值不被使用(begin 不调),observeEffect=true 且未传时给回正确
         // 的 300ms 窗口(用 ?? 0 会因 0 非 nullish 把窗口塌成 0ms,故不可用 0)。observeEffect
         // 恒为 boolean(args.observeEffect === true),无需兜底。
-        args: [selector, cdpAvailable, withEffect, windowMs ?? 300, (args.onDialog as string) ?? "dismiss", (args.promptText as string | undefined) ?? null, args.force === true],
+        args: [selector, cdpAvailable, withEffect, windowMs ?? 300, (args.onDialog as string) ?? "dismiss", (args.promptText as string | undefined) ?? null, args.force === true, __t.pagination ?? null],
         world: "MAIN",
-      });
+        });
+        if (__t.pagination && !results[0]?.result) throw new Error("Synthetic CLICK returned an invalid result");
+      } catch (err) {
+        if (!__t.pagination) throw err;
+        try { await readDialogCapturedAndDisarm(tid, frameId); } catch (cleanupError) { console.error("[vortex.dom] dialog cleanup failed after CLICK error", cleanupError); }
+        const message = err instanceof Error ? err.message : String(err);
+        const code = message.includes("No tab") ? VtxErrorCode.TAB_NOT_FOUND : message.includes("Cannot access") ? VtxErrorCode.PERMISSION_DENIED : VtxErrorCode.JS_EXECUTION_ERROR;
+        const original = err instanceof VtxError ? err : vtxError(code, message);
+        throw new VtxError(original.code, original.message, { ...original.extra, context: { ...original.extra?.context, extras: { ...original.extra?.context?.extras, actionMayHaveExecuted: true } }, hint: "Action may have been executed; check the page state; do not retry directly." });
+      }
       return results[0]?.result as {
         result?: { deferToCdp?: boolean } | unknown;
         error?: string;
@@ -1294,40 +1444,42 @@ export function registerDomHandlers(
         if (r?.error) mapPageError(enrichAmbiguousError(r, selector), selector);
       };
       // 首跑:cdpAvailable=!!debuggerMgr。submit-intent 会返回 deferToCdp(未点击)。
-      let res = await runSyntheticClick(!degradeNote && !!debuggerMgr, effectOn);
+      const res = await runSyntheticClick(!degradeNote && !!debuggerMgr, effectOn);
       throwIfClickError(res);
       const inner = res?.result as { deferToCdp?: boolean } | undefined;
       // observeEffect 透传:reactClickable 元素(如京东"加入购物车" div)走此 defer 分支,
       // 正是 GAP-G silent success 现场——CDP 路径同样需采集效果信号。click-effect 模块
       // 已在 runSyntheticClick 前预注入。
       if (inner?.deferToCdp) {
+        await validatePagination();
+        // 失败可能发生在输入已发出之后，不能再合成点击。
+        let deferResult: unknown;
         try {
-          const deferResult = attachDialogHandled(await cdpClickElement(debuggerMgr, tid, frameId, selector, {
+          deferResult = attachDialogHandled(await cdpClickElement(debuggerMgr, tid, frameId, selector, {
             force: args.force as boolean | undefined,
             observeEffect: effectOn,
             windowMs,
             onDialog: args.onDialog as string | undefined,
             promptText: (args.promptText as string | undefined) ?? null,
+            ...(__t.pagination ? { pagination: __t.pagination } : {}),
           }));
-          return finishSynthetic(deferResult);
         } catch (err) {
-          // 页内判定该元素要可信派发,却回落合成——不自陈就正是要堵的那种假成功
-          if (isCdpAttachFailure(err)) {
-            degradeNote = noteFor(err);
-            effectOn = true;
-            await loadPageSideModule(tid, frameId, "click-effect");
+          const warning = "Action may have been executed; check the page state before deciding whether another action is needed; do not retry directly.";
+          if (err instanceof VtxError) {
+            throw new VtxError(err.code, err.message, { ...err.extra, hint: warning });
           }
-          // CDP 探测/attach 失败 → 回退合成(cdpAvailable=false 强制不再 defer,本次真点击)。
-          res = await runSyntheticClick(false, effectOn);
-          throwIfClickError(res);
-          return finishSynthetic(attachDialogHandled(res?.result));
+          const message = err instanceof Error ? err.message : String(err);
+          const code = message.includes("No tab") ? VtxErrorCode.TAB_NOT_FOUND :
+            message.includes("Cannot access") ? VtxErrorCode.PERMISSION_DENIED : VtxErrorCode.JS_EXECUTION_ERROR;
+          throw vtxError(code, message, undefined, { hint: warning });
         }
+        return finishSynthetic(deferResult);
       }
       return finishSynthetic(attachDialogHandled(res?.result));
     },
 
-    [DomActions.TYPE]: async (args, tabId) => {
-      const __t = resolveTarget(args);
+    [DomActions.TYPE]: withPaginationInputHint(async (args, tabId, markInputAttempted) => {
+      const __t = resolveTarget(args, true);
       // let 声明：gate 自愈后用 __heal.selector 重绑，下游所有引用统一用 selector。
       let selector = __t.selector;
       const text = args.text as string;
@@ -1335,20 +1487,18 @@ export function registerDomHandlers(
       if (text == null) throw vtxError(VtxErrorCode.INVALID_PARAMS, "Missing required param: text");
       const tid = await getActiveTabId(__t.boundTabId ?? (args.tabId as number | undefined) ?? tabId);
       const frameId = __t.boundFrameId ?? (args.frameId as number | undefined);
-      if (frameId != null) await ensureFrameAttached(tid, frameId);
+      if (frameId != null) {
+        try { await ensureFrameAttached(tid, frameId); }
+        catch (err) {
+          if (__t.pagination) throw vtxError(VtxErrorCode.STALE_SNAPSHOT, "Snapshot frame is no longer attached");
+          throw err;
+        }
+      }
 
       // L2 integration: actionability + descriptor 自愈 gate。
       // needsEditable:true 保持与原 waitActionableAutoForce 调用一致（type 需可编辑元素）。
       // NOT_STABLE 自动 force 重试逻辑在 waitActionableAutoForce 内已覆盖。
-      const __healType = await healAwareGate(
-        tid,
-        frameId,
-        selector,
-        { timeout: args.timeout as number | undefined, needsEditable: true },
-        args.force as boolean | undefined,
-        __t.descriptor,
-        debuggerMgr,
-      );
+      const __healType = await inputGate(tid, frameId, selector, args, __t, debuggerMgr);
       // 重绑 selector：若已自愈则改为 healed selector，下游所有引用统一用 selector。
       selector = __healType.selector;
 
@@ -1365,6 +1515,7 @@ export function registerDomHandlers(
       // 加载 dom-resolve 模块，使 inline func 能通过 shadow 穿透解析 selector。
       // 此处单次加载同时覆盖下方两处查询站点：probe（actionability 检测）与 input/textarea dispatch。
       await loadPageSideModule(tid, frameId, "dom-resolve");
+      if (__t.pagination) await validateInputPagination(tid, frameId, selector, __t.pagination);
       const probe = await nativePageQuery<{
         ok?: true;
         isContentEditable?: boolean;
@@ -1376,14 +1527,23 @@ export function registerDomHandlers(
         tid,
         frameId,
         DOM_TYPE_PAGE_FUNC,
-        [selector, text !== ""],
-      );
+        __t.pagination ? [selector, text !== "", __t.pagination, delay] : [selector, text !== ""],
+      ).catch((err) => {
+        markInputAttempted();
+        throw err;
+      });
+      if (__t.pagination && (!probe || (probe.ok !== true && !probe.error))) {
+        markInputAttempted();
+        throw vtxError(VtxErrorCode.JS_EXECUTION_ERROR, "TYPE probe returned an invalid result");
+      }
       if (probe?.error) {
         mapPageError(enrichAmbiguousError(probe, selector), selector);
       }
+      if (probe?.ok) markInputAttempted();
 
       // dialog arm:type 操作(键盘事件序列 / CDP insertText)可能触发同步 confirm,默认 dismiss 防冻屏。
       await armDialogPolicy(tid, frameId, "dismiss", null);
+      let inputFailed = false;
       try {
 
       if (probe?.isContentEditable) {
@@ -1395,10 +1555,12 @@ export function registerDomHandlers(
         await debuggerMgr.attach(tid);
         if (delay > 0) {
           for (const ch of text) {
+            await validateInputPagination(tid, frameId, selector, __t.pagination, true);
             await debuggerMgr.sendCommand(tid, "Input.insertText", { text: ch });
             await new Promise((r) => setTimeout(r, delay));
           }
         } else {
+          await validateInputPagination(tid, frameId, selector, __t.pagination, true);
           await debuggerMgr.sendCommand(tid, "Input.insertText", { text });
         }
         // 族 A silent-false-success 护栏(对齐 input/textarea 路径 786-793 的回读校验):
@@ -1416,8 +1578,14 @@ export function registerDomHandlers(
           } | undefined>(
             tid,
             frameId,
-            (sel: string, before: string, txt: string) => {
+            (sel: string, before: string, txt: string, page?: { snapshotId: string; nodeIndex: number } | null) => {
               const els = (window as any).__vortexDomResolve.queryAllDeep(sel) as Element[];
+              if (page) {
+                const captured = (window as any).__vortexPageSnapshots?.[page.snapshotId]?.nodes?.[page.nodeIndex] as Element | undefined;
+                if (!captured?.isConnected || captured.ownerDocument !== document || els.length !== 1 || els[0] !== captured) {
+                  return { errorCode: "STALE_SNAPSHOT", error: "Captured target changed before TYPE readback" };
+                }
+              }
               const now = els.length ? ((els[0] as HTMLElement).textContent ?? "") : "";
               if (now === before && now !== txt) {
                 return {
@@ -1429,9 +1597,10 @@ export function registerDomHandlers(
               // 500 与 schema 回读同口径:contentEditable 可能是整篇文档,不能原样回传
               return { value: now.length > 500 ? now.slice(0, 500) + "…" : now };
             },
-            [selector, probe?.ceText ?? "", text],
+            [selector, probe?.ceText ?? "", text, __t.pagination ?? null],
           );
           if (verify?.error) mapPageError(verify, selector);
+          if (__t.pagination && typeof verify?.value !== "string") throw vtxError(VtxErrorCode.JS_EXECUTION_ERROR, "TYPE readback returned an invalid result");
           if (typeof verify?.value === "string") verifiedValue = verify.value;
         }
         // typed 是入参字符数,不等于实写入;编辑器规范化时以 verify 实读为准
@@ -1444,6 +1613,7 @@ export function registerDomHandlers(
         return withGateEvidence(cdpTypeResult, __healType);
       }
 
+      if (__t.pagination) await validateInputPagination(tid, frameId, selector, __t.pagination);
       // input / textarea path — legacy synthetic dispatch (kept
       // byte-identical to v0.8 for every passing case in bench).
       const res = await nativePageQuery<{
@@ -1454,14 +1624,21 @@ export function registerDomHandlers(
       } | undefined>(
         tid,
         frameId,
-        async (sel: string, txt: string, delayMs: number) => {
+        async (sel: string, txt: string, delayMs: number, pagination: { snapshotId: string; nodeIndex: number } | null) => {
           try {
-            const els = (window as any).__vortexDomResolve.queryAllDeep(sel) as Element[];
+            const captured: Element | null = pagination ? (window as any).__vortexPageSnapshots?.[pagination.snapshotId]?.validate?.(pagination.nodeIndex, sel) ?? null : null;
+            const stale = () => !!pagination && (!captured || (window as any).__vortexPageSnapshots?.[pagination.snapshotId]?.validate?.(pagination.nodeIndex, sel, true, true) !== captured || (captured.getRootNode() as Document | ShadowRoot).activeElement !== captured);
+            let inputStarted = false;
+            const staleError = () => ({ errorCode: "STALE_SNAPSHOT", error: "Page changed since the snapshot was captured", ...(inputStarted ? { extras: { actionMayHaveExecuted: true } } : {}) });
+            if (pagination && !captured) return staleError();
+            const els = captured ? [captured] : (window as any).__vortexDomResolve.queryAllDeep(sel) as Element[];
             if (els.length === 0) {
               return { errorCode: "ELEMENT_NOT_FOUND", error: `Element not found: ${sel}` };
             }
             const el = els[0] as HTMLInputElement;
+            inputStarted = true;
             el.focus();
+            if (stale()) return staleError();
             // 原生 value setter:直接对 el.value 累加赋值会绕过 React/Vue 受控组件的
             // value tracker → onChange 读不到变化 → state 把值覆盖回去,逐字被吞(族 F #8)。
             // 用元素类型匹配的原生 setter(同 FILL 的受控绕过),plain input 结果相同、
@@ -1483,6 +1660,7 @@ export function registerDomHandlers(
             // 的拼接(族 F #9)。先清空再输入。仅在有文本要输入时清空——type("") 保持
             // no-op,避免破坏性清空已有值(评审 M2)。
             if (String(txt) !== "") {
+              if (stale()) return staleError();
               setValue("");
               el.dispatchEvent(new InputEvent("input", { bubbles: true }));
             }
@@ -1494,26 +1672,33 @@ export function registerDomHandlers(
               el instanceof HTMLTextAreaElement ||
               ["text", "search", "tel", "url", "email", "password", ""].includes(inputType);
             if (!charByChar) {
+              if (stale()) return staleError();
               setValue(txt);
               el.dispatchEvent(new InputEvent("input", { bubbles: true }));
+              if (stale()) return staleError();
               el.dispatchEvent(new Event("change", { bubbles: true }));
             } else {
               // 用累加器而非每次读 el.value:delay>0 时受控组件可能在 setTimeout 间隙把
               // el.value 改回 state 值,读回累加会错乱(只剩末字符/重复,评审 M1)。
               let acc = "";
               for (const char of txt) {
+                if (stale()) return staleError();
                 const eventInit = { key: char, bubbles: true, cancelable: true };
                 el.dispatchEvent(new KeyboardEvent("keydown", eventInit));
+                if (stale()) return staleError();
                 el.dispatchEvent(new KeyboardEvent("keypress", eventInit));
+                if (stale()) return staleError();
                 acc += char;
                 setValue(acc);
                 el.dispatchEvent(new InputEvent("input", { bubbles: true, data: char }));
+                if (stale()) return staleError();
                 el.dispatchEvent(new KeyboardEvent("keyup", eventInit));
                 if (delayMs > 0) {
                   await new Promise((r) => setTimeout(r, delayMs));
                 }
               }
             }
+            if (stale()) return staleError();
             // 回读校验副作用真发生(族 A 一致):非空 text 却读回空 = 被类型/格式约束拒绝。
             if (String(txt) !== "" && (el as HTMLInputElement).value === "") {
               return {
@@ -1534,18 +1719,26 @@ export function registerDomHandlers(
             return { error: err instanceof Error ? err.message : String(err) };
           }
         },
-        [selector, text, delay ?? 0],
+        [selector, text, delay ?? 0, __t.pagination ?? null],
       );
+      if (__t.pagination && (!res || (!res.error && (typeof res.result !== "object" || res.result === null || (res.result as { success?: unknown }).success !== true)))) throw vtxError(VtxErrorCode.JS_EXECUTION_ERROR, "TYPE returned an invalid result");
       if (res?.error) mapPageError(res, selector);
       const typeResult = res?.result;
       return withGateEvidence(typeResult as object, __healType);
+      } catch (err) {
+        inputFailed = true;
+        throw err;
       } finally {
-        await readDialogCapturedAndDisarm(tid, frameId);
+        await readDialogCapturedAndDisarm(tid, frameId).catch((err) => {
+          // 清理仍执行；分页输入的主错误（含 throw undefined）优先。
+          if (!(__t.pagination && inputFailed)) throw err;
+          console.error("[vortex.dom] dialog cleanup failed after TYPE error", err);
+        });
       }
-    },
+    }),
 
-    [DomActions.FILL]: async (args, tabId) => {
-      const __t = resolveTarget(args);
+    [DomActions.FILL]: withPaginationInputHint(async (args, tabId, markInputAttempted) => {
+      const __t = resolveTarget(args, true);
       // let 声明：gate 自愈后用 __heal.selector 重绑，下游所有引用统一用 selector。
       let selector = __t.selector;
       const fallbackToNative = args.fallbackToNative === true;
@@ -1565,20 +1758,18 @@ export function registerDomHandlers(
       const value = String(rawValue);
       const tid = await getActiveTabId(__t.boundTabId ?? (args.tabId as number | undefined) ?? tabId);
       const frameId = __t.boundFrameId ?? (args.frameId as number | undefined);
-      if (frameId != null) await ensureFrameAttached(tid, frameId);
+      if (frameId != null) {
+        try { await ensureFrameAttached(tid, frameId); }
+        catch (err) {
+          if (__t.pagination) throw vtxError(VtxErrorCode.STALE_SNAPSHOT, "Snapshot frame is no longer attached");
+          throw err;
+        }
+      }
 
       // L2 integration: actionability + descriptor 自愈 gate。
       // needsEditable:true 保持与原 waitActionableAutoForce 调用一致（fill 需可编辑元素）。
       // NOT_STABLE 自动 force 重试(对齐 BUG-011 / CLICK)逻辑在 waitActionableAutoForce 内已覆盖。
-      const __healFill = await healAwareGate(
-        tid,
-        frameId,
-        selector,
-        { timeout: args.timeout as number | undefined, needsEditable: true },
-        args.force as boolean | undefined,
-        __t.descriptor,
-        debuggerMgr,
-      );
+      const __healFill = await inputGate(tid, frameId, selector, args, __t, debuggerMgr);
       // 重绑 selector：若已自愈则改为 healed selector，下游所有引用统一用 selector。
       selector = __healFill.selector;
 
@@ -1596,6 +1787,7 @@ export function registerDomHandlers(
             (window as any).__vortexFillReject.checkRejectPattern(sel, patterns),
           [selector, FILL_REJECT_PATTERNS],
         );
+        await validateInputPagination(tid, frameId, selector, __t.pagination);
         if (rejectResult?.rejected) {
           const r = rejectResult as { rejected: true; errorCode: string; error: string; extras: Record<string, unknown> };
           mapPageError(r, selector);
@@ -1606,6 +1798,7 @@ export function registerDomHandlers(
       await loadPageSideModule(tid, frameId, "dom-resolve");
       // dialog arm:fill 操作(input 事件 / React onChange 处理)可能触发同步 confirm,默认 dismiss 防冻屏。
       await armDialogPolicy(tid, frameId, "dismiss", null);
+      let inputFailed = false;
       let res: {
         result?: unknown;
         error?: string;
@@ -1613,6 +1806,7 @@ export function registerDomHandlers(
         extras?: Record<string, unknown>;
       } | undefined;
       try {
+      if (__t.pagination) await validateInputPagination(tid, frameId, selector, __t.pagination);
       res = await nativePageQuery<{
         result?: unknown;
         error?: string;
@@ -1622,18 +1816,32 @@ export function registerDomHandlers(
         tid,
         frameId,
         DOM_FILL_PAGE_FUNC,
-        [selector, value],
-      );
-      } finally {
-        await readDialogCapturedAndDisarm(tid, frameId);
+        [selector, value, __t.pagination ?? null],
+      ).catch((err) => {
+        markInputAttempted();
+        throw err;
+      });
+      if (__t.pagination && (!res || (!res.error && (typeof res.result !== "object" || res.result === null || (res.result as { success?: unknown }).success !== true)))) {
+        markInputAttempted();
+        throw vtxError(VtxErrorCode.JS_EXECUTION_ERROR, "FILL returned an invalid result");
       }
+      if (res?.result || res?.extras?.actionMayHaveExecuted === true) markInputAttempted();
       if (res?.error) mapPageError(enrichAmbiguousError(res, selector), selector);
+      } catch (err) {
+        inputFailed = true;
+        throw err;
+      } finally {
+        await readDialogCapturedAndDisarm(tid, frameId).catch((err) => {
+          if (!(__t.pagination && inputFailed)) throw err;
+          console.error("[vortex.dom] dialog cleanup failed after FILL error", err);
+        });
+      }
       const fillResult = res?.result;
       return withGateEvidence(fillResult as object, __healFill);
-    },
+    }),
 
     [DomActions.SELECT]: async (args, tabId) => {
-      const __t = resolveTarget(args);
+      const __t = resolveTarget(args, true);
       // let 声明：gate 自愈后用 __heal.selector 重绑，下游所有引用统一用 selector。
       let selector = __t.selector;
       // value 可为单值(string)或数组(string[],原生 <select multiple> 多选)。
@@ -1641,18 +1849,18 @@ export function registerDomHandlers(
       if (value == null) throw vtxError(VtxErrorCode.INVALID_PARAMS, "Missing required param: value");
       const tid = await getActiveTabId(__t.boundTabId ?? (args.tabId as number | undefined) ?? tabId);
       const frameId = __t.boundFrameId ?? (args.frameId as number | undefined);
-      if (frameId != null) await ensureFrameAttached(tid, frameId);
+      if (frameId != null) {
+        try { await ensureFrameAttached(tid, frameId); }
+        catch (err) {
+          if (__t.pagination) throw vtxError(VtxErrorCode.STALE_SNAPSHOT, "Snapshot frame is no longer attached");
+          throw err;
+        }
+      }
 
       // L2 integration: actionability + descriptor 自愈 gate。
-      const __healSelect = await healAwareGate(
-        tid,
-        frameId,
-        selector,
-        { timeout: args.timeout as number | undefined },
-        args.force as boolean | undefined,
-        __t.descriptor,
-        debuggerMgr,
-      );
+      const __healSelect = __t.pagination
+        ? await inputGate(tid, frameId, selector, args, __t, debuggerMgr, false)
+        : await healAwareGate(tid, frameId, selector, { timeout: args.timeout as number | undefined }, args.force as boolean | undefined, __t.descriptor, debuggerMgr);
       // 重绑 selector：若已自愈则改为 healed selector，下游所有引用统一用 selector。
       selector = __healSelect.selector;
 
@@ -1667,6 +1875,7 @@ export function registerDomHandlers(
         extras?: Record<string, unknown>;
       } | undefined;
       try {
+      if (__t.pagination) await validateInputPagination(tid, frameId, selector, __t.pagination);
       res = await nativePageQuery<{
         result?: unknown;
         error?: string;
@@ -1676,7 +1885,7 @@ export function registerDomHandlers(
         tid,
         frameId,
         DOM_SELECT_PAGE_FUNC,
-        [selector, value, (args.timeout as number | undefined) ?? 5000],
+        [selector, value, (args.timeout as number | undefined) ?? 5000, __t.pagination ?? null],
       );
       } finally {
         await readDialogCapturedAndDisarm(tid, frameId);
@@ -1848,26 +2057,26 @@ export function registerDomHandlers(
     },
 
     [DomActions.HOVER]: async (args, tabId) => {
-      const __t = resolveTarget(args);
+      const __t = resolveTarget(args, true);
       // let 声明：gate 自愈后用 __heal.selector 重绑，下游所有引用统一用 selector。
       let selector = __t.selector;
       const tid = await getActiveTabId(__t.boundTabId ?? (args.tabId as number | undefined) ?? tabId);
       const frameId = __t.boundFrameId ?? (args.frameId as number | undefined);
-      if (frameId != null) await ensureFrameAttached(tid, frameId);
+      if (frameId != null) {
+        try { await ensureFrameAttached(tid, frameId); }
+        catch (err) {
+          if (__t.pagination) throw vtxError(VtxErrorCode.STALE_SNAPSHOT, "Snapshot frame is no longer attached");
+          throw err;
+        }
+      }
 
       // L2 integration: descriptor 自愈 gate。HOVER 原本不走 actionability 门；
       // 此处加入 healAwareGate 使 stale ref 能重匹配元素后重试。HOVER 不检查
       // disabled，故用 force=true 跳过 actionability 严格门，仅借助 waitActionable
       // 的 NOT_ATTACHED 检测触发自愈路径（与原行为兼容）。
-      const __healHover = await healAwareGate(
-        tid,
-        frameId,
-        selector,
-        { timeout: args.timeout as number | undefined },
-        /* force */ true, // HOVER 原来不走门，用 force:true 保留原有宽松语义
-        __t.descriptor,
-        debuggerMgr,
-      );
+      const __healHover = __t.pagination
+        ? await inputGate(tid, frameId, selector, { ...args, force: true }, __t, debuggerMgr, false)
+        : await healAwareGate(tid, frameId, selector, { timeout: args.timeout as number | undefined }, true, __t.descriptor, debuggerMgr);
       // 重绑 selector：若已自愈则改为 healed selector，下游所有引用统一用 selector。
       selector = __healHover.selector;
 
@@ -1876,6 +2085,7 @@ export function registerDomHandlers(
       // dialog arm:hover 操作(mouseover/mouseenter + CDP mouseMoved)可能触发同步 confirm,默认 dismiss 防冻屏。
       await armDialogPolicy(tid, frameId, "dismiss", null);
       try {
+      if (__t.pagination) await validateInputPagination(tid, frameId, selector, __t.pagination);
       const res = await nativePageQuery<{
         result?: unknown;
         error?: string;
@@ -1885,7 +2095,7 @@ export function registerDomHandlers(
         tid,
         frameId,
         DOM_HOVER_PAGE_FUNC,
-        [selector],
+        [selector, __t.pagination ?? null],
       );
       if (res?.error) mapPageError(enrichAmbiguousError(res, selector), selector);
       const hr = res?.result as
@@ -1897,10 +2107,31 @@ export function registerDomHandlers(
       if (hr) {
         const { x: ox, y: oy } = await getIframeOffset(tid, frameId);
         await debuggerMgr.attach(tid);
+        let point = { x: hr.cx, y: hr.cy };
+        if (__t.pagination) {
+          let current: { x: number; y: number } | null = null;
+          try {
+            const results = await chrome.scripting.executeScript({
+              target: buildExecuteTarget(tid, frameId), world: "MAIN",
+              func: (token: string, index: number, sel: string) => {
+                const el = (window as any).__vortexPageSnapshots?.[token]?.validate?.(index, sel) as Element | null;
+                if (!el) return null;
+                const rect = el.getBoundingClientRect();
+                return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+              },
+              args: [__t.pagination.snapshotId, __t.pagination.nodeIndex, selector],
+            });
+            current = results[0]?.result ?? null;
+          } catch (err) {
+            console.warn("[vortex.dom] pagination validation failed", err);
+          }
+          if (!current || !getSnapshotEntry(__t.pagination.snapshotId)) throw vtxError(VtxErrorCode.STALE_SNAPSHOT, "Page changed since the snapshot was captured");
+          point = current;
+        }
         await debuggerMgr.sendCommand(tid, "Input.dispatchMouseEvent", {
           type: "mouseMoved",
-          x: hr.cx + ox,
-          y: hr.cy + oy,
+          x: point.x + ox,
+          y: point.y + oy,
         });
       }
       const hoverResult = { success: true, ...(hr?.tooltip ?? {}) };

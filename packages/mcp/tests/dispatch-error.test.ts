@@ -28,6 +28,14 @@ describe("formatDispatchError：hint 三层兜底", () => {
     expect(s).toContain("Hint (lastReason=NOT_ATTACHED):");
   });
 
+  it("远端安全 hint 不被 lastReason 的重试兜底冲淡", () => {
+    const hint = "Execution state is uncertain. Call vortex_observe to check the page state; do not retry directly.";
+    expect(formatDispatchError({
+      code: "TIMEOUT", message: "timed out", hint,
+      context: { extras: { lastReason: "NOT_ATTACHED" } },
+    })).toBe(`Error [TIMEOUT]: timed out\nHint: ${hint}`);
+  });
+
   it("只把 message 中的候选交给调用方，extras-only 候选不可见", () => {
     const visible = formatDispatchError({
       code: "SELECTOR_AMBIGUOUS",

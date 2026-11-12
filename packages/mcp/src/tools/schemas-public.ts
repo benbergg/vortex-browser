@@ -99,6 +99,9 @@ export const PUBLIC_TOOLS: ToolDef[] = [
     schema: {
       type: "object",
       properties: {
+        target: TargetOptional,
+        paginate: { type: "boolean", description: "Freeze a single-frame snapshot for paginated reading." },
+        cursor: { type: "string", description: "Continue a paginated snapshot; omit capture parameters." },
         scope: { type: "string", enum: ["viewport", "full"] },
         filter: { enum: ["interactive", "all"] },
         frames: { enum: ["main", "all-same-origin", "all-permitted", "all"] },

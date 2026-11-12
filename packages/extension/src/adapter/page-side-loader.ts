@@ -1,14 +1,16 @@
 // L1 Page-side Bundle Loader: inject page-side bundle into target tab+frame MAIN world
-// via chrome.scripting.executeScript({ files }).
+// via files for ordinary callers, or a document/lease-bound function for observe.
 //
 // Design:
-// - Idempotent: maintain (tabId, frameId, module) loaded set, repeated calls are no-op
+// - Idempotent: ordinary calls cache success; owned calls always recheck the original lease
 // - Concurrent-safe: in-flight promise is stored so parallel callers await the same execution
 // - MAIN world: same as PR #1 pageQuery to avoid framework isolation
 // - module names centralized to avoid typos and aid grep
 
 import { PAGE_NOT_READY_INJECT_HINT, VtxErrorCode, vtxError } from "@vortex-browser/shared";
 import { buildExecuteTarget } from "../lib/tab-utils.js";
+import type { ScanRequest } from "../handlers/observe-scan-ownership.js";
+import { installDomResolveForScan } from "virtual:vortex-dom-resolve-installer";
 
 export type PageSideModule =
   | "actionability"
@@ -20,7 +22,17 @@ export type PageSideModule =
   | "click-effect"
   | "hover-reveal";
 
-const loadedModules = new Map<string, true | Promise<void>>();
+interface OwnedInstallation {
+  request: ScanRequest;
+  track: <T>(work: Promise<T>) => Promise<T>;
+}
+
+interface InFlightModule {
+  token?: string;
+  promise: Promise<void>;
+}
+
+const loadedModules = new Map<string, true | InFlightModule>();
 
 // 注入超时(ms)。chrome.scripting.executeScript 在某些 SW/tab 异常态(SW 被回收后
 // 重启、跨进程导航中途、renderer 卡顿)下会**永不 settle**(既不 resolve 也不 reject)。
@@ -48,11 +60,22 @@ function injectWithTimeout(
   module: PageSideModule,
   tabId: number,
   frameId: number | undefined,
+  ownership?: OwnedInstallation,
 ): Promise<void> {
   let timer: ReturnType<typeof setTimeout> | undefined;
-  const exec = chrome.scripting
-    .executeScript({ target, files: [`page-side/${module}.js`], world: "MAIN" })
-    .then(() => undefined);
+  const raw = ownership
+    ? ownership.track(chrome.scripting.executeScript({
+      target: { tabId, documentIds: [ownership.request.documentId] }, world: "MAIN",
+      func: installDomResolveForScan, args: [ownership.request],
+    }))
+    : chrome.scripting.executeScript({ target, files: [`page-side/${module}.js`], world: "MAIN" });
+  // Track raw execution, not this timeout wrapper: timeout does not release a scan gate.
+  const exec = raw.then((results) => {
+    if (ownership && (results.length !== 1 || results[0].documentId !== ownership.request.documentId ||
+        results[0].frameId !== ownership.request.frameId || results[0].result !== true)) {
+      throw vtxError(VtxErrorCode.STALE_SNAPSHOT, "Page-side module lease changed before installation");
+    }
+  });
   const timeout = new Promise<never>((_, reject) => {
     timer = setTimeout(() => {
       // 抛裸 Error 会冒到 router 兜底被归成 JS_EXECUTION_ERROR,hint 让人去查
@@ -94,30 +117,38 @@ export async function loadPageSideModule(
   tabId: number,
   frameId: number | undefined,
   module: PageSideModule,
+  ownership?: OwnedInstallation,
 ): Promise<void> {
-  const k = key(tabId, frameId, module);
+  if (ownership && module !== "dom-resolve") {
+    throw vtxError(VtxErrorCode.INVALID_PARAMS, "Owned installation requires dom-resolve");
+  }
+  const k = key(tabId, frameId, module) + (ownership ? `::${ownership.request.documentId}` : "");
   const cached = loadedModules.get(k);
   if (cached === true) return;
-  if (cached !== undefined) {
-    // in-flight — await the same promise
-    await cached;
+  if (cached && cached.token === ownership?.request.token) {
+    await cached.promise;
     return;
   }
 
   const target = buildExecuteTarget(tabId, frameId);
-  const promise = injectWithTimeout(target, module, tabId, frameId)
-    .then(() => {
-      loadedModules.set(k, true);
-    })
-    .catch((err: unknown) => {
-      // 失败(注入错误或超时)即驱逐 in-flight 缓存,使后续调用能重试——避免
-      // 永久 pending promise 把瞬时卡顿放大成永久 wedge(2026-06-02 调查)。
-      loadedModules.delete(k);
-      throw err;
-    });
+  const entry: InFlightModule = {
+    token: ownership?.request.token,
+    promise: injectWithTimeout(target, module, tabId, frameId, ownership)
+      .then(() => {
+        if (loadedModules.get(k) !== entry) return;
+        // A completed owned installation is not a reusable authorization cache.
+        if (ownership) loadedModules.delete(k);
+        else loadedModules.set(k, true);
+      })
+      .catch((err: unknown) => {
+        // A late ack/failure may evict only its own generation, never a successor.
+        if (loadedModules.get(k) === entry) loadedModules.delete(k);
+        throw err;
+      }),
+  };
 
-  loadedModules.set(k, promise);
-  await promise;
+  loadedModules.set(k, entry);
+  await entry.promise;
 }
 
 export function _resetPageSideLoader(): void {
