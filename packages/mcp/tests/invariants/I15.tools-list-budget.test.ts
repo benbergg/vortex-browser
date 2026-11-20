@@ -172,7 +172,7 @@ describe("I15: tools/list budget + count + internalized grep", () => {
     defs.map(d => ({ name: d.name, description: d.description, inputSchema: d.schema })),
   );
 
-  it("tools/list UTF-8 字节 ≤ 13000 B (口径更正后实测 12869 留 131B buffer)", () => {
+  it("tools/list UTF-8 字节 ≤ 13500 B (2026-11-20 实测 13423,留 77B buffer)", () => {
     // ⚠️ 口径（2026-10-24 评审 F2）：必须是 **UTF-8 字节**，不是字符数。
     //   本文件此前用 `payload.length`（字符数）判定，公开 description 里中文占比很高
     //   （中文 3 字节/字）⇒ 字符数明显小于真实字节数，cap 形同虚设：
@@ -217,7 +217,17 @@ describe("I15: tools/list budget + count + internalized grep", () => {
     //   按 UTF-8 字节口径，改 cap 前实测 12836 B（已超 cap 12300 达 536 B）。
     //   本次含 F5 的 value 文案更正（+33 B）后真实字节 12869 B ⇒ cap 12300 → 13000
     //   （上调 cap 而非压文案，沿用本文件历次惯例，理由见文件头）。
-    expect(Buffer.byteLength(toolsListPayload, "utf8")).toBeLessThanOrEqual(13000);
+    // D-1（2026-11-20）：cap 13000 → 13500。两条增量，都不是“凭空变大”：
+    //   ① 基线就已经超标：636ecbf 的 vortex_observe 新增 target/paginate/cursor
+    //      三个参数（且未登记进下面的 DOCUMENTED 白名单）→ 实测 13207 B，已超
+    //      13000 达 207 B。这条基线红灯是 feat/a11y-fidelity 带进来的，与本次修复无关，
+    //      但它不修就没法用本断言证明任何东西，本次一并修掉。
+    //   ② D-1 契约修复：vortex_debug_read 补声明运行时真接受的顶层 pattern 与
+    //      includeResources（+216 B）——公开面此前没声明，模型只能把它们塞进 filter，
+    //      filter 形状不对时又被 Object.assign 静默丢弃。压掉这两段等于把该能力
+    //      从公开面抹掉（与上面每次调 cap 的理由同型）。
+    //   实测 13423 B，cap 13500 留 77 B 余量。
+    expect(Buffer.byteLength(toolsListPayload, "utf8")).toBeLessThanOrEqual(13500);
   });
 
   it("公开工具数量 = 24（23 + vortex_sequence 多步序列）", () => {
@@ -338,6 +348,14 @@ describe("I15: tools/list budget + count + internalized grep", () => {
       "vortex_sequence.steps[].value": "序列步骤复用 vortex_act 的 value 语义",
       "vortex_sequence.onFailure": "序列失败策略需要明确 stop 或 continue",
       "vortex_tab_create.active": "模型不知道 active=false 会发生什么:后台 tab 不夺取 session current",
+      // 2026-11-20：基线（636ecbf）新增的三个 observe 参数一直未登记，I15 白名单
+      // 断言在基线上就是红的 —— 本次一并补登记。
+      "vortex_observe.target": "null/omit = 整页，@ref = 单元素；不写模型会只截首屏",
+      "vortex_observe.paginate": "长页分页读；不写模型会以为读全了",
+      "vortex_observe.cursor": "接续上一页的游标；不写模型会重复读第一页",
+      // D-1（2026-11-20）：公开面补声明运行时真接受的两个平铺参数。
+      "vortex_debug_read.pattern": "运行时真接受顶层 pattern（source=network 必填其一），公开面此前没声明 → 模型只能塞进 filter，filter 形状错还被静默丢弃",
+      "vortex_debug_read.includeResources": "运行时真接受顶层 includeResources（默认只留 XHR/Fetch），公开面此前没声明 → 模型无法请求静态资源",
     };
 
     const found: string[] = [];

@@ -492,14 +492,16 @@ export function registerNetworkHandlers(
       const entry = allEntries.find((e) => e.requestId === requestId);
       if (!entry) {
         throw vtxError(
-          VtxErrorCode.INTERNAL_ERROR,
+          VtxErrorCode.REQUEST_NOT_FOUND,
           `Request not found: ${requestId}`,
           { extras: { requestId } },
           {
             hint:
-              "The requestId was not found in the network log. " +
-              "Use vortex_debug_read(source=network) to list requests and obtain a valid requestId. " +
+              "The requestId was not found in this tab's network log. " +
+              "Call vortex_debug_read with source='network' and pattern='<url substring>' to list requests, " +
+              "then call it again with source='request' and reqid=<the returned requestId>. " +
               "Entries are evicted after the tab is closed or the log is cleared.",
+            recoverable: true,
           },
         );
       }

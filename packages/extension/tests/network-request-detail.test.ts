@@ -16,13 +16,14 @@
  * - subscribedTabs 只在 ensureSubscribed/SUBSCRIBE 后才接收 CDP 事件
  *   → 测试须先 dispatch network.subscribe 让 tab 入订阅集
  * - vi.resetModules() 导致 VtxError 与 router 静态引用的 VtxError 不同类 →
- *   检查 error?.message 而非 error?.code
+ *   故 router 也在 reset 之后动态 import（D-1b 的错误码断言需要真实 code，
+ *   instanceof 失败时错误码会退化成 JS_EXECUTION_ERROR）
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { splitDiagnosis, type NmRequest } from "@vortex-browser/shared";
-import { ActionRouter } from "../src/lib/router.js";
 
 let registerNetworkHandlers: typeof import("../src/handlers/network.js")["registerNetworkHandlers"];
+let ActionRouter: typeof import("../src/lib/router.js")["ActionRouter"];
 
 function mkReq(
   tool: string,
@@ -98,12 +99,13 @@ function simulateRequest(
 }
 
 describe("network.getRequestDetail (source=request) — 单请求 status+body", () => {
-  let router: ActionRouter;
+  let router: InstanceType<typeof ActionRouter>;
   let getOnEventCb: () => ((tabId: number, method: string, params: unknown) => void) | undefined;
 
   beforeEach(async () => {
     vi.unstubAllGlobals();
     vi.resetModules();
+    ({ ActionRouter } = await import("../src/lib/router.js"));
     router = new ActionRouter();
 
     const mock = makeDebuggerMock({ body: '{"ok":true}', base64Encoded: false });
@@ -168,6 +170,25 @@ describe("network.getRequestDetail (source=request) — 单请求 status+body", 
     );
     expect(resp.error).toBeDefined();
     expect(resp.error?.message).toMatch(/not found|nonexistent/i);
+  });
+
+  // D-1b(2026-11-20): 「请求不存在」此前报 INTERNAL_ERROR —— 调用方分不清
+  // 「服务端炸了」和「id 不对」，agent 会拿同一个 id 盲目重试。
+  it("③b reqid 找不到 → 错误码是 REQUEST_NOT_FOUND（不是 INTERNAL_ERROR）", async () => {
+    const resp = await router.dispatch(
+      mkReq("network.getRequestDetail", { requestId: "nonexistent-id" }, 42),
+    );
+    expect(resp.error).toBeDefined();
+    expect(resp.error?.code).toBe("REQUEST_NOT_FOUND");
+    expect(resp.error?.code).not.toBe("INTERNAL_ERROR");
+  });
+
+  it("③c 找不到 requestId 时的 hint 必须给出可直接执行的恢复调用（含 pattern）", async () => {
+    const resp = await router.dispatch(
+      mkReq("network.getRequestDetail", { requestId: "nonexistent-id" }, 42),
+    );
+    // source=network 没有 pattern 会被 dispatch 拒掉 → hint 必须带上 pattern
+    expect(resp.error?.hint ?? "").toMatch(/pattern/);
   });
 
   it("④ body 超过 maxLength(默认 10240)时截断并 truncated:true", async () => {

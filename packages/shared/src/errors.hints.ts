@@ -398,6 +398,10 @@ export const DEFAULT_ERROR_META: Record<VtxErrorCode, VtxErrorMeta> = {
     hint: "Verify the action argument matches one of vortex_act's enum values: click, fill, type, select, scroll, hover. The drag action is not yet exposed via vortex_act in v0.6.",
     recoverable: false,
   },
+  REQUEST_NOT_FOUND: {
+    hint: "requestId is not in this tab's network log. Call vortex_debug_read with source='network' and pattern='<url substring>' to list requests, then call it again with source='request' and reqid=<the returned requestId>.",
+    recoverable: true,
+  },
 };
 
 /**

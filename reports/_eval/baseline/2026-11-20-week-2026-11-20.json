@@ -1,0 +1,949 @@
+{
+  "schema": 2,
+  "window": {
+    "from": "2026-11-13T13:30:00.000Z",
+    "to": "2026-11-20T13:30:00.000Z",
+    "observedFrom": "2026-11-15T10:44:19.893Z",
+    "observedTo": "2026-11-20T12:56:34.132Z",
+    "activeDays": 6
+  },
+  "coverage": {
+    "window": {
+      "from": "2026-11-13T13:30:00.000Z",
+      "to": "2026-11-20T13:30:00.000Z"
+    },
+    "perSource": {
+      "claude": {
+        "filesScanned": 8,
+        "filesWithVortex": 1,
+        "filesUnreadable": 0,
+        "calls": 35,
+        "results": 35
+      },
+      "pi": {
+        "filesScanned": 207,
+        "filesWithVortex": 12,
+        "filesUnreadable": 0,
+        "calls": 1138,
+        "results": 1138
+      },
+      "codex": {
+        "filesScanned": 5,
+        "filesWithVortex": 0,
+        "filesUnreadable": 0,
+        "calls": 0,
+        "results": 0
+      },
+      "sink": {
+        "filesScanned": 0,
+        "filesWithVortex": 0,
+        "filesUnreadable": 0,
+        "calls": 0,
+        "results": 0
+      }
+    },
+    "codexAux": {
+      "calls": 0,
+      "perTool": {}
+    }
+  },
+  "totals": {
+    "calls": 1173,
+    "ok": 1095,
+    "errors": 78,
+    "settled": 1173,
+    "unpaired": 0,
+    "unknown": 0,
+    "errorRate": 0.0665,
+    "emptySuccess": 33,
+    "emptyUnknown": 622,
+    "emptyRate": 0.0698,
+    "unknownRate": 0,
+    "unpairedRate": 0
+  },
+  "cost": {
+    "resultChars": 874508,
+    "argsChars": 241179,
+    "medianDurationMs": 1276,
+    "p95DurationMs": 12987,
+    "durationSamples": 1173
+  },
+  "perTool": [
+    {
+      "tool": "evaluate",
+      "calls": 429,
+      "ok": 397,
+      "errors": 32,
+      "errorRate": 0.0746,
+      "emptySuccess": 18,
+      "emptyUnknown": 266,
+      "emptyRate": 0.1374,
+      "unpaired": 0,
+      "unknown": 0,
+      "resultChars": 125178,
+      "argsChars": 181739,
+      "medianDurationMs": 910,
+      "p95DurationMs": 3046,
+      "maxDurationMs": 14015,
+      "over5s": 14
+    },
+    {
+      "tool": "act",
+      "calls": 145,
+      "ok": 130,
+      "errors": 15,
+      "errorRate": 0.1034,
+      "emptySuccess": 0,
+      "emptyUnknown": 98,
+      "emptyRate": 0,
+      "unpaired": 0,
+      "unknown": 0,
+      "resultChars": 11175,
+      "argsChars": 11482,
+      "medianDurationMs": 987,
+      "p95DurationMs": 5024,
+      "maxDurationMs": 31016,
+      "over5s": 8
+    },
+    {
+      "tool": "navigate",
+      "calls": 101,
+      "ok": 97,
+      "errors": 4,
+      "errorRate": 0.0396,
+      "emptySuccess": 0,
+      "emptyUnknown": 9,
+      "emptyRate": 0,
+      "unpaired": 0,
+      "unknown": 0,
+      "resultChars": 17513,
+      "argsChars": 10788,
+      "medianDurationMs": 7520,
+      "p95DurationMs": 26909,
+      "maxDurationMs": 62310,
+      "over5s": 68
+    },
+    {
+      "tool": "extract",
+      "calls": 84,
+      "ok": 81,
+      "errors": 3,
+      "errorRate": 0.0357,
+      "emptySuccess": 4,
+      "emptyUnknown": 0,
+      "emptyRate": 0.0494,
+      "unpaired": 0,
+      "unknown": 0,
+      "resultChars": 336172,
+      "argsChars": 4089,
+      "medianDurationMs": 2204,
+      "p95DurationMs": 16859,
+      "maxDurationMs": 39948,
+      "over5s": 22
+    },
+    {
+      "tool": "fill",
+      "calls": 78,
+      "ok": 66,
+      "errors": 12,
+      "errorRate": 0.1538,
+      "emptySuccess": 0,
+      "emptyUnknown": 59,
+      "emptyRate": 0,
+      "unpaired": 0,
+      "unknown": 0,
+      "resultChars": 5289,
+      "argsChars": 6461,
+      "medianDurationMs": 1401,
+      "p95DurationMs": 4607,
+      "maxDurationMs": 32001,
+      "over5s": 3
+    },
+    {
+      "tool": "observe",
+      "calls": 60,
+      "ok": 58,
+      "errors": 2,
+      "errorRate": 0.0333,
+      "emptySuccess": 0,
+      "emptyUnknown": 33,
+      "emptyRate": 0,
+      "unpaired": 0,
+      "unknown": 0,
+      "resultChars": 118411,
+      "argsChars": 3658,
+      "medianDurationMs": 4123,
+      "p95DurationMs": 14574,
+      "maxDurationMs": 42336,
+      "over5s": 25
+    },
+    {
+      "tool": "browser",
+      "calls": 56,
+      "ok": 55,
+      "errors": 1,
+      "errorRate": 0.0179,
+      "emptySuccess": 0,
+      "emptyUnknown": 46,
+      "emptyRate": 0,
+      "unpaired": 0,
+      "unknown": 0,
+      "resultChars": 756,
+      "argsChars": 1108,
+      "medianDurationMs": 1200,
+      "p95DurationMs": 1890,
+      "maxDurationMs": 3562,
+      "over5s": 0
+    },
+    {
+      "tool": "tab_create",
+      "calls": 45,
+      "ok": 44,
+      "errors": 1,
+      "errorRate": 0.0222,
+      "emptySuccess": 0,
+      "emptyUnknown": 14,
+      "emptyRate": 0,
+      "unpaired": 0,
+      "unknown": 0,
+      "resultChars": 1625,
+      "argsChars": 3403,
+      "medianDurationMs": 1563,
+      "p95DurationMs": 4954,
+      "maxDurationMs": 12224,
+      "over5s": 2
+    },
+    {
+      "tool": "query",
+      "calls": 36,
+      "ok": 34,
+      "errors": 2,
+      "errorRate": 0.0556,
+      "emptySuccess": 7,
+      "emptyUnknown": 2,
+      "emptyRate": 0.2188,
+      "unpaired": 0,
+      "unknown": 0,
+      "resultChars": 203706,
+      "argsChars": 3911,
+      "medianDurationMs": 1008,
+      "p95DurationMs": 31993,
+      "maxDurationMs": 33415,
+      "over5s": 6
+    },
+    {
+      "tool": "tab_list",
+      "calls": 35,
+      "ok": 35,
+      "errors": 0,
+      "errorRate": 0,
+      "emptySuccess": 0,
+      "emptyUnknown": 18,
+      "emptyRate": 0,
+      "unpaired": 0,
+      "unknown": 0,
+      "resultChars": 46062,
+      "argsChars": 428,
+      "medianDurationMs": 1282,
+      "p95DurationMs": 4145,
+      "maxDurationMs": 7857,
+      "over5s": 1
+    },
+    {
+      "tool": "debug_read",
+      "calls": 27,
+      "ok": 26,
+      "errors": 1,
+      "errorRate": 0.037,
+      "emptySuccess": 0,
+      "emptyUnknown": 20,
+      "emptyRate": 0,
+      "unpaired": 0,
+      "unknown": 0,
+      "resultChars": 5504,
+      "argsChars": 2141,
+      "medianDurationMs": 784,
+      "p95DurationMs": 1725,
+      "maxDurationMs": 3356,
+      "over5s": 0
+    },
+    {
+      "tool": "wait_for",
+      "calls": 21,
+      "ok": 18,
+      "errors": 3,
+      "errorRate": 0.1429,
+      "emptySuccess": 0,
+      "emptyUnknown": 13,
+      "emptyRate": 0,
+      "unpaired": 0,
+      "unknown": 0,
+      "resultChars": 1201,
+      "argsChars": 1954,
+      "medianDurationMs": 2141,
+      "p95DurationMs": 16282,
+      "maxDurationMs": 20173,
+      "over5s": 5
+    },
+    {
+      "tool": "press",
+      "calls": 20,
+      "ok": 20,
+      "errors": 0,
+      "errorRate": 0,
+      "emptySuccess": 0,
+      "emptyUnknown": 19,
+      "emptyRate": 0,
+      "unpaired": 0,
+      "unknown": 0,
+      "resultChars": 103,
+      "argsChars": 763,
+      "medianDurationMs": 1366,
+      "p95DurationMs": 5475,
+      "maxDurationMs": 5475,
+      "over5s": 1
+    },
+    {
+      "tool": "screenshot",
+      "calls": 13,
+      "ok": 13,
+      "errors": 0,
+      "errorRate": 0,
+      "emptySuccess": 4,
+      "emptyUnknown": 8,
+      "emptyRate": 0.8,
+      "unpaired": 0,
+      "unknown": 0,
+      "resultChars": 279,
+      "argsChars": 662,
+      "medianDurationMs": 2246,
+      "p95DurationMs": 21653,
+      "maxDurationMs": 21653,
+      "over5s": 3
+    },
+    {
+      "tool": "resize",
+      "calls": 8,
+      "ok": 8,
+      "errors": 0,
+      "errorRate": 0,
+      "emptySuccess": 0,
+      "emptyUnknown": 7,
+      "emptyRate": 0,
+      "unpaired": 0,
+      "unknown": 0,
+      "resultChars": 102,
+      "argsChars": 415,
+      "medianDurationMs": 1590,
+      "p95DurationMs": 12010,
+      "maxDurationMs": 12010,
+      "over5s": 1
+    },
+    {
+      "tool": "tab_close",
+      "calls": 5,
+      "ok": 3,
+      "errors": 2,
+      "errorRate": 0.4,
+      "emptySuccess": 0,
+      "emptyUnknown": 2,
+      "emptyRate": 0,
+      "unpaired": 0,
+      "unknown": 0,
+      "resultChars": 381,
+      "argsChars": 240,
+      "medianDurationMs": 550,
+      "p95DurationMs": 1751,
+      "maxDurationMs": 1751,
+      "over5s": 0
+    },
+    {
+      "tool": "sequence",
+      "calls": 3,
+      "ok": 3,
+      "errors": 0,
+      "errorRate": 0,
+      "emptySuccess": 0,
+      "emptyUnknown": 2,
+      "emptyRate": 0,
+      "unpaired": 0,
+      "unknown": 0,
+      "resultChars": 609,
+      "argsChars": 610,
+      "medianDurationMs": 1463,
+      "p95DurationMs": 1661,
+      "maxDurationMs": 1661,
+      "over5s": 0
+    },
+    {
+      "tool": "describe",
+      "calls": 2,
+      "ok": 2,
+      "errors": 0,
+      "errorRate": 0,
+      "emptySuccess": 0,
+      "emptyUnknown": 2,
+      "emptyRate": null,
+      "unpaired": 0,
+      "unknown": 0,
+      "resultChars": 0,
+      "argsChars": 123,
+      "medianDurationMs": 2913,
+      "p95DurationMs": 2913,
+      "maxDurationMs": 2913,
+      "over5s": 0
+    },
+    {
+      "tool": "search",
+      "calls": 1,
+      "ok": 1,
+      "errors": 0,
+      "errorRate": 0,
+      "emptySuccess": 0,
+      "emptyUnknown": 0,
+      "emptyRate": 0,
+      "unpaired": 0,
+      "unknown": 0,
+      "resultChars": 442,
+      "argsChars": 49,
+      "medianDurationMs": 3963,
+      "p95DurationMs": 3963,
+      "maxDurationMs": 3963,
+      "over5s": 0
+    },
+    {
+      "tool": "browser_list",
+      "calls": 1,
+      "ok": 1,
+      "errors": 0,
+      "errorRate": 0,
+      "emptySuccess": 0,
+      "emptyUnknown": 1,
+      "emptyRate": null,
+      "unpaired": 0,
+      "unknown": 0,
+      "resultChars": 0,
+      "argsChars": 40,
+      "medianDurationMs": 1081,
+      "p95DurationMs": 1081,
+      "maxDurationMs": 1081,
+      "over5s": 0
+    },
+    {
+      "tool": "mouse_click",
+      "calls": 1,
+      "ok": 1,
+      "errors": 0,
+      "errorRate": 0,
+      "emptySuccess": 0,
+      "emptyUnknown": 1,
+      "emptyRate": null,
+      "unpaired": 0,
+      "unknown": 0,
+      "resultChars": 0,
+      "argsChars": 72,
+      "medianDurationMs": 1546,
+      "p95DurationMs": 1546,
+      "maxDurationMs": 1546,
+      "over5s": 0
+    },
+    {
+      "tool": "file_upload",
+      "calls": 1,
+      "ok": 1,
+      "errors": 0,
+      "errorRate": 0,
+      "emptySuccess": 0,
+      "emptyUnknown": 1,
+      "emptyRate": null,
+      "unpaired": 0,
+      "unknown": 0,
+      "resultChars": 0,
+      "argsChars": 6990,
+      "medianDurationMs": 1078,
+      "p95DurationMs": 1078,
+      "maxDurationMs": 1078,
+      "over5s": 0
+    },
+    {
+      "tool": "history",
+      "calls": 1,
+      "ok": 1,
+      "errors": 0,
+      "errorRate": 0,
+      "emptySuccess": 0,
+      "emptyUnknown": 1,
+      "emptyRate": null,
+      "unpaired": 0,
+      "unknown": 0,
+      "resultChars": 0,
+      "argsChars": 53,
+      "medianDurationMs": 25875,
+      "p95DurationMs": 25875,
+      "maxDurationMs": 25875,
+      "over5s": 1
+    }
+  ],
+  "perSource": [
+    {
+      "src": "claude",
+      "calls": 35,
+      "ok": 32,
+      "errors": 3,
+      "errorRate": 0.0857,
+      "emptySuccess": 4,
+      "unpaired": 0,
+      "unknown": 0
+    },
+    {
+      "src": "pi",
+      "calls": 1138,
+      "ok": 1063,
+      "errors": 75,
+      "errorRate": 0.0659,
+      "emptySuccess": 29,
+      "unpaired": 0,
+      "unknown": 0
+    }
+  ],
+  "perSession": [
+    {
+      "session": "/Users/lg/.pi/agent/sessions/--Users-lg-workspace-Knowledge-Library-Athena--/2026-11-15T11-35-10-488Z_01a1defd-6397-741b-89ea-96eaebaf9010.jsonl",
+      "calls": 457,
+      "ok": 417,
+      "errors": 40,
+      "errorRate": 0.0875
+    },
+    {
+      "session": "/Users/lg/.pi/agent/sessions/--Users-lg-workspace-Knowledge-Library-Atlas--/2026-11-16T06-24-19-641Z_01a1e307-28b8-7280-a479-aa723126abd2.jsonl",
+      "calls": 200,
+      "ok": 189,
+      "errors": 11,
+      "errorRate": 0.055
+    },
+    {
+      "session": "/Users/lg/.pi/agent/sessions/--Users-lg-workspace-Knowledge-Library-Athena--/2026-11-15T11-37-09-580Z_90eda896-6cb9-4589-b2ab-ffa2579a19d5-0cd9a06f-8536b7e3-e023.jsonl",
+      "calls": 115,
+      "ok": 111,
+      "errors": 4,
+      "errorRate": 0.0348
+    },
+    {
+      "session": "/Users/lg/.pi/agent/sessions/--Users-lg-workspace-Knowledge-Library-Atlas--/2026-11-20T01-42-03-270Z_01a1f69e-2b05-7705-ae97-93a168deec35.jsonl",
+      "calls": 93,
+      "ok": 86,
+      "errors": 7,
+      "errorRate": 0.0753
+    },
+    {
+      "session": "/Users/lg/.pi/agent/sessions/--Users-lg-workspace-Knowledge-Library-Athena--/2026-11-15T11-37-09-227Z_19194df5-33e5-429b-a467-798da800b77c-5b8473c7-824802d0-31a6.jsonl",
+      "calls": 80,
+      "ok": 79,
+      "errors": 1,
+      "errorRate": 0.0125
+    },
+    {
+      "session": "/Users/lg/.pi/agent/sessions/--Users-lg-workspace-voc-htm--/2026-11-17T06-59-43-847Z_407aac9f-1b60-4f61-a886-bb446f6fbb38-5eb3d0c2-19331003-6119.jsonl",
+      "calls": 75,
+      "ok": 71,
+      "errors": 4,
+      "errorRate": 0.0533
+    },
+    {
+      "session": "/Users/lg/.pi/agent/sessions/--Users-lg-.herdr-worktrees-lowcode-ui-prototype-feat-global-ui-prototype--/2026-11-16T08-19-08-645Z_1500d728-4ca2-4d00-9262-1ab74ededd0a-f4242b70-8b896be0-3e59.jsonl",
+      "calls": 62,
+      "ok": 55,
+      "errors": 7,
+      "errorRate": 0.1129
+    },
+    {
+      "session": "9fdee399-2534-4abb-818f-81cb0a60dd80",
+      "calls": 35,
+      "ok": 32,
+      "errors": 3,
+      "errorRate": 0.0857
+    },
+    {
+      "session": "/Users/lg/.pi/agent/sessions/--Users-lg-workspace-Knowledge-Library-Atlas--/2026-11-20T12-39-10-272Z_01a1f8f7-c6be-7641-be48-8f29fb0de517.jsonl",
+      "calls": 21,
+      "ok": 20,
+      "errors": 1,
+      "errorRate": 0.0476
+    },
+    {
+      "session": "/Users/lg/.pi/agent/sessions/--Users-lg-workspace-Knowledge-Library-Athena--/2026-11-19T13-48-49-569Z_01a1f411-3020-704a-8eab-068838dce468.jsonl",
+      "calls": 14,
+      "ok": 14,
+      "errors": 0,
+      "errorRate": 0
+    },
+    {
+      "session": "/Users/lg/.pi/agent/sessions/--Users-lg-workspace-lowcode-ui-prototype--/2026-11-16T03-20-35-231Z_1b351db1-9820-4257-8961-709f9aa0e6f0-7d04f98b-439a4071-58b2.jsonl",
+      "calls": 12,
+      "ok": 12,
+      "errors": 0,
+      "errorRate": 0
+    },
+    {
+      "session": "/Users/lg/.pi/agent/sessions/--Users-lg-workspace-Knowledge-Library-Athena--/2026-11-14T08-04-48-144Z_01a1d916-6d8f-76fc-ab45-e476fc4a2dab.jsonl",
+      "calls": 9,
+      "ok": 9,
+      "errors": 0,
+      "errorRate": 0
+    }
+  ],
+  "recovery": {
+    "nextOk": 75,
+    "nextError": 3,
+    "nextOther": 0,
+    "sessions": 12
+  },
+  "perDay": [
+    [
+      "2026-11-15",
+      204
+    ],
+    [
+      "2026-11-16",
+      531
+    ],
+    [
+      "2026-11-17",
+      269
+    ],
+    [
+      "2026-11-18",
+      6
+    ],
+    [
+      "2026-11-19",
+      49
+    ],
+    [
+      "2026-11-20",
+      114
+    ]
+  ],
+  "topErrors": [
+    {
+      "sig": "fill | Error: Error [COMMIT_FAILED]: Selected option(s) not reflected after commit: CRM (combobox value shows \"\"). Likely a dropped click, a single-select given multip",
+      "count": 5
+    },
+    {
+      "sig": "act | Error: Error [TIMEOUT]: Actionability timeout after Nms; last reason: NOT_ATTACHED Hint: Action timed out. Increase the timeout argument, or call vortex_wait_fo",
+      "count": 5
+    },
+    {
+      "sig": "evaluate | Error: Error [TAB_NOT_FOUND]: No tab with id: N Hint: tabId argument does not exist. Call vortex_tab_create to open a new tab, or omit tabId to operate on the a",
+      "count": 3
+    },
+    {
+      "sig": "evaluate | Failed to call tool: data must have required property 'code' Expected parameters: code (string) *required* async (boolean) timeout (number) [maximum: N] [defaul",
+      "count": 2
+    },
+    {
+      "sig": "wait_for | Error: Error [TIMEOUT]: Expression never resolved truthy within Nms Hint: Action timed out. Increase the timeout argument, or call vortex_wait_for with mode='id",
+      "count": 2
+    },
+    {
+      "sig": "navigate | Error: Error [TAB_NOT_FOUND]: No tab with id: N. Hint: tabId argument does not exist. Call vortex_tab_create to open a new tab, or omit tabId to operate on the ",
+      "count": 2
+    },
+    {
+      "sig": "fill | Error: Error [COMMIT_FAILED]: Selected option(s) not reflected after commit: 采购ERP (combobox value shows \"\"). Likely a dropped click, a single-select given mult",
+      "count": 2
+    },
+    {
+      "sig": "evaluate | Error: Error [TIMEOUT]: js.evaluate timed out after Nms (no result returned; the page-side function may still be running) Hint: The page's main thread is blocke",
+      "count": 2
+    },
+    {
+      "sig": "query | Error: Error [TIMEOUT]: Action query.queryPage exceeded its Nms budget Hint: The page's main thread is blocked by a long task, so it never answered within the a",
+      "count": 2
+    },
+    {
+      "sig": "tab_close | Error: Error [TAB_NOT_FOUND]: No tab with id: N. Hint: tabId argument does not exist. Call vortex_tab_create to open a new tab, or omit tabId to operate on the ",
+      "count": 2
+    },
+    {
+      "sig": "extract | Error [TIMEOUT]: Request content.getText timed out Hint: The extension did not answer within the deadline; its own action budget should have fired first, so the",
+      "count": 1
+    },
+    {
+      "sig": "extract | Error [TIMEOUT]: Action content.getText exceeded its Nms budget Hint: The page's main thread is blocked by a long task, so it never answered within the action b",
+      "count": 1
+    },
+    {
+      "sig": "navigate | Error [TAB_NOT_FOUND]: No tab with id: N. Hint: tabId argument does not exist. Call vortex_tab_create to open a new tab, or omit tabId to operate on the active ",
+      "count": 1
+    },
+    {
+      "sig": "act | Failed to call tool: data must have required property 'target' Expected parameters: target (string) *required* - @ref from vortex_observe, or a CSS selector act",
+      "count": 1
+    },
+    {
+      "sig": "evaluate | Error: Error [JS_EXECUTION_ERROR]: Cannot read properties of null (reading 'dispatchEvent') Hint: Check the error text above for what went wrong. If it points a",
+      "count": 1
+    },
+    {
+      "sig": "evaluate | Error: Error [JS_EXECUTION_ERROR]: Cannot read properties of undefined (reading 'click') Hint: Check the error text above for what went wrong. If it points at y",
+      "count": 1
+    },
+    {
+      "sig": "evaluate | Error: Error [TIMEOUT]: js.evaluateAsync timed out after Nms (no result returned; the page-side function may still be running) Hint: The page-side function did ",
+      "count": 1
+    },
+    {
+      "sig": "evaluate | Error: Error [JS_EXECUTION_ERROR]: Unexpected token '}' Hint: Check the error text above for what went wrong. If it points at your code or arguments, adjust the",
+      "count": 1
+    },
+    {
+      "sig": "act | Error: Error [OBSCURED]: Element is covered by <div.ant-modal-wrap> after Nms of retrying; hit-testing its center reaches that element, not the target Hint: Ele",
+      "count": 1
+    },
+    {
+      "sig": "act | Error: Error [OBSCURED]: Element's center hit-tests to its own ancestor <div.ant-modal-wrap> (clipped by that ancestor, pointer-events:none, or the ancestor pai",
+      "count": 1
+    },
+    {
+      "sig": "act | Error: Error [SELECTOR_AMBIGUOUS]: Selector \".toolbar .ant-space button:first-child\" matched N elements. Matched candidates: #N <button> text=\"演示：来源不可核实\" class=",
+      "count": 1
+    },
+    {
+      "sig": "act | Error: Error [STALE_REF]: 选择器失效且 descriptor {name:\"对象 · 表单 · 视图 · 应用工作区\"} 无命中，元素可能已移除；请重新 vortex_observe Hint: Element ref is stale and could not be re-resolved",
+      "count": 1
+    },
+    {
+      "sig": "observe | Error: Error [IFRAME_NOT_READY]: No target frames resolved (tab may be uninitialized)",
+      "count": 1
+    },
+    {
+      "sig": "evaluate | Error: Error [JS_EXECUTION_ERROR]: option 业务办理人 Hint: Check the error text above for what went wrong. If it points at your code or arguments, adjust them and re",
+      "count": 1
+    },
+    {
+      "sig": "evaluate | Error: Error [JS_EXECUTION_ERROR]: missing 首次必需材料尚未就绪 Hint: Check the error text above for what went wrong. If it points at your code or arguments, adjust them ",
+      "count": 1
+    },
+    {
+      "sig": "evaluate | Error: Error [JS_EXECUTION_ERROR]: missing 材料未检查通过 Hint: Check the error text above for what went wrong. If it points at your code or arguments, adjust them and",
+      "count": 1
+    },
+    {
+      "sig": "evaluate | Error: Error [JS_EXECUTION_ERROR]: button 批准 Hint: Check the error text above for what went wrong. If it points at your code or arguments, adjust them and retry",
+      "count": 1
+    },
+    {
+      "sig": "evaluate | Error: Error [JS_EXECUTION_ERROR]: ui is not defined Hint: Check the error text above for what went wrong. If it points at your code or arguments, adjust them a",
+      "count": 1
+    },
+    {
+      "sig": "evaluate | Error: Error [JS_EXECUTION_ERROR]: Missing external submit Hint: Check the error text above for what went wrong. If it points at your code or arguments, adjust ",
+      "count": 1
+    },
+    {
+      "sig": "fill | Error: Error [TAB_NOT_FOUND]: No tab with id: N Hint: tabId argument does not exist. Call vortex_tab_create to open a new tab, or omit tabId to operate on the a",
+      "count": 1
+    },
+    {
+      "sig": "evaluate | Error: Error [JS_EXECUTION_ERROR]: Published dependencies missing Hint: Check the error text above for what went wrong. If it points at your code or arguments, ",
+      "count": 1
+    },
+    {
+      "sig": "fill | Error: Error [ELEMENT_NOT_FOUND]: Element not found: [aria-label='业务场景'] Hint: Element not found. Verify the selector or call vortex_observe to list interactive",
+      "count": 1
+    },
+    {
+      "sig": "evaluate | Error: Error [JS_EXECUTION_ERROR]: Approval not persisted Hint: Check the error text above for what went wrong. If it points at your code or arguments, adjust t",
+      "count": 1
+    },
+    {
+      "sig": "evaluate | Error: Error [JS_EXECUTION_ERROR]: Missing 发布流程 Hint: Check the error text above for what went wrong. If it points at your code or arguments, adjust them and re",
+      "count": 1
+    },
+    {
+      "sig": "evaluate | Error: Error [JS_EXECUTION_ERROR]: Publication absent Hint: Check the error text above for what went wrong. If it points at your code or arguments, adjust them ",
+      "count": 1
+    },
+    {
+      "sig": "evaluate | Error: Error [JS_EXECUTION_ERROR]: Missing 批准 Hint: Check the error text above for what went wrong. If it points at your code or arguments, adjust them and retr",
+      "count": 1
+    },
+    {
+      "sig": "evaluate | Error: Error [JS_EXECUTION_ERROR]: Missing 确认执行 Hint: Check the error text above for what went wrong. If it points at your code or arguments, adjust them and re",
+      "count": 1
+    },
+    {
+      "sig": "evaluate | Error: Error [JS_EXECUTION_ERROR]: Verification action missing Hint: Check the error text above for what went wrong. If it points at your code or arguments, adj",
+      "count": 1
+    },
+    {
+      "sig": "evaluate | Error: Error [JS_EXECUTION_ERROR]: Missing send Hint: Check the error text above for what went wrong. If it points at your code or arguments, adjust them and re",
+      "count": 1
+    },
+    {
+      "sig": "evaluate | Error: Error [JS_EXECUTION_ERROR]: CRM option absent Hint: Check the error text above for what went wrong. If it points at your code or arguments, adjust them a",
+      "count": 1
+    },
+    {
+      "sig": "evaluate | Error: Error [JS_EXECUTION_ERROR]: Old clarification contaminated a draft: N/N Hint: Check the error text above for what went wrong. If it points at your code o",
+      "count": 1
+    },
+    {
+      "sig": "evaluate | Error: Error [JS_EXECUTION_ERROR]: Cannot read properties of null (reading 'closest') Hint: Check the error text above for what went wrong. If it points at your",
+      "count": 1
+    },
+    {
+      "sig": "fill | Error: Error [TIMEOUT]: Action dom.commit exceeded its Nms budget Hint: The page's main thread still responds, so the stall is inside this action's own path — f",
+      "count": 1
+    },
+    {
+      "sig": "fill | Error: Error [OBSCURED]: Element is covered by <div.ant-modal-wrap> after Nms of retrying; hit-testing its center reaches that element, not the target Hint: Ele",
+      "count": 1
+    },
+    {
+      "sig": "fill | Error: Error [OBSCURED]: Hit-testing the element's center reached no element at all (clipped by an ancestor, or positioned outside the viewport) (still true aft",
+      "count": 1
+    },
+    {
+      "sig": "navigate | Failed to call tool: Request timed out Expected parameters: url (string) *required* waitUntil (enum: \"load\", \"domcontentloaded\", \"networkidle\") reload (boolean)",
+      "count": 1
+    },
+    {
+      "sig": "extract | Error: Error [TIMEOUT]: Action content.getText exceeded its Nms budget Hint: The page's main thread is blocked by a long task, so it never answered within the a",
+      "count": 1
+    },
+    {
+      "sig": "act | Error: Error [JS_EXECUTION_ERROR]: Cannot read properties of undefined (reading 'queryAllDeep') Hint: Check the error text above for what went wrong. If it poin",
+      "count": 1
+    },
+    {
+      "sig": "act | Error: Error [NOT_ATTACHED]: target \"form[action='build?delay=Nsec'] select[name='value']:nth-of-type(N)\" matched no element (not an @ref, so it was used as a C",
+      "count": 1
+    },
+    {
+      "sig": "evaluate | Error: Error [JS_EXECUTION_ERROR]: Cannot read properties of null (reading 'textContent') Hint: Check the error text above for what went wrong. If it points at ",
+      "count": 1
+    },
+    {
+      "sig": "evaluate | Error: Error [JS_EXECUTION_ERROR]: SyntaxError: Unexpected identifier 'Promise' Hint: Check the error text above for what went wrong. If it points at your code ",
+      "count": 1
+    },
+    {
+      "sig": "evaluate | Error: Error [JS_EXECUTION_ERROR]: SyntaxError: await is only valid in async functions and the top level bodies of modules Hint: Check the error text above for ",
+      "count": 1
+    },
+    {
+      "sig": "act | Error: Error [TIMEOUT]: Element is hidden (display:none / visibility:hidden) after Nms. The target exists in the DOM but is not rendered. Hint: If the element o",
+      "count": 1
+    },
+    {
+      "sig": "act | Error: Error [SELECTOR_AMBIGUOUS]: Selector \".vxe-body--row:first-child .vxe-body--column:not(.fixed--hidden)\" matched N elements. Matched candidates: #N <td> t",
+      "count": 1
+    },
+    {
+      "sig": "act | Error: Error [NOT_ATTACHED]: target \"button[type='submit']\" matched no element (not an @ref, so it was used as a CSS selector). No element with a similar access",
+      "count": 1
+    },
+    {
+      "sig": "wait_for | Error: Error [TIMEOUT]: Expression never resolved truthy within Nms; last evaluation threw: Evaluating a string as JavaScript violates the following Content Sec",
+      "count": 1
+    },
+    {
+      "sig": "browser | Operation aborted",
+      "count": 1
+    },
+    {
+      "sig": "observe | Failed to call tool: data/filter must be equal to one of the allowed values Expected parameters: scope (enum: \"viewport\", \"full\") filter (enum: \"interactive\", \"",
+      "count": 1
+    },
+    {
+      "sig": "evaluate | Error: Error [JS_EXECUTION_ERROR]: Invalid regular expression: /(js|css|png|jpg|svg|woff|ttf|ico|map)(?|$)/i: Invalid group Hint: Check the error text above for",
+      "count": 1
+    },
+    {
+      "sig": "tab_create | Failed to call tool: data/active must be boolean Expected parameters: url (string) active (boolean) - false = 后台打开，不夺取 session 的当前 tab",
+      "count": 1
+    },
+    {
+      "sig": "debug_read | Error: Error [INVALID_PARAMS]: vortex_debug_read source=network: pattern is required (pass top-level 'pattern' or 'filter.pattern', e.g. '/api/'). Use a substri",
+      "count": 1
+    }
+  ],
+  "topErrorCodes": [
+    {
+      "code": "JS_EXECUTION_ERROR",
+      "count": 25
+    },
+    {
+      "code": "TIMEOUT",
+      "count": 18
+    },
+    {
+      "code": "TAB_NOT_FOUND",
+      "count": 9
+    },
+    {
+      "code": "<no-code>",
+      "count": 7
+    },
+    {
+      "code": "COMMIT_FAILED",
+      "count": 7
+    },
+    {
+      "code": "OBSCURED",
+      "count": 4
+    },
+    {
+      "code": "SELECTOR_AMBIGUOUS",
+      "count": 2
+    },
+    {
+      "code": "NOT_ATTACHED",
+      "count": 2
+    },
+    {
+      "code": "STALE_REF",
+      "count": 1
+    },
+    {
+      "code": "IFRAME_NOT_READY",
+      "count": 1
+    },
+    {
+      "code": "ELEMENT_NOT_FOUND",
+      "count": 1
+    },
+    {
+      "code": "INVALID_PARAMS",
+      "count": 1
+    }
+  ],
+  "routes": {
+    "vortex": 1173,
+    "playwright": 2,
+    "vortexShare": 0.9983,
+    "bySource": {
+      "claude": {
+        "vortex": 35,
+        "playwright": 2
+      },
+      "pi": {
+        "vortex": 1138,
+        "playwright": 0
+      },
+      "codex": {
+        "vortex": 0,
+        "playwright": 0
+      }
+    },
+    "sinkServerSide": 0
+  },
+  "routesMethodology": {
+    "version": "per-source-2026-11-20",
+    "note": "routes 为 claude + pi + codex 三源合计；codex 走文本辅助计数（session 里没有工具调用块时为 0）；sink 是服务端观测，单列不计入份额。",
+    "legacy": "2026-11-20 之前的快照用的是旧口径：routes.vortex 只统计 Claude 源（Pi/Codex 恒 0）⇒ 与本快照的 routes.vortex 不可直接比较，跨期必须用同一版 collect.mjs 重跑。"
+  },
+  "label": "week-2026-11-20"
+}

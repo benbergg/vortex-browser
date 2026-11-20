@@ -19,6 +19,7 @@
 import { readFileSync, writeFileSync, mkdirSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
+import { pathToFileURL } from "node:url";
 import {
   parseClaudeFile,
   parsePiFile,
@@ -57,11 +58,189 @@ function* walk(dir) {
 
 // Bash 里直接跑 playwright / puppeteer 也是选了 playwright。只数 mcp__playwright__*
 // 会把占比算成下界——历史上 MCP 967 次之外还有 Bash 121 次。
+//
+// D-2(2026-11-20): 代理形态也算 vortex —— Pi 的 MCP 调用名是 "mcp__vortex"
+//（真正工具名在 args.tool 里），旧判断只认 "mcp__vortex__" 前缀，Pi 全部漏掉。
 function browserRoute(name, input) {
-  if (name.startsWith("mcp__vortex__")) return "vortex";
-  if (name.startsWith("mcp__playwright__")) return "playwright";
+  if (!name) return null;
+  if (name === "mcp__vortex" || name.startsWith("mcp__vortex__")) return "vortex";
+  if (name === "mcp__playwright" || name.startsWith("mcp__playwright__")) return "playwright";
   if (name === "Bash" && /playwright|puppeteer/i.test(String(input?.command ?? ""))) return "playwright";
   return null;
+}
+
+/**
+ * 按源统计「走了 playwright 的调用数」（窗口内）。
+ *
+ * D-2(2026-11-20)：此前这个扫描只存在于 claude 分支，导致 routes.vortex 恒等于
+ * Claude 源调用数、Pi 源恒 0。三源各自的调用形态不同：
+ *   - claude：assistant message.content[] 里的 tool_use 块
+ *   - pi：assistant 的 toolCall（代理名 mcp__playwright + args.tool）+ toolResult
+ *     里 codemode 展开的 nestedCalls（只数最外层，展开层不重复计）
+ *   - codex：custom_tool_call(exec) 脚本文本里的 tools.mcp__playwright__xxx(
+ *
+ * vortex 侧不在这里数 —— 走抽取器口径（coverage.perSource[src].calls，窗口内
+ * 事实数，已含 Pi 代理形态与嵌套调用去重）。
+ */
+export function countPlaywrightCalls(src, raw, fromTs, toTs) {
+  let n = 0;
+  const inWindow = (ts) => Number.isFinite(ts) && ts >= fromTs && ts < toTs;
+  const isPw = (name, input) => browserRoute(name, input) === "playwright";
+
+  if (src === "claude") {
+    for (const line of raw.split("\n")) {
+      if (!line.trim()) continue;
+      let d;
+      try {
+        d = JSON.parse(line);
+      } catch {
+        continue;
+      }
+      if (!inWindow(Date.parse(d.timestamp ?? ""))) continue;
+      const content = d.message?.content;
+      if (!Array.isArray(content)) continue;
+      for (const b of content) {
+        if (b?.type === "tool_use" && isPw(b.name, b.input)) n++;
+      }
+    }
+  } else if (src === "pi") {
+    n += countPiPlaywrightCalls(raw, fromTs, toTs);
+  } else if (src === "codex") {
+    // 只看真正发起调用的 exec 脚本（与抽取器 parseCodexFile 同一口径）
+    const callRe = /tools\.mcp__playwright__([a-z_]+)\s*\(/g;
+    for (const line of raw.split("\n")) {
+      if (!line.trim()) continue;
+      let d;
+      try {
+        d = JSON.parse(line);
+      } catch {
+        continue;
+      }
+      if (!inWindow(Date.parse(d.timestamp ?? ""))) continue;
+      const p = d.payload;
+      if (!p || p.type !== "custom_tool_call" || p.name !== "exec") continue;
+      const input = typeof p.input === "string" ? p.input : "";
+      n += (input.match(callRe) ?? []).length;
+    }
+  }
+  return n;
+}
+
+/**
+ * Pi 源的 playwright 调用数（窗口内）。
+ *
+ * 口径完全对齐抽取器 parsePiFile（extract.mjs:149-264），否则份额会失真：
+ *   - assistantCalls 按 id 收（**不预先按窗口过滤**），toolResults 按 toolCallId 收
+ *   - 每个 assistant 调用只处理一次 ⇒ 重复的 toolResult 不会重复计
+ *   - 时间归属 = **外层调用的 ts**（不是 toolResult 的 ts）：
+ *     外层在窗口内、结果在窗口外 → 算窗口内；外层在窗口外、结果在窗口内 → 不算
+ */
+export function countPiPlaywrightCalls(raw, fromTs, toTs) {
+  let n = 0;
+  const inWindow = (ts) => Number.isFinite(ts) && ts >= fromTs && ts < toTs;
+  const isPw = (name, input) => browserRoute(name, input) === "playwright";
+  const assistantCalls = new Map();
+  const toolResults = new Map();
+  for (const line of raw.split("\n")) {
+    if (!line.trim()) continue;
+    let d;
+    try {
+      d = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    const m = d.message;
+    if (!m || typeof m !== "object") continue;
+    const ts = Date.parse(d.timestamp ?? m.timestamp ?? "");
+    if (!Number.isFinite(ts)) continue;
+    if (m.role === "assistant" && Array.isArray(m.content)) {
+      for (const b of m.content) {
+        if (b?.type === "toolCall") {
+          assistantCalls.set(b.id, { id: b.id, name: b.name, arguments: b.arguments, ts });
+        }
+      }
+    } else if (m.role === "toolResult") {
+      toolResults.set(m.toolCallId, { ts, nestedCalls: m.nestedCalls ?? null });
+    }
+  }
+  for (const ac of assistantCalls.values()) {
+    if (!inWindow(ac.ts)) continue;
+    // ① 外层调用本身走 playwright（含代理名 mcp__playwright）——展开层不重复计
+    if (isPw(ac.name, ac.arguments)) {
+      n++;
+      continue;
+    }
+    // ② codemode 展开层：祖先里已经有 playwright 的 = 同一次调用（跳过）
+    const nested = toolResults.get(ac.id)?.nestedCalls?.calls;
+    if (!Array.isArray(nested) || nested.length === 0) continue;
+    const byId = new Map(nested.map((c) => [c.id, c]));
+    for (const entry of nested) {
+      if (!entry || !isPw(entry.name, entry.arguments)) continue;
+      if (hasPlaywrightAncestor(entry.id, ac.id, byId, assistantCalls, isPw)) continue;
+      n++;
+    }
+  }
+  return n;
+}
+
+/**
+ * nestedCalls 条目的祖先链里是否已经有 **playwright 路由** 的条目。
+ *
+ * 关键：只有“祖先本身走 playwright”才算同一次调用；祖先是普通容器
+ * （如 codemode 的一般工具调用）时，它下面的 playwright 调用是**另一次**调用，
+ * 不能被去重掉（否则 playwright 份额被漏算）。
+ *
+ * 链式 id 形如 `<outerId>/<k>/<j>`，祖先 id = `<outerId>/<path 前缀>`；
+ * 中间层在 nestedCalls 里，最外层在 assistantCalls 里（= outerId 本身，
+ * 由调用方单独处理：外层走 playwright 时直接计 1 并跳过展开层）。
+ */
+function hasPlaywrightAncestor(entryId, outerId, byId, assistantCalls, isPw) {
+  if (!entryId || !entryId.startsWith(`${outerId}/`)) return false;
+  const path = String(entryId).slice(String(outerId).length + 1).split("/");
+  for (let k = 1; k < path.length; k++) {
+    const ancestorId = `${outerId}/${path.slice(0, k).join("/")}`;
+    const ancestor = byId.get(ancestorId);
+    if (ancestor && isPw(ancestor.name, ancestor.arguments)) return true;
+    const o = assistantCalls.get(ancestorId);
+    if (o && isPw(o.name, o.arguments)) return true;
+  }
+  return false;
+}
+
+/**
+ * 汇总浏览器工具路由份额。
+ *
+ * D-2(2026-11-20)：routes.vortex 此前只有 Claude 一个源（Pi 恒 0）。现在：
+ *   - vortex 走抽取器口径（coverage.perSource[src].calls，窗口内事实数）
+ *   - codex 是文本级辅助证据（coverage.codexAux.calls），单独标 aux
+ *   - sink 是服务端镜像，不计入路由份额（否则与客户端侧同一次调用重复计）
+ */
+export function assembleRoutes(coverage, routeBySource) {
+  const bySource = {
+    claude: {
+      vortex: coverage.perSource?.claude?.calls ?? 0,
+      playwright: routeBySource?.claude ?? 0,
+    },
+    pi: {
+      vortex: coverage.perSource?.pi?.calls ?? 0,
+      playwright: routeBySource?.pi ?? 0,
+    },
+    codex: {
+      vortex: coverage.codexAux?.calls ?? 0,
+      playwright: routeBySource?.codex ?? 0,
+    },
+  };
+  const vortex = bySource.claude.vortex + bySource.pi.vortex + bySource.codex.vortex;
+  const playwright =
+    bySource.claude.playwright + bySource.pi.playwright + bySource.codex.playwright;
+  return {
+    vortex,
+    playwright,
+    vortexShare:
+      vortex + playwright ? +(vortex / (vortex + playwright)).toFixed(4) : null,
+    bySource,
+    sinkServerSide: coverage.perSource?.sink?.calls ?? 0,
+  };
 }
 
 function collect({ days, from, to, sources }) {
@@ -76,7 +255,8 @@ function collect({ days, from, to, sources }) {
     perSource: {},
     codexAux: null,
   };
-  const routeCounts = { vortex: 0, playwright: 0 };
+  // playwright 路由计数（按源）；vortex 侧用抽取器口径，见 assembleRoutes。
+  const routeCountsBySource = { claude: 0, pi: 0, codex: 0 };
   let minTs = Infinity;
   let maxTs = 0;
 
@@ -101,32 +281,15 @@ function collect({ days, from, to, sources }) {
       }
       cov.filesScanned++;
 
+      // 浏览器工具份额(同源对比用)：D-2 起三源都扫。
+      routeCountsBySource[src] =
+        (routeCountsBySource[src] ?? 0) + countPlaywrightCalls(src, raw, fromTs, toTs);
       if (src === "claude") {
         const parsed = parseClaudeFile(raw, file);
         events.push(parsed);
         cov.calls += parsed.calls.length;
         cov.results += parsed.results.length;
         if (parsed.calls.length) cov.filesWithVortex++;
-        // 浏览器工具份额(同源对比用)
-        for (const line of raw.split("\n")) {
-          if (!line.trim()) continue;
-          let d;
-          try {
-            d = JSON.parse(line);
-          } catch {
-            continue;
-          }
-          const ts = Date.parse(d.timestamp ?? "");
-          if (!Number.isFinite(ts) || ts < fromTs || ts >= toTs) continue;
-          const content = d.message?.content;
-          if (!Array.isArray(content)) continue;
-          for (const b of content) {
-            if (b?.type === "tool_use") {
-              const route = browserRoute(b.name, b.input);
-              if (route) routeCounts[route]++;
-            }
-          }
-        }
       } else if (src === "pi") {
         const parsed = parsePiFile(raw, file);
         events.push(parsed);
@@ -203,12 +366,14 @@ function collect({ days, from, to, sources }) {
     coverage,
   });
 
-  snapshot.routes = {
-    ...routeCounts,
-    vortexShare:
-      routeCounts.vortex + routeCounts.playwright
-        ? +(routeCounts.vortex / (routeCounts.vortex + routeCounts.playwright)).toFixed(4)
-        : null,
+  snapshot.routes = assembleRoutes(coverage, routeCountsBySource);
+  // D-2 口径说明（随快照落盘，跨期比较必须先读这段）
+  snapshot.routesMethodology = {
+    version: "per-source-2026-11-20",
+    note:
+      "routes 为 claude + pi + codex 三源合计；codex 走文本辅助计数（session 里没有工具调用块时为 0）；sink 是服务端观测，单列不计入份额。",
+    legacy:
+      "2026-11-20 之前的快照用的是旧口径：routes.vortex 只统计 Claude 源（Pi/Codex 恒 0）⇒ 与本快照的 routes.vortex 不可直接比较，跨期必须用同一版 collect.mjs 重跑。",
   };
   snapshot.label = null;
   return snapshot;
@@ -235,6 +400,16 @@ function toMarkdown(snap, label) {
   const errs = snap.topErrors
     .slice(0, 20)
     .map((e) => `| ${e.count} | \`${e.sig.replace(/\|/g, "\\|")}\` |`)
+    .join("\n");
+  // 路由份额（按源）—— D-2：旧口径只统计 claude 源，routes.vortex 恒等于 Claude 调用数。
+  const routes = snap.routes ?? { vortex: 0, playwright: 0, vortexShare: 0, bySource: {} };
+  const routesMethodology = snap.routesMethodology ?? {
+    version: "per-source-2026-11-20",
+    note: "routes 为三源合计；sink 单列不计入份额。",
+    legacy: "旧快照只统计 Claude 源，跨期不可直接比较。",
+  };
+  const routeRows = Object.entries(routes.bySource ?? {})
+    .map(([src, r]) => `| ${src} | ${r.vortex} | ${r.playwright} |`)
     .join("\n");
   const cov = snap.coverage;
   const covRows = Object.entries(cov.perSource)
@@ -269,6 +444,17 @@ Codex 辅助证据（exec 脚本里的调用形态，不进主分母）：${cov.
 | 源 | 调用 | ok | 错误 | 错误率 | 空返回 | unpaired | unknown |
 |---|---:|---:|---:|---:|---:|---:|---:|
 ${srcRows}
+
+## 路由份额（按源）
+
+| 源 | vortex 调用 | playwright 调用 |
+|---|---:|---:|
+${routeRows}
+
+合计：vortex ${routes.vortex} / playwright ${routes.playwright}，vortex 占比 ${pct(routes.vortexShare)}${routes.sinkServerSide ? `；服务端 sink 观测 ${routes.sinkServerSide} 次（单列，不叠加）` : ""}
+
+> **口径（${routesMethodology.version}）**：${routesMethodology.note}
+> **旧口径对比**：${routesMethodology.legacy}
 
 ## 各工具（调用数 ≥ ${MIN_CALLS_FOR_RATE}）
 
@@ -353,4 +539,5 @@ function main() {
   console.log(`\n已写入 ${base}.json / ${base}.md`);
 }
 
-main();
+// 允许被单测 import（node --test scripts/usage-baseline/）。
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) main();

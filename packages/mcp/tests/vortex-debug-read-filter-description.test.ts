@@ -20,6 +20,8 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import { dispatchNewTool } from "../src/tools/dispatch.js";
+import { PUBLIC_TOOLS } from "../src/tools/schemas-public.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SCHEMA_SRC = readFileSync(
@@ -103,5 +105,83 @@ describe("vortex_debug_read filter 子字段 description 文档化 (V2 P0 修复
     // source=request 新能力将 description 扩至 ~76 char (在 180 之内)
     // filter 子字段 description 不在 I15 invariant 约束内 (可详尽)
     expect(desc.length).toBeLessThanOrEqual(180);
+  });
+});
+
+/**
+ * D-1(2026-11-20): 公开契约与运行时不一致 + 参数形状错误时文案指错字段。
+ *
+ * 运行时真相：
+ *   - dispatch 的 network pattern 校验读 args.pattern（顶层）或 filter.pattern
+ *   - extension network.ts 读 args.includeResources（顶层）
+ *   → 这两个平铺参数公开面此前没声明，模型只能塞进 filter；
+ *     filter 是字符串时 Object.assign 静默丢弃它，随后报 "pattern is required"，
+ *     把「filter 形状错」误报成「pattern 缺失」。
+ */
+describe("D-1: 公开契约与运行时一致 + filter 形状错报错指对字段", () => {
+  // 断言**公开 schema 对象**而不是源码文本：源码文本正则会命中别的工具的同名
+  // 属性（审查发现：这样写修复前也是绿的，等于没有回归能力）。
+  const debugReadProps = (() => {
+    const tool = PUBLIC_TOOLS.find((t) => t.name === "vortex_debug_read");
+    expect(tool, "vortex_debug_read 必须在 PUBLIC_TOOLS 里").toBeDefined();
+    const props = (tool!.schema as { properties?: Record<string, { type?: string }> }).properties ?? {};
+    return props;
+  })();
+
+  it("公开 schema 声明运行时实际接受的顶层 pattern（string）", () => {
+    expect(debugReadProps.pattern, "公开面缺顶层 pattern → 模型只能塞进 filter").toBeDefined();
+    expect(debugReadProps.pattern!.type).toBe("string");
+  });
+
+  it("公开 schema 声明运行时实际接受的顶层 includeResources（boolean）", () => {
+    expect(
+      debugReadProps.includeResources,
+      "公开面缺顶层 includeResources → 模型无法请求静态资源",
+    ).toBeDefined();
+    expect(debugReadProps.includeResources!.type).toBe("boolean");
+  });
+
+  it("filter 传字符串 → 报 filter 形状错，不再报 'pattern is required'", () => {
+    let err: unknown;
+    try {
+      dispatchNewTool("vortex_debug_read", { source: "network", filter: "example" });
+    } catch (e) {
+      err = e;
+    }
+    expect(err, "字符串 filter 必须被拒").toBeDefined();
+    const msg = err instanceof Error ? err.message : String(err);
+    expect(msg).toMatch(/filter must be an object/i);
+    expect(msg, "不能再把形状错报成 pattern 缺失").not.toMatch(/pattern is required/i);
+  });
+
+  it("filter 传数组 → 同样报 filter 形状错", () => {
+    let err: unknown;
+    try {
+      dispatchNewTool("vortex_debug_read", { source: "network", filter: ["example"] });
+    } catch (e) {
+      err = e;
+    }
+    expect(err).toBeDefined();
+    expect(err instanceof Error ? err.message : String(err)).toMatch(/filter must be an object/i);
+  });
+
+  it("filter 传对象仍正常路由（不回归）", () => {
+    const r = dispatchNewTool("vortex_debug_read", {
+      source: "network",
+      filter: { pattern: "/api/" },
+    });
+    expect(r?.action).toBe("network.getLogs");
+    expect(r?.params.pattern).toBe("/api/");
+  });
+
+  it("顶层 pattern 与 includeResources 透传到 handler 参数", () => {
+    const r = dispatchNewTool("vortex_debug_read", {
+      source: "network",
+      pattern: "/api/",
+      includeResources: true,
+    });
+    expect(r?.action).toBe("network.getLogs");
+    expect(r?.params.pattern).toBe("/api/");
+    expect(r?.params.includeResources).toBe(true);
   });
 });

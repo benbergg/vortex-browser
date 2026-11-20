@@ -92,3 +92,21 @@ export function getInternalToolDef(name: string): ToolDef | undefined {
   ensureMaps();
   return internalMap.get(name);
 }
+
+/**
+ * 解析 tools/call 的目标工具：公开面 + 诊断工具 vortex_ping。
+ *
+ * vortex_ping 不在 tools/list（公开面不因它增长，I15 字节预算不受影响），
+ * 但**必须可调用** —— 客户端靠 ping 响应里的 schemaHash 比对自己缓存的
+ * 工具面版本（server.ts 的设计意图）。v0.6 把 ping 从 PUBLIC_TOOLS 移出时
+ * 没留任何可达路径（没有 cap，getToolDef 只查 publicMap），
+ * 于是指纹机制整条链路断在第一步：没有任何客户端能拿到 schemaHash。
+ * 2026-11-20 D-1 把它接回来。
+ *
+ * 2026-06-04 审计的「连接失败文案不得引导 agent 调 ping」结论仍然成立：
+ * 那条文案至今没有指向 ping（回归锁见 tests/connectivity-error-guidance.test.ts），
+ * 本改动只是让这个已经存在的诊断工具不再是一条死路。
+ */
+export function resolveToolDef(name: string): ToolDef | undefined {
+  return getToolDef(name) ?? (name === "vortex_ping" ? getInternalToolDef(name) : undefined);
+}

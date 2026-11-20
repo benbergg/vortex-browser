@@ -337,6 +337,18 @@ export const PUBLIC_TOOLS: ToolDef[] = [
           description:
             "flat keys, do not nest by source: {level} for console; {pattern,statusMin,statusMax} for network；statusMin 配合 statusMax 过滤 HTTP 状态码区间",
         },
+        // D-1(2026-11-20): 运行时真的接受这两个平铺参数 —— extension network.ts
+        // 读 args.includeResources,dispatch 的 network pattern 校验读 args.pattern ——
+        // 但公开面此前没声明,模型只能把它们塞进 filter;filter 形状不对时又被
+        // Object.assign 静默丢弃,最后报 "pattern is required"(指错了字段)。
+        pattern: {
+          type: "string",
+          description: "network 源的 URL 子串,与 filter.pattern 等价,二者必填其一",
+        },
+        includeResources: {
+          type: "boolean",
+          description: "true 时含静态资源,默认只留 XHR/Fetch",
+        },
         tail: { type: "number" },
         ...tabFields,
       },

@@ -57,10 +57,10 @@ describe("VtxError", () => {
 });
 
 describe("VtxErrorCode enum", () => {
-  // 48 = 47 + INVALID_SELECTOR（L2）。target 非法 CSS 此前被 probe 吞成可重试的
-  // NOT_ATTACHED，空转满 timeout 后抛反方向的 "detached from DOM" 诊断。
-  it("includes all 48 error codes (24 base + 2 组件 + 10 L2 + 9 L3 + 2 L4 + 1 act-verify)", () => {
-    expect(Object.keys(VtxErrorCode)).toHaveLength(48);
+  // 49 = 48 + REQUEST_NOT_FOUND（D-1b, 2026-11-20）。
+  // target 非法 CSS 此前被 probe 吞成可重试的 NOT_ATTACHED，空转满 timeout 后抛反方向的 "detached from DOM" 诊断。
+  it("includes all 49 error codes (24 base + 2 组件 + 10 L2 + 9 L3 + 2 L4 + 1 act-verify + 1 debug-read)", () => {
+    expect(Object.keys(VtxErrorCode)).toHaveLength(49);
   });
 
   it("each constant equals its own string value (self-describing)", () => {
@@ -82,6 +82,10 @@ describe("VtxErrorCode enum", () => {
 
   it("exposes COMMIT_FAILED (@since 0.4.0)", () => {
     expect(VtxErrorCode.COMMIT_FAILED).toBe("COMMIT_FAILED");
+  });
+
+  it("exposes REQUEST_NOT_FOUND (@since 4.1.1, D-1b)", () => {
+    expect(VtxErrorCode.REQUEST_NOT_FOUND).toBe("REQUEST_NOT_FOUND");
   });
 });
 

@@ -15,7 +15,8 @@ import {
   CallToolRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import { sendRequest } from "./client.js";
-import { getToolDefs, getToolDef, setEnabledCaps } from "./tools/registry.js";
+import { getToolDefs, getToolDef, resolveToolDef, setEnabledCaps } from "./tools/registry.js";
+import { computeSchemaHash } from "./tools/schema-fingerprint.js";
 import { buildInstructions } from "./instructions.js";
 import { dispatchNewTool } from "./tools/dispatch.js";
 import { timeoutLadder, splitDiagnosis, hubDeadlineFor } from "@vortex-browser/shared";
@@ -53,16 +54,10 @@ try {
 }
 
 /**
- * 计算当前 MCP 注册的所有工具指纹。
- * 变更任一工具 name / action / description 都会影响 hash。
- * 代理拿到 ping 响应里的 schemaHash 可对比自己缓存的版本，
- * 判断 MCP server 是否被重启过（典型场景：merge 了新 PR 但 Claude Code 还没重启）。
+ * 工具集指纹见 tools/schema-fingerprint.ts（覆盖 name/action/description/schema）。
+ * ping 响应里的 schemaHash 让拿到响应的客户端对比自己缓存的版本，
+ * 判断 MCP server 是否被重启过（典型场景：merge 了新 PR 但客户端还没重启）。
  */
-function computeSchemaHash(): string {
-  const defs = getToolDefs();
-  const payload = defs.map((d) => `${d.name}:${d.action}:${d.description.length}`).sort().join("|");
-  return createHash("sha256").update(payload).digest("hex").slice(0, 12);
-}
 import {
   saveBase64Image,
   getImageSize,
@@ -349,7 +344,7 @@ function recordUsage(
   }
   appendUsage({
     ts: new Date().toISOString(),
-    tool: sanitizeToolName(toolName, (n) => Boolean(getToolDef(n))),
+    tool: sanitizeToolName(toolName, (n) => Boolean(resolveToolDef(n))),
     outcome: result.isError ? "error" : "ok",
     // 只接受已知 vortex 错误码；未带错误码的失败（如 Unknown tool）标 UNKNOWN
     errorCode: result.isError
@@ -424,7 +419,7 @@ export async function handleCallTool(
   request: { params: { name: string; arguments?: unknown } },
 ): Promise<{ content: ContentItem[]; isError?: boolean }> {
   const { name, arguments: args } = request.params;
-  const toolDef = getToolDef(name);
+  const toolDef = resolveToolDef(name);
 
   if (!toolDef) {
     return {
@@ -510,7 +505,7 @@ export async function handleCallTool(
             } | undefined) ?? {}
           : {};
       const toolCount = getToolDefs().length;
-      const schemaHash = computeSchemaHash();
+      const schemaHash = computeSchemaHash(getToolDefs());
 
       // 版本漂移检测：MCP 与扩展的语义主版本不一致时给出明显提示。
       const extVersion = versionInfo.extensionVersion;

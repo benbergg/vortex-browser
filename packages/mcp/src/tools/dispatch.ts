@@ -283,6 +283,15 @@ export function dispatchNewTool(
     case "vortex_debug_read": {
       const { source, filter, tail, reqid, ...rest } = params;
       const next: Record<string, unknown> = { ...rest };
+      // D-1(2026-11-20): 先校验 filter 形状。字符串/数组 filter 会被下面的
+      // Object.assign 静默丢弃,随后报 "pattern is required" —— 把「filter 形状错」
+      // 误报成「pattern 缺失」,调用方按错方向重试(改 filter 而不加 pattern)。
+      if (filter != null && (typeof filter !== "object" || Array.isArray(filter))) {
+        throw vtxError(
+          VtxErrorCode.INVALID_PARAMS,
+          `vortex_debug_read: filter must be an object {level?,pattern?,statusMin?,statusMax?}, got ${Array.isArray(filter) ? "array" : typeof filter}. For a plain substring pass top-level pattern instead of filter.`,
+        );
+      }
       // source=request: 按 reqid 取单请求 status+body（确定性判定）
       if (source === "request") {
         if (!reqid || typeof reqid !== "string" || !reqid.trim()) {

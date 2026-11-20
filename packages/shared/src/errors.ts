@@ -101,6 +101,12 @@ export const VtxErrorCode = {
   INVALID_TARGET: "INVALID_TARGET",
   /** action 不在 act 7 enum 内（click/fill/type/select/scroll/hover/drag）。*/
   UNSUPPORTED_ACTION: "UNSUPPORTED_ACTION",
+
+  // -- L4 调试读（1 类，@since 4.1.1）--
+  /** vortex_debug_read(source=request) 的 requestId 在该 tab 的网络日志里不存在
+   *  （tab 未订阅 / 日志已清 / tab 已关）。此前报 INTERNAL_ERROR，调用方分不清
+   *  「服务端炸了」和「id 不对」，agent 会拿同一个 id 盲目重试。*/
+  REQUEST_NOT_FOUND: "REQUEST_NOT_FOUND",
 } as const;
 
 export type VtxErrorCode = (typeof VtxErrorCode)[keyof typeof VtxErrorCode];
