@@ -249,8 +249,10 @@ function installAutoRestart(): void {
     // FSWatcher extends EventEmitter 但 @types/node 25 的 FSWatcher 接口经过
     // InternalEventEmitter<EventMap<...>> 重写, tsc 5.x 严格模式 + bundler 解析
     // 找不到 .on。运行时 watcher.on() 正确(继承自 EventEmitter), 仅类型层歧义。
-    // @ts-expect-error - 抑制类型层 on 缺失, 运行时正确。保留 watcher.on 字面量
-    // (tests/self-restart.test.ts:62 source-lock 验证)。
+    // 用 @ts-ignore 而不是 @ts-expect-error：类型层 on 的可见性随 @types/node 版本变化
+    // (20.x 可见 / 25.x 不可见)，@ts-expect-error 在"无错"的那一侧会变成 TS2578 未使用指令。
+    // 保留 watcher.on 字面量 (tests/self-restart.test.ts:62 source-lock 验证)。
+    // @ts-ignore - 抑制类型层 on 缺失, 运行时正确。
     watcher.on("error", (err: unknown) => {
       const msg = err instanceof Error ? err.message : String(err);
       process.stderr.write(`[vortex-mcp] fs.watch failed: ${msg}; auto-restart disabled.\n`);

@@ -102,8 +102,9 @@ export function createSupervisor(deps: SupervisorDeps): SupervisorHandle {
       stdio: ["pipe", "pipe", "inherit"], // stderr 直通 supervisor stderr
     });
     c.stdout!.on("data", onChildData);
-    // @ts-expect-error ChildProcessByStdio.on 在 @types/node@25+moduleResolution:bundler 下
-    // 类型层不可见(同 server.ts FSWatcher.on);运行时继承 EventEmitter 无问题。
+    // ChildProcessByStdio.on 的类型层可见性随 @types/node 版本变化(同 server.ts FSWatcher.on 注释)，
+    // 用 @ts-ignore 而不是 @ts-expect-error（后者在"无错"的那一侧会变成 TS2578 未使用指令）。
+    // @ts-ignore - 抑制类型层 on 不可见, 运行时继承 EventEmitter 无问题。
     c.on("exit", onChildExit);
     child = c as unknown as ChildProcess;
   }
@@ -407,7 +408,8 @@ if (isMainEntry()) {
       if (debounce) clearTimeout(debounce);
       debounce = setTimeout(() => { debounce = null; sup.triggerRestart(`dist:${filename}`); }, DEBOUNCE_MS);
     });
-    // @ts-expect-error FSWatcher.on 类型层歧义,运行时正确(继承自 EventEmitter)
+    // 类型层 on 可见性随 @types/node 版本变化(同 server.ts FSWatcher.on 注释) ⇒ @ts-ignore，不用 @ts-expect-error。
+    // @ts-ignore - 抑制类型层 on 歧义,运行时正确(继承自 EventEmitter)
     watcher.on("error", (e: unknown) => process.stderr.write(`[supervisor] watch error: ${String(e)}\n`));
   } catch (e) {
     process.stderr.write(`[supervisor] watch init failed: ${String(e)}; auto-restart disabled\n`);
