@@ -5,12 +5,13 @@
 <!--
   复现 N002 T2-2 Element Plus dialog 实测:模态 3 按钮混进 56 个背景元素。
   修复:观察 aria-modal=true → 裁剪 baseCandidates 到模态子树 + 发 # modal: meta;
-        filter=all 背景带 [behind-modal];role=dialog 无 aria-modal 走前置(零漂移)。
+        filter=all 背景带 [behind-modal];role=dialog 无 aria-modal 的伪模态在真模态
+        作用域下同样作背景抑制(默认 observe 不召回)。
 
   页面结构:
     - <main> 内 12 个导航链接(背景,默认应被裁掉)
     - 1 个 dialog(aria-modal=true)内 2 按钮(模态内,应保留)
-    - 1 个 dialog(无 aria-modal,pseudo-modal)内 2 按钮(走 overlay-priority 前置)
+    - 1 个 dialog(无 aria-modal,pseudo-modal)内 2 按钮(默认被真模态作用域抑制)
     - 1 个 listbox(<select>)非模态(应保留,走 overlay-priority 前置)
 -->
 <main id="main">
@@ -36,7 +37,7 @@
   <button data-vtx-oracle="modal-cancel" style="margin:6px">Cancel</button>
 </div>
 
-<!-- 伪模态:role=dialog 但无 aria-modal → 走 overlay-priority 前置,不裁剪 -->
+<!-- 伪模态:role=dialog 但无 aria-modal → 真模态打开时同样作背景抑制(默认不召回) -->
 <div id="pseudo" role="dialog" aria-label="Hint"
      style="position:fixed;top:400px;left:200px;z-index:9998;background:#eee;border:1px dashed #999;padding:8px;width:200px">
   <button data-vtx-oracle="pseudo-ok" style="margin:4px">OK</button>
