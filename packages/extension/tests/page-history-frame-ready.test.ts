@@ -15,6 +15,11 @@ import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from "vite
  *   （waitForMainFrameReady）：只看"能注入"不够——交接窗口前半段旧 frame 照样
  *   能注入，必须比对文档身份（href / timeOrigin）；预算耗尽抛 PAGE_NOT_READY，
  *   不静默当成功。
+ *
+ *   还要等 frame **稳定**：Chrome 的 history 恢复先把文档塞进临时 frame、随后把
+ *   该 frame 换掉。探针命中"恢复中的文档"时身份已经是新的，但那个 frame 马上
+ *   要死——只判身份变化时仍有 ~2.8% 的轮次在 ~50ms 后报 "Frame was removed"。
+ *   所以判据是"同一个 frameId + documentId 连续稳定存在 confirmMs"。
  */
 
 let executeScriptMock: Mock;
@@ -38,8 +43,8 @@ const HANDOVER_ERR = "Frame with ID 0 was removed.";
 const OLD_DOC = { href: "http://x/old", timeOrigin: 1000 };
 const NEW_DOC = { href: "http://x/new", timeOrigin: 2000 };
 
-function ok(doc: { href: string; timeOrigin: number }) {
-  return Promise.resolve([{ result: doc }]);
+function ok(doc: { href: string; timeOrigin: number }, frameId = 7, documentId = "doc-7") {
+  return Promise.resolve([{ result: doc, frameId, documentId }]);
 }
 
 describe("history 之后 frame 交接门控（Round 3）", () => {
@@ -61,21 +66,24 @@ describe("history 之后 frame 交接门控（Round 3）", () => {
       return ok(NEW_DOC);
     });
     const { waitForMainFrameReady } = await importPage();
-    await expect(waitForMainFrameReady(1, OLD_DOC)).resolves.toBeUndefined();
+    await expect(waitForMainFrameReady(1, OLD_DOC, 2000, 0)).resolves.toBeUndefined();
     expect(executeScriptMock).toHaveBeenCalledTimes(3);
   });
 
-  it("文档身份已变 → 立即放行（不必等交接错误出现）", async () => {
+  it("文档身份已变 → 不必等交接错误出现，但仍要等 frame 稳定窗口", async () => {
     installChrome(() => ok(NEW_DOC));
     const { waitForMainFrameReady } = await importPage();
-    await expect(waitForMainFrameReady(1, OLD_DOC)).resolves.toBeUndefined();
-    expect(executeScriptMock).toHaveBeenCalledTimes(1);
+    const t0 = Date.now();
+    await expect(waitForMainFrameReady(1, OLD_DOC, 2000, 40)).resolves.toBeUndefined();
+    // 稳定窗口没到之前不能放行：至少探第二次，且耗时不少于窗口本身。
+    expect(executeScriptMock.mock.calls.length).toBeGreaterThanOrEqual(2);
+    expect(Date.now() - t0).toBeGreaterThanOrEqual(40);
   });
 
   it("URL 相同但 timeOrigin 变了（重新加载同一 URL）→ 放行", async () => {
     installChrome(() => ok({ href: OLD_DOC.href, timeOrigin: 2000 }));
     const { waitForMainFrameReady } = await importPage();
-    await expect(waitForMainFrameReady(1, OLD_DOC)).resolves.toBeUndefined();
+    await expect(waitForMainFrameReady(1, OLD_DOC, 2000, 0)).resolves.toBeUndefined();
     expect(executeScriptMock).toHaveBeenCalledTimes(1);
   });
 
@@ -88,7 +96,7 @@ describe("history 之后 frame 交接门控（Round 3）", () => {
       return ok(NEW_DOC);
     });
     const { waitForMainFrameReady } = await importPage();
-    await expect(waitForMainFrameReady(1, OLD_DOC)).resolves.toBeUndefined();
+    await expect(waitForMainFrameReady(1, OLD_DOC, 2000, 0)).resolves.toBeUndefined();
     expect(executeScriptMock).toHaveBeenCalledTimes(3);
   });
 
@@ -101,8 +109,23 @@ describe("history 之后 frame 交接门控（Round 3）", () => {
       return ok(NEW_DOC);
     });
     const { waitForMainFrameReady } = await importPage();
-    await expect(waitForMainFrameReady(1, OLD_DOC)).resolves.toBeUndefined();
+    await expect(waitForMainFrameReady(1, OLD_DOC, 2000, 0)).resolves.toBeUndefined();
     expect(executeScriptMock).toHaveBeenCalledTimes(3);
+  });
+
+  it("同一文档但 frame 被换掉（frameId 变了）→ 不得在换掉之前放行", async () => {
+    let call = 0;
+    installChrome(() => {
+      call += 1;
+      // 前两次命中"恢复中的临时 frame"，之后 frame 被换成新的那个。
+      if (call === 1) return ok(NEW_DOC, 7, "doc-restored");
+      if (call === 2) return ok(NEW_DOC, 9, "doc-final");
+      return ok(NEW_DOC, 9, "doc-final");
+    });
+    const { waitForMainFrameReady } = await importPage();
+    await expect(waitForMainFrameReady(1, OLD_DOC, 2000, 40)).resolves.toBeUndefined();
+    // 必须观察到 frame 换代之后还要再稳一段，才算放行。
+    expect(executeScriptMock.mock.calls.length).toBeGreaterThanOrEqual(3);
   });
 
   it("永久性错误（该页面本来就不支持注入）→ 立即返回，不重试也不抛", async () => {
@@ -114,19 +137,19 @@ describe("history 之后 frame 交接门控（Round 3）", () => {
       ),
     );
     const { waitForMainFrameReady } = await importPage();
-    await expect(waitForMainFrameReady(1, OLD_DOC)).resolves.toBeUndefined();
+    await expect(waitForMainFrameReady(1, OLD_DOC, 2000, 0)).resolves.toBeUndefined();
     expect(executeScriptMock).toHaveBeenCalledTimes(1);
   });
 
   it("交接一直没完成 → 预算耗尽抛 PAGE_NOT_READY（不静默当成功）", async () => {
     installChrome(() => Promise.reject(new Error(HANDOVER_ERR)));
     const { waitForMainFrameReady } = await importPage();
-    await expect(waitForMainFrameReady(1, OLD_DOC, 60)).rejects.toThrow(/not ready/i);
+    await expect(waitForMainFrameReady(1, OLD_DOC, 60, 0)).rejects.toThrow(/not ready/i);
   });
 
   it("探针挂住（页面还忙）→ 预算耗尽抛 PAGE_NOT_READY（不静默返回）", async () => {
     installChrome(() => new Promise(() => {}));
     const { waitForMainFrameReady } = await importPage();
-    await expect(waitForMainFrameReady(1, OLD_DOC, 600)).rejects.toThrow(/not ready/i);
+    await expect(waitForMainFrameReady(1, OLD_DOC, 600, 0)).rejects.toThrow(/not ready/i);
   });
 });
