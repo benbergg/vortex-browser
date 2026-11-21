@@ -44,19 +44,34 @@ function stubChrome(opts: {
   frames: FrameRow[];
   scanResults: Record<number, ReturnType<typeof mkPage> | null>;
 }) {
-  const executeScript = vi.fn(async ({ target, args }: { target: { frameIds?: number[] }; args?: unknown[] }) => {
-    const frameId = target.frameIds?.[0];
-    if (frameId == null) return [{ result: opts.scanResults[0] ?? null }];
+  // observe 先做「文档归属 claim」（scan.claim 注入）再扫描：mock 必须回显请求里的
+  // documentId/frameId，否则归属判定失败 → STALE_SNAPSHOT。
+  const frames = opts.frames.map((f) => ({
+    documentId: `doc-${f.frameId}`,
+    documentLifecycle: "active",
+    ...f,
+  }));
+  const frameOfDoc = new Map(frames.map((f) => [f.documentId, f.frameId]));
+  const executeScript = vi.fn(async ({ target, args }: { target: { frameIds?: number[]; documentIds?: string[] }; args?: unknown[] }) => {
+    const docId = target.documentIds?.[0];
+    const frameId = target.frameIds?.[0] ?? (docId ? frameOfDoc.get(docId) : undefined);
+    // 现行契约：每个 InjectionResult 都要回显 documentId/frameId（真实浏览器行为）。
+    const echo = (result: unknown) => [{ documentId: docId, frameId, result }];
+    if (typeof args?.[0] === "string") {
+      const req = args?.[1] as { documentId?: string; frameId?: number } | undefined;
+      return [{ documentId: req?.documentId ?? docId, frameId: req?.frameId ?? frameId, result: true }];
+    }
+    if (frameId == null) return echo(opts.scanResults[0] ?? null);
     const childUrl = args?.[0];
     if (typeof childUrl === "string" && childUrl.startsWith("http")) {
-      return [{ result: { x: 0, y: 0 } }];
+      return echo({ x: 0, y: 0 });
     }
-    return [{ result: opts.scanResults[frameId] ?? null }];
+    return echo(opts.scanResults[frameId] ?? null);
   });
   vi.stubGlobal("chrome", {
     tabs: { query: vi.fn().mockResolvedValue([{ id: 42 }]) },
     webNavigation: {
-      getAllFrames: vi.fn().mockResolvedValue(opts.frames),
+      getAllFrames: vi.fn().mockResolvedValue(frames),
     },
     scripting: { executeScript },
     runtime: {
@@ -170,24 +185,32 @@ describe("observe auto-fallback (shell+iframe sites)", () => {
     // executeScript returns null result for main, but webNavigation lists the
     // frames. Without the guard, page=null would yield elementCount=0 < 50 and
     // silently fallback to iframe content, masking the main scan failure.
-    const executeScript = vi.fn(async ({ target, args }: { target: { frameIds?: number[] }; args?: unknown[] }) => {
-      const frameId = target.frameIds?.[0];
+    const frames = [
+      { frameId: 0, parentFrameId: -1, url: "https://shell/", documentId: "doc-0", documentLifecycle: "active" },
+      { frameId: 190, parentFrameId: 0, url: "https://shell/iframe", documentId: "doc-190", documentLifecycle: "active" },
+    ];
+    const frameOfDoc = new Map(frames.map((f) => [f.documentId, f.frameId]));
+    const executeScript = vi.fn(async ({ target, args }: { target: { frameIds?: number[]; documentIds?: string[] }; args?: unknown[] }) => {
+      const docId = target.documentIds?.[0];
+      const frameId = target.frameIds?.[0] ?? (docId ? frameOfDoc.get(docId) : undefined);
+      const echo = (result: unknown) => [{ documentId: docId, frameId, result }];
+      if (typeof args?.[0] === "string") {
+        const req = args?.[1] as { documentId?: string; frameId?: number } | undefined;
+        return [{ documentId: req?.documentId ?? docId, frameId: req?.frameId ?? frameId, result: true }];
+      }
       const childUrl = args?.[0];
       if (typeof childUrl === "string" && childUrl.startsWith("http")) {
-        return [{ result: { x: 0, y: 0 } }];
+        return echo({ x: 0, y: 0 });
       }
       // main fails; child has content
-      if (frameId === 0) return [{ result: null }];
-      if (frameId === 190) return [{ result: mkPage(50) }];
-      return [{ result: null }];
+      if (frameId === 0) return echo(null);
+      if (frameId === 190) return echo(mkPage(50));
+      return echo(null);
     });
     vi.stubGlobal("chrome", {
       tabs: { query: vi.fn().mockResolvedValue([{ id: 42 }]) },
       webNavigation: {
-        getAllFrames: vi.fn().mockResolvedValue([
-          { frameId: 0, parentFrameId: -1, url: "https://shell/" },
-          { frameId: 190, parentFrameId: 0, url: "https://shell/iframe" },
-        ]),
+        getAllFrames: vi.fn().mockResolvedValue(frames),
       },
       scripting: { executeScript },
       runtime: {
@@ -260,27 +283,35 @@ describe("observe auto-fallback (shell+iframe sites)", () => {
   it("respects host_permissions when falling back: cross-origin iframes outside permissions are skipped", async () => {
     // Verify that auto-fallback uses 'all-permitted' (not 'all'), so blocked
     // origins still excluded
-    const executeScript = vi.fn(async ({ target, args }: { target: { frameIds?: number[] }; args?: unknown[] }) => {
-      const frameId = target.frameIds?.[0];
+    const frames = [
+      { frameId: 0, parentFrameId: -1, url: "https://shell.example/", documentId: "doc-0", documentLifecycle: "active" },
+      { frameId: 190, parentFrameId: 0, url: "https://shell.example/app", documentId: "doc-190", documentLifecycle: "active" },
+      { frameId: 191, parentFrameId: 0, url: "https://blocked.other/", documentId: "doc-191", documentLifecycle: "active" },
+    ];
+    const frameOfDoc = new Map(frames.map((f) => [f.documentId, f.frameId]));
+    const executeScript = vi.fn(async ({ target, args }: { target: { frameIds?: number[]; documentIds?: string[] }; args?: unknown[] }) => {
+      const docId = target.documentIds?.[0];
+      const frameId = target.frameIds?.[0] ?? (docId ? frameOfDoc.get(docId) : undefined);
+      const echo = (result: unknown) => [{ documentId: docId, frameId, result }];
+      if (typeof args?.[0] === "string") {
+        const req = args?.[1] as { documentId?: string; frameId?: number } | undefined;
+        return [{ documentId: req?.documentId ?? docId, frameId: req?.frameId ?? frameId, result: true }];
+      }
       const childUrl = args?.[0];
       if (typeof childUrl === "string" && childUrl.startsWith("http")) {
-        return [{ result: { x: 0, y: 0 } }];
+        return echo({ x: 0, y: 0 });
       }
       const pages: Record<number, ReturnType<typeof mkPage>> = {
         0: mkPage(5),
         190: mkPage(30),
         191: mkPage(40),
       };
-      return [{ result: frameId != null ? pages[frameId] ?? null : null }];
+      return echo(frameId != null ? pages[frameId] ?? null : null);
     });
     vi.stubGlobal("chrome", {
       tabs: { query: vi.fn().mockResolvedValue([{ id: 42 }]) },
       webNavigation: {
-        getAllFrames: vi.fn().mockResolvedValue([
-          { frameId: 0, parentFrameId: -1, url: "https://shell.example/" },
-          { frameId: 190, parentFrameId: 0, url: "https://shell.example/app" },
-          { frameId: 191, parentFrameId: 0, url: "https://blocked.other/" },
-        ]),
+        getAllFrames: vi.fn().mockResolvedValue(frames),
       },
       scripting: { executeScript },
       runtime: {
@@ -303,26 +334,35 @@ describe("observe auto-fallback (shell+iframe sites)", () => {
     // judge `iframe-srcdoc-inherit` fixture exposed this: auto-fallback dropped
     // the srcdoc child, so observe never reported the child button. Same-origin
     // srcdoc must be scanned just like resolveTargetFrames('all-same-origin').
+    const frames = [
+      { frameId: 0, parentFrameId: -1, url: "https://example.com/page", documentId: "doc-0", documentLifecycle: "active" },
+      { frameId: 1, parentFrameId: 0, url: "about:srcdoc", documentId: "doc-1", documentLifecycle: "active" },
+    ];
+    const frameOfDoc = new Map(frames.map((f) => [f.documentId, f.frameId]));
     const executeScript = vi.fn(
-      async ({ target, args }: { target: { frameIds?: number[] }; args?: unknown[] }) => {
-        const frameId = target.frameIds?.[0];
+      async ({ target, args }: { target: { frameIds?: number[]; documentIds?: string[] }; args?: unknown[] }) => {
+        const docId = target.documentIds?.[0];
+        const frameId = target.frameIds?.[0] ?? (docId ? frameOfDoc.get(docId) : undefined);
+        const echo = (result: unknown) => [{ documentId: docId, frameId, result }];
         // getIframeOffset passes the child frame url (string) → return a rect
-        if (typeof args?.[0] === "string") return [{ result: { x: 0, y: 0 } }];
+        if (typeof args?.[0] === "string" && args[0].startsWith("http")) return echo({ x: 0, y: 0 });
+        // 归属操作(scan.claim/claim/scan.check/retire)：页面侧返回布尔结果
+        if (typeof args?.[0] === "string") {
+          const req = args?.[1] as { documentId?: string; frameId?: number } | undefined;
+          return [{ documentId: req?.documentId ?? docId, frameId: req?.frameId ?? frameId, result: true }];
+        }
         // scan call (args[0] is max:number) → page for this frame
         const pages: Record<number, ReturnType<typeof mkPage>> = {
           0: mkPage(1),
           1: mkPage(1),
         };
-        return [{ result: frameId != null ? pages[frameId] ?? null : null }];
+        return echo(frameId != null ? pages[frameId] ?? null : null);
       },
     );
     vi.stubGlobal("chrome", {
       tabs: { query: vi.fn().mockResolvedValue([{ id: 42 }]) },
       webNavigation: {
-        getAllFrames: vi.fn().mockResolvedValue([
-          { frameId: 0, parentFrameId: -1, url: "https://example.com/page" },
-          { frameId: 1, parentFrameId: 0, url: "about:srcdoc" },
-        ]),
+        getAllFrames: vi.fn().mockResolvedValue(frames),
       },
       scripting: { executeScript },
       runtime: {
@@ -345,21 +385,29 @@ describe("observe auto-fallback (shell+iframe sites)", () => {
     // about:blank shares srcdoc's opaque origin ("null") but is NOT srcdoc — it
     // must not be swept in via the same-origin loosening. The loosening is gated
     // on url === "about:srcdoc" precisely to exclude about:blank / data: children.
+    const frames = [
+      { frameId: 0, parentFrameId: -1, url: "https://example.com/page", documentId: "doc-0", documentLifecycle: "active" },
+      { frameId: 1, parentFrameId: 0, url: "about:blank", documentId: "doc-1", documentLifecycle: "active" },
+    ];
+    const frameOfDoc = new Map(frames.map((f) => [f.documentId, f.frameId]));
     const executeScript = vi.fn(
-      async ({ target, args }: { target: { frameIds?: number[] }; args?: unknown[] }) => {
-        const frameId = target.frameIds?.[0];
-        if (typeof args?.[0] === "string") return [{ result: { x: 0, y: 0 } }];
+      async ({ target, args }: { target: { frameIds?: number[]; documentIds?: string[] }; args?: unknown[] }) => {
+        const docId = target.documentIds?.[0];
+        const frameId = target.frameIds?.[0] ?? (docId ? frameOfDoc.get(docId) : undefined);
+        const echo = (result: unknown) => [{ documentId: docId, frameId, result }];
+        if (typeof args?.[0] === "string" && args[0].startsWith("http")) return echo({ x: 0, y: 0 });
+        if (typeof args?.[0] === "string") {
+          const req = args?.[1] as { documentId?: string; frameId?: number } | undefined;
+          return [{ documentId: req?.documentId ?? docId, frameId: req?.frameId ?? frameId, result: true }];
+        }
         const pages: Record<number, ReturnType<typeof mkPage>> = { 0: mkPage(1) };
-        return [{ result: frameId != null ? pages[frameId] ?? null : null }];
+        return echo(frameId != null ? pages[frameId] ?? null : null);
       },
     );
     vi.stubGlobal("chrome", {
       tabs: { query: vi.fn().mockResolvedValue([{ id: 42 }]) },
       webNavigation: {
-        getAllFrames: vi.fn().mockResolvedValue([
-          { frameId: 0, parentFrameId: -1, url: "https://example.com/page" },
-          { frameId: 1, parentFrameId: 0, url: "about:blank" },
-        ]),
+        getAllFrames: vi.fn().mockResolvedValue(frames),
       },
       scripting: { executeScript },
       runtime: {

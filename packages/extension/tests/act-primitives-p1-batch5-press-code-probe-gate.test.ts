@@ -122,7 +122,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const CDP_SRC = readFileSync(join(__dirname, "../src/adapter/cdp.ts"), "utf8");
 const DOM_SRC = readFileSync(join(__dirname, "../src/handlers/dom.ts"), "utf8");
 const RESOLVE_SRC = readFileSync(
-  join(__dirname, "../src/page-side/dom-resolve.ts"),
+  join(__dirname, "../src/page-side/dom-resolve-install.ts"),
   "utf8",
 );
 const SHADOW_SRC = readFileSync(
