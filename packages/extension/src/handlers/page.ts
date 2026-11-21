@@ -28,6 +28,147 @@ async function probeReadyState(tabId: number): Promise<string> {
   }
 }
 
+// history 恢复交接窗口的门控预算。实测交接耗时 ≤270ms（20 轮 back → 立即注入，
+// resp→ready 中位 111.6ms / max 266ms），2s 已有 ~7 倍余量。
+//
+// 为什么不是 3000ms：back/forward 的 handler 最坏耗时 = load 等待 25s + 本预算，
+// 必须给 MCP 传输层留 ≥3s margin（house 规则：内部等待 < 传输超时 30s），
+// 故本预算取 2000ms（25s + 2s = 27s）。
+const FRAME_READY_BUDGET_MS = 2_000;
+// 单次注入探针的上界：坏 SW/tab 态下 executeScript 既不 resolve 也不 reject
+// （见 lib/race-timeout.ts 的说明），裸 await 会把整条链路挂到传输超时。
+const FRAME_READY_PROBE_TIMEOUT_MS = 500;
+const FRAME_READY_POLL_INTERVAL_MS = 20;
+
+/**
+ * 「frame 正在交接」时的错误签名：旧 frame 已移除 / 执行上下文已销毁。
+ *
+ * 只认这几种：它们都意味着「等一等就会好」。其余错误（受限页面、无 host
+ * 权限、标签页已关）不是交接问题，不该被当成交接重试。
+ */
+const FRAME_HANDOVER_PATTERN =
+  /frame with id \d+ was removed|execution context was destroyed|cannot find context with specified id/i;
+/**
+ * 「旧 frame 确实被销毁了」的签名——只有它能证明旧文档已经换掉。
+ *
+ * 「execution context was destroyed」不行：文档被换掉时也可能出现，但它并不
+ * 证明 frame 已销毁（旧 frame 还活着时也可能报），拿它当证据会在交接完成前
+ * 就放行。
+ */
+const FRAME_DESTROYED_PATTERN = /frame with id \d+ was removed/i;
+
+/** 文档身份：URL + timeOrigin（timeOrigin 每个新文档必变；同 URL 重新加载也能区分）。 */
+type FrameIdentity = { href: string; timeOrigin: number };
+
+type FrameProbe =
+  | { ok: true; id: FrameIdentity }
+  | { ok: false; kind: "handover" | "permanent" | "busy"; error: string };
+
+/**
+ * 探一次主 frame：注入一个纯读取函数，拿文档身份。
+ *
+ * 读身份而不只是「能不能注入」：history 恢复交接窗口里 **旧 frame 还能注入**
+ * （实测命令后 ~60ms 内探针照样成功，但那时拿到的还是旧文档），只看「注入成功」
+ * 会在交接完成前就放行，调用方紧接着的操作仍然会撞上 frame 被销毁的那一刻。
+ */
+async function probeFrameIdentity(tabId: number): Promise<FrameProbe> {
+  try {
+    const raced = await raceTimeout(
+      chrome.scripting.executeScript({
+        target: { tabId },
+        func: () => ({ href: location.href, timeOrigin: performance.timeOrigin }),
+      }),
+      FRAME_READY_PROBE_TIMEOUT_MS,
+    );
+    if (raced === TIMED_OUT) {
+      return {
+        ok: false,
+        kind: "busy",
+        error: `page-side probe timed out after ${FRAME_READY_PROBE_TIMEOUT_MS}ms`,
+      };
+    }
+    const value = (raced as Array<{ result?: unknown }>)[0]?.result as
+      | { href?: unknown; timeOrigin?: unknown }
+      | undefined;
+    if (!value || typeof value.href !== "string") {
+      // 交接窗口里 executeScript 可能既不抛错也不带回结果（frame 正在被换掉）。
+      // 这既不是「永久不支持注入」，也不能证明旧 frame 已销毁 ⇒ 当成瞬时（busy）。
+      return { ok: false, kind: "busy", error: "probe returned no document identity" };
+    }
+    return {
+      ok: true,
+      id: {
+        href: value.href,
+        timeOrigin: typeof value.timeOrigin === "number" ? value.timeOrigin : 0,
+      },
+    };
+  } catch (err) {
+    const error = err instanceof Error ? err.message : String(err);
+    return {
+      ok: false,
+      kind: FRAME_HANDOVER_PATTERN.test(error) ? "handover" : "permanent",
+      error,
+    };
+  }
+}
+
+/**
+ * 等主 frame 重新可注入 **且已经是新文档**（history 恢复交接窗口的门控）。
+ *
+ * Why：history 恢复提交后，渲染进程销毁旧 frame、换上新 frame，这个交接窗口内
+ * 任何 page-side 注入（chrome.scripting.executeScript——vortex_evaluate / observe /
+ * act 都走它）都会失败，报 "Frame with ID 0 was removed."。而 handler 只等 tab 级
+ * 'complete' 状态（实测在命令后 ~33ms 就到），远早于 frame 交接完成，于是
+ * vortex_history 先返回、调用方紧接着的第一次操作就炸。实测（20 轮 back → 立即
+ * evaluate）：9/20 轮首次注入即失败。
+ *
+ * 放行判据（三条任一成立即可）：
+ * 1. 探到的文档身份与命令前不同（href 或 timeOrigin 变了）——确定是新文档；
+ * 2. 期间观测到过交接错误（frame 已销毁）——确定旧文档已被换掉；
+ * 3. 探针永久失败（受限页 / 无权限 / 标签页已关）——与本次交接无关，不阻塞。
+ *
+ * 兜底：预算耗尽仍未拿到新文档 → 抛 PAGE_NOT_READY（不静默当成功）。
+ *
+ * @param before 命令前探到的旧文档身份（探不到就传 null，退化成只认交接错误）。
+ */
+async function waitForMainFrameReady(
+  tabId: number,
+  before: FrameIdentity | null = null,
+  budgetMs: number = FRAME_READY_BUDGET_MS,
+): Promise<void> {
+  const deadline = Date.now() + budgetMs;
+  let sawHandover = false;
+  let lastError = "";
+  for (;;) {
+    const probe = await probeFrameIdentity(tabId);
+    if (probe.ok) {
+      const changed =
+        before === null || probe.id.href !== before.href || probe.id.timeOrigin !== before.timeOrigin;
+      if (changed || sawHandover) return;
+      // 还是旧文档（交接没走完）——继续等。
+      lastError = `still on the previous document (${probe.id.href})`;
+    } else {
+      lastError = probe.error;
+      if (probe.kind === "permanent") return;
+      // 只有「frame 确实被销毁」才能当「旧文档已换掉」的证据。
+      if (probe.kind === "handover" && FRAME_DESTROYED_PATTERN.test(probe.error)) {
+        sawHandover = true;
+      }
+    }
+    if (Date.now() >= deadline) {
+      throw vtxError(
+        VtxErrorCode.PAGE_NOT_READY,
+        `The history entry was restored, but the new page was not ready for interaction within ${budgetMs}ms (last probe error: ${lastError}).`,
+        { tabId, extras: { budgetMs, lastProbeError: lastError } },
+        {
+          hint: "The page was restored but its frame was still being swapped, so no page-side injection worked within 2000ms. Call vortex_wait_for with mode='idle' value='network' on the tab, then retry the same action.",
+        },
+      );
+    }
+    await new Promise((resolve) => setTimeout(resolve, FRAME_READY_POLL_INTERVAL_MS));
+  }
+}
+
 // 等 tab 加载完成。监听 chrome.tabs.onUpdated 的 status === "complete"——这是 **tab
 // 级**加载态，反映**所有**网络活动（图片/广告/tracker/持久连接）。真实站 `load`
 // 等所有子资源，常态 >30s 甚至永不触发（DDG dogfood 2026-06-03）。
@@ -64,6 +205,7 @@ function waitForTabLoad(
 }
 
 export { waitForTabLoad };
+export { waitForMainFrameReady };
 
 // 等新文档 DOMContentLoaded（DOM 解析完成、可 query 可交互），不等全部子资源
 // （load/tab 'complete'）。用 chrome.webNavigation.onDOMContentLoaded 主 frame 信号精确
@@ -142,7 +284,10 @@ export async function navigateHistory(
   debuggerMgr: DebuggerManager,
   tid: number,
   delta: -1 | 1,
-): Promise<void> {
+): Promise<FrameIdentity | null> {
+  // 命令前先记下旧文档身份：交接窗口里旧 frame 还能注入，只有身份变了才说明
+  // 新文档已经接管（见 waitForMainFrameReady）。
+  const before = await probeFrameIdentity(tid);
   await debuggerMgr.attach(tid);
   const { currentIndex, entries } = (await debuggerMgr.sendCommand(
     tid,
@@ -198,6 +343,7 @@ export async function navigateHistory(
       recoverable: false,
     });
   }
+  return before.ok ? before.id : null;
 }
 
 // Chrome 拒绝恢复历史项时的 CDP 错误形态：message 是 JSON 文本 {"code":-32000,"message":"Not allowed"}。
@@ -364,16 +510,18 @@ export function registerPageHandlers(router: ActionRouter, debuggerMgr: Debugger
 
     [PageActions.BACK]: async (args, tabId) => {
       const tid = await getActiveTabId(tabId);
-      await navigateHistory(debuggerMgr, tid, -1);
+      const before = await navigateHistory(debuggerMgr, tid, -1);
       const { degraded } = await waitForTabLoad(tid, NAVIGATE_LOAD_TIMEOUT_MS);
+      await waitForMainFrameReady(tid, before);
       const tab = await chrome.tabs.get(tid);
       return { url: tab.url, title: tab.title, ...(degraded ? { degraded: true } : {}) };
     },
 
     [PageActions.FORWARD]: async (args, tabId) => {
       const tid = await getActiveTabId(tabId);
-      await navigateHistory(debuggerMgr, tid, 1);
+      const before = await navigateHistory(debuggerMgr, tid, 1);
       const { degraded } = await waitForTabLoad(tid, NAVIGATE_LOAD_TIMEOUT_MS);
+      await waitForMainFrameReady(tid, before);
       const tab = await chrome.tabs.get(tid);
       return { url: tab.url, title: tab.title, ...(degraded ? { degraded: true } : {}) };
     },
