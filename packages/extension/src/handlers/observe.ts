@@ -1253,6 +1253,14 @@ async function scanOneFrame(
         axRequest: AXRequest | null,
       ) => {
         const scanDocument = document;
+        // 注入侧跑在页面上下文里，拿不到模块作用域的 vtxError：裸 Error 过不了仓库的
+        // 抛错纪律门禁（scripts/check-throw-discipline.mjs）。改抛同形的 Error（带 code
+        // 属性），code 取 @vortex-browser/shared 的 VtxErrorCode 同值。
+        const __vtxFail = (code: string, msg: string): never => {
+          const e = new Error(msg) as Error & { code?: string };
+          e.code = code;
+          throw e;
+        };
         const ownsScan = (request = scanRequest) => {
           const owner = (document as any).__vortexScanOwner;
           return document === scanDocument && !!owner && owner.documentId === request.documentId && owner.frameId === request.frameId &&
@@ -1291,7 +1299,7 @@ async function scanOneFrame(
           if (depth >= SHADOW_WALK_MAX_DEPTH) return acc;
           if (root instanceof Element && root.shadowRoot) acc.push(...querySelectorAllDeep(selector, root.shadowRoot, depth + 1, walkDeadline));
           for (const host of root.querySelectorAll('*')) {
-            if (Date.now() >= walkDeadline) throw new Error("Observe deadline expired");
+            if (Date.now() >= walkDeadline) __vtxFail("TIMEOUT", "Observe deadline expired");
             if (host.shadowRoot) acc.push(...querySelectorAllDeep(selector, host.shadowRoot, depth + 1, walkDeadline));
           }
           return acc;
@@ -1418,7 +1426,7 @@ async function scanOneFrame(
             if (document === scanDocument && states[paginationToken] === item) delete states[paginationToken];
           }, 60_000);
           const marker = (el: Element, name: string, value: string | null, request = scanRequest) => {
-            if (!ownsScan(request) || states[paginationToken] !== item || item.document !== document) throw new Error("Observe lease revoked");
+            if (!ownsScan(request) || states[paginationToken] !== item || item.document !== document) __vtxFail("STALE_SNAPSHOT", "Observe lease revoked");
             if (relevant(observer.takeRecords())) state.changed = true;
             if (value === null) el.removeAttribute(name); else el.setAttribute(name, value);
             const records = observer.takeRecords();
@@ -1447,8 +1455,8 @@ async function scanOneFrame(
           states[paginationToken] = item;
         }
         const setMarker = (el: Element, name: string, value: string) => {
-          if (Date.now() >= deadline) throw new Error("Observe deadline expired");
-          if (!ownsScan()) { scanInvalid = true; throw new Error("Observe lease revoked"); }
+          if (Date.now() >= deadline) __vtxFail("TIMEOUT", "Observe deadline expired");
+          if (!ownsScan()) { scanInvalid = true; __vtxFail("STALE_SNAPSHOT", "Observe lease revoked"); }
           const item = paginationToken && (window as any).__vortexPageSnapshots[paginationToken];
           if (item) item.marker(el, name, value); else el.setAttribute(name, value);
         };
@@ -1962,7 +1970,7 @@ const INTERACTIVE_SELECTORS = [
           const stack: Array<{ el: Element; expanded: boolean }> = [{ el: root, expanded: false }];
           const pending = new WeakSet<Element>();
           while (stack.length) {
-            if (Date.now() >= deadline) throw new Error("Observe deadline expired");
+            if (Date.now() >= deadline) __vtxFail("TIMEOUT", "Observe deadline expired");
             const current = stack.pop()!;
             if (maskedSubtrees.has(current.el)) continue;
             if (isTextMasked(current.el)) { maskedSubtrees.set(current.el, true); continue; }
@@ -1999,7 +2007,7 @@ const INTERACTIVE_SELECTORS = [
             const kids = node.childNodes;
             for (let i = 0; i < kids.length; i++) {
               if (forValue ? out.replace(/\s+/g, " ").trim().length >= 200 : out.length > 96 || count > 250) return;
-              if (forValue && Date.now() >= deadline) throw new Error("Observe deadline expired");
+              if (forValue && Date.now() >= deadline) __vtxFail("TIMEOUT", "Observe deadline expired");
               const child = kids[i];
               if (child.nodeType === 3) {
                 if (!maskedTextNode(child)) out += child.nodeValue || "";
@@ -4084,7 +4092,7 @@ const INTERACTIVE_SELECTORS = [
               const walk = (n: Node): void => {
                 const kids = n.childNodes;
                 for (let i = 0; i < kids.length; i++) {
-                  if (Date.now() >= deadline) throw new Error("Observe deadline expired");
+                  if (Date.now() >= deadline) __vtxFail("TIMEOUT", "Observe deadline expired");
                   const c = kids[i];
                   if (c.nodeType === 3 && !maskedTextNode(c)) parts.push(c.nodeValue ?? "");
                   else if (c.nodeType === 1 && !(c as Element).matches("a[href],button,input,select,textarea,[role=button]")) { parts.push(" "); walk(c); parts.push(" "); }
@@ -4093,7 +4101,7 @@ const INTERACTIVE_SELECTORS = [
               walk(anc);
               out = parts.join("").replace(/\s+/g, " ").trim().slice(0, 200);
             } catch {
-              if (Date.now() >= deadline) throw new Error("Observe deadline expired");
+              if (Date.now() >= deadline) __vtxFail("TIMEOUT", "Observe deadline expired");
               out = "";
             }
             __ancCache.set(anc, out);
@@ -4105,7 +4113,7 @@ const INTERACTIVE_SELECTORS = [
               || ((el.getRootNode() as ShadowRoot | Document) as ShadowRoot).host
               || null;
             while (cur && chain.length < __DUP_HOPS) {
-              if (Date.now() >= deadline) throw new Error("Observe deadline expired");
+              if (Date.now() >= deadline) __vtxFail("TIMEOUT", "Observe deadline expired");
               chain.push(__ancText(cur));
               if (cur === scopeEl) break;
               cur = cur.parentElement
@@ -4141,14 +4149,14 @@ const INTERACTIVE_SELECTORS = [
               if (Array.isArray(full)) {
                 map = new Map<string, number>();
                 for (const row of full) {
-                  if (Date.now() >= deadline) throw new Error("Observe deadline expired");
+                  if (Date.now() >= deadline) __vtxFail("TIMEOUT", "Observe deadline expired");
                   const k = __vxeKeyOf(inst, row);
                   if (k === null) { map = null; break; }
                   map.set(k, (map.get(k) ?? 0) + 1);
                 }
               }
             } catch {
-              if (Date.now() >= deadline) throw new Error("Observe deadline expired");
+              if (Date.now() >= deadline) __vtxFail("TIMEOUT", "Observe deadline expired");
               map = null;
             }
             __vxeKeyIndex.set(inst, map);
@@ -4166,7 +4174,7 @@ const INTERACTIVE_SELECTORS = [
           const __vxeTableOf = (inst: any): any => {
             let cur = inst;
             for (let i = 0; cur && i < 32; i++) {
-              if (Date.now() >= deadline) throw new Error("Observe deadline expired");
+              if (Date.now() >= deadline) __vtxFail("TIMEOUT", "Observe deadline expired");
               if (__vxeIsTable(cur)) return cur;
               cur = cur.$parent;
             }
@@ -4176,7 +4184,7 @@ const INTERACTIVE_SELECTORS = [
           const __vxeParent = (el: Element): Element | null => el === scopeEl ? null : el.parentElement;
           const __vxeClosest = (el: Element | null, selector: string): Element | null => {
             while (el) {
-              if (Date.now() >= deadline) throw new Error("Observe deadline expired");
+              if (Date.now() >= deadline) __vtxFail("TIMEOUT", "Observe deadline expired");
               if (el.matches(selector)) return el;
               el = __vxeParent(el);
             }
@@ -4189,7 +4197,7 @@ const INTERACTIVE_SELECTORS = [
           const __vxeVue3Table = (root: Element): any => {
             let app: Element | null = root;
             while (app && !(app as any).__vue_app__) {
-              if (Date.now() >= deadline) throw new Error("Observe deadline expired");
+              if (Date.now() >= deadline) __vtxFail("TIMEOUT", "Observe deadline expired");
               app = __vxeParent(app);
             }
             if (!app) return null;
@@ -4199,7 +4207,7 @@ const INTERACTIVE_SELECTORS = [
               const pending = [(app as any)._vnode];
               const seen = new Set<any>();
               while (pending.length) {
-                if (Date.now() >= deadline) throw new Error("Observe deadline expired");
+                if (Date.now() >= deadline) __vtxFail("TIMEOUT", "Observe deadline expired");
                 const vnode = pending.pop();
                 if (!vnode || typeof vnode !== "object" || seen.has(vnode)) continue;
                 seen.add(vnode);
@@ -4224,7 +4232,7 @@ const INTERACTIVE_SELECTORS = [
           const __vxeOwnedBy = (inst: any, root: Element): boolean => {
             let a: Element | null = root;
             while (a) {
-              if (Date.now() >= deadline) throw new Error("Observe deadline expired");
+              if (Date.now() >= deadline) __vtxFail("TIMEOUT", "Observe deadline expired");
               const vu = (a as any).__vue__;
               if (vu && __vxeTableOf(vu) === inst) return a === root;
               a = __vxeParent(a);
@@ -4237,7 +4245,7 @@ const INTERACTIVE_SELECTORS = [
             let vxeLike = false;
             let inst: any | null = null;
             while (p) {
-              if (Date.now() >= deadline) throw new Error("Observe deadline expired");
+              if (Date.now() >= deadline) __vtxFail("TIMEOUT", "Observe deadline expired");
               const vu = (p as any).__vue__;
               // 最近的一个能证出表的实例说了算;但不走到底 —— vxeLike 要看完整条祖先链。
               if (vu && !inst) {
@@ -4265,7 +4273,7 @@ const INTERACTIVE_SELECTORS = [
             let root: Element | null = null;
             let q: Element | null = el;
             while (q) {
-              if (Date.now() >= deadline) throw new Error("Observe deadline expired");
+              if (Date.now() >= deadline) __vtxFail("TIMEOUT", "Observe deadline expired");
               if ((q as any).__vue__ === inst) { root = q; break; }
               q = __vxeParent(q);
             }
@@ -4289,7 +4297,7 @@ const INTERACTIVE_SELECTORS = [
             while (p) {
               if (seen.has(p)) return true;
               seen.add(p);
-              if (Date.now() >= deadline) throw new Error("Observe deadline expired");
+              if (Date.now() >= deadline) __vtxFail("TIMEOUT", "Observe deadline expired");
               if (__vxeOverflow(p)) {
                 const pr = p.getBoundingClientRect();
                 const box = p as HTMLElement;
@@ -4299,7 +4307,7 @@ const INTERACTIVE_SELECTORS = [
                   for (let a: Element | null = p; a; a = __vxeVisualParent(a)) {
                     if (ancestors.has(a)) return true;
                     ancestors.add(a);
-                    if (Date.now() >= deadline) throw new Error("Observe deadline expired");
+                    if (Date.now() >= deadline) __vtxFail("TIMEOUT", "Observe deadline expired");
                     const style = getComputedStyle(a);
                     const zoom = style.zoom && style.zoom !== "normal" ? Number(style.zoom) : 1;
                     if (!Number.isFinite(zoom) || zoom <= 0) return true;
@@ -4363,7 +4371,7 @@ const INTERACTIVE_SELECTORS = [
             while (p) {
               if (seen.has(p)) return false;
               seen.add(p);
-              if (Date.now() >= deadline) throw new Error("Observe deadline expired");
+              if (Date.now() >= deadline) __vtxFail("TIMEOUT", "Observe deadline expired");
               const cs = getComputedStyle(p);
               if (p.hasAttribute("hidden") || cs.display === "none" || cs.visibility === "hidden"
                 || cs.visibility === "collapse" || cs.opacity === "0") return false;
@@ -4390,7 +4398,7 @@ const INTERACTIVE_SELECTORS = [
           const __vxeAncestorHidden = (el: Element): boolean => {
             let p = __vxeParent(el);
             while (p) {
-              if (Date.now() >= deadline) throw new Error("Observe deadline expired");
+              if (Date.now() >= deadline) __vtxFail("TIMEOUT", "Observe deadline expired");
               if (__vxeStateHidden(p)) return true;
               p = __vxeParent(p);
             }
@@ -4403,7 +4411,7 @@ const INTERACTIVE_SELECTORS = [
             const walk = (node: Node): void => {
               if (out.length > 200) return;
               for (const child of Array.from(node.childNodes)) {
-                if (Date.now() >= deadline) throw new Error("Observe deadline expired");
+                if (Date.now() >= deadline) __vtxFail("TIMEOUT", "Observe deadline expired");
                 if (child.nodeType === 3) {
                   const p = node as Element;
                   if (p.nodeType === 1 && !__vxeTextVisible(child, p)) continue;
@@ -4437,7 +4445,7 @@ const INTERACTIVE_SELECTORS = [
           const __vxeRowOf = (el: Element, scope: { boundary: Element | null }): Element | null => {
             let p: Element | null = el;
             while (p) {
-              if (Date.now() >= deadline) throw new Error("Observe deadline expired");
+              if (Date.now() >= deadline) __vtxFail("TIMEOUT", "Observe deadline expired");
               if (p.tagName === "TR") return p;
               if (p === scope.boundary) return null;
               p = __vxeParent(p);
@@ -4460,7 +4468,7 @@ const INTERACTIVE_SELECTORS = [
             if (!index || index.get(key) !== 1) return { unavailable: true };
             const parts: string[] = [];
             for (const cand of Array.from(scope.root.querySelectorAll("tr[rowid]"))) {
-              if (Date.now() >= deadline) throw new Error("Observe deadline expired");
+              if (Date.now() >= deadline) __vtxFail("TIMEOUT", "Observe deadline expired");
               if (cand.getAttribute("rowid") !== key || !__vxeFragmentRow(cand)) continue;
               if (__vxeScope(cand).inst !== scope.inst) continue;   // 必须同一实例,嵌套表不混
               const t = __vxeText(cand, el);
@@ -4479,11 +4487,11 @@ const INTERACTIVE_SELECTORS = [
             if (g) g.push(i); else __groups.set(k, [i]);
           }
           for (const idxs of __groups.values()) {
-            if (Date.now() >= deadline) throw new Error("Observe deadline expired");
+            if (Date.now() >= deadline) __vtxFail("TIMEOUT", "Observe deadline expired");
             if (idxs.length < 2) continue;
             const chains = idxs.map((i) => __chainOf(collectedEls[i]));
             for (let a = 0; a < idxs.length; a++) {
-              if (Date.now() >= deadline) throw new Error("Observe deadline expired");
+              if (Date.now() >= deadline) __vtxFail("TIMEOUT", "Observe deadline expired");
               const i = idxs[a];
               // 行上下文(能证明身份时)优先:祖先链在固定列表格里只有固定列自己的文本。
               const vxe = __vxeRowContext(collectedEls[i]);
@@ -4579,7 +4587,7 @@ const INTERACTIVE_SELECTORS = [
         {
           const __vc = querySelectorAllDeep("[role=grid],[role=treegrid],[role=table],[role=listbox],[role=tree]", scanRoot);
           for (const c of __vc) {
-            if (Date.now() >= deadline) throw new Error("Observe deadline expired");
+            if (Date.now() >= deadline) __vtxFail("TIMEOUT", "Observe deadline expired");
             const __cr = (c.getAttribute("role") || "").toLowerCase();
             const __rendered =
               __cr === "grid" || __cr === "treegrid" || __cr === "table"
@@ -4599,7 +4607,7 @@ const INTERACTIVE_SELECTORS = [
           const __seenScrollers = new Set();
           const __cands = querySelectorAllDeep("table,[role=grid],[role=listbox],[role=tree],ul,ol", scanRoot);
           for (const cand of __cands) {
-            if (Date.now() >= deadline) throw new Error("Observe deadline expired");
+            if (Date.now() >= deadline) __vtxFail("TIMEOUT", "Observe deadline expired");
             if (cand.hasAttribute("aria-rowcount") || cand.hasAttribute("aria-setsize")) continue; // ARIA 路径已处理
             const __rows = cand.querySelectorAll("[role=row],tr,li");
             const __rendered = __rows.length;
@@ -4610,7 +4618,7 @@ const INTERACTIVE_SELECTORS = [
             let __scroller = null;
             let __cur = cand;
             for (let i = 0; i < 6 && __cur; i++) {
-              if (Date.now() >= deadline) throw new Error("Observe deadline expired");
+              if (Date.now() >= deadline) __vtxFail("TIMEOUT", "Observe deadline expired");
               const __oy = getComputedStyle(__cur).overflowY;
               if ((__oy === "auto" || __oy === "scroll") && __cur.scrollHeight > __cur.clientHeight) {
                 __scroller = __cur;
@@ -4654,7 +4662,7 @@ const INTERACTIVE_SELECTORS = [
           // 强滚动 div 容器 + 内部 ≥3 高度成簇重复子项 + estTotal>>渲染。廉价 scrollHeight 门先于 getComputedStyle。
           // 成簇用中位数 band[median×0.6,1.6] 替代严格等高:容纳 react-virtuoso 等变高虚拟列表(逐项测量行高不一)。
           for (const __sc of querySelectorAllDeep("div", scanRoot)) {
-            if (Date.now() >= deadline) throw new Error("Observe deadline expired");
+            if (Date.now() >= deadline) __vtxFail("TIMEOUT", "Observe deadline expired");
             if (__seenScrollers.has(__sc)) continue;
             const __sh2 = (__sc as HTMLElement).scrollHeight;
             const __ch2 = (__sc as HTMLElement).clientHeight;
@@ -4664,11 +4672,11 @@ const INTERACTIVE_SELECTORS = [
             let __divRows = 0;
             let __divRowH = 0;
             for (const __w of Array.from((__sc as HTMLElement).querySelectorAll("div"))) {
-              if (Date.now() >= deadline) throw new Error("Observe deadline expired");
+              if (Date.now() >= deadline) __vtxFail("TIMEOUT", "Observe deadline expired");
               const __kids = Array.from(__w.children);
               if (__kids.length < 3) continue;
               const __heights = __kids.map((n) => {
-                if (Date.now() >= deadline) throw new Error("Observe deadline expired");
+                if (Date.now() >= deadline) __vtxFail("TIMEOUT", "Observe deadline expired");
                 return n.getBoundingClientRect().height;
               });
               const __sorted = [...__heights].sort((a, b) => a - b);
@@ -4695,7 +4703,7 @@ const INTERACTIVE_SELECTORS = [
           // 级条目。真源 blindspot-detect.ts detectChartCanvas,改一处须改两处。识别库:
           // echarts(data-zr-dom-id)/ G2(祖先 data-chart-source-type)/ Chart.js(Chart.getChart)。
           for (const __cv of querySelectorAllDeep("canvas", scanRoot)) {
-            if (Date.now() >= deadline) throw new Error("Observe deadline expired");
+            if (Date.now() >= deadline) __vtxFail("TIMEOUT", "Observe deadline expired");
             const __cvEl = __cv as HTMLElement;
             let __clib: string | null = null;
             if (__cvEl.getAttribute("data-zr-dom-id") !== null) {
@@ -4725,7 +4733,7 @@ const INTERACTIVE_SELECTORS = [
           // detectImageBlindspot,改一处须改两处。排除:有意义 alt / alt=""(装饰)/ aria-label/
           // title / aria-hidden / role=presentation / 图标级小图(<80)。
           for (const __im of querySelectorAllDeep("img", scanRoot)) {
-            if (Date.now() >= deadline) throw new Error("Observe deadline expired");
+            if (Date.now() >= deadline) __vtxFail("TIMEOUT", "Observe deadline expired");
             const __imEl = __im as HTMLElement;
             const __altV = (__imEl.getAttribute("alt") || "").trim();
             if (__altV) continue;                                          // 有意义 alt → 可读
@@ -4789,7 +4797,7 @@ const INTERACTIVE_SELECTORS = [
           else if (typeof (window as any).g_history !== "undefined" || (window as any).g !== undefined) __fw = "umi";
           else {
             for (const __s of Array.from(document.scripts)) {
-              if (Date.now() >= deadline) throw new Error("Observe deadline expired");
+              if (Date.now() >= deadline) __vtxFail("TIMEOUT", "Observe deadline expired");
               if (/(?:umi|react|vue|angular|svelte|next|nuxt)/i.test((__s as HTMLScriptElement).src || "")) { __fw = "script-chunk"; break; }
             }
           }
@@ -4803,14 +4811,14 @@ const INTERACTIVE_SELECTORS = [
             // 视觉门(F3):canvas/video 类应用无交互 DOM 但已渲染,面积门与 canvas 盲区一致。
             let __hasVisual = false;
             for (const __v of Array.from(document.querySelectorAll("canvas, video"))) {
-              if (Date.now() >= deadline) throw new Error("Observe deadline expired");
+              if (Date.now() >= deadline) __vtxFail("TIMEOUT", "Observe deadline expired");
               const __vr = (__v as Element).getBoundingClientRect();
               if (__vr.width * __vr.height > 200 * 150) { __hasVisual = true; break; }
             }
             if (!__hasContent && !__hasVisual) {
               let __blank: { sel: string; len: number } | null = null;
               for (const __sel of __mounts) {
-                if (Date.now() >= deadline) throw new Error("Observe deadline expired");
+                if (Date.now() >= deadline) __vtxFail("TIMEOUT", "Observe deadline expired");
                 const __rt = document.querySelector(__sel);
                 if (!__rt) continue;
                 const __len = __rt.innerHTML.trim().length;
