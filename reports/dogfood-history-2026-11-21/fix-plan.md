@@ -74,7 +74,7 @@
 
 ## 6. 修复执行结果（2026-11-21）
 
-**状态**：实现完成 + 本地验证全绿；**未提交、未合并**（等用户授权）。
+**状态**：实现完成 + 验证全绿；**已提交 `faf0f76` 并 ff 合并进本地 `main`**（用户授权，未推送）。
 
 | 计划步骤 | 状态 | 证据 |
 |---|---|---|
@@ -91,4 +91,6 @@
 | D11 真机 DAST 复验 | ✅ | 16/16 PASS；sink 同一调用 `errorCode:"NO_EFFECT"` |
 | D12 记账 | ⚠️ 部分 | `docs/audit-ledger.md` 已记（审计表 + 计数 + 下一候选原语 `drag`）；`dogfood-rotation.mjs record` **不适用**（本轮是 vortex 原生路径，无站点 ⇒ 写进池子会污染站点缺陷趋势）；另发现 SOP §6 说 `record` 会写 `reports/_dogfood/ledger.md`，但脚本实际只写 `rotation-pool.json`（脚本与 SOP 不一致，记为残留问题） |
 
-**未做（需授权）**：合并 `main`、推送。
+**合并后复验（E2，2026-11-21 17:1x）**：主仓 `main` = `faf0f76`；重编译后 `buildStamp=4.1.0+mwq70ba3`，浏览器已重载该构建；主仓逐包回归 extension 17/17、shared errors 26/26、mcp 3/3；主仓 dist 的 DAST **16/16 PASS**。
+
+**未做（需单独授权）**：推送（禁推 master/main）。
