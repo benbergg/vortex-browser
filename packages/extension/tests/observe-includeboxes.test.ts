@@ -72,23 +72,38 @@ function stubChrome(opts: {
    */
   offsetsByChildUrl?: Record<string, { x: number; y: number }>;
 }) {
+  // observe 现在先做「文档归属 claim」（scan.claim 注入）再扫描：mock 必须回显请求里的
+  // documentId/frameId，否则归属判定失败 → STALE_SNAPSHOT。
+  const frames = opts.frames.map((f) => ({
+    documentId: `doc-${f.frameId}`,
+    documentLifecycle: "active",
+    ...f,
+  }));
+  const frameOfDoc = new Map(frames.map((f) => [f.documentId, f.frameId]));
   const executeScript = vi.fn(
-    async ({ target, args }: { target: { frameIds?: number[] }; args?: unknown[] }) => {
-      const frameId = target.frameIds?.[0];
-      // Offset-resolve calls pass a string url as args[0]
+    async ({ target, args }: { target: { frameIds?: number[]; documentIds?: string[] }; args?: unknown[] }) => {
+      const docId = target.documentIds?.[0];
+      const frameId = target.frameIds?.[0] ?? (docId ? frameOfDoc.get(docId) : undefined);
+      // 现行契约：每个 InjectionResult 都要回显 documentId/frameId（真实浏览器行为）。
+      // 归属判定（scan.claim/claim/retire）与扫描结果校验都靠它，缺了就成假失败。
+      const echo = (result: unknown) => [{ documentId: docId, frameId, result }];
       const childUrl = args?.[0];
       if (typeof childUrl === "string" && childUrl.startsWith("http")) {
         const off = opts.offsetsByChildUrl?.[childUrl] ?? { x: 0, y: 0 };
-        return [{ result: off }];
+        return echo(off);
       }
-      if (frameId == null) return [{ result: opts.scanResults[0] ?? null }];
-      return [{ result: opts.scanResults[frameId] ?? null }];
+      if (typeof childUrl === "string") {
+        const req = args?.[1] as { documentId?: string; frameId?: number } | undefined;
+        return [{ documentId: req?.documentId ?? docId, frameId: req?.frameId ?? frameId, result: true }];
+      }
+      if (frameId == null) return echo(opts.scanResults[0] ?? null);
+      return echo(opts.scanResults[frameId] ?? null);
     },
   );
   vi.stubGlobal("chrome", {
     tabs: { query: vi.fn().mockResolvedValue([{ id: 42 }]) },
     webNavigation: {
-      getAllFrames: vi.fn().mockResolvedValue(opts.frames),
+      getAllFrames: vi.fn().mockResolvedValue(frames),
     },
     scripting: { executeScript },
     runtime: {

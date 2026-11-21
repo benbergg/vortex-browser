@@ -55,7 +55,7 @@ describe("observe.ts 投放区发现接线(source-lock)", () => {
   });
 
   it("marker 清理含 data-vtx-dropzone(防标记残留)", () => {
-    expect(OWNERSHIP_SRC).toMatch(/for \(const name of \[[^\]]*"data-vtx-dropzone"[^\]]*\]\)[\s\S]*?el\.getAttribute\(name\) !== request\.token[\s\S]*?item\.marker\(el, name, null\); else el\.removeAttribute\(name\)/);
+    expect(OWNERSHIP_SRC).toMatch(/for \(const name of \[[^\]]*"data-vtx-dropzone"[^\]]*\]\)[\s\S]*?el\.getAttribute\(name\) !== request\.token[\s\S]*?item\.marker\(el, name, null, scan\); else el\.removeAttribute\(name\)/);
     expect(OWNERSHIP_SRC).toContain("if (el.shadowRoot) roots.push(el.shadowRoot)");
   });
 });

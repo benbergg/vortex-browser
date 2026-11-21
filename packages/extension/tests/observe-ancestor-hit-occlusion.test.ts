@@ -25,9 +25,14 @@ function setupDom(html: string, hitId: string, withResolve = true) {
   (globalThis as any).window = win;
   (globalThis as any).document = win.document;
   // inject 环境天然有这些全局;new Function 剥离作用域后靠裸标识符解析,jsdom 须补。
+  // 列表跟着扫描体里用到的 HTML*Element 构造器走(instanceof 用到哪个就补哪个,
+  // 缺一个就是 ReferenceError → 整帧扫描失败 → 元素为空)。
   for (const g of [
     "HTMLElement", "HTMLInputElement", "HTMLAnchorElement", "Element", "Node",
     "ShadowRoot", "DocumentFragment", "SVGElement", "NodeFilter", "Text", "Comment",
+    "HTMLTextAreaElement", "HTMLSelectElement", "HTMLIFrameElement", "HTMLImageElement",
+    "HTMLLabelElement", "HTMLScriptElement", "HTMLDetailsElement", "HTMLMeterElement",
+    "HTMLProgressElement", "HTMLOptionElement", "HTMLSlotElement",
   ]) {
     (globalThis as any)[g] = win[g];
   }
@@ -55,14 +60,17 @@ function stubChrome() {
   vi.stubGlobal("chrome", {
     tabs: { query: vi.fn().mockResolvedValue([{ id: 42 }]) },
     webNavigation: {
-      getAllFrames: vi.fn().mockResolvedValue([{ frameId: 0, parentFrameId: -1, url: "https://x/" }]),
+      getAllFrames: vi.fn().mockResolvedValue([{ frameId: 0, parentFrameId: -1, url: "https://x/", documentId: "doc-0", documentLifecycle: "active" }]),
     },
     scripting: {
       // 真执行注入体:String(func) 后重新求值,模块作用域在此彻底丢失。
-      executeScript: vi.fn(async ({ func, args }: any) => {
+      // 现行契约:每个 InjectionResult 都要回显 documentId/frameId(真实浏览器行为),
+      // 归属判定(claim/retire)与扫描结果校验都靠它。
+      executeScript: vi.fn(async ({ func, args, target }: any) => {
         if (typeof func !== "function") return [{ result: null }];
         const stripped = new Function("return (" + String(func) + ")")();
-        return [{ result: await stripped(...(args ?? [])) }];
+        const r = await stripped(...(args ?? []));
+        return [{ documentId: target?.documentIds?.[0], frameId: target?.frameIds?.[0] ?? 0, result: r }];
       }),
     },
     runtime: { getManifest: vi.fn().mockReturnValue({ host_permissions: ["<all_urls>"] }) },
@@ -94,7 +102,7 @@ describe("observe 遮挡判定与门同判据", () => {
   // dom-resolve。缺这条断言时,删掉 scanOneFrame 里的注入整行,本文件仍然全绿。
   it("扫描前把 dom-resolve 注进目标 frame（承重接线）", async () => {
     await observeFirst(`<button id="b">确定</button>`, "b");
-    expect(vi.mocked(loadPageSideModule)).toHaveBeenCalledWith(42, 0, "dom-resolve");
+    expect(vi.mocked(loadPageSideModule)).toHaveBeenCalledWith(42, 0, "dom-resolve", expect.anything());
   });
 
   it("祖先裁剪命中 → visible:false 且点名祖先（与门的 ancestor 判定一致）", async () => {
