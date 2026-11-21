@@ -100,6 +100,16 @@ describe("navigateHistory — CDP 按 index 后退/前进(绕过 chrome.tabs.goB
     });
     await navigateHistory(dbg as never, 42, -1);
     expect(dbg.attach).toHaveBeenCalledWith(42);
+    // 顺序也断言：attach 必须在第一条 CDP 命令之前（attach 失败时不能发命令）
+    const order: string[] = [];
+    dbg.attach.mockImplementation(async () => { order.push("attach"); });
+    dbg.sendCommand.mockImplementation(async (_tid: number, method: string) => {
+      order.push(method);
+      return { currentIndex: 1, entries: [{ id: 1, url: "a" }, { id: 2, url: "b" }] };
+    });
+    await navigateHistory(dbg as never, 42, -1);
+    expect(order[0]).toBe("attach");
+    expect(order[1]).toBe("Page.getNavigationHistory");
   });
 
   it("back 边界(currentIndex=0): 抛 NO_EFFECT 且不调 navigateToHistoryEntry", async () => {
@@ -134,12 +144,14 @@ describe("navigateHistory — CDP 按 index 后退/前进(绕过 chrome.tabs.goB
 });
 
 describe("D-HIST-1: 浏览器拒绝恢复历史项 ⇒ 结构化 NO_EFFECT(不是裸 CDP 错误)", () => {
-  const target = { id: 10, url: "chrome://newtab/" };
+  // 下面的 catch 分支用例用 https 目标：不可检查的 scheme 已在进 CDP 前被拒绝（见下一个
+  // describe），目标换成 https 才能真正走到「CDP 抛拒绝错误 ⇒ 翻译成 NO_EFFECT」这条路径。
+  const target = { id: 10, url: "https://a.test/" };
 
   it("拒绝恢复 ⇒ NO_EFFECT + recoverable:false + hint 指向 vortex_navigate", async () => {
     const { navigateHistory } = await importPage();
     const dbg = mkDebuggerMgr(
-      { currentIndex: 1, entries: [target, { id: 20, url: "https://example.com/" }] },
+      { currentIndex: 1, entries: [target, { id: 20, url: "https://b.test/" }] },
       { navigateError: refusalError() },
     );
     const err = await navigateHistory(dbg as never, 42, -1).catch((e: unknown) => e);
@@ -154,12 +166,12 @@ describe("D-HIST-1: 浏览器拒绝恢复历史项 ⇒ 结构化 NO_EFFECT(不�
   it("拒绝恢复 ⇒ 文案陈述「浏览器拒绝恢复该历史项」并带目标 URL", async () => {
     const { navigateHistory } = await importPage();
     const dbg = mkDebuggerMgr(
-      { currentIndex: 1, entries: [target, { id: 20, url: "https://example.com/" }] },
+      { currentIndex: 1, entries: [target, { id: 20, url: "https://b.test/" }] },
       { navigateError: refusalError() },
     );
     const err = await navigateHistory(dbg as never, 42, -1).catch((e: unknown) => e);
     expect((err as Error).message).toMatch(/refus/i);
-    expect((err as Error).message).toContain("chrome://newtab/");
+    expect((err as Error).message).toContain("https://a.test/");
   });
 
   it("目标不是内部页 ⇒ 不做「内部页」归因(不做无条件归因)", async () => {
@@ -232,6 +244,51 @@ describe("D-HIST-1: 浏览器拒绝恢复历史项 ⇒ 结构化 NO_EFFECT(不�
     const dbg = mkDebuggerMgr({ currentIndex: 0, entries: [] }, { attachError: original });
     const err = await navigateHistory(dbg as never, 42, -1).catch((e: unknown) => e);
     expect(err).toBe(original);
+  });
+});
+
+describe("不可检查的历史项（内部页/扩展页）⇒ 事先拒绝，不发 CDP 导航", () => {
+  // 恢复这类条目时 Chrome 会把 tab 真的带到那个页面并当场 detach 调试器
+  // （CDP 错误形态是 "Detached while handling command."，翻译不出结构化契约）。
+  // 事先拒绝：页面不动、调试会话不断、错误可执行。
+  const blockedSchemes = ["chrome://newtab/", "edge://newtab/", "chrome-extension://abcdef/page.html"];
+
+  it.each(blockedSchemes)("%s ⇒ NO_EFFECT + recoverable:false + hint，且不发 navigateToHistoryEntry", async (url) => {
+    const { navigateHistory } = await importPage();
+    const dbg = mkDebuggerMgr({
+      currentIndex: 1,
+      entries: [{ id: 10, url }, { id: 20, url: "https://b.test/" }],
+    });
+    const err = await navigateHistory(dbg as never, 42, -1).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(Error);
+    expect((err as VtxError).code).toBe(VtxErrorCode.NO_EFFECT);
+    expect((err as VtxError).extra?.recoverable).toBe(false);
+    expect((err as VtxError).extra?.hint).toContain("vortex_navigate");
+    expect((err as Error).message).toMatch(/refused to restore/i);
+    expect((err as Error).message).toContain(url);
+    // 关键：不能真的去导航那个页面
+    const methods = dbg.sendCommand.mock.calls.map((c) => c[1]);
+    expect(methods).not.toContain("Page.navigateToHistoryEntry");
+  });
+
+  it("about:blank 是可检查的空白文档 ⇒ 正常发导航命令", async () => {
+    const { navigateHistory } = await importPage();
+    const dbg = mkDebuggerMgr({
+      currentIndex: 1,
+      entries: [{ id: 10, url: "about:blank" }, { id: 20, url: "https://b.test/" }],
+    });
+    await navigateHistory(dbg as never, 42, -1);
+    expect(dbg.sendCommand).toHaveBeenCalledWith(42, "Page.navigateToHistoryEntry", { entryId: 10 });
+  });
+
+  it("https 目标是普通页面 ⇒ 正常发导航命令", async () => {
+    const { navigateHistory } = await importPage();
+    const dbg = mkDebuggerMgr({
+      currentIndex: 1,
+      entries: [{ id: 10, url: "https://a.test/" }, { id: 20, url: "https://b.test/" }],
+    });
+    await navigateHistory(dbg as never, 42, -1);
+    expect(dbg.sendCommand).toHaveBeenCalledWith(42, "Page.navigateToHistoryEntry", { entryId: 10 });
   });
 });
 

@@ -162,6 +162,20 @@ export async function navigateHistory(
     );
   }
   const target = entries[targetIndex];
+  // 事先拒绝「vortex 无法检查」的页面：chrome:/edge: 是浏览器内部页，chrome-extension:
+  // 是扩展页（含 vortex 自己的新标签页）——调试器都无法 attach。恢复这类历史项时 Chrome
+  // 会把 tab 真的带到那个页面并当场 detach 调试器，CDP 抛的是
+  // "Detached while handling command."（不是可识别的 "Not allowed"），事后翻译不出结构化
+  // 契约，tab 还停在不可检查的页面上。事先拒绝：页面不动、调试会话不断。
+  if (isUninspectableEntryUrl(target.url)) {
+    throw vtxError(
+      VtxErrorCode.NO_EFFECT,
+      `Vortex refused to restore this history entry (${target.url}). The target entry is a page ` +
+        "vortex cannot inspect (a browser-internal page such as a new tab page, or an extension page).",
+      undefined,
+      { hint: HISTORY_RESTORE_REFUSED_HINT, recoverable: false },
+    );
+  }
   try {
     await debuggerMgr.sendCommand(tid, "Page.navigateToHistoryEntry", {
       entryId: target.id,
@@ -191,6 +205,19 @@ const HISTORY_REFUSED_CDP_CODE = -32000;
 const HISTORY_REFUSED_CDP_MESSAGE = "Not allowed";
 // 浏览器内部页 scheme：目标 entry 是这类页面时 Chrome 不允许历史导航（newtab 等）。
 const INTERNAL_PAGE_SCHEMES = ["chrome:", "edge:", "about:"];
+// 恢复这些 scheme 的历史项会让 tab 落到 vortex 无法检查的页面：调试器 attach 不上去
+// （chrome:/edge: 内部页、chrome-extension: 扩展页），而 about: 不在其列——about:blank
+// 是可脚本化、可调试的空白文档（vortex_navigate 也放行它）。
+const UNINSPECTABLE_ENTRY_SCHEMES = ["chrome:", "edge:", "chrome-extension:"];
+
+function isUninspectableEntryUrl(url: string | undefined): boolean {
+  if (!url) return false;
+  try {
+    return UNINSPECTABLE_ENTRY_SCHEMES.includes(new URL(url).protocol);
+  } catch {
+    return false;
+  }
+}
 
 function isHistoryRestoreRefused(err: unknown): boolean {
   const raw = err instanceof Error ? err.message : typeof err === "string" ? err : "";
