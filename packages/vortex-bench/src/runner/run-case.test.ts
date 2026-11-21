@@ -425,3 +425,52 @@ describe("suite 字段", () => {
     expect(m.passed).toBe(true);
   });
 });
+
+describe("case 前置复位失败必须显式失败", () => {
+  // 复位/导航是 case 的前置条件。MCP 工具失败只带 isError 标记、不 throw，
+  // 静默继续 = 在上个 case 的脏页面上跑本 case（假失败，且报告看不出是环境问题）。
+  it("复位 navigate 返回 isError → case 失败并写明复位失败", async () => {
+    callToolMock.mockImplementation(async (req: ToolCallReq) => {
+      if (req.name === "vortex_navigate" && req.arguments.url === "about:blank") {
+        return textResult("Error [INVALID_PARAMS]: URL scheme not allowed: about:", true);
+      }
+      return textResult("ok");
+    });
+
+    const def: CaseDefinition = {
+      name: "reset-failed",
+      playgroundPath: "/#/reset",
+      async run(ctx) {
+        ctx.assert(true, "不该走到这里");
+      },
+    };
+
+    const m = await runCase(def, OPTS);
+
+    expect(m.passed).toBe(false);
+    expect(m.failureReason).toContain("复位到 about:blank 失败");
+    expect(m.failureReason).toContain("URL scheme not allowed");
+  });
+
+  it("导航到目标页失败 → case 失败并写明导航失败", async () => {
+    callToolMock.mockImplementation(async (req: ToolCallReq) => {
+      if (req.name === "vortex_navigate" && req.arguments.url !== "about:blank") {
+        return textResult("Error [TIMEOUT]: nav timeout", true);
+      }
+      return textResult("ok");
+    });
+
+    const def: CaseDefinition = {
+      name: "nav-failed",
+      playgroundPath: "/#/nav",
+      async run(ctx) {
+        ctx.assert(true, "不该走到这里");
+      },
+    };
+
+    const m = await runCase(def, OPTS);
+
+    expect(m.passed).toBe(false);
+    expect(m.failureReason).toContain("导航到 http://127.0.0.1:5173/#/nav 失败");
+  });
+});

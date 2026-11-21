@@ -231,9 +231,13 @@ export function registerPageHandlers(router: ActionRouter, debuggerMgr: Debugger
         throw vtxError(VtxErrorCode.INVALID_PARAMS,
           `Invalid URL: ${url} (must start with http:// or https://)`);
       }
-      if (!ALLOWED_URL_SCHEMES.includes(parsed.protocol)) {
+      // about:blank 是浏览器的空白文档:无脚本、无特权,是「把当前页清空」的标准动作
+      // (bench 的跨 case 复位、agent 的"回到空白页"都靠它)。只放行精确的 about:blank:
+      // about: 方案下还有 about:srcdoc 这类能执行脚本的变体,不能整方案放行。
+      const isBlankPage = parsed.protocol === "about:" && parsed.pathname === "blank";
+      if (!ALLOWED_URL_SCHEMES.includes(parsed.protocol) && !isBlankPage) {
         throw vtxError(VtxErrorCode.INVALID_PARAMS,
-          `URL scheme not allowed: ${parsed.protocol} (must be one of ${ALLOWED_URL_SCHEMES.join(", ")})`);
+          `URL scheme not allowed: ${parsed.protocol} (must be one of ${ALLOWED_URL_SCHEMES.join(", ")}, or exactly about:blank)`);
       }
       const tid = await getActiveTabId(tabId);
       const waitForLoad = (args.waitForLoad as boolean) ?? true;

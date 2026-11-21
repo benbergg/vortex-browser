@@ -97,6 +97,24 @@ describe("vortex_navigate URL 预校验 (BUG-006)", () => {
     expect(out.error?.code).toBe("INVALID_PARAMS");
   });
 
+  // bench 跨 case 复位、agent 回空白页都靠 about:blank：它是无脚本的空白文档，放行。
+  it("about:blank → 正常 navigate（复位用）", async () => {
+    tabsGet.mockResolvedValue({ id: 42, status: "complete", url: "about:blank" });
+    scriptingExecute.mockResolvedValue([{ result: false }]);
+    const out = await router.dispatch(mkReq("page.navigate", { url: "about:blank", waitForLoad: false })) as
+      { error?: { code: string; message: string } };
+    expect(out.error).toBeUndefined();
+    expect(tabsUpdate).toHaveBeenCalledWith(42, { url: "about:blank" });
+  });
+
+  // 只放行精确的 about:blank：about:srcdoc 能执行脚本，仍须拦。
+  it("about:srcdoc → INVALID_PARAMS（about: 方案不整方案放行）", async () => {
+    const out = await router.dispatch(mkReq("page.navigate", { url: "about:srcdoc?x" })) as
+      { error?: { code: string; message: string } };
+    expect(out.error?.code).toBe("INVALID_PARAMS");
+    expect(tabsUpdate).not.toHaveBeenCalled();
+  });
+
   it("http:// 有效 URL → 正常 navigate (不抛)", async () => {
     tabsGet.mockResolvedValue({ id: 42, status: "complete", url: "http://valid.com/" });
     scriptingExecute.mockResolvedValue([{ result: false }]);  // 不是 ERR 页
