@@ -1423,7 +1423,7 @@ export function registerDomHandlers(
         args: [selector, cdpAvailable, withEffect, windowMs ?? 300, (args.onDialog as string) ?? "dismiss", (args.promptText as string | undefined) ?? null, args.force === true, __t.pagination ?? null],
         world: "MAIN",
         });
-        if (__t.pagination && !results[0]?.result) throw new Error("Synthetic CLICK returned an invalid result");
+        if (__t.pagination && !results[0]?.result) throw vtxError(VtxErrorCode.INTERNAL_ERROR, "Synthetic CLICK returned an invalid result");
       } catch (err) {
         if (!__t.pagination) throw err;
         try { await readDialogCapturedAndDisarm(tid, frameId); } catch (cleanupError) { console.error("[vortex.dom] dialog cleanup failed after CLICK error", cleanupError); }
