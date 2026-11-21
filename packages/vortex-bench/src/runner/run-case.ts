@@ -154,13 +154,16 @@ export async function runCase(def: CaseDefinition, opts: RunCaseOptions): Promis
       // 每个 case 开头固定动作：先 about:blank 卸载旧组件，再 navigate 到目标
       // （同 URL navigate 在 Vue hash router 下不会重 mount，导致跨次 state 残留）
       // suite B（自包含 fixture）省略 playgroundPath —— 直接导航到基址。
+      // 复位/导航失败必须显式失败：MCP 工具错误只是 isError 标记，不 throw。
+      // 静默继续 = 在上个 case 的脏页面上跑本 case（上个 picker 面板还开着，
+      // driver 会操作到旧面板）= 假失败，且报告里看不出是环境问题。
       const startUrl = def.playgroundPath
         ? opts.playgroundUrl + def.playgroundPath
         : (opts.baseUrl ?? opts.playgroundUrl);
-      await ctx.call("vortex_navigate", { url: "about:blank" });
-      await ctx.call("vortex_navigate", {
+      assertNavigateOk(await ctx.call("vortex_navigate", { url: "about:blank" }), "复位到 about:blank");
+      assertNavigateOk(await ctx.call("vortex_navigate", {
         url: startUrl,
-      });
+      }), `导航到 ${startUrl}`);
       await ctx.call("vortex_wait_for", {
         mode: "idle",
         value: "dom",
@@ -283,6 +286,16 @@ function buildMetrics(
   // （既有 baseline.json 按 suite A 的形状生成，多一个键就是报告形状回归）。
   if (def.suite === "b") m.suite = "b";
   return m;
+}
+
+/**
+ * MCP 工具调用的失败只体现在 isError 标记上（不会 throw）。
+ * 复位/导航属于 case 的前置条件，失败必须显式抛错，不能带着脏页面继续跑 case。
+ */
+function assertNavigateOk(res: unknown, what: string): void {
+  if (!Boolean((res as { isError?: boolean } | null)?.isError)) return;
+  const text = extractText(res).trim();
+  throw new Error(`${what} 失败: ${text.slice(0, 200)}`);
 }
 
 function extractText(res: unknown): string {
