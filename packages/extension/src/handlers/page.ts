@@ -1,4 +1,5 @@
 import {
+  HISTORY_RESTORE_REFUSED_HINT,
   MAX_INNER_TIMEOUT_MS,
   PAGE_HANDLER_MARGIN_MS,
   PageActions,
@@ -146,7 +147,7 @@ export async function navigateHistory(
   const { currentIndex, entries } = (await debuggerMgr.sendCommand(
     tid,
     "Page.getNavigationHistory",
-  )) as { currentIndex: number; entries: Array<{ id: number }> };
+  )) as { currentIndex: number; entries: Array<{ id: number; url?: string }> };
   const targetIndex = currentIndex + delta;
   if (targetIndex < 0 || targetIndex >= entries.length) {
     throw vtxError(
@@ -160,9 +161,61 @@ export async function navigateHistory(
       },
     );
   }
-  await debuggerMgr.sendCommand(tid, "Page.navigateToHistoryEntry", {
-    entryId: entries[targetIndex].id,
-  });
+  const target = entries[targetIndex];
+  try {
+    await debuggerMgr.sendCommand(tid, "Page.navigateToHistoryEntry", {
+      entryId: target.id,
+    });
+  } catch (err) {
+    // D-HIST-1: Chrome 拒绝恢复该历史项（如新建标签页这类浏览器内部页）时，CDP 抛
+    // {"code":-32000,"message":"Not allowed"}。裸冒泡会被 router 兜底成
+    // JS_EXECUTION_ERROR + 通用 hint ⇒ 调用方无法分辨「浏览器拒绝」与「vortex 坏了」，
+    // 只会盲目重试。这里翻译成与同函数索引越界分支一致的 NO_EFFECT。
+    // 只认确认的拒绝形态；其余错误原样抛出（不吞错、不改分类）。
+    if (!isHistoryRestoreRefused(err)) throw err;
+    const targetUrl = target.url ?? "";
+    let message = `The browser refused to restore this history entry (${targetUrl || "unknown URL"}).`;
+    if (isInternalPageUrl(targetUrl)) {
+      message +=
+        " The target entry is a browser-internal page (such as a new tab page), which cannot be restored.";
+    }
+    throw vtxError(VtxErrorCode.NO_EFFECT, message, undefined, {
+      hint: HISTORY_RESTORE_REFUSED_HINT,
+      recoverable: false,
+    });
+  }
+}
+
+// Chrome 拒绝恢复历史项时的 CDP 错误形态：message 是 JSON 文本 {"code":-32000,"message":"Not allowed"}。
+const HISTORY_REFUSED_CDP_CODE = -32000;
+const HISTORY_REFUSED_CDP_MESSAGE = "Not allowed";
+// 浏览器内部页 scheme：目标 entry 是这类页面时 Chrome 不允许历史导航（newtab 等）。
+const INTERNAL_PAGE_SCHEMES = ["chrome:", "edge:", "about:"];
+
+function isHistoryRestoreRefused(err: unknown): boolean {
+  const raw = err instanceof Error ? err.message : typeof err === "string" ? err : "";
+  if (!raw.startsWith("{")) return false;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return false;
+  }
+  if (parsed === null || typeof parsed !== "object") return false;
+  const payload = parsed as { code?: unknown; message?: unknown };
+  return (
+    payload.code === HISTORY_REFUSED_CDP_CODE &&
+    payload.message === HISTORY_REFUSED_CDP_MESSAGE
+  );
+}
+
+function isInternalPageUrl(url: string): boolean {
+  if (!url) return false;
+  try {
+    return INTERNAL_PAGE_SCHEMES.includes(new URL(url).protocol);
+  } catch {
+    return false;
+  }
 }
 
 export function registerPageHandlers(router: ActionRouter, debuggerMgr: DebuggerManager): void {

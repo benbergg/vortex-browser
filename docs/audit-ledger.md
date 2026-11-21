@@ -19,7 +19,7 @@ Ralph-loop 跨轮状态锚点。每轮:① 读本文件 + `git log` 定下一个
 
 ## 连续无 bug 计数：0
 
-> `fill_form` clean(计数曾 +1);本轮 `wait_for` 发现真 bug(custom 模式隐藏 tab rAF 冻结挂死),计数归零。下一个候选原语：`history`（back/forward/go，CDP Page.navigateToHistoryEntry 边界）或 `query`。
+> `fill_form` clean(计数曾 +1);本轮 `wait_for` 发现真 bug(custom 模式隐藏 tab rAF 冻结挂死),计数归零。**2026-11-21：审计 `history` 发现真 bug（退到浏览器内部页历史项 ⇒ 裸 CDP "Not allowed" 冒泡成 JS_EXECUTION_ERROR，栈顶 forward 边界却是 NO_EFFECT ⇒ 同类结局两种处理），计数仍为 0**。下一个候选原语：`drag`（或 `file_upload`/`sequence`/`resize`——24 个公开工具面里尚未审计的）。
 
 ## 待办 backlog（非当前原语，独立迭代）
 
@@ -41,6 +41,7 @@ Ralph-loop 跨轮状态锚点。每轮:① 读本文件 + `git log` 定下一个
 | console（GET_LOGS level='all' 哨兵） | bug → 修复 | PR #63 `040cf71` | 2026-06-20 |
 | fill_form | **clean**（部分成功语义对称、DAST 双向证实无假成功/假失败） | — | 2026-06-20 |
 | wait_for（custom 隐藏 tab rAF 冻结挂死） | bug → 修复 | PR 待开 | 2026-06-20 |
+| history（back 退到浏览器内部页 ⇒ 裸 CDP 错误） | bug → 修复（待审核/实施，循环 `dogfood-history-2026-11-21`） | PR 待开 | 2026-11-21 |
 
 ---
 
@@ -55,5 +56,5 @@ Ralph-loop 跨轮状态锚点。每轮:① 读本文件 + `git log` 定下一个
 | L-02 | hub 收到非法 JSON（客户端发 Python repr 的 `"tabId":None`）时返回 **HTML + 内部堆栈**（含 node_modules 绝对路径与请求体片段） | `POST /api/js/evaluate` body=`{"code":"1","tabId":None}` → HTTP 400，body 是 `text/html` 栈页面 | `express.json()` 没有错误中间件，body-parser 的 `entity.parse.failed` 落到 Express 默认错误处理 | 真机 curl（status=400，content-type=text/html，含 `body-parser` 栈） | 新增 `packages/hub/src/json-body-error.ts` + 注册在路由之后；只接管已知 body-parser 错误类型（parse.failed→400、too.large→413），不泄栈、不回显请求体 | 单测 `packages/hub/tests/json-body-error.test.ts`（JSON 形状 / 无栈 / 无请求体 / 正常请求不受影响） |
 | L-03 | 客户端 schema 校验拒绝（14 次，占错误 30%）：`data/tabId must be number`、`data/async must be boolean`、`data/maxLength must be number`、`data/depth must be number` | agent 传 `tabId:"984536681"`、`async:"true"`、`maxLength:"20000"`、`depth:"4"` | **客户端**按 vortex 发布的 strict schema 校验，请求**根本没到服务端**；vortex 侧看不到这类失败（也无 sink 可看）。按源归类：**14 次全部来自 Pi 客户端**（Pi 20 次错误里占 14；Claude Code 26 次错误里 0 次）—— 严格程度是客户端差异，不是所有客户端的共同约束 | transcript 里调用原值 + 同一格式也出现在 playwright MCP（“data must have required property 'action'”），证明是客户端通用校验逻辑；vortex 源码内无该文案；按源错误构成统计 | **本轮不改 schema**（缺客户端 `anyOf` 兼容证据 + 受益面仅严格校验客户端；改公开契约还要同步处理 `computeSchemaHash` 不覆盖 schema 形状的盲点）。方案见报告 §4-A，先查客户端能否放宽/关闭校验 | 未修（待客户端兼容验证） |
 | L-04 | `navigate` TAB_NOT_FOUND（2 次）：调用时 tab 已不可用，vortex 零自愈 | 旧 tabId 在调用时已失效 | 与上一轮同一类：MCP 侧只重试传输层 throw，`resp.error` 形式的业务错误不重试 | 上一轮报告已登记，本周复现 | 未修（证据够但属能力面改动，需单独设计） | 未修 |
-| L-05 | 结构性缺口：诊断只能反解 agent transcript，换客户端就要重做解析器，且拿不到服务端真相 | 本轮三源抽取器写了 400+ 行适配 | vortex 无自身使用/错误 sink | 本轮抽取器工作量即成本证据 | 新增 `packages/mcp/src/usage-log.ts`（默认关，`VORTEX_USAGE_LOG=1` 开启；只记长度与错误码；写盘失败不影响调用；保留 14 天）+ `docs/usage-log.md` | 单测 `packages/mcp/tests/usage-log.test.ts`；抽取器新增 `sink` 源可直读 |
+| L-05 | 结构性缺口：诊断只能反解 agent transcript，换客户端就要重做解析器，且拿不到服务端真相 | 本轮三源抽取器写了 400+ 行适配 | vortex 无自身使用/错误 sink | 本轮抽取器工作量即成本证据 | 新增 `packages/mcp/src/usage-log.ts`（默认关，`VORTEX_USAGE_LOG=1` 开启；只记长度与错误码；写盘失败不影响调用；保留 14 天）+ `docs/usage-log.md` | 单测 `packages/mcp/tests/usage-log.test.ts`；抽取器新增 `sink` 源可直读。**2026-11-21 实测闭合**：sink 真实落盘 `~/.vortex/logs/mcp-2026-11-21.jsonl`（21 行），基线快照 `2026-11-21-week-2026-11-21-sink.json` 的 `perSource[sink]` = 21 calls / 15 ok / 6 errors ⇒ 服务端真相已可直接读（注意坑：`StdioClientTransport` 默认只透传安全白名单 env，客户端必须显式注入 `VORTEX_USAGE_LOG=1` 才会开） |
 

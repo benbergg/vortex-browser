@@ -30,14 +30,26 @@ type NavHistory = {
   entries: Array<{ id: number; url: string }>;
 };
 
-function mkDebuggerMgr(history: NavHistory) {
+function mkDebuggerMgr(history: NavHistory, opts?: { attachError?: Error; historyError?: Error; navigateError?: Error }) {
   return {
-    attach: vi.fn().mockResolvedValue(undefined),
+    attach: vi.fn().mockImplementation(() =>
+      opts?.attachError ? Promise.reject(opts.attachError) : Promise.resolve(undefined),
+    ),
     sendCommand: vi.fn().mockImplementation((_tid: number, method: string) => {
-      if (method === "Page.getNavigationHistory") return Promise.resolve(history);
+      if (method === "Page.getNavigationHistory") {
+        return opts?.historyError ? Promise.reject(opts.historyError) : Promise.resolve(history);
+      }
+      if (method === "Page.navigateToHistoryEntry" && opts?.navigateError) {
+        return Promise.reject(opts.navigateError);
+      }
       return Promise.resolve(undefined);
     }),
   };
+}
+
+/** Chrome 拒绝恢复历史项时的真实 CDP 错误形态（message 是 JSON 文本）。 */
+function refusalError(message = "Not allowed", code = -32000): Error {
+  return new Error(JSON.stringify({ code, message }));
 }
 
 async function importPage() {
@@ -118,6 +130,108 @@ describe("navigateHistory — CDP 按 index 后退/前进(绕过 chrome.tabs.goB
     // 加字符串 code(跨实例稳定)断言被测行为契约。
     expect(err).toBeInstanceOf(Error);
     expect((err as VtxError).code).toBe(VtxErrorCode.NO_EFFECT);
+  });
+});
+
+describe("D-HIST-1: 浏览器拒绝恢复历史项 ⇒ 结构化 NO_EFFECT(不是裸 CDP 错误)", () => {
+  const target = { id: 10, url: "chrome://newtab/" };
+
+  it("拒绝恢复 ⇒ NO_EFFECT + recoverable:false + hint 指向 vortex_navigate", async () => {
+    const { navigateHistory } = await importPage();
+    const dbg = mkDebuggerMgr(
+      { currentIndex: 1, entries: [target, { id: 20, url: "https://example.com/" }] },
+      { navigateError: refusalError() },
+    );
+    const err = await navigateHistory(dbg as never, 42, -1).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(Error);
+    expect((err as VtxError).code).toBe(VtxErrorCode.NO_EFFECT);
+    expect((err as VtxError).extra?.recoverable).toBe(false);
+    expect((err as VtxError).extra?.hint).toContain("vortex_navigate");
+    // 走的是「拒绝分支」而不是「索引越界分支」：CDP 命令确实被调用过
+    expect(dbg.sendCommand).toHaveBeenCalledWith(42, "Page.navigateToHistoryEntry", { entryId: 10 });
+  });
+
+  it("拒绝恢复 ⇒ 文案陈述「浏览器拒绝恢复该历史项」并带目标 URL", async () => {
+    const { navigateHistory } = await importPage();
+    const dbg = mkDebuggerMgr(
+      { currentIndex: 1, entries: [target, { id: 20, url: "https://example.com/" }] },
+      { navigateError: refusalError() },
+    );
+    const err = await navigateHistory(dbg as never, 42, -1).catch((e: unknown) => e);
+    expect((err as Error).message).toMatch(/refus/i);
+    expect((err as Error).message).toContain("chrome://newtab/");
+  });
+
+  it("目标不是内部页 ⇒ 不做「内部页」归因(不做无条件归因)", async () => {
+    const { navigateHistory } = await importPage();
+    const dbg = mkDebuggerMgr(
+      { currentIndex: 1, entries: [{ id: 10, url: "https://a.test/" }, { id: 20, url: "https://b.test/" }] },
+      { navigateError: refusalError() },
+    );
+    const err = await navigateHistory(dbg as never, 42, -1).catch((e: unknown) => e);
+    expect((err as VtxError).code).toBe(VtxErrorCode.NO_EFFECT);
+    expect((err as Error).message).toMatch(/refus/i);
+    expect((err as Error).message).not.toMatch(/internal page/i);
+  });
+
+  it("forward 方向同样可翻译", async () => {
+    const { navigateHistory } = await importPage();
+    const dbg = mkDebuggerMgr(
+      { currentIndex: 0, entries: [{ id: 20, url: "https://example.com/" }, target] },
+      { navigateError: refusalError() },
+    );
+    const err = await navigateHistory(dbg as never, 42, 1).catch((e: unknown) => e);
+    expect((err as VtxError).code).toBe(VtxErrorCode.NO_EFFECT);
+    expect((err as VtxError).extra?.recoverable).toBe(false);
+  });
+
+  it("同 code 不同 message ⇒ 原样抛出(对象同一性)", async () => {
+    const { navigateHistory } = await importPage();
+    const original = refusalError("Not permitted");
+    const dbg = mkDebuggerMgr(
+      { currentIndex: 1, entries: [target, { id: 20, url: "https://example.com/" }] },
+      { navigateError: original },
+    );
+    const err = await navigateHistory(dbg as never, 42, -1).catch((e: unknown) => e);
+    expect(err).toBe(original);
+  });
+
+  it("不同 code 同 message ⇒ 原样抛出", async () => {
+    const { navigateHistory } = await importPage();
+    const original = refusalError("Not allowed", -32001);
+    const dbg = mkDebuggerMgr(
+      { currentIndex: 1, entries: [target, { id: 20, url: "https://example.com/" }] },
+      { navigateError: original },
+    );
+    const err = await navigateHistory(dbg as never, 42, -1).catch((e: unknown) => e);
+    expect(err).toBe(original);
+  });
+
+  it("非 JSON 文本 ⇒ 原样抛出", async () => {
+    const { navigateHistory } = await importPage();
+    const original = new Error("Not allowed");
+    const dbg = mkDebuggerMgr(
+      { currentIndex: 1, entries: [target, { id: 20, url: "https://example.com/" }] },
+      { navigateError: original },
+    );
+    const err = await navigateHistory(dbg as never, 42, -1).catch((e: unknown) => e);
+    expect(err).toBe(original);
+  });
+
+  it("getNavigationHistory 失败 ⇒ 原样抛出(不被翻译)", async () => {
+    const { navigateHistory } = await importPage();
+    const original = new Error("get history boom");
+    const dbg = mkDebuggerMgr({ currentIndex: 0, entries: [] }, { historyError: original });
+    const err = await navigateHistory(dbg as never, 42, -1).catch((e: unknown) => e);
+    expect(err).toBe(original);
+  });
+
+  it("attach 失败 ⇒ 原样抛出(不被翻译)", async () => {
+    const { navigateHistory } = await importPage();
+    const original = new Error("attach boom");
+    const dbg = mkDebuggerMgr({ currentIndex: 0, entries: [] }, { attachError: original });
+    const err = await navigateHistory(dbg as never, 42, -1).catch((e: unknown) => e);
+    expect(err).toBe(original);
   });
 });
 

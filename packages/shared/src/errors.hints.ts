@@ -148,6 +148,20 @@ export const EVALUATE_TIMEOUT_HINT =
   "If the tab stops answering, call vortex_observe on another tab or vortex_navigate to reload it.";
 
 /**
+ * 浏览器拒绝恢复某个历史项时的 hint。
+ *
+ * 背景(D-HIST-1)：Chrome 拒绝 `Page.navigateToHistoryEntry` 导航到某条历史项时,
+ * CDP 抛 `{"code":-32000,"message":"Not allowed"}`。此前该错误裸冒泡 ⇒ 被 router
+ * 兜底成 JS_EXECUTION_ERROR + 通用 hint ⇒ 调用方无法分辨「浏览器拒绝」与「vortex 坏了」,
+ * 只会盲目重试。翻译成 NO_EFFECT 后语义与同函数的索引越界分支一致。
+ *
+ * 约束：必须同时过 I19（50~300 字符、含 next-action 动词与工具/参数名）与 I21。
+ */
+export const HISTORY_RESTORE_REFUSED_HINT =
+  "The browser refused to restore this history entry, so retrying the same back or forward action cannot succeed. " +
+  "Call vortex_navigate with the target URL to open that page directly, or use vortex_history with the opposite direction to stay on the current entry.";
+
+/**
  * 经 vtxError 第 4 参下发的 override hint 登记表。它们和 DEFAULT_ERROR_META 一样
  * 直达 LLM,故必须一起受 I19/I20 不变量扫描——不登记就是绕过契约。
  */
@@ -156,6 +170,7 @@ export const OVERRIDE_HINTS: Record<string, string> = {
   CDP_BUSY_ATTACH_HINT,
   CDP_BUSY_MOUSE_CLICK_HINT,
   EVALUATE_TIMEOUT_HINT,
+  HISTORY_RESTORE_REFUSED_HINT,
   NO_HIT_HINT,
   PAGE_NOT_READY_INJECT_HINT,
   TIMEOUT_PAGE_ALIVE_HINT,
