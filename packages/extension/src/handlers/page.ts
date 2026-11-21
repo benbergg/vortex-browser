@@ -39,6 +39,16 @@ const FRAME_READY_BUDGET_MS = 2_000;
 // （见 lib/race-timeout.ts 的说明），裸 await 会把整条链路挂到传输超时。
 const FRAME_READY_PROBE_TIMEOUT_MS = 500;
 const FRAME_READY_POLL_INTERVAL_MS = 20;
+/**
+ * 「frame 已稳定」的确认窗口：新文档必须在同一个 frame（frameId + documentId 都不变）
+ * 里连续存活这么久，才认为不会再被换掉。
+ *
+ * Why 需要这个窗口：Chrome 的 history 恢复先把 bfcache 文档恢复出来、随后用重新
+ * 加载的文档替换它（documentId 变化，实测间隔中位 116ms / 最大 151ms）。探针命中
+ * 「恢复中的文档」时身份已经是新的，但那个文档马上要死——只判身份变化时仍有
+ * ~2.8% 的轮次在 ~50ms 后报 "Frame with ID 0 was removed"。
+ */
+const FRAME_STABLE_CONFIRM_MS = 300;
 
 /**
  * 「frame 正在交接」时的错误签名：旧 frame 已移除 / 执行上下文已销毁。
@@ -60,8 +70,17 @@ const FRAME_DESTROYED_PATTERN = /frame with id \d+ was removed/i;
 /** 文档身份：URL + timeOrigin（timeOrigin 每个新文档必变；同 URL 重新加载也能区分）。 */
 type FrameIdentity = { href: string; timeOrigin: number };
 
+/**
+ * 一次探针的结果。
+ *
+ * frameId / documentId 是「frame 稳不稳」的判据：history 恢复交接期间 Chrome 会
+ * 先恢复出 bfcache 里的文档、随后用重新加载的文档替换它（实测两次 documentId 切换
+ * 的间隔中位 116ms / 最大 151ms）。光看文档身份变没变看不出这一点——恢复出来的文档
+ * 身份确实是新的（href/timeOrigin 都对），但它马上要被换掉，调用方紧接着的注入
+ * 会撞上 "Frame with ID 0 was removed"。
+ */
 type FrameProbe =
-  | { ok: true; id: FrameIdentity }
+  | { ok: true; id: FrameIdentity; frameId: number; documentId: string }
   | { ok: false; kind: "handover" | "permanent" | "busy"; error: string };
 
 /**
@@ -87,19 +106,20 @@ async function probeFrameIdentity(tabId: number): Promise<FrameProbe> {
         error: `page-side probe timed out after ${FRAME_READY_PROBE_TIMEOUT_MS}ms`,
       };
     }
-    const value = (raced as Array<{ result?: unknown }>)[0]?.result as
-      | { href?: unknown; timeOrigin?: unknown }
-      | undefined;
-    if (!value || typeof value.href !== "string") {
+    const value = (raced as Array<{ result?: unknown; frameId?: number; documentId?: string }>)[0];
+    const identity = value?.result as { href?: unknown; timeOrigin?: unknown } | undefined;
+    if (!identity || typeof identity.href !== "string") {
       // 交接窗口里 executeScript 可能既不抛错也不带回结果（frame 正在被换掉）。
       // 这既不是「永久不支持注入」，也不能证明旧 frame 已销毁 ⇒ 当成瞬时（busy）。
       return { ok: false, kind: "busy", error: "probe returned no document identity" };
     }
     return {
       ok: true,
+      frameId: typeof value?.frameId === "number" ? value.frameId : -1,
+      documentId: typeof value?.documentId === "string" ? value.documentId : "",
       id: {
-        href: value.href,
-        timeOrigin: typeof value.timeOrigin === "number" ? value.timeOrigin : 0,
+        href: identity.href,
+        timeOrigin: typeof identity.timeOrigin === "number" ? identity.timeOrigin : 0,
       },
     };
   } catch (err) {
@@ -122,12 +142,20 @@ async function probeFrameIdentity(tabId: number): Promise<FrameProbe> {
  * vortex_history 先返回、调用方紧接着的第一次操作就炸。实测（20 轮 back → 立即
  * evaluate）：9/20 轮首次注入即失败。
  *
- * 放行判据（三条任一成立即可）：
+ * 放行判据（全部满足）：
  * 1. 探到的文档身份与命令前不同（href 或 timeOrigin 变了）——确定是新文档；
- * 2. 期间观测到过交接错误（frame 已销毁）——确定旧文档已被换掉；
- * 3. 探针永久失败（受限页 / 无权限 / 标签页已关）——与本次交接无关，不阻塞。
+ *    或期间观测到过交接错误（frame 已销毁）——确定旧文档已被换掉；
+ * 2. 同一个 frame + 同一份文档连续稳定存在 ≥ FRAME_STABLE_CONFIRM_MS——确定这个
+ *    frame 不会马上被换掉。
  *
- * 兜底：预算耗尽仍未拿到新文档 → 抛 PAGE_NOT_READY（不静默当成功）。
+ * Why 第 2 条：只判「文档身份变了」不够——Chrome 的 history 恢复会先把 bfcache 里的
+ * 文档恢复出来（documentId A），随后再用重新加载的文档（documentId B）替换它。
+ * 实测（30 轮探针）：A→B 切换间隔中位 116ms / 最大 151ms。只判身份变化时仍有
+ * ~2.8% 的轮次在 history 返回后 ~30-50ms 就报 "Frame with ID 0 was removed."——
+ * 探针命中的是恢复中的文档 A，而它马上要被换掉。
+ * 所以判据是「同一个 frameId + documentId 连续稳定存在 confirmMs」。
+ *
+ * 兜底：预算耗尽仍未拿到稳住的 frame → 抛 PAGE_NOT_READY（不静默当成功）。
  *
  * @param before 命令前探到的旧文档身份（探不到就传 null，退化成只认交接错误）。
  */
@@ -135,19 +163,38 @@ async function waitForMainFrameReady(
   tabId: number,
   before: FrameIdentity | null = null,
   budgetMs: number = FRAME_READY_BUDGET_MS,
+  confirmMs: number = FRAME_STABLE_CONFIRM_MS,
 ): Promise<void> {
   const deadline = Date.now() + budgetMs;
   let sawHandover = false;
   let lastError = "";
+  // 候选 frame：连续稳定观察到的 (frame, document) 及其首次出现时刻。
+  let candidate: { frameId: number; documentId: string; since: number } | null = null;
   for (;;) {
     const probe = await probeFrameIdentity(tabId);
     if (probe.ok) {
       const changed =
         before === null || probe.id.href !== before.href || probe.id.timeOrigin !== before.timeOrigin;
-      if (changed || sawHandover) return;
-      // 还是旧文档（交接没走完）——继续等。
-      lastError = `still on the previous document (${probe.id.href})`;
+      if (!changed && !sawHandover) {
+        // 还是旧文档（交接没走完）——继续等。
+        candidate = null;
+        lastError = `still on the previous document (${probe.id.href})`;
+      } else {
+        const sameSlot =
+          candidate !== null &&
+          candidate.frameId === probe.frameId &&
+          candidate.documentId === probe.documentId;
+        if (!sameSlot) {
+          candidate = { frameId: probe.frameId, documentId: probe.documentId, since: Date.now() };
+        }
+        if (candidate !== null && Date.now() - candidate.since >= confirmMs) {
+          return;
+        }
+        lastError = "the new document is not held by a stable frame yet";
+      }
     } else {
+      // 探针失败：之前的候选作废（frame 可能正在被换掉）。
+      candidate = null;
       lastError = probe.error;
       if (probe.kind === "permanent") return;
       // 只有「frame 确实被销毁」才能当「旧文档已换掉」的证据。
