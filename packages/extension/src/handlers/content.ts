@@ -4,6 +4,13 @@ import { getActiveTabId, buildExecuteTarget, ensureFrameAttached } from "../lib/
 import { resolveTargetOptional } from "../lib/resolve-target.js";
 import { truncateWithTextTrailer, truncateWithHtmlTrailer } from "../lib/truncate.js";
 import { loadPageSideModule } from "../adapter/page-side-loader.js";
+import {
+  TERMINAL_ADAPTERS,
+  collectTerminalLines,
+  selectTerminal,
+  serializeTerminalLines,
+  type TerminalProbe,
+} from "../lib/terminal-readback.js";
 
 export function registerContentHandlers(router: ActionRouter): void {
   router.registerAll({
@@ -44,7 +51,7 @@ export function registerContentHandlers(router: ActionRouter): void {
       if (selector) await loadPageSideModule(tid, frameId, "dom-resolve");
       const results = await chrome.scripting.executeScript({
         target: buildExecuteTarget(tid, frameId),
-        func: async (sel: string | null, opts: { wantValue: boolean; wantAttrs: boolean; maxDepth: number; scroll: boolean; includeAlt: boolean }) => {
+        func: async (sel: string | null, opts: { wantValue: boolean; wantAttrs: boolean; maxDepth: number; scroll: boolean; includeAlt: boolean; terminalContainers?: string[] }) => {
           try {
             // P1 scroll-to-load：提取前分步滚到底触发懒加载。每步滚到底后在
             // grace 窗口内**轮询等待 scrollHeight 增长**——一旦增长立即进下一步
@@ -265,22 +272,42 @@ export function registerContentHandlers(router: ActionRouter): void {
               return result;
             };
             const text = hidden ? "" : walkWithAlt(root, collectShadowText(root, inner));
+            // 目标本身就是终端容器（.xterm-rows / .view-lines / .cm-content）时，innerText
+            // 是补齐到列宽的行（尾随空格淹没），逻辑行要从行元素读——标记出来，
+            // host 侧再采一次逻辑行。
+            const terminalRoot = !!root && (opts.terminalContainers ?? []).some((c) => {
+              try { return root.matches(c); } catch { return false; }
+            });
 
             if (!opts.wantValue && !opts.wantAttrs) {
+              // 普通路径保持 { result: text } 原形（源码级契约：getText 只要 text 时返回纯字符串）
+              if (terminalRoot) return { result: text, terminal: true };
               return { result: text };
             }
             const controls = walkControls(root, opts.maxDepth);
+            if (terminalRoot) return { result: { text, controls }, terminal: true };
             return { result: { text, controls } };
           } catch (err) {
             return { error: err instanceof Error ? err.message : String(err) };
           }
         },
-        args: [selector ?? null, { wantValue, wantAttrs, maxDepth, scroll, includeAlt }],
+        args: [selector ?? null, { wantValue, wantAttrs, maxDepth, scroll, includeAlt, terminalContainers: Object.values(TERMINAL_ADAPTERS).map((a) => a.container) }],
         world: "MAIN",
       });
-      const res = results[0]?.result as { result?: unknown; error?: string };
+      const res = results[0]?.result as { result?: unknown; error?: string; terminal?: boolean };
       if (res?.error) throw vtxError(res.error.startsWith("Element not found:") ? VtxErrorCode.ELEMENT_NOT_FOUND : VtxErrorCode.JS_EXECUTION_ERROR, res.error, selector ? { selector } : undefined);
-      const raw = res?.result;
+      let raw = res?.result;
+      // 目标是终端容器 → 读逻辑行（逐行取行元素），替掉补齐到列宽的 innerText。
+      if (res?.terminal && typeof raw === "string") {
+        const probeRes = await chrome.scripting.executeScript({
+          target: buildExecuteTarget(tid, frameId),
+          func: collectTerminalLines,
+          args: [TERMINAL_ADAPTERS, selector ?? null],
+          world: "MAIN",
+        });
+        const readback = selectTerminal(probeRes[0]?.result as TerminalProbe | undefined);
+        if (readback) raw = serializeTerminalLines(readback.lines);
+      }
       // B3-7: 截断上限优先级 maxLength(默认 10KB=10240) > maxBytes(向后兼容) > 默认 10240.
       // 注: truncateWithTextTrailer 的 limit 单位是 code-point(字符)数, maxBytes 历史命名
       // 但单位同为字符(非真字节), 故两者可统一比较.
