@@ -61,10 +61,33 @@ function nameSourceOf(sources?: AXValueSource[]): AXOverlayInfo["nameSource"] | 
 }
 
 /**
- * 计算单个已扫元素的 AX 语义覆盖增量。input 是该元素的启发式现值子集。
- * 优先级:① AX role 非 generic → 覆盖 role;② AX role=generic 但启发式判交互 → 留启发式 role;
- * ③ name/state/value AX 命中即覆盖;④ nameSource 标来源。
+ * 字体图标字形名(Unicode 私有区字符)不是可用名。
+ *
+ * Chrome 的 AX name-from-content 取 ::before 字体字形:`<button class="vxe-icon-edit">`
+ * 的 AX name 是 U+E61E 字形,而非可读名。AX 命中即覆盖会把 page-side 的
+ * iconFontName 补名("edit")洗成字形 —— agent 读到 `button ""` 定位不到控件
+ * (bench nameless-control-recall #icon-edit P1,2026-06-19 起长期存在)。
+ *
+ * 只认「全是私有区字符」的名字;含文本的混合名(aria-label "编辑 \ue61e")仍按 AX 取。
  */
+function isGlyphName(name: string): boolean {
+  const chars = [...name];
+  if (!chars.length) return false;
+  return chars.every((c) => {
+    const cp = c.codePointAt(0)!;
+    return (
+      (cp >= 0xe000 && cp <= 0xf8ff) || // BMP 私有区
+      (cp >= 0xf0000 && cp <= 0xffffd) || // 增补平面私有区 A
+      (cp >= 0x100000 && cp <= 0x10fffd) // 增补平面私有区 B
+    );
+  });
+}
+
+/**
+* 计算单个已扫元素的 AX 语义覆盖增量。input 是该元素的启发式现值子集。
+* 优先级:① AX role 非 generic → 覆盖 role;② AX role=generic 但启发式判交互 → 留启发式 role;
+* ③ name/state/value AX 命中即覆盖;④ nameSource 标来源。
+*/
 export function computeAXOverlay(
   el: { backendId: number; role: string; name: string; heuristicInteractive?: boolean },
   node: CDPAXNode,
@@ -74,7 +97,9 @@ export function computeAXOverlay(
   if (axRole && !GENERIC_ROLES.has(axRole)) out.role = axRole;
 
   const axName = (node.name?.value ?? "").trim();
-  if (axName) {
+  // 字体图标字形名不覆盖启发式补名(见 isGlyphName 注释);page-side 本就无名时
+  // 保留原行为(字形仍照旧输出,不改现状)。
+  if (axName && !(isGlyphName(axName) && el.name)) {
     out.name = axName;
     out.nameSource = nameSourceOf(node.name?.sources);
   }
