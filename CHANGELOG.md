@@ -6,7 +6,36 @@
 
 ## [Unreleased]
 
+### Added
+
+- **`vortex_press` 支持 `text` 批量键入**：整串文本逐字符送成**受信任按键**（CDP
+  `Input.dispatchKeyEvent` keyDown 带 `text`），终端/编辑器按真实键位处理，而不是往代理里
+  插一段纯文本。标点走 US 布局的物理键位（`code` + `windowsVirtualKeyCode`）——旧的
+  `charCodeAt(0)` 取法把 `-` 映射成 45、`.` 映射成 46，正好撞 DOM 传统 keyCode 的
+  Insert/Delete，xterm.js 按 keyCode 判键会把这两个字符丢掉。换行折成 Enter、制表折成 Tab，
+  `key` 与 `text` 同时给会报 `INVALID_PARAMS`。
+
+  涉及文件：`packages/extension/src/handlers/keyboard.ts`（新增 `textToKeyEvents`/`typeText`，
+  PRESS 增加 `text` 分支）；新增 `packages/extension/tests/keyboard-press-text.test.ts`。
+
 ### Fixed
+
+- **终端/编辑器的隐藏输入代理不再被当"不可见目标"拒掉**：xterm.js / Monaco / CodeMirror
+  用一个离屏 1x1 `textarea` 接键入，vortex 过去把"离屏"一律判成不可交互——
+  `vortex_type` 报 `ELEMENT_OFFSCREEN`，`vortex_fill` 把命令写进代理却让 agent 以为已执行。
+  现在 `vortex_type` 命中终端输入代理时聚焦代理并改走 CDP 受信任按键（焦点没落到代理上、
+  即页面抢了焦点，则拒绝、不送按键），`vortex_fill` 对终端代理拒绝并指向 type/press。
+
+  涉及文件：`packages/extension/src/handlers/dom.ts`（终端代理识别 + TYPE 走 CDP 按键 +
+  FILL 拒绝）；新增 `packages/extension/tests/dom-hidden-helper-input.test.ts`。
+
+- **`vortex_get_text` 读终端内容时拿回逻辑行**：xterm 把每行补齐到列宽，提取走 innerText
+  拿到的是补齐行，正则 grep 命中的是补空格那一份，agent 看不到自己刚键入的命令。
+  现在目标是终端容器（`.xterm-rows`/`.view-lines`/`.cm-content`）时改采逐行的逻辑行。
+
+  涉及文件：`packages/extension/src/handlers/content.ts`（终端容器识别 + 逻辑行读回）；
+  新增 `packages/extension/src/lib/terminal-readback.ts`（终端行采集器，认容器自身即 root
+  的情形）与 `packages/extension/tests/{content-get-text-terminal,terminal-readback}.test.ts`。
 
 - **`vortex_act(action=scroll)` 的未知 `position` 不再静默假成功**：位置词表限定
   `top|bottom|left|right`（大小写与首尾空白归一化后匹配）。词表外的值过去被静默忽略——
