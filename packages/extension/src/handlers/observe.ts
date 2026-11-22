@@ -5091,6 +5091,39 @@ function resolveObserveScope(
   return { selector: resolved.selector, frameId: boundFrameId, ...(resolved.pagination ? { pagination: resolved.pagination } : {}) };
 }
 
+/**
+ * 扫描降级归因:帧级截断 + 质量下降两类信号,与 MCP 侧 buildDegradedNote 同口径。
+ */
+export interface ScanDegradation {
+  timedOutFrames?: number[];
+  budgetSkippedFrames?: number[];
+  unclaimedFrames?: number[];
+  listenerDiscovery?: "timeout" | "error" | "skipped-heavy";
+  axOverlay?: "timeout";
+}
+
+/**
+ * 把降级归因渲染成一句人能读懂的说明,只列真实发生的项。
+ * 失败路径曾固定输出「timed out frames: []」「skipped by budget: []」两个空列表,
+ * 把 listener discovery 超时、AX overlay 超时、未 claim 的 frame 三类真实原因全丢了,
+ * agent 只剩「页面可能太重」的猜测。措辞与 MCP 侧 buildDegradedNote 对齐,免得同一件事两处说法不同。
+ */
+export function describeScanDegradation(degraded: ScanDegradation): string {
+  const parts: string[] = [];
+  if (degraded.timedOutFrames?.length) parts.push(`frames [${degraded.timedOutFrames.join(", ")}] timed out`);
+  if (degraded.budgetSkippedFrames?.length)
+    parts.push(`frames [${degraded.budgetSkippedFrames.join(", ")}] skipped (scan budget exhausted)`);
+  if (degraded.unclaimedFrames?.length)
+    parts.push(`frames [${degraded.unclaimedFrames.join(", ")}] not claimed (document ownership unavailable)`);
+  if (degraded.listenerDiscovery) {
+    parts.push(`listener discovery ${degraded.listenerDiscovery === "timeout"
+      ? "timed out"
+      : degraded.listenerDiscovery === "skipped-heavy" ? "skipped (too many listeners)" : "failed"}`);
+  }
+  if (degraded.axOverlay === "timeout") parts.push("AX overlay timed out (role/name fell back to heuristics)");
+  return parts.join("; ");
+}
+
 export function registerObserveHandlers(router: ActionRouter, debuggerMgr: DebuggerManager): void {
   const navigation = new Map<number, Map<number, number>>();
   const committedDocuments = new Map<number, Map<number, { documentId?: string; lastKnownDocumentId?: string; changes: number }>>();
@@ -5906,7 +5939,7 @@ offScreenActionable: e.offScreenActionable,
       checkDeadline();
 
       // 降级归因:仅在扫描真被截断时出现,正常路径 meta 保持字节不变
-      const degraded =
+      const degraded: ScanDegradation | undefined =
         unclaimedFrames.length > 0 ||
         scanBudget.timedOutFrames.length > 0 ||
         scanBudget.budgetSkippedFrames.length > 0 ||
@@ -5927,10 +5960,11 @@ offScreenActionable: e.offScreenActionable,
           : undefined;
       // 有货就交货并标明缺口,没货就诚实报错——空结果 + success 是纯粹的 silent success
       if (degraded && elementsOut.length === 0) {
+        const reasons = describeScanDegradation(degraded) || "reason not recorded";
         throw vtxError(
           VtxErrorCode.TIMEOUT,
-          `observe scan degraded and yielded 0 elements (timed out frames: [${scanBudget.timedOutFrames.join(", ")}], skipped by budget: [${scanBudget.budgetSkippedFrames.join(", ")}]); page may be too heavy or the tab is in a bad state. Retry with frames='main' to narrow scope, or vortex_wait_for(mode='idle') first.`,
-          { tabId: tid, extras: { timedOutFrames: scanBudget.timedOutFrames, budgetSkippedFrames: scanBudget.budgetSkippedFrames } },
+          `observe scan degraded and yielded 0 elements; degradation reasons: ${reasons}. Retry with frames='main' to narrow scope, or vortex_wait_for(mode='idle') first.`,
+          { tabId: tid, extras: { ...degraded } },
         );
       }
 
