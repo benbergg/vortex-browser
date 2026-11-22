@@ -71,4 +71,51 @@ describe("checkManifest", () => {
     const m = manifest([{ id: "child", interactive: true, expectedName: "子框按钮", expectedRole: null, pattern: "iframe-srcdoc-inherit", joinBy: "name" }]);
     expect(checkManifest(p, oracles, m)).toHaveLength(0); // 既不 recall-miss 也不 precision-miss
   });
+
+  // ── 命中行选择:容器行也会命中子项 oracle(中心落在子项 rect 边界上,centerInside 含边界),
+  //    取 hits[0] 会拿容器的 name/role 去校验 → 假 P1。改为取与 oracle rect IoU 最大者。
+  const listRow = { ref: "@e0", role: "list", name: "首页 关于", flags: [], bbox: [0, 0, 100, 40], frameId: 0 };
+  const itemRow = { ref: "@e1", role: "menuitem", name: "首页", flags: [], bbox: [0, 0, 100, 20], frameId: 0 };
+  const homeOracle: OracleRect[] = [{ id: "home", rect: [0, 0, 100, 20] }];
+  const homeManifest = manifest([
+    { id: "home", interactive: true, expectedName: "首页", expectedRole: "menuitem", pattern: "aria-cursor-dedup" },
+  ]);
+
+  it("容器行命中同一 oracle(中心落在子项边界)→ 校验几何最贴合的子项行", () => {
+    const p = parsed([listRow, itemRow]);
+    expect(checkManifest(p, homeOracle, homeManifest)).toHaveLength(0);
+  });
+
+  it("子项行排在容器行前面 → 选行结果不变", () => {
+    const p = parsed([itemRow, listRow]);
+    expect(checkManifest(p, homeOracle, homeManifest)).toHaveLength(0);
+  });
+
+  it("最贴合行的 name 不符 → 仍报 P1", () => {
+    const p = parsed([listRow, { ...itemRow, name: "首" }]);
+    const findings = checkManifest(p, homeOracle, homeManifest);
+    expect(findings).toHaveLength(1);
+    expect(findings[0].kind).toBe("name-mismatch");
+    expect(findings[0].severity).toBe("P1");
+  });
+
+  it("只有容器行命中 → 仍报 P1(选行规则不掩盖真实错配)", () => {
+    const p = parsed([listRow]);
+    const findings = checkManifest(p, homeOracle, homeManifest);
+    expect(findings.map((f) => f.kind).sort()).toEqual(["name-mismatch", "role-mismatch"]);
+    expect(findings.every((f) => f.severity === "P1")).toBe(true);
+  });
+
+  it("frame offset:行 bbox 是 frame-local,选行前先复合到 top-page", () => {
+    const p: ParsedObserve = {
+      header: { snapshotId: "s", url: "u" },
+      frameOffsets: { 1: [100, 100] },
+      rows: [
+        { ref: "@f1e0", role: "list", name: "首页 关于", flags: [], bbox: [0, 0, 100, 40], frameId: 1 },
+        { ref: "@f1e1", role: "menuitem", name: "首页", flags: [], bbox: [0, 0, 100, 20], frameId: 1 },
+      ],
+    };
+    const oracles: OracleRect[] = [{ id: "home", rect: [100, 100, 100, 20] }];
+    expect(checkManifest(p, oracles, homeManifest)).toHaveLength(0);
+  });
 });
