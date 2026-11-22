@@ -269,6 +269,14 @@ async function inputGate(tabId: number, frameId: number | undefined, selector: s
   }
 }
 
+/**
+ * SCROLL 的 position 词表。词表外的值过去被静默忽略——scrollTo({}) 什么都不滚，
+ * 却仍回 success:true / moved:false（假成功，2026-11-21 Semi dogfood A-2：
+ * position=middle 与绝对像素在虚拟滚动容器上被静默丢弃，agent 无法滚到中段）。
+ * 词表外一律 INVALID_PARAMS 诚实失败；绝对偏移走 x/y 坐标参数。
+ */
+const SCROLL_POSITIONS = new Set(["top", "bottom", "left", "right"]);
+
 export const DOM_CLICK_PAGE_FUNC = async (sel: string, cdpAvailable: boolean, observeEffect: boolean, windowMs: number | undefined, dialogAnswer: string, dialogPromptText: string | null, force: boolean, pagination?: { snapshotId: string; nodeIndex: number } | null) => {
           let inputStarted = false;
           try {
@@ -1900,7 +1908,15 @@ export function registerDomHandlers(
       // let 声明：gate 自愈后重绑，下游统一用 selector。
       let selector = __t?.selector;
       const container = args.container as string | undefined;
-      const position = args.position as string | undefined;
+      const positionRaw = args.position as string | undefined;
+      // 词表校准放扩展侧:词表外直接 INVALID_PARAMS,不再走到 page 侧被静默忽略。
+      const position = positionRaw?.trim().toLowerCase();
+      if (position && !SCROLL_POSITIONS.has(position)) {
+        throw vtxError(
+          VtxErrorCode.INVALID_PARAMS,
+          `Unsupported scroll position: ${positionRaw}. Supported: ${[...SCROLL_POSITIONS].join("|")}; absolute offsets use x/y coordinates.`,
+        );
+      }
       const x = args.x as number | undefined;
       const y = args.y as number | undefined;
       if (!selector && !position && x === undefined && y === undefined) {

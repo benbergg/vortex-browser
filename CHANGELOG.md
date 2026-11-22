@@ -6,7 +6,19 @@
 
 ## [Unreleased]
 
----
+### Fixed
+
+- **`vortex_act(action=scroll)` 的未知 `position` 不再静默假成功**：位置词表限定
+  `top|bottom|left|right`（大小写与首尾空白归一化后匹配）。词表外的值过去被静默忽略——
+  `scrollTo({})` 什么都没滚，却照样回 `success:true` / `moved:false`，返回值不反映
+  「什么都没发生」。2026-11-21 Semi Design dogfood A-2 实证：虚拟滚动容器上
+  `position=middle` 与绝对像素 `26000` 都被丢弃，agent 既滚不到中段、也看不出这次没动。
+  现在词表外直接报 `INVALID_PARAMS`，错误信息列出可用词表并指明绝对偏移走 `x`/`y` 坐标参数。
+
+  涉及文件：`packages/extension/src/handlers/dom.ts`（扩展侧校词表，词表外
+  `vtxError(INVALID_PARAMS)`，在进页面侧之前失败）；新增
+  `packages/extension/tests/dom-scroll-position.test.ts`（词表外诚实失败 + 词表内照常滚动
+  + 大小写归一化）。
 
 ## [4.1.0] - 2026-10-22
 
