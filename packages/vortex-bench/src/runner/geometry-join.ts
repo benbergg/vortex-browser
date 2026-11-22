@@ -4,7 +4,7 @@
 
 import type { ObserveRow, OracleRect } from "../scan-types.js";
 
-type Box = [number, number, number, number];
+export type Box = [number, number, number, number];
 
 /** bbox 中心是否落在 rect 内(含边界) */
 export function centerInside(bbox: Box, rect: Box): boolean {
@@ -31,8 +31,7 @@ export function joinByGeometry(
 
   for (const r of rows) {
     if (r.bbox === null) continue; // 无 bbox 不参与几何 join
-    const [dx, dy] = frameOffsets[r.frameId] ?? [0, 0];
-    const topBox: Box = [r.bbox[0] + dx, r.bbox[1] + dy, r.bbox[2], r.bbox[3]];
+    const topBox = topPageBox(r, frameOffsets);
     const hit = oracles.find((o) => centerInside(topBox, o.rect));
     if (hit) matches.get(hit.id)!.push(r);
     else unmatchedRows.push(r);
@@ -40,8 +39,22 @@ export function joinByGeometry(
   return { matches, unmatchedRows };
 }
 
+/**
+ * 行 bbox → top-page 坐标(frame-local + frameOffsets)。
+ * matches 里存的是原始行(bbox 仍是 frame-local),校验侧算 IoU 时必须再复合一次,
+ * 否则跨 frame 的行会拿错坐标系比。
+ */
+export function topPageBox(
+  row: ObserveRow,
+  frameOffsets: Record<number, [number, number]>,
+): Box {
+  const [dx, dy] = frameOffsets[row.frameId] ?? [0, 0];
+  const b = row.bbox ?? [0, 0, 0, 0];
+  return [b[0] + dx, b[1] + dy, b[2], b[3]];
+}
+
 /** IoU(交并比) */
-function iou(a: Box, b: Box): number {
+export function iou(a: Box, b: Box): number {
   const ax2 = a[0] + a[2], ay2 = a[1] + a[3];
   const bx2 = b[0] + b[2], by2 = b[1] + b[3];
   const ix = Math.max(0, Math.min(ax2, bx2) - Math.max(a[0], b[0]));
