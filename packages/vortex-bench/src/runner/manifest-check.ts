@@ -1,8 +1,34 @@
 // packages/vortex-bench/src/runner/manifest-check.ts
 // observe 输出 vs manifest ground truth → recall/precision/name/role finding。
 
-import type { Finding, OracleRect, ParsedObserve, SynthManifest } from "../scan-types.js";
-import { joinByGeometry } from "./geometry-join.js";
+import type { Finding, ObserveRow, OracleRect, ParsedObserve, SynthManifest } from "../scan-types.js";
+import { iou, joinByGeometry, topPageBox } from "./geometry-join.js";
+
+/**
+ * 命中行里挑「与 oracle 几何最贴合」的那行。
+ * 背景:observe 输出里容器行(如 ul 的 list 行)的 bbox 中心可能正好落在子项 oracle
+ * 的 rect 边界上(centerInside 含边界),于是容器行也会命中该 oracle;而容器行在输出里
+ * 排在子项行之前,取 hits[0] 会拿容器的 name/role 去校验,报出假 P1
+ * (期望 "首页"/menuitem,实际 "首页 关于"/list)。IoU 最大者才对应 oracle 元素本身。
+ * 不按 expectedName/Role 选行——那会让校验变成同义反复,掩盖真实错配。
+ */
+function bestHit(
+  oracle: OracleRect,
+  hits: ObserveRow[],
+  frameOffsets: Record<number, [number, number]>,
+): ObserveRow | undefined {
+  let best: ObserveRow | undefined;
+  let bestIou = -1;
+  for (const r of hits) {
+    if (r.bbox === null) continue;
+    const v = iou(oracle.rect, topPageBox(r, frameOffsets));
+    if (v > bestIou) {
+      bestIou = v;
+      best = r;
+    }
+  }
+  return best ?? hits[0];
+}
 
 export function checkManifest(
   parsed: ParsedObserve,
@@ -14,6 +40,7 @@ export function checkManifest(
 
   for (const entry of manifest.entries) {
     const base = { fixture: manifest.fixture, pattern: entry.pattern, oracleId: entry.id };
+    const oracle = oracles.find((o) => o.id === entry.id);
 
     // name-join 分支(跨 frame fixture):按 expectedName 在 observe 行里找
     if (entry.joinBy === "name") {
@@ -32,8 +59,9 @@ export function checkManifest(
           detail: `interactive 元素 #${entry.id} 未被任何 observe 行命中(漏识别)` });
         continue;
       }
-      // 命中:校验首个命中行的 name/role
-      const row = hits[0];
+      // 命中:校验几何最贴合的那条命中行(容器行也会命中,见 bestHit 注释)
+      const row = (oracle && bestHit(oracle, hits, parsed.frameOffsets)) ?? hits[0];
+      if (!row) continue;
       if (entry.expectedName !== null && row.name !== entry.expectedName) {
         findings.push({ ...base, severity: "P1", kind: "name-mismatch", ref: row.ref,
           detail: `#${entry.id} 期望 name="${entry.expectedName}",实际 "${row.name ?? ""}"` });
@@ -45,7 +73,8 @@ export function checkManifest(
     } else {
       // interactive:false 却被命中 → 噪声
       if (hits.length > 0) {
-        findings.push({ ...base, severity: "P2", kind: "precision-miss", ref: hits[0].ref,
+        const row = (oracle && bestHit(oracle, hits, parsed.frameOffsets)) ?? hits[0];
+        findings.push({ ...base, severity: "P2", kind: "precision-miss", ref: row.ref,
           detail: `#${entry.id} 标注为非交互,却被 observe 输出(噪声)` });
       }
     }
