@@ -6,6 +6,11 @@
  *   1. CHANGELOG [Unreleased] must be empty (already rolled into a version).
  *   2. File paths referenced in the latest version section must appear in
  *      `git diff vPREV..HEAD --name-only`.
+ *
+ * Range pairing: the section decides the range. A released section (its version
+ * has a tag) is checked against its own release range (prev tag..that tag); a
+ * not-yet-released section (new version section, untagged) against
+ * `latestTag..HEAD`. `--from`/`--to` override the range.
  *   3. Numeric claims in the latest section vs same claims in commit messages
  *      (WARN on mismatch, never FAIL — best-effort cross-check).
  *   4. New silent fallback expressions (?? / ||) added in the range must
@@ -34,8 +39,10 @@ function parseArgs(argv) {
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--from") args.from = argv[++i];
-    else if (a === "--to") args.to = argv[++i];
-    else if (a === "--version") args.version = argv[++i];
+    else if (a === "--to") {
+      args.to = argv[++i];
+      args.toGiven = true;
+    } else if (a === "--version") args.version = argv[++i];
     else if (a === "-h" || a === "--help") {
       console.log(
         "Usage: pnpm ship:preflight [--from <tag>] [--to <ref>] [--version <X.Y.Z>]",
@@ -58,6 +65,14 @@ function latestTag() {
     return git("tag --list 'v*' --sort=-version:refname").split("\n")[0];
   } catch {
     return git("describe --tags --abbrev=0");
+  }
+}
+
+function tagList() {
+  try {
+    return git("tag --list 'v*' --sort=-version:refname").split("\n").filter(Boolean);
+  } catch {
+    return [];
   }
 }
 
@@ -349,12 +364,29 @@ function render(resolvedFrom, resolvedTo, versionTag, results) {
 
 function main() {
   const args = parseArgs(process.argv.slice(2));
-  const resolvedFrom = args.from ?? latestTag();
-  const resolvedTo = args.to;
 
   const changelog = readFileSync(resolve(ROOT, "CHANGELOG.md"), "utf8");
   const { unreleased, versions } = parseChangelog(changelog);
   const section = findLatestVersion(versions, args.version);
+
+  // 段与范围必须配对:
+  // - 最新段已发版(有同名 tag)→ 配它自己的发布范围(上一 tag..该 tag);
+  // - 最新段未发版(新版本段,还没打 tag)→ 配 latestTag..HEAD。
+  // 否则 [Unreleased] 为空(仓库处于已发版态)时,已发布段的路径被拿去比发布之后的
+  // diff → Gate 2 必然假 FAIL(Gate 3/4 同样扫错范围)。
+  const tags = tagList();
+  const sectionTagIdx = tags.indexOf(`v${section.version}`);
+  let resolvedFrom = args.from;
+  let resolvedTo = args.to;
+  if (resolvedFrom === undefined) {
+    if (sectionTagIdx >= 0) {
+      const sectionTag = tags[sectionTagIdx];
+      resolvedFrom = tags[sectionTagIdx + 1] ?? git(`rev-list --max-parents=0 ${sectionTag}`);
+      if (!args.toGiven) resolvedTo = sectionTag;
+    } else {
+      resolvedFrom = latestTag();
+    }
+  }
   const versionTag = `[${section.version}]${section.date ? ` - ${section.date}` : ""}`;
 
   const changed = rangeFiles(resolvedFrom, resolvedTo);
