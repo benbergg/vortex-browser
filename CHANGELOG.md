@@ -20,6 +20,18 @@
   `packages/extension/tests/dom-scroll-position.test.ts`（词表外诚实失败 + 词表内照常滚动
   + 大小写归一化）。
 
+- **`vortex_observe` 零元素降级时，错误信息点名真实降级原因**：扫描被截断且一个元素都没扫到
+  时，错误信息过去固定输出两个必空的数组（`timed out frames: []` /
+  `skipped by budget: []`），把真正的原因——listener discovery 超时、AX overlay 超时、
+  没拿到文档归属的 frame——整条丢掉，agent 只剩「页面可能太重或标签页状态坏」的猜测，
+  重试也重试不对。现在错误信息按实际发生的降级项逐条点名（帧号 + 原因），措辞与 MCP 侧
+  成功路径的 `# degraded:` 提示对齐，同一件事两处不再说法不同。
+
+  涉及文件：`packages/extension/src/handlers/observe.ts`（新增 `describeScanDegradation`，
+  零元素失败路径用它渲染降级原因，extras 同步带上真实降级项）；
+  `packages/extension/tests/observe-scan-budget.test.ts`（零元素降级消息点名 listener
+  discovery 超时与卡死帧 + 五类降级文案参数化测试）。
+
 ## [4.1.0] - 2026-10-22
 
 ### Added

@@ -17,7 +17,7 @@ import type { NmRequest } from "@vortex-browser/shared";
 import { JSDOM } from "jsdom";
 import { ActionRouter } from "../src/lib/router.js";
 import { getSnapshotEntry } from "../src/lib/snapshot-store.js";
-import { registerObserveHandlers, frameScanTimeout } from "../src/handlers/observe.js";
+import { registerObserveHandlers, frameScanTimeout, describeScanDegradation } from "../src/handlers/observe.js";
 
 function mkReq(tool: string, args: Record<string, unknown> = {}, tabId?: number): NmRequest {
   return { type: "tool_request", tool, args, requestId: "r-1", ...(tabId != null ? { tabId } : {}) };
@@ -260,6 +260,28 @@ describe("observe 跨 frame 扫描降级", () => {
     expect(resp.error?.code).toBe("TIMEOUT");
   });
 
+  // 单个 frame 卡死 + 另一个 frame 没有元素 → 走的是「零元素降级」路径(而非整体 deadline),
+  // 消息必须点名是哪个 frame 卡死。
+  it("零元素降级时,错误消息点名卡死的 frame", async () => {
+    vi.useFakeTimers();
+    stubChrome({
+      frames: [
+        { frameId: 0, parentFrameId: -1, url: "https://x/" },
+        { frameId: 190, parentFrameId: 0, url: "https://x/ok" },
+      ],
+      scanResults: { 0: mkPage(5), 190: mkPage(0) },
+      wedgedFrames: [0],
+    });
+
+    const p = router.dispatch(mkReq("observe.snapshot", { frames: "all-permitted" }, 42));
+    await vi.advanceTimersByTimeAsync(29_000);
+    const resp = await p;
+
+    expect(resp.error?.code).toBe("TIMEOUT");
+    expect(resp.error?.message).toMatch(/frames \[[^\]]+\] timed out/);
+    expect(resp.error?.message).not.toMatch(/frames \[\]/);
+  });
+
   // live 复现(2026-08-11 gamma.app):1 个 srcdoc iframe,filter=all + scope=full 下
   // 该 frame 独占几乎全部剩余预算,扫描阶段刚好吃满 → AX overlay / 组装 / marker 清理
   // 全在预算之外,叠加后越过 30s 传输线,调用方仍见 "no response" 丑错。
@@ -343,6 +365,49 @@ describe("observe 跨 frame 扫描降级", () => {
       expect(r.elements.length).toBe(5); // 扫描本身不受影响
       expect(r.meta.degraded?.listenerDiscovery).toBe("timeout");
       expect(win.document.__vortexListenerOwner.owner).toBeNull();
+    } finally {
+      dom.window.close();
+    }
+  });
+
+  // 零元素降级路径的消息曾经只列两个必空的数组(timed out frames: [] / skipped by budget: [])，
+  // listener discovery 超时这类真实原因被整条丢掉 → agent 拿到的是「页面可能太重」的猜测。
+  it("零元素降级时,错误消息点名真实降级原因(而不是空列表)", async () => {
+    vi.useFakeTimers();
+    stubChrome({
+      frames: [{ frameId: 0, parentFrameId: -1, url: "https://x/" }],
+      scanResults: { 0: mkPage(0) },
+    });
+    const dom = pageRealm(mkPage(0));
+    const win = dom.window as any;
+    win.Date.now = () => Date.now();
+    const documentId = "degraded-empty-document";
+    vi.mocked(chrome.webNavigation.getAllFrames).mockResolvedValue([{ frameId: 0, parentFrameId: -1, url: "https://x/", documentId }] as any);
+    const execute = vi.mocked(chrome.scripting.executeScript);
+    const scan = execute.getMockImplementation()! as (details: any) => Promise<any>;
+    execute.mockImplementation(async (details: any) => {
+      if (!details.target.documentIds) return scan(details);
+      if (!details.target.documentIds.includes(documentId)) return [];
+      if (details.world !== "MAIN") throw new Error("Ownership injection must use MAIN world");
+      return [{ frameId: 0, documentId, result: await win.eval(`(${String(details.func)})`)(...structuredClone(details.args ?? [])) }] as any;
+    });
+    // debuggerMgr 存在但 CDP 永不响应(冷附加卡住)→ discovery 8s 超时
+    const hangingDbg = {
+      attach: vi.fn(() => new Promise(() => {})),
+      enableDomain: vi.fn(() => new Promise(() => {})),
+      sendCommand: vi.fn(() => new Promise(() => {})),
+    } as any;
+    const r2 = new ActionRouter();
+    registerObserveHandlers(r2, hangingDbg);
+
+    try {
+      const p = r2.dispatch(mkReq("observe.snapshot", { includeAX: false }, 42));
+      await vi.advanceTimersByTimeAsync(9_000);
+      const resp = await p;
+
+      expect(resp.error?.code).toBe("TIMEOUT");
+      expect(resp.error?.message).toContain("listener discovery timed out");
+      expect(resp.error?.message).not.toContain("timed out frames: []");
     } finally {
       dom.window.close();
     }
@@ -461,5 +526,37 @@ describe("observe 跨 frame 扫描降级", () => {
 
     expect(r.elements.length).toBe(12);
     expect(r.meta.degraded).toBeUndefined();
+  });
+});
+
+// 失败路径的消息必须逐类点名降级原因,否则 agent 拿到的仍是猜测。
+describe("降级归因文案", () => {
+  it.each([
+    [{ timedOutFrames: [3] }, "frames [3] timed out"],
+    [{ budgetSkippedFrames: [4, 5] }, "frames [4, 5] skipped (scan budget exhausted)"],
+    [{ unclaimedFrames: [6] }, "frames [6] not claimed (document ownership unavailable)"],
+    [{ listenerDiscovery: "timeout" as const }, "listener discovery timed out"],
+    [{ listenerDiscovery: "skipped-heavy" as const }, "listener discovery skipped (too many listeners)"],
+    [{ listenerDiscovery: "error" as const }, "listener discovery failed"],
+    [{ axOverlay: "timeout" as const }, "AX overlay timed out (role/name fell back to heuristics)"],
+  ])("单类降级 %j → 文案点名该原因", (degraded, expected) => {
+    expect(describeScanDegradation(degraded)).toBe(expected);
+  });
+
+  it("组合降级时每一类都保留,不丢项", () => {
+    const text = describeScanDegradation({
+      timedOutFrames: [1],
+      unclaimedFrames: [2],
+      listenerDiscovery: "timeout",
+      axOverlay: "timeout",
+    });
+    expect(text).toContain("frames [1] timed out");
+    expect(text).toContain("frames [2] not claimed");
+    expect(text).toContain("listener discovery timed out");
+    expect(text).toContain("AX overlay timed out");
+  });
+
+  it("没有降级项时不产出空文案", () => {
+    expect(describeScanDegradation({})).toBe("");
   });
 });
