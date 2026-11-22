@@ -6,6 +6,7 @@ import { resolveTarget, resolveTargetOptional } from "../lib/resolve-target.js";
 import { getSnapshotEntry } from "../lib/snapshot-store.js";
 import { pageQuery as nativePageQuery, mapPageError } from "../adapter/native.js";
 import { loadPageSideModule } from "../adapter/page-side-loader.js";
+import { typeText } from "./keyboard.js";
 import { clickBBox as cdpClickBBox, cdpClickElement } from "../adapter/cdp.js";
 import { getIframeOffset } from "../lib/iframe-offset.js";
 import {
@@ -276,6 +277,29 @@ async function inputGate(tabId: number, frameId: number | undefined, selector: s
  * 词表外一律 INVALID_PARAMS 诚实失败；绝对偏移走 x/y 坐标参数。
  */
 const SCROLL_POSITIONS = new Set(["top", "bottom", "left", "right"]);
+
+/**
+ * 是否终端/编辑器的隐藏输入代理（xterm.js / Monaco / CodeMirror 的 helper textarea）。
+ * 放行范围保守：必须是 input/textarea、落在已知宿主容器内、非 disabled/readonly。
+ * 宿主容器本身不是通行证——同样形状的蜜罐（离屏 textarea 但不在宿主内）仍走原判定。
+ */
+export function isTerminalInputProxy(el: Element): boolean {
+  const tag = el.tagName;
+  if (tag !== "TEXTAREA" && tag !== "INPUT") return false;
+  const field = el as HTMLTextAreaElement;
+  if (field.disabled || field.readOnly) return false;
+  for (let p: Element | null = el.parentElement; p; p = p.parentElement) {
+    if (!p.classList) continue;
+    if (
+      p.classList.contains("xterm") ||
+      p.classList.contains("monaco-editor") ||
+      p.classList.contains("cm-editor")
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
 
 export const DOM_CLICK_PAGE_FUNC = async (sel: string, cdpAvailable: boolean, observeEffect: boolean, windowMs: number | undefined, dialogAnswer: string, dialogPromptText: string | null, force: boolean, pagination?: { snapshotId: string; nodeIndex: number } | null) => {
           let inputStarted = false;
@@ -635,6 +659,37 @@ export const DOM_TYPE_PAGE_FUNC = (sel: string, selectAll: boolean, pagination?:
               error: `Element ${sel} has zero dimensions (detached or hidden)`,
             };
           }
+          // 终端/编辑器的隐藏输入代理（xterm.js / Monaco 的 1x1 离屏 textarea）：
+          // 离屏是设计如此，不是"页面上误点的不可见目标"——报 ELEMENT_OFFSCREEN 会让
+          // agent 无法向终端键入。放行条件收得很窄（与模块级 isTerminalInputProxy 同款，
+          // 内联副本：executeScript 注入丢模块作用域，不能裸引用模块 helper）。
+          const __isTerminalProxy = ((): boolean => {
+            const __tag = el.tagName;
+            if (__tag !== "TEXTAREA" && __tag !== "INPUT") return false;
+            const __field = el as HTMLTextAreaElement;
+            if (__field.disabled || __field.readOnly) return false;
+            for (let __p: Element | null = el.parentElement; __p; __p = __p.parentElement) {
+              if (!__p.classList) continue;
+              if (
+                __p.classList.contains("xterm") ||
+                __p.classList.contains("monaco-editor") ||
+                __p.classList.contains("cm-editor")
+              ) return true;
+            }
+            return false;
+          })();
+          if (__isTerminalProxy) {
+            // 聚焦代理（preventScroll：别把页面滚到离屏坐标）；焦点没落到代理上说明
+            // 页面把焦点抢走了——此时拒绝，不送按键。
+            el.focus({ preventScroll: true } as FocusOptions);
+            if (document.activeElement !== el) {
+              return {
+                errorCode: "INVALID_PARAMS",
+                error: `Element ${sel} is a terminal input proxy but focus did not land on it (page took focus); type rejected before dispatch`,
+              };
+            }
+            return { ok: true, extras: { terminalProxy: true } };
+          }
           const inView =
             rect.top < window.innerHeight &&
             rect.bottom > 0 &&
@@ -720,6 +775,28 @@ export const DOM_FILL_PAGE_FUNC = (sel: string, val: string, pagination?: { snap
               };
             }
             const el = els[0] as HTMLInputElement;
+            // 终端/编辑器的隐藏输入代理:fill 写进去的不是终端内容(终端靠按键流),
+            // 只会污染代理并让 agent 以为命令已执行——拒绝并指向 type/press。
+            // 内联副本(与模块级 isTerminalInputProxy 同款):executeScript 注入丢模块作用域。
+            if (el.tagName === "TEXTAREA" || el.tagName === "INPUT") {
+              let __isProxy = false;
+              if (!el.disabled && !el.readOnly) {
+                for (let __p: Element | null = el.parentElement; __p; __p = __p.parentElement) {
+                  if (!__p.classList) continue;
+                  if (
+                    __p.classList.contains("xterm") ||
+                    __p.classList.contains("monaco-editor") ||
+                    __p.classList.contains("cm-editor")
+                  ) { __isProxy = true; break; }
+                }
+              }
+              if (__isProxy) {
+                return {
+                  errorCode: "INVALID_PARAMS",
+                  error: `Element ${sel} is a terminal input proxy (hidden helper of a terminal/editor); use type or press to send keys, not fill`,
+                };
+              }
+            }
             // 探测 disabled 走门同款 isEnabled(含 aria-disabled),与 CLICK/TYPE 一致(#26)。
             if (!(window as any).__vortexDomResolve.isEnabled(el)) {
               return { errorCode: "ELEMENT_DISABLED", error: `Element ${sel} is disabled` };
@@ -1553,6 +1630,14 @@ export function registerDomHandlers(
       await armDialogPolicy(tid, frameId, "dismiss", null);
       let inputFailed = false;
       try {
+
+      // 终端输入代理:页面侧已聚焦(焦点没落在代理上时已拒绝),改走 CDP 受信任按键。
+      const probeExtras = (probe as { extras?: Record<string, unknown> } | undefined)?.extras;
+      if (probeExtras?.terminalProxy === true) {
+        await debuggerMgr.attach(tid);
+        const typed = await typeText(debuggerMgr, tid, text);
+        return { success: true, path: "cdp-keys", typed };
+      }
 
       if (probe?.isContentEditable) {
         // contentEditable path — Input.insertText is the only way to

@@ -74,6 +74,90 @@ function keyToVk(key: string): number {
   return KEY_CODES[key] ?? (key.length === 1 ? key.toUpperCase().charCodeAt(0) : 0);
 }
 
+// ── 批量键入（vortex_press text=…）────────────────────────────────────────
+// 整串文本逐字符送成**受信任按键**（CDP Input.dispatchKeyEvent keyDown 带 text），
+// 页面收到的是真按键输入而非 insertText —— 终端/编辑器按真实键位处理。
+//
+// US 布局：标点字符 → 物理键 { code, windowsVirtualKeyCode }。
+// shift 变体与基础字符共用同一物理键（Windows 语义）："-"→189、"."→190、"|"→220。
+// 旧实现对单字符取 charCodeAt(0)："-"→45、"."→46 —— 正好撞 DOM 传统 keyCode 的
+// Insert/Delete，xterm.js 按 keyCode 判键会把这两个字符丢掉（真机："ls -lt"→"ls lt"）。
+const PUNCT_PHYSICAL: Record<string, { code: string; vk: number }> = {
+  "-": { code: "Minus", vk: 189 },
+  "=": { code: "Equal", vk: 187 },
+  "[": { code: "BracketLeft", vk: 219 },
+  "]": { code: "BracketRight", vk: 221 },
+  "\\": { code: "Backslash", vk: 220 },
+  ";": { code: "Semicolon", vk: 186 },
+  "'": { code: "Quote", vk: 222 },
+  ",": { code: "Comma", vk: 188 },
+  ".": { code: "Period", vk: 190 },
+  "/": { code: "Slash", vk: 191 },
+  "`": { code: "Backquote", vk: 192 },
+};
+
+/** shift 变体 → 同一物理键上的基础字符（取基础字符的 code/vk）。 */
+const SHIFTED_TO_BASE: Record<string, string> = {
+  _: "-", "+": "=", "{": "[", "}": "]", "|": "\\", ":": ";", "\"": "'",
+  "<": ",", ">": ".", "?": "/", "~": "`",
+  "!": "1", "@": "2", "#": "3", "$": "4", "%": "5", "^": "6", "&": "7", "*": "8", "(": "9", ")": "0",
+};
+
+/** 单个按键事件（CDP 受信任按键）。 */
+export interface TypedKeyEvent {
+  key: string;
+  code: string;
+  text: string;
+  windowsVirtualKeyCode: number;
+}
+
+/**
+ * 文本 → 逐字符按键事件。
+ * 换行（\n / \r\n / \r）→ Enter；制表 → Tab；CRLF 折成一次回车。
+ */
+export function textToKeyEvents(text: string): TypedKeyEvent[] {
+  const out: TypedKeyEvent[] = [];
+  const normalized = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  for (const ch of normalized) {
+    if (ch === "\n") {
+      out.push({ key: "Enter", code: "Enter", text: "\r", windowsVirtualKeyCode: 13 });
+    } else if (ch === "\t") {
+      out.push({ key: "Tab", code: "Tab", text: "\t", windowsVirtualKeyCode: 9 });
+    } else if (ch === " ") {
+      out.push({ key: " ", code: "Space", text: " ", windowsVirtualKeyCode: 32 });
+    } else if (/^[a-zA-Z]$/.test(ch)) {
+      out.push({ key: ch, code: "Key" + ch.toUpperCase(), text: ch, windowsVirtualKeyCode: ch.toUpperCase().charCodeAt(0) });
+    } else if (/^[0-9]$/.test(ch)) {
+      out.push({ key: ch, code: "Digit" + ch, text: ch, windowsVirtualKeyCode: ch.charCodeAt(0) });
+    } else {
+      const punct = PUNCT_PHYSICAL[SHIFTED_TO_BASE[ch] ?? ch];
+      if (punct) {
+        out.push({ key: ch, code: punct.code, text: ch, windowsVirtualKeyCode: punct.vk });
+      } else {
+        // 无对应物理键的字符（中文、emoji 等）：按纯文本键位送。
+        out.push({ key: ch, code: "", text: ch, windowsVirtualKeyCode: 0 });
+      }
+    }
+  }
+  return out;
+}
+
+/** 把文本逐字符送成受信任按键。返回送出的按键数。 */
+export async function typeText(debuggerMgr: DebuggerManager, tid: number, text: string): Promise<number> {
+  const events = textToKeyEvents(text);
+  for (const ev of events) {
+    await debuggerMgr.sendCommand(tid, "Input.dispatchKeyEvent", {
+      type: "keyDown", key: ev.key, code: ev.code, text: ev.text,
+      windowsVirtualKeyCode: ev.windowsVirtualKeyCode, modifiers: 0,
+    });
+    await debuggerMgr.sendCommand(tid, "Input.dispatchKeyEvent", {
+      type: "keyUp", key: ev.key, code: ev.code,
+      windowsVirtualKeyCode: ev.windowsVirtualKeyCode, modifiers: 0,
+    });
+  }
+  return events.length;
+}
+
 // 修饰键名 → CDP modifiers 标志位(含常见别名 Cmd/Command/Win/Super→Meta、Option→Alt)。
 const MODIFIERS: Record<string, number> = {
   Alt: 1, Control: 2, Ctrl: 2, Meta: 4, Shift: 8,
@@ -269,7 +353,19 @@ export function registerKeyboardHandlers(
   router.registerAll({
     [KeyboardActions.PRESS]: async (args, tabId) => {
       const tid = await getActiveTabId((args.tabId as number | undefined) ?? tabId);
-      const expr = args.key as string;
+      const expr = args.key as string | undefined;
+      const text = args.text as string | undefined;
+      if (expr && text !== undefined) {
+        throw vtxError(VtxErrorCode.INVALID_PARAMS, "provide either key or text, not both");
+      }
+      // 批量键入：整串文本逐字符送成受信任按键（终端/编辑器按真实键位处理）。
+      // text 存在时不再走 key 必填校验——空串也算一次批量键入（typed 0）。
+      if (text !== undefined) {
+        if (typeof text !== "string") throw vtxError(VtxErrorCode.INVALID_PARAMS, "text must be a string");
+        await debuggerMgr.attach(tid);
+        const typed = await typeText(debuggerMgr, tid, text);
+        return { success: true, typed, path: "cdp-keys" };
+      }
       if (!expr) throw vtxError(VtxErrorCode.INVALID_PARAMS, "key is required");
 
       const { key, modifiers, modifierKeys } = parseKeyExpression(expr);
