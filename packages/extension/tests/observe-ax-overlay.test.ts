@@ -69,6 +69,35 @@ describe("computeAXOverlay", () => {
     expect(r.nameSource).toBe("placeholder");
   });
 
+  // 字体图标字形名(PUA)覆盖启发式补名(bench nameless-control-recall #icon-edit P1):
+  // Chrome AX name-from-content 取 ::before 字形(U+E61E),会把 page-side 的
+  // iconFontName 补名("edit")洗成字形 → observe 输出 button "" agent 定位不到。
+  it("AX name 是字体图标字形(PUA)且启发式有补名 → 不覆盖,保留补名", () => {
+    const node = ax({ role: { value: "button" }, name: { value: "\ue61e" } });
+    const r = computeAXOverlay({ backendId: 30, role: "button", name: "edit" }, node);
+    expect(r.name).toBeUndefined();
+    expect(r.nameSource).toBeUndefined();
+    expect(r.role).toBe("button"); // role 仍取 AX
+  });
+
+  it("AX name 是字体图标字形(PUA)且启发式无名 → 维持原行为(仍取 AX 字形名)", () => {
+    const node = ax({ role: { value: "button" }, name: { value: "\ue61e" } });
+    const r = computeAXOverlay({ backendId: 31, role: "button", name: "" }, node);
+    expect(r.name).toBe("\ue61e");
+  });
+
+  it("AX name 是普通文本 → 照常覆盖(不误伤)", () => {
+    const node = ax({ role: { value: "button" }, name: { value: "编辑" } });
+    const r = computeAXOverlay({ backendId: 32, role: "button", name: "edit" }, node);
+    expect(r.name).toBe("编辑");
+  });
+
+  it("AX name 含文本+字形(混合) → 照常覆盖(只挡纯字形名)", () => {
+    const node = ax({ role: { value: "button" }, name: { value: "编辑 \ue61e" } });
+    const r = computeAXOverlay({ backendId: 33, role: "button", name: "edit" }, node);
+    expect(r.name).toBe("编辑 \ue61e");
+  });
+
   it("valuetext 优先于 value", () => {
     const node = ax({
       role: { value: "slider" }, value: { value: "0.5" },
