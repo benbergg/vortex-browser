@@ -25,15 +25,19 @@ function identity(r: ObserveRow): string {
   return `${r.role} ${r.name ?? ""}`;
 }
 
-/** INV-1:无 mutation 连跑两次 observe,可交互集合(role+name 计数)必须一致 */
-export function checkStability(a: ParsedObserve, b: ParsedObserve, fixture: string, pattern: string): Finding[] {
+/**
+ * INV-1:无 mutation 连跑两次 observe,manifest 锚定元素集合(role+name 计数)必须一致。
+ * 比较范围由调用方给定(ownedRows:oracle 几何命中 + name 认领的行)——比全量 observe 行
+ * 稳:全量行会含第三方扩展注入的浮球等环境噪声,并受 observe 行数 cap 影响而随环境漂移。
+ */
+export function checkStability(a: ObserveRow[], b: ObserveRow[], fixture: string, pattern: string): Finding[] {
   const count = (rows: ObserveRow[]): Map<string, number> => {
     const m = new Map<string, number>();
     for (const r of rows) m.set(identity(r), (m.get(identity(r)) ?? 0) + 1);
     return m;
   };
-  const ca = count(a.rows);
-  const cb = count(b.rows);
+  const ca = count(a);
+  const cb = count(b);
   const keys = new Set([...ca.keys(), ...cb.keys()]);
   const diffs: string[] = [];
   for (const k of keys) {

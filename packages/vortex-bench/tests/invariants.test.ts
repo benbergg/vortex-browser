@@ -10,18 +10,23 @@ const r = (role: string, name: string | null, bbox: ObserveRow["bbox"]): Observe
   ({ ref: "@x", role, name, flags: [], bbox, frameId: 0 });
 
 describe("checkStability (INV-1)", () => {
-  it("两次 observe 集合一致 → 无 finding", () => {
-    const a = parsed([r("button", "保存", [0, 0, 10, 10])]);
-    const b = parsed([r("button", "保存", [1, 0, 10, 10])]); // 1px 抖动容忍
+  it("两次 observe 的锚定元素集合一致 → 无 finding", () => {
+    const a = [r("button", "保存", [0, 0, 10, 10])];
+    const b = [r("button", "保存", [1, 0, 10, 10])]; // 1px 抖动容忍
     expect(checkStability(a, b, "t", "p")).toHaveLength(0);
   });
   it("第二次少了一个元素 → P1 inv1-instability", () => {
-    const a = parsed([r("button", "保存", [0, 0, 10, 10]), r("link", "更多", [0, 50, 10, 10])]);
-    const b = parsed([r("button", "保存", [0, 0, 10, 10])]);
+    const a = [r("button", "保存", [0, 0, 10, 10]), r("link", "更多", [0, 50, 10, 10])];
+    const b = [r("button", "保存", [0, 0, 10, 10])];
     const f = checkStability(a, b, "t", "p");
     expect(f).toHaveLength(1);
     expect(f[0].kind).toBe("inv1-instability");
     expect(f[0].severity).toBe("P1");
+  });
+  it("比较范围只由调用方给定的行决定(环境噪声行不在范围内)", () => {
+    const anchored = [r("button", "保存", [0, 0, 10, 10])];
+    // 第三方浮球行不在传入范围 → 两次集合一致
+    expect(checkStability(anchored, anchored, "t", "p")).toHaveLength(0);
   });
 });
 

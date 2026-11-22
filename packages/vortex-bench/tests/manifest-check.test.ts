@@ -1,6 +1,6 @@
 // packages/vortex-bench/tests/manifest-check.test.ts
 import { describe, it, expect } from "vitest";
-import { checkManifest } from "../src/runner/manifest-check.js";
+import { checkManifest, ownedRows } from "../src/runner/manifest-check.js";
 import type { ParsedObserve, OracleRect, SynthManifest } from "../src/scan-types.js";
 
 function parsed(rows: ParsedObserve["rows"]): ParsedObserve {
@@ -8,6 +8,39 @@ function parsed(rows: ParsedObserve["rows"]): ParsedObserve {
 }
 const manifest = (entries: SynthManifest["entries"]): SynthManifest => ({
   fixture: "t", path: "/synth/t.html", entries,
+});
+
+describe("ownedRows (INV-1 比较范围)", () => {
+  it("只返回 oracle 几何命中的行 + name 认领的行", () => {
+    const p = parsed([
+      { ref: "@e0", role: "button", name: "保存", flags: [], bbox: [10, 10, 50, 20], frameId: 0 },
+      { ref: "@e1", role: "div", name: "imt-fb-btn", flags: [], bbox: [400, 400, 30, 30], frameId: 0 },
+    ]);
+    const oracles: OracleRect[] = [{ id: "btn", rect: [0, 0, 100, 50] }];
+    const m = manifest([{ id: "btn", interactive: true, expectedName: "保存", expectedRole: "button", pattern: "p" }]);
+    expect(ownedRows(p, oracles, m).map((r) => r.ref)).toEqual(["@e0"]);
+  });
+
+  it("第三方注入的浮球行不在比较范围(环境噪声不参与 INV-1)", () => {
+    const noise = { ref: "@fb", role: "div", name: "imt-fb-btn", flags: [], bbox: [400, 400, 30, 30], frameId: 0 };
+    const p1 = parsed([
+      { ref: "@e0", role: "button", name: "保存", flags: [], bbox: [10, 10, 50, 20], frameId: 0 },
+    ]);
+    const p2 = parsed([
+      { ref: "@e0", role: "button", name: "保存", flags: [], bbox: [10, 10, 50, 20], frameId: 0 },
+      noise,
+    ]);
+    const oracles: OracleRect[] = [{ id: "btn", rect: [0, 0, 100, 50] }];
+    const m = manifest([{ id: "btn", interactive: true, expectedName: "保存", expectedRole: "button", pattern: "p" }]);
+    expect(ownedRows(p1, oracles, m)).toHaveLength(1);
+    expect(ownedRows(p2, oracles, m)).toHaveLength(1);
+  });
+
+  it("joinBy=name 的入口按名字认领行(无 bbox 也算)", () => {
+    const p = parsed([{ ref: "@f1e0", role: "button", name: "子框按钮", flags: [], bbox: null, frameId: 1 }]);
+    const m = manifest([{ id: "sub", interactive: true, expectedName: "子框按钮", expectedRole: "button", pattern: "p", joinBy: "name" }]);
+    expect(ownedRows(p, [], m).map((r) => r.ref)).toEqual(["@f1e0"]);
+  });
 });
 
 describe("checkManifest", () => {

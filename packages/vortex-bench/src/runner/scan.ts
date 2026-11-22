@@ -5,7 +5,7 @@
 
 import { createMcpConnection, closeMcpConnection } from "./mcp-client.js";
 import { parseObserveSnapshot } from "./observe-parser.js";
-import { checkManifest } from "./manifest-check.js";
+import { checkManifest, ownedRows } from "./manifest-check.js";
 import { checkStability, classifyProbe, checkDuplicates, checkBboxSanity, type ProbeResult } from "./invariants.js";
 import { joinByGeometry } from "./geometry-join.js";
 import type { Finding, FixtureScanResult, OracleRect, SynthManifest } from "../scan-types.js";
@@ -120,8 +120,15 @@ export async function scanFixture(manifest: SynthManifest, opts: ScanOptions): P
     result.invariants.inv2 = !inv2Crashed;
 
     // 4) observe #2 → INV-1 稳定性(此处才让 observe #1 的 ref 失效)
+    // INV-1 只比 manifest 锚定的行(oracle 几何命中 + name 认领):全量 observe 行会含
+    // 第三方扩展注入的浮球等环境噪声,并受 observe 行数 cap 影响,两次集合会随环境漂移。
     const parsed2 = parseObserveSnapshot(extractText(await call("vortex_observe", { frames, scope: "full", includeBoxes: true })));
-    const inv1 = checkStability(parsed1, parsed2, manifest.fixture, result.pattern);
+    const inv1 = checkStability(
+      ownedRows(parsed1, oracles, manifest),
+      ownedRows(parsed2, oracles, manifest),
+      manifest.fixture,
+      result.pattern,
+    );
     result.findings.push(...inv1);
     result.invariants.inv1 = inv1.length === 0;
   } catch (err) {

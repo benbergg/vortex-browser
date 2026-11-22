@@ -30,6 +30,40 @@ function bestHit(
   return best ?? hits[0];
 }
 
+/** name-join 入口的 expectedName 集合(跨 frame fixture 无 geometry oracle,靠名字认领行)。 */
+function nameClaimedNames(manifest: SynthManifest): Set<string> {
+  return new Set(
+    manifest.entries
+      .filter((e) => e.joinBy === "name" && e.expectedName !== null)
+      .map((e) => e.expectedName as string),
+  );
+}
+
+/**
+ * manifest 拥有的 observe 行:oracle 几何命中的行 + joinBy:"name" 认领的行。
+ * INV-1 稳定性只比这些行——全量 observe 行会含第三方扩展注入的浮球等环境噪声,
+ * 且 observe 有行数 cap,环境行会把 fixture 自身行挤出集合,导致两次 observe 的
+ * 全量集合随环境漂移(2026-11-22 实测:悬浮球注入占掉约 10 个名额,90 个导航链接的
+ * 尾部行 1→0,报出假 P1 inv1-instability,且每次落在不同 fixture 上)。
+ */
+export function ownedRows(
+  parsed: ParsedObserve,
+  oracles: OracleRect[],
+  manifest: SynthManifest,
+): ObserveRow[] {
+  const { matches } = joinByGeometry(parsed.rows, oracles, parsed.frameOffsets);
+  const owned = new Map<string, ObserveRow>();
+  for (const hits of matches.values()) for (const r of hits) owned.set(r.ref, r);
+  // name-join 入口(跨 frame,行可能无 bbox → 几何 join 不收)按名字认领
+  const nameClaimed = nameClaimedNames(manifest);
+  if (nameClaimed.size > 0) {
+    for (const r of parsed.rows) {
+      if (r.name !== null && nameClaimed.has(r.name)) owned.set(r.ref, r);
+    }
+  }
+  return [...owned.values()];
+}
+
 export function checkManifest(
   parsed: ParsedObserve,
   oracles: OracleRect[],
@@ -83,11 +117,7 @@ export function checkManifest(
   // joinBy:name 的 entry 靠 name 认领 observe 行(跨 frame 无 geometry oracle),
   // 这些行必然落在 geometry 的 unmatchedRows 里。下面噪声扫描要排除它们,
   // 否则被正确识别的跨 frame 元素会被误报成 _unannotated 噪声(自校准实测假阳)。
-  const nameClaimed = new Set(
-    manifest.entries
-      .filter((e) => e.joinBy === "name" && e.expectedName !== null)
-      .map((e) => e.expectedName as string),
-  );
+  const nameClaimed = nameClaimedNames(manifest);
 
   // 命中不到任何 oracle 的 observe 行:记为 P2 噪声(fixture 应标全;未标元素从轻)
   for (const row of unmatchedRows) {
