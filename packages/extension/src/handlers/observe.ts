@@ -1,4 +1,4 @@
-import { ObserveActions, VtxErrorCode, vtxError } from "@vortex-browser/shared";
+import { ObserveActions, VtxError, VtxErrorCode, vtxError } from "@vortex-browser/shared";
 import type { ActionRouter } from "../lib/router.js";
 import type { DebuggerManager } from "../lib/debugger-manager.js";
 import { getActiveTabId, buildExecuteTarget, ensureFrameAttached } from "../lib/tab-utils.js";
@@ -4918,6 +4918,68 @@ const LISTENER_DISCOVERY_TIMEOUT_MS = 8_000;
 const SCAN_CLAIM_TIMEOUT_MS = 1_000;
 
 /**
+ * 扫描归属 claim 的失败分类。每个 frame 只产出一条最终分类：
+ * 归属被拒（refused）与 recovery 异常（recovery-error/recovery-timeout）是 terminal，
+ * 不再重试；其余可重试。
+ */
+type ScanClaimFailure = {
+  frameId: number;
+  reason: "skipped-no-document" | "skipped-lifecycle" | "injection-error" | "empty-result"
+    | "timeout" | "refused" | "recovery-error" | "recovery-timeout";
+  detail: string;
+  terminal: boolean;
+};
+
+/**
+ * 归属 claim 全部失败时按原因诚实报错：归属冲突与 recovery 异常优先（terminal），
+ * 其次按 injection-error > empty-result > timeout > skipped。
+ */
+function scanClaimError(failures: ScanClaimFailure[], tabId: number): VtxError {
+  const pick = (reason: ScanClaimFailure["reason"]) => failures.find((failure) => failure.reason === reason);
+  const refused = pick("refused");
+  if (refused) {
+    return vtxError(VtxErrorCode.STALE_SNAPSHOT,
+      `Target document ownership could not be acquired: the scan ownership protocol refused the claim on frame ${refused.frameId}`,
+      { tabId, frameId: refused.frameId });
+  }
+  const recoveryError = pick("recovery-error");
+  if (recoveryError) {
+    return vtxError(VtxErrorCode.JS_EXECUTION_ERROR,
+      `The scan ownership claim was refused on frame ${recoveryError.frameId} and the ownership recovery failed: ${recoveryError.detail}`,
+      { tabId, frameId: recoveryError.frameId });
+  }
+  const recoveryTimeout = pick("recovery-timeout");
+  if (recoveryTimeout) {
+    return vtxError(VtxErrorCode.STALE_SNAPSHOT,
+      `Target document ownership could not be acquired: the ownership recovery timed out on frame ${recoveryTimeout.frameId}`,
+      { tabId, frameId: recoveryTimeout.frameId });
+  }
+  const injectionError = pick("injection-error");
+  if (injectionError) {
+    return vtxError(VtxErrorCode.JS_EXECUTION_ERROR,
+      `Failed to acquire scan ownership on frame ${injectionError.frameId}: ${injectionError.detail}`,
+      { tabId, frameId: injectionError.frameId });
+  }
+  const emptyResult = pick("empty-result");
+  if (emptyResult) {
+    return vtxError(VtxErrorCode.PAGE_NOT_READY,
+      `Target document is no longer available on frame ${emptyResult.frameId} (the document was replaced or is not scriptable)`,
+      { tabId, frameId: emptyResult.frameId });
+  }
+  const timedOut = pick("timeout");
+  if (timedOut) {
+    return vtxError(VtxErrorCode.TIMEOUT,
+      `Timed out acquiring scan ownership on frame ${timedOut.frameId} after ${timedOut.detail}ms`,
+      { tabId, frameId: timedOut.frameId });
+  }
+  const skipped = pick("skipped-lifecycle") ?? pick("skipped-no-document");
+  const code = skipped && skipped.frameId === 0 ? VtxErrorCode.PAGE_NOT_READY : VtxErrorCode.IFRAME_NOT_READY;
+  return vtxError(code,
+    `Target frame ${skipped?.frameId ?? 0} is not ready (documentLifecycle=${skipped?.detail ?? "unknown"})`,
+    { tabId, frameId: skipped?.frameId });
+}
+
+/**
  * 单 frame 超时 = 剩余预算按剩余 frame 数均摊,但不低于下限。
  * 单 frame 场景即等于整个剩余预算(不误伤慢站);多 frame 场景保证一个卡死的 frame
  * 不会吃光预算导致其余 frame 全被跳过。
@@ -5164,8 +5226,8 @@ export function registerObserveHandlers(router: ActionRouter, debuggerMgr: Debug
       );
       checkDeadline();
       const explicitFrameId = args.frameId as number | undefined;
-      const navigationAtStart = new Map(navigation.get(tid));
-      const committedAtStart = new Map(committedDocuments.get(tid));
+      let navigationAtStart = new Map(navigation.get(tid));
+      let committedAtStart = new Map(committedDocuments.get(tid));
       for (const [id, entry] of pageSnapshots) {
         if (Date.now() - entry.capturedAt > PAGE_TTL_MS) pageSnapshots.delete(id);
       }
@@ -5231,7 +5293,7 @@ export function registerObserveHandlers(router: ActionRouter, debuggerMgr: Debug
       const includeBoxes = args.includeBoxes === true;
 
       // scope 存在时只扫 scope 所在的 frame:局部观察不该把别的 frame 混进来。
-      const frameTargets = await resolveTargetFrames(
+      let frameTargets = await resolveTargetFrames(
         tid,
         scope ? scope.frameId : explicitFrameId,
         framesParam,
@@ -5355,24 +5417,61 @@ export function registerObserveHandlers(router: ActionRouter, debuggerMgr: Debug
       };
       let listenerDiscovery: "timeout" | "error" | "skipped-heavy" | undefined;
       let axOverlayTimedOut = false;
-      const discoverListeners = async (targets: FrameTarget[]) => {
-        const claimDeadline = Date.now() + Math.min(SCAN_CLAIM_TIMEOUT_MS, Math.max(0, deadline - Date.now()) / 2);
+      // 扫描归属 claim：一轮内按 frame 并发；失败按原因分类（F1）。
+      const claimScanRound = async (
+        targets: FrameTarget[],
+        claimDeadline: number,
+      ): Promise<{ claimed: ScanRequest[]; failures: ScanClaimFailure[] }> => {
+        const claimed: ScanRequest[] = [];
+        const failures: ScanClaimFailure[] = [];
         await Promise.all(targets.map(async (target) => {
-          if (!target.documentId?.trim() || (target.documentLifecycle && target.documentLifecycle !== "active")) {
-            unclaimedFrames.push(target.frameId); return;
+          if (!target.documentId?.trim()) {
+            failures.push({ frameId: target.frameId, reason: "skipped-no-document", detail: "no documentId", terminal: false });
+            return;
+          }
+          if (target.documentLifecycle && target.documentLifecycle !== "active") {
+            failures.push({ frameId: target.frameId, reason: "skipped-lifecycle", detail: target.documentLifecycle, terminal: false });
+            return;
           }
           const request: ScanRequest = { frameId: target.frameId, documentId: target.documentId, ancestorFrameIds: target.ancestorFrameIds,
             epoch: scanEpoch, order: ++scanOrder, token: crypto.randomUUID(), deadline };
           scanRequests.push(request);
+          const claimStart = Date.now();
           try {
-            const claimed = await raceTimeout(track(chrome.scripting.executeScript({ target: { tabId: tid, documentIds: [request.documentId] }, world: "MAIN",
+            const result = await raceTimeout(track(chrome.scripting.executeScript({ target: { tabId: tid, documentIds: [request.documentId] }, world: "MAIN",
               func: updateScanOwnership, args: ["scan.claim", request] })), Math.max(0, claimDeadline - Date.now()));
-            if (claimed !== TIMED_OUT && claimed.length === 1 && claimed[0].documentId === request.documentId && claimed[0].frameId === request.frameId &&
-                (claimed[0].result === true || (claimed[0].result === false && await recoverDocumentOwnership("scan", tid, request,
-                  (work) => raceTimeout(track(work), Math.max(0, claimDeadline - Date.now())))))) claimedScans.push(request);
-            else unclaimedFrames.push(target.frameId);
-          } catch (err) { unclaimedFrames.push(target.frameId); console.warn("[vortex.observe] scan claim failed", err); }
+            if (result === TIMED_OUT) {
+              failures.push({ frameId: target.frameId, reason: "timeout", detail: String(Date.now() - claimStart), terminal: false });
+              return;
+            }
+            if (result.length !== 1 || result[0].documentId !== request.documentId || result[0].frameId !== request.frameId ||
+                typeof result[0].result !== "boolean") {
+              failures.push({ frameId: target.frameId, reason: "empty-result", detail: JSON.stringify(result), terminal: false });
+              return;
+            }
+            if (result[0].result === true) { claimed.push(request); return; }
+            // 归属协议拒绝：走 recovery。recovery 阶段的异常单独归类（terminal，不重试）。
+            let recoveryTimedOut = false;
+            const wait: NonNullable<Parameters<typeof recoverDocumentOwnership>[3]> = (work) =>
+              raceTimeout(track(work), Math.max(0, claimDeadline - Date.now())).then((value) => {
+                if (value === TIMED_OUT) recoveryTimedOut = true;
+                return value;
+              });
+            try {
+              if (await recoverDocumentOwnership("scan", tid, request, wait)) { claimed.push(request); return; }
+              failures.push({ frameId: target.frameId, reason: recoveryTimedOut ? "recovery-timeout" : "refused",
+                detail: "ownership protocol refused the claim", terminal: true });
+            } catch (err) {
+              failures.push({ frameId: target.frameId, reason: "recovery-error", detail: String(err), terminal: true });
+            }
+          } catch (err) {
+            failures.push({ frameId: target.frameId, reason: "injection-error", detail: String(err), terminal: false });
+            console.warn("[vortex.observe] scan claim failed", err);
+          }
         }));
+        return { claimed, failures };
+      };
+      const discoverListenerElements = async (targets: FrameTarget[]) => {
         if (!debuggerMgr) return;
         const listenerDeadline = Math.min(deadline, Date.now() + LISTENER_DISCOVERY_TIMEOUT_MS);
         await Promise.all(targets.map(async (target) => {
@@ -5414,9 +5513,38 @@ export function registerObserveHandlers(router: ActionRouter, debuggerMgr: Debug
           console.warn("[vortex.observe] listener discovery failed", err);
         }
       };
-      await discoverListeners(frameTargets);
+      const claimRound = async (targets: FrameTarget[], claimBudgetMs: number) => {
+        const round = await claimScanRound(targets, Date.now() + Math.min(claimBudgetMs, Math.max(0, deadline - Date.now())));
+        claimedScans.push(...round.claimed);
+        unclaimedFrames.push(...round.failures.map((failure) => failure.frameId));
+        return round.failures;
+      };
+      let claimFailures = await claimRound(frameTargets, SCAN_CLAIM_TIMEOUT_MS);
+      if (claimedScans.length === 0 && !claimFailures.some((failure) => failure.terminal) && deadline - Date.now() > 0) {
+        // F2：全部 frame 未 claim 上且没有归属冲突时，重新解析 frame、整窗重建身份基线，再试一轮。
+        const resolved = await resolveTargetFrames(tid, scope ? scope.frameId : explicitFrameId, framesParam);
+        navigationAtStart = new Map(navigation.get(tid));
+        committedAtStart = new Map(committedDocuments.get(tid));
+        if (resolved.length === 0) {
+          throw vtxError(
+            VtxErrorCode.IFRAME_NOT_READY,
+            "No target frames resolved (tab may be uninitialized)",
+            { tabId: tid, frameId: explicitFrameId },
+          );
+        }
+        if (paginate && resolved.length !== 1) {
+          throw vtxError(VtxErrorCode.INVALID_PARAMS, "Pagination requires a single frame");
+        }
+        frameTargets = resolved;
+        claimedScans.length = 0;
+        unclaimedFrames.length = 0;
+        claimFailures = await claimRound(frameTargets, 2 * SCAN_CLAIM_TIMEOUT_MS);
+      }
+      await discoverListenerElements(frameTargets);
       checkDeadline();
-      if (claimedScans.length === 0) throw vtxError(VtxErrorCode.STALE_SNAPSHOT, "Target document ownership could not be acquired");
+      if (claimedScans.length === 0) {
+        throw scanClaimError(claimFailures, tid);
+      }
       const primaryRequest = claimedScans.find((request) => request.frameId === frameTargets[0].frameId);
       scans.push(
         ...(await scanFramesWithBudget(tid, frameTargets, scanBudget, {
@@ -5509,7 +5637,11 @@ export function registerObserveHandlers(router: ActionRouter, debuggerMgr: Debug
               }));
             if (newTargets.length > 0) {
               autoFallback = true;
-              await discoverListeners(newTargets);
+              const fallbackClaim = await claimScanRound(newTargets,
+                Date.now() + Math.min(SCAN_CLAIM_TIMEOUT_MS, Math.max(0, deadline - Date.now())));
+              claimedScans.push(...fallbackClaim.claimed);
+              unclaimedFrames.push(...fallbackClaim.failures.map((failure) => failure.frameId));
+              await discoverListenerElements(newTargets);
               // 与主循环共享同一预算:fallback 是第二轮扫描,不该另起炉灶再吃 25s
               scans.push(
                 ...(await scanFramesWithBudget(tid, newTargets, scanBudget, {
