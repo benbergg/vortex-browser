@@ -20,6 +20,17 @@
 
 ### Fixed
 
+- **back/forward 的 load 等待不再空等满 25s**：历史恢复常在毫秒级完成，而 back/forward
+  先发导航命令、**再**挂 tab `complete` 监听器，事件早于监听器发过就永远等不到
+  ⇒ `waitForTabLoad` 空等满 `NAVIGATE_LOAD_TIMEOUT_MS`(25s)，实测单次 history 调用
+  25536ms/25651ms 且返回 `degraded:true`（事后 tab 已 `status=complete`），25s+frame-ready 2s
+  顶穿 MCP 动作 30s 预算 ⇒ `contract/history-back-refused` 偶发
+  `Error [TIMEOUT]: Action page.back exceeded its 30000ms budget`（passRate 0.67）。
+  现在监听器在导航前挂上（与 navigate 路径的 NAV-1b 同形修复），导航被拒时安全丢弃这次等待。
+
+  涉及文件：`packages/extension/src/handlers/page.ts`（新增 `runHistoryNavigation`，
+  BACK/FORWARD 改走它）；新增 `packages/extension/tests/page-history-load-race.test.ts`。
+
 - **终端/编辑器的隐藏输入代理不再被当"不可见目标"拒掉**：xterm.js / Monaco / CodeMirror
   用一个离屏 1x1 `textarea` 接键入，vortex 过去把"离屏"一律判成不可交互——
   `vortex_type` 报 `ELEMENT_OFFSCREEN`，`vortex_fill` 把命令写进代理却让 agent 以为已执行。

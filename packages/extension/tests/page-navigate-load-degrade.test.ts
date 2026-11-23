@@ -136,8 +136,12 @@ describe("navigate 内部 load 等待 < MCP 传输超时 margin (DDG dogfood 202
 
   it("reload/back/forward 的 load 等待 cap 在 NAVIGATE_LOAD_TIMEOUT_MS", () => {
     const calls = SRC.match(/waitForTabLoad\(tid,\s*NAVIGATE_LOAD_TIMEOUT_MS\)/g) ?? [];
-    // reload + back + forward 三处。
-    expect(calls.length).toBeGreaterThanOrEqual(3);
+    // reload 一处 + history 一处（back/forward 自 Round 15 起共用 runHistoryNavigation）。
+    expect(calls.length).toBeGreaterThanOrEqual(2);
+    // history 那处必须在 runHistoryNavigation 里（监听器在导航前挂上，见该函数注释）。
+    expect(SRC).toMatch(
+      /async function runHistoryNavigation[\s\S]{0,600}?waitForTabLoad\(tid,\s*NAVIGATE_LOAD_TIMEOUT_MS\)/,
+    );
   });
 
   it("network_idle 默认 timeout 用 NAVIGATE_LOAD_TIMEOUT_MS 而非裸 30000(== 传输)", () => {

@@ -438,6 +438,41 @@ function isInternalPageUrl(url: string): boolean {
   }
 }
 
+/**
+ * 历史恢复（back/forward）的公共实现。
+ *
+ * Why 要单独抽出来：load 等待的 'complete' 监听器必须在 navigateHistory **之前**挂上。
+ * 历史恢复常在毫秒级完成（bfcache / 同文档），'complete' 事件在监听器挂上之前就已经
+ * 发过 ⇒ waitForTabLoad 空等满 NAVIGATE_LOAD_TIMEOUT_MS(25s)。实测（探针 6 轮）：
+ * history 调用耗时 25536ms / 25651ms 且返回 degraded:true，事后 tab status=complete
+ * （页面早已就绪）⇒ 25s + frame-ready 2s 顶穿 MCP 动作 30s 预算 ⇒ bench
+ * `contract/history-back-refused` 偶发
+ * `Error [TIMEOUT]: Action page.back exceeded its 30000ms budget`（passRate 0.67）。
+ *
+ * 与 navigate 路径的 NAV-1b 修复同形（那里在 navigate 之后挂 listener 是漏修死角，
+ * 2026-06-04 插桩确诊过 55ms↔25047ms 抖动）——同一形状的竞态，只是这条路没人修。
+ */
+async function runHistoryNavigation(
+  debuggerMgr: DebuggerManager,
+  tid: number,
+  delta: -1 | 1,
+): Promise<{ url: string | undefined; title: string | undefined; degraded?: boolean }> {
+  // 监听器先挂，导航后发（见上方注释）。
+  const loadPromise = waitForTabLoad(tid, NAVIGATE_LOAD_TIMEOUT_MS);
+  let before: FrameIdentity | null;
+  try {
+    before = await navigateHistory(debuggerMgr, tid, delta);
+  } catch (err) {
+    // 导航没发生（索引越界 / 事先拒绝 / CDP 拒绝）⇒ 弃用这次等待，避免留下悬空 reject。
+    loadPromise.catch(() => undefined);
+    throw err;
+  }
+  const { degraded } = await loadPromise;
+  await waitForMainFrameReady(tid, before);
+  const tab = await chrome.tabs.get(tid);
+  return { url: tab.url, title: tab.title, ...(degraded ? { degraded: true } : {}) };
+}
+
 export function registerPageHandlers(router: ActionRouter, debuggerMgr: DebuggerManager): void {
   router.registerAll({
     [PageActions.NAVIGATE]: async (args, tabId) => {
@@ -557,20 +592,12 @@ export function registerPageHandlers(router: ActionRouter, debuggerMgr: Debugger
 
     [PageActions.BACK]: async (args, tabId) => {
       const tid = await getActiveTabId(tabId);
-      const before = await navigateHistory(debuggerMgr, tid, -1);
-      const { degraded } = await waitForTabLoad(tid, NAVIGATE_LOAD_TIMEOUT_MS);
-      await waitForMainFrameReady(tid, before);
-      const tab = await chrome.tabs.get(tid);
-      return { url: tab.url, title: tab.title, ...(degraded ? { degraded: true } : {}) };
+      return runHistoryNavigation(debuggerMgr, tid, -1);
     },
 
     [PageActions.FORWARD]: async (args, tabId) => {
       const tid = await getActiveTabId(tabId);
-      const before = await navigateHistory(debuggerMgr, tid, 1);
-      const { degraded } = await waitForTabLoad(tid, NAVIGATE_LOAD_TIMEOUT_MS);
-      await waitForMainFrameReady(tid, before);
-      const tab = await chrome.tabs.get(tid);
-      return { url: tab.url, title: tab.title, ...(degraded ? { degraded: true } : {}) };
+      return runHistoryNavigation(debuggerMgr, tid, 1);
     },
 
     [PageActions.WAIT]: async (args, tabId) => {
