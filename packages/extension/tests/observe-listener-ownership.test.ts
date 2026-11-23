@@ -364,7 +364,7 @@ describe("listener/dropzone document request ownership", () => {
     expect(retireA).toBeDefined();
     api.hooks.omitDocumentId = 0;
     const b: any = await api.observe({ paginate: true, maxElements: 2 });
-    expect(b.error?.code).toBe("STALE_SNAPSHOT");
+    expect(b.error?.code).toBe("PAGE_NOT_READY");
     expect(b.result).toBeUndefined();
     const frame = api.frames.get(0)!;
     expect(a.error).toBeUndefined();

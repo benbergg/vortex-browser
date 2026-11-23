@@ -156,7 +156,7 @@ describe("AX marker request ownership", () => {
     const { observe } = setup({}, debuggerMgr);
     vi.mocked(chrome.webNavigation.getAllFrames).mockResolvedValue([{ frameId: 0, parentFrameId: -1, url: "https://x/", ...(kind === "cached" ? { documentId: "main-document", documentLifecycle: "cached" } : {}) }] as any);
     const response: any = await observe({ target: "#b0", includeAX: true });
-    expect(response.error?.code).toBe("STALE_SNAPSHOT");
+    expect(response.error?.code).toBe("PAGE_NOT_READY");
     expect(response.result).toBeUndefined();
     expect(document.querySelector("#b0")!.getAttribute("data-vtx-ax")).toBeNull();
     expect(debuggerMgr.sendCommand.mock.calls.some(([, method]) => method === "Accessibility.getFullAXTree")).toBe(false);
@@ -179,24 +179,40 @@ describe("AX marker request ownership", () => {
     expect(document.documentElement.getAttribute("data-vtx-frame-ax")).toBeNull();
   });
 
-  it("does not claim or stamp a replacement document after enumeration", async () => {
+  it("claims the replacement document only after re-resolving it", async () => {
     const debuggerMgr = { enableDomain: vi.fn().mockResolvedValue(undefined), sendCommand: vi.fn().mockResolvedValue({ root: { children: [] }, nodes: [] }) };
     const { observe, replaceDocument } = setup({}, debuggerMgr);
     const execute = vi.mocked(chrome.scripting.executeScript);
     const original = execute.getMockImplementation()!;
     let attemptedClaim = false;
+    const claims: Array<{ documentIds?: string[]; result?: unknown }> = [];
+    const checks: Array<{ documentIds?: string[]; result?: unknown }> = [];
     execute.mockImplementation(async (details: any) => {
       if (!attemptedClaim && details.target.documentIds?.includes("main-document")) {
         attemptedClaim = true;
         replaceDocument();
       }
-      return original(details);
+      const injected = await original(details);
+      if (details.args?.[0] === "scan.claim") claims.push({ documentIds: details.target.documentIds, result: injected?.[0]?.result });
+      if (details.args?.[0] === "scan.check") checks.push({ documentIds: details.target.documentIds, result: injected?.[0]?.result });
+      return injected;
     });
     const response: any = await observe({ includeAX: true });
-    expect(response.error?.code).toBe("STALE_SNAPSHOT");
-    expect(response.result).toBeUndefined();
     expect(attemptedClaim).toBe(true);
-    expect(document.querySelector("#next")?.getAttribute("data-vtx-ax")).toBeNull();
+    expect(response.error).toBeUndefined();
+    expect(response.result).toBeDefined();
+    // ① 第一轮 claim 打在旧文档上 → 注入返回空结果（请求不被重定向）
+    expect(claims[0].documentIds).toEqual(["main-document"]);
+    expect(claims[0].result).toBeUndefined();
+    // ② 第二轮显式 claim 新文档并成功
+    expect(claims[1].documentIds).toEqual(["next-document"]);
+    expect(claims[1].result).toBe(true);
+    // ③ 扫描期间新文档的归属复核通过（token 归属正确）
+    expect(checks.length).toBeGreaterThan(0);
+    expect(checks.every((check) => check.documentIds?.includes("next-document"))).toBe(true);
+    expect(checks.every((check) => check.result === true)).toBe(true);
+    // 旧文档不再被打标
+    expect(windows[0].document.querySelector("[data-vtx-ax]")).toBeNull();
     expect(document.documentElement.getAttribute("data-vtx-frame-ax")).toBeNull();
   });
 
