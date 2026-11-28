@@ -51,8 +51,16 @@ export function transitionOwnership(
       old.deadline === request.deadline && Object.entries(request).every(([name, value]) =>
         JSON.stringify(current[name]) === JSON.stringify(value));
   }
-  if (JSON.stringify(current) !== JSON.stringify(expected) ||
-      (!old.retired && old.owner !== null && Date.now() < old.deadline)) return false;
+  // The probe state returns from the page through the extension boundary, which
+  // does not preserve key order. Compare the key set and every value instead of
+  // the serialized objects; ancestorFrameIds stays order sensitive.
+  const expectedEntries = Object.entries(expected);
+  if (expectedEntries.length !== Object.keys(current).length) return false;
+  for (const [name, value] of expectedEntries) {
+    if (!Object.prototype.hasOwnProperty.call(current, name)) return false;
+    if (JSON.stringify(current[name]) !== JSON.stringify(value)) return false;
+  }
+  if (!old.retired && old.owner !== null && Date.now() < old.deadline) return false;
   const tombstones = exited ?? new Set<string>();
   tombstones.add(old.epoch);
   doc[exitedKey] = tombstones;
