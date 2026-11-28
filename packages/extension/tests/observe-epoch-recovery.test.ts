@@ -745,11 +745,15 @@ describe("ordinary scan write ownership across worker epochs", () => {
 describe("ownership handover across the executeScript argument boundary", () => {
   const exitedKey = (kind: Kind) => kind === "listener" ? "__vortexListenerExitedEpochs" : kind === "scan" ? "__vortexScanExitedEpochs" : "__vortexAXExitedEpochs";
 
-  // Chrome hands the page result back through a sorted dictionary, so the probe
-  // state arrives at the next injection with a different key order.
+  // Chrome hands the page result back through a sorted dictionary that drops
+  // null-valued fields, so the probe state arrives at the next injection with
+  // a different key order and without its null fields.
   const acrossBoundary = (state: Record<string, any>) => {
     const out: Record<string, any> = {};
-    for (const key of Object.keys(state).sort()) out[key] = state[key];
+    for (const key of Object.keys(state).sort()) {
+      if (state[key] === null || state[key] === undefined) continue;
+      out[key] = state[key];
+    }
     return out;
   };
 
@@ -771,7 +775,7 @@ describe("ownership handover across the executeScript argument boundary", () => 
   });
 
   for (const kind of ["listener", "ax", "scan"] as const) {
-    it.each(["retired", "expired"] as const)(`hands over ${kind} ownership after the probe result crosses the argument boundary reordered (%s)`, async (state) => {
+    it.each(["retired", "expired"] as const)(`hands over ${kind} ownership after the probe result crosses the argument boundary reordered and stripped of null fields (%s)`, async (state) => {
       const api = await setup();
       const request = seed(api, kind, state);
       const { recoverDocumentOwnership } = await import("../src/handlers/observe-ownership-recovery.js");
@@ -781,6 +785,43 @@ describe("ownership handover across the executeScript argument boundary", () => 
       expect(await recoverDocumentOwnership(kind, 42, successor(kind, request) as any, wait as any)).toBe(true);
       expect(api.win.document[ownerKey(kind)].owner).toBe(`${kind}-token-B`);
       expect(api.win.document[exitedKey(kind)].has(`${kind}-worker-A`)).toBe(true);
+    });
+  }
+
+  for (const kind of ["listener", "ax", "scan"] as const) {
+    it(`hands over ${kind} ownership when a null-valued field is missing on one side only`, async () => {
+      const api = await setup();
+      const request = seed(api, kind, "retired");
+      const next = successor(kind, request);
+      const { transitionOwnership } = await import("../src/handlers/observe-ownership-recovery.js");
+      const op = async (action: "probe" | "handover", expected: any = null) => (await api.inject({
+        target: { tabId: 42, documentIds: [api.frame.documentId] }, world: "MAIN",
+        func: transitionOwnership, args: [`ownership.${action}`, kind, next, expected],
+      }))[0]?.result;
+      const expected = await op("probe");
+      expect(expected.owner).toBeNull();
+      // The probe saw a null owner, the live state lost the field entirely.
+      delete api.win.document[ownerKey(kind)].owner;
+      expect(await op("handover", expected)).toBe(true);
+      expect(api.win.document[ownerKey(kind)].owner).toBe(next.token);
+    });
+
+    it(`rejects a ${kind} handover when the owner token was released after the probe`, async () => {
+      const api = await setup();
+      const request = seed(api, kind, "expired");
+      const next = successor(kind, request);
+      const { transitionOwnership } = await import("../src/handlers/observe-ownership-recovery.js");
+      const op = async (action: "probe" | "handover", expected: any = null) => (await api.inject({
+        target: { tabId: 42, documentIds: [api.frame.documentId] }, world: "MAIN",
+        func: transitionOwnership, args: [`ownership.${action}`, kind, next, expected],
+      }))[0]?.result;
+      const expected = await op("probe");
+      expect(expected.owner).toBe(request.token);
+      api.win.document[ownerKey(kind)].owner = null;
+      const before = structuredClone(api.win.document[ownerKey(kind)]);
+      expect(await op("handover", expected)).toBe(false);
+      expect(api.win.document[ownerKey(kind)]).toEqual(before);
+      expect(api.win.document[exitedKey(kind)]).toBeUndefined();
     });
   }
 
