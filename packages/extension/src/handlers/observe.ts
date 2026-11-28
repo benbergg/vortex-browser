@@ -268,7 +268,14 @@ interface ScannedElement {
   occludedBy?: string;
   attrs: Record<string, string>;
   /** Framework UI state derived from class / aria. @since 0.4.0 (O-8) */
-  state?: { checked?: boolean | "mixed"; selected?: boolean; active?: boolean; disabled?: boolean; expanded?: boolean; required?: boolean; current?: boolean; invalid?: boolean; sort?: "ascending" | "descending" | "none"; haspopup?: string; readonly?: boolean };
+  state?: { checked?: boolean | "mixed"; selected?: boolean; active?: boolean; disabled?: boolean; expanded?: boolean; required?: boolean; current?: boolean; invalid?: boolean; sort?: "ascending" | "descending" | "none"; haspopup?: string; readonly?: boolean;
+    /** AX focused=true:键盘焦点当前在该元素上。@since R7 */
+    focused?: boolean;
+    /** AX focusable=true:该元素可接收键盘焦点。@since R7 */
+    focusable?: boolean;
+    /** AX modal=true:该对话框为模态。@since R7 */
+    modal?: boolean;
+  };
   /** 值域控件(slider/spinbutton/progressbar/meter 及原生 range/number/progress)的当前值,如 "30" 或 "30/100"。@since dogfood 2026-06-02 */
   /** 同快照内 role+name 重名时,能把本元素与同组区分开的祖先文本。@since dup-context */
   valueNow?: string;
@@ -3631,7 +3638,14 @@ const INTERACTIVE_SELECTORS = [
           inViewport: boolean;
           occludedBy?: string;
           attrs: Record<string, string>;
-          state?: { checked?: boolean; selected?: boolean; active?: boolean; disabled?: boolean; expanded?: boolean; required?: boolean; current?: boolean; invalid?: boolean; sort?: "ascending" | "descending" | "none"; haspopup?: string; level?: number };
+          state?: { checked?: boolean; selected?: boolean; active?: boolean; disabled?: boolean; expanded?: boolean; required?: boolean; current?: boolean; invalid?: boolean; sort?: "ascending" | "descending" | "none"; haspopup?: string; level?: number;
+            /** AX focused=true:键盘焦点当前在该元素上。@since R7 */
+            focused?: boolean;
+            /** AX focusable=true:该元素可接收键盘焦点。@since R7 */
+            focusable?: boolean;
+            /** AX modal=true:该对话框为模态。@since R7 */
+            modal?: boolean;
+          };
           /** 值域控件当前值,如 "30" 或 "30/100"(getValueInfo 严格限定值域控件)。 */
           valueNow?: string;
           /** 同快照内 role+name 重名时的区分性祖先文本。@since dup-context */
@@ -5778,7 +5792,14 @@ export function registerObserveHandlers(router: ActionRouter, debuggerMgr: Debug
         tag: string;
         role: string;
         name: string;
-        state?: { checked?: boolean | "mixed"; selected?: boolean; active?: boolean; disabled?: boolean; expanded?: boolean; required?: boolean; current?: boolean; invalid?: boolean; sort?: "ascending" | "descending" | "none"; haspopup?: string; readonly?: boolean };
+        state?: { checked?: boolean | "mixed"; selected?: boolean; active?: boolean; disabled?: boolean; expanded?: boolean; required?: boolean; current?: boolean; invalid?: boolean; sort?: "ascending" | "descending" | "none"; haspopup?: string; readonly?: boolean;
+          /** AX focused=true:键盘焦点当前在该元素上。@since R7 */
+          focused?: boolean;
+          /** AX focusable=true:该元素可接收键盘焦点。@since R7 */
+          focusable?: boolean;
+          /** AX modal=true:该对话框为模态。@since R7 */
+          modal?: boolean;
+        };
         /** 值域控件当前值,如 "30" 或 "30/100"(getValueInfo 严格限定值域控件)。 */
         valueNow?: string;
         /** 同快照内 role+name 重名时的区分性祖先文本。@since dup-context */

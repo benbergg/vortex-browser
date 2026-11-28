@@ -86,6 +86,12 @@ export interface AXOverlayInfo {
     autocomplete?: "list" | "both" | "none" | "inline";
     /** aria-pressed=true, toggle button 状态(与 [active] 同源不同义)。@since R1 B004 */
     pressed?: boolean;
+    /** AX focused=true:键盘焦点当前落在该元素上。@since R7 */
+    focused?: boolean;
+    /** AX focusable=true:该元素可接收键盘焦点。@since R7 */
+    focusable?: boolean;
+    /** AX modal=true:该对话框为模态。@since R7 */
+    modal?: boolean;
   };
   valueNow?: string;
   controls?: number[];      // 目标 backendDOMNodeId(后续 remap 到 index)

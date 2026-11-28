@@ -134,6 +134,16 @@ export function computeAXOverlay(
   if (getProp(node, "pressed") === true || getProp(node, "pressed") === "true") {
     state.pressed = true;
   }
+  // R7: focused / focusable / modal 是 AX 独有属性(DOM 派生 state 无同名键,
+  // 唯一来源即 CDP properties)。缺口:真实站 github.com/microsoft/vscode/issues
+  // 上点击「Search issues」输入框后 observe 只给 {autocomplete,haspopup,expanded},
+  // 同一时刻 AX 给 focused:true/focusable:true;打开「Quick search」对话框后
+  // `dialog "Quick search"` 的 state 为 null,而 AX 给 modal:true(2026-11-28)。
+  // 语义:原始值严格等于布尔 true 才输出;缺失/false/字符串 "false"/其他非布尔
+  // 一律不输出(与 ax-snapshot.ts 的 focused 判定同纪律)。
+  if (getProp(node, "focused") === true) state.focused = true;
+  if (getProp(node, "focusable") === true) state.focusable = true;
+  if (getProp(node, "modal") === true) state.modal = true;
   if (Object.keys(state).length > 0) out.state = state;
 
   const valuetext = getProp(node, "valuetext");

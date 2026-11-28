@@ -8,6 +8,28 @@
 
 ### Added
 
+- **`observe.snapshot` 的元素 state 补齐 AX 焦点/可聚焦/模态三项**：`computeAXOverlay` 把 CDP
+  `Accessibility.getFullAXTree` 的 `properties` 投影成元素 `state` 时，白名单只含
+  `checked`/`selected`/`disabled`/`expanded`/`required`/`readonly`/`invalid`/`autocomplete`/
+  `pressed`，**不含 `focused`/`focusable`/`modal`**——AX 覆盖层本身已命中这些元素
+  （`semanticSource:"ax"`），是白名单缺失让信息在最后一层被丢弃。实测（2026-11-28，
+  `https://github.com/microsoft/vscode/issues`，Chrome）：点击
+  `input[placeholder="Search issues"]` 后 `observe.snapshot` 的 combobox state 只有
+  `{autocomplete:"list", haspopup:"listbox", expanded:false}`，而同一时刻 AX 的 `properties`
+  给 `focused:true`/`focusable:true`；打开 GitHub「Quick search」对话框后
+  `dialog "Quick search"` 的 state 为 `null`，AX 给 `modal:true`。现在这三项进白名单，
+  **原始值严格等于布尔 `true` 才输出**，属性缺失/`false`/字符串 `"false"`/其他非布尔一律
+  不输出（不造默认值）；`expanded`（保留显式 `false`）、`checked`（支持 `"mixed"`）、
+  `autocomplete`（仅合法 token）、`invalid` 等旧键语义不变。不新增顶层字段，不改
+  role/name/description/valueNow/controls/owns 与 frame 覆盖行为。
+  ⚠️ MCP 文本渲染（`packages/mcp/src/lib/observe-render.ts`）本轮**未改**：state 的文本渲染走
+  显式白名单，这三项只出现在结构化输出（compact/full）的 `state` 里。
+
+  涉及文件：`packages/extension/src/handlers/observe-ax-overlay.ts`（state 白名单）、
+  `packages/extension/src/reasoning/types.ts`（`AXOverlayInfo.state` 类型）、
+  `packages/extension/src/handlers/observe.ts`（三处 state 类型声明）；新增
+  `packages/extension/tests/observe-ax-state.test.ts`。
+
 - **`vortex_press` 支持 `text` 批量键入**：整串文本逐字符送成**受信任按键**（CDP
   `Input.dispatchKeyEvent` keyDown 带 `text`），终端/编辑器按真实键位处理，而不是往代理里
   插一段纯文本。标点走 US 布局的物理键位（`code` + `windowsVirtualKeyCode`）——旧的
