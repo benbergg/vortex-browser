@@ -74,21 +74,6 @@ const CLICK_EVENT_TYPES = ["click", "mousedown", "mouseup", "pointerdown", "poin
  */
 const DROP_TARGET_EVENT_TYPES = ["drop", "dragenter", "dragover"];
 
-// Diagnostic spike: never emit arbitrary CDP messages or page-thrown values.
-function diagnosticError(error: unknown): string {
-  const message = error instanceof Error ? error.message : typeof error === "string" ? error : "";
-  return [
-    "Could not find node with given id",
-    "No node with given id found",
-    "Could not find object with given id",
-    "Cannot find context with specified id",
-    "Document needs to be requested first",
-    "No target with given id found",
-    "not attached",
-    "already attached",
-  ].find((known) => message.toLowerCase().includes(known.toLowerCase())) ?? "redacted unknown error";
-}
-
 /** DOMDebugger.getEventListeners 单条监听器形（只用到 type + backendNodeId）。 */
 interface CdpEventListener {
   type?: string;
@@ -126,30 +111,23 @@ export async function markListenerElements(
 ): Promise<ListenerMarkResult> {
   if (requests.length === 0) return { count: 0, dropzoneCount: 0, mechanism: "error" };
   let docObjectId: string | undefined;
-  let stage = "attach";
   try {
     if (typeof (debuggerMgr as DebuggerManager).attach === "function") {
       await (debuggerMgr as DebuggerManager).attach(tabId);
     }
     if (typeof (debuggerMgr as DebuggerManager).enableDomain === "function") {
-      stage = "DOM.enable";
       await (debuggerMgr as DebuggerManager).enableDomain(tabId, "DOM");
     }
 
     // document 的 RemoteObject（getEventListeners 的根 objectId）
-    stage = "Runtime.evaluate";
     const docResp = (await debuggerMgr.sendCommand(tabId, "Runtime.evaluate", {
       expression: "document",
       returnByValue: false,
     })) as { result?: { objectId?: string } } | undefined;
     docObjectId = docResp?.result?.objectId;
-    if (!docObjectId) {
-      console.warn("[listener-spike]", { tabId, stage, error: "missing document objectId" });
-      return { count: 0, dropzoneCount: 0, mechanism: "error" };
-    }
+    if (!docObjectId) return { count: 0, dropzoneCount: 0, mechanism: "error" };
 
     // 一次拿整个文档子树（含 shadow / iframe）所有监听器，每条带 backendNodeId
-    stage = "DOMDebugger.getEventListeners";
     const leResp = (await debuggerMgr.sendCommand(tabId, "DOMDebugger.getEventListeners", {
       objectId: docObjectId,
       depth: -1,
@@ -178,7 +156,6 @@ export async function markListenerElements(
     // "Document needs to be requested first")。depth:-1+pierce 确保 shadow/iframe
     // 节点也在 frontend map 内，与 getEventListeners 的 pierce:true 对齐。仅在确有
     // 关注监听器(且 ≤cap)时才付此遍历代价。
-    stage = "DOM.getDocument";
     await debuggerMgr.sendCommand(tabId, "DOM.getDocument", { depth: -1, pierce: true });
 
     // 页侧检查截止时间，避免排队中的 CDP 命令在超时后写入。
@@ -186,23 +163,20 @@ export async function markListenerElements(
     const markSet = async (ids: Set<number>, attr: string): Promise<number> => {
       if (ids.size === 0) return 0;
       if (Date.now() >= deadline) { incomplete = true; return 0; }
-      stage = "DOM.pushNodesByBackendIdsToFrontend";
       const pushResp = (await debuggerMgr.sendCommand(tabId, "DOM.pushNodesByBackendIdsToFrontend", {
         backendNodeIds: [...ids],
       })) as { nodeIds?: number[] } | undefined;
       const nodeIds = pushResp?.nodeIds ?? [];
       let n = 0;
       for (const nodeId of nodeIds) {
-        if (!nodeId) { console.warn("[listener-spike]", { tabId, stage: "DOM.pushNodesByBackendIdsToFrontend", nodeId, error: "missing nodeId" }); incomplete = true; continue; }
+        if (!nodeId) { incomplete = true; continue; }
         if (Date.now() >= deadline) { incomplete = true; break; }
         let objectId: string | undefined;
         try {
-          stage = "DOM.resolveNode";
           const resolved = await debuggerMgr.sendCommand(tabId, "DOM.resolveNode", { nodeId }) as { object?: { objectId?: string } };
           objectId = resolved?.object?.objectId;
-          if (!objectId) { console.warn("[listener-spike]", { tabId, stage, nodeId, error: "missing objectId" }); incomplete = true; continue; }
+          if (!objectId) { incomplete = true; continue; }
           if (Date.now() >= deadline) { incomplete = true; break; }
-          stage = "Runtime.callFunctionOn";
           const response = await debuggerMgr.sendCommand(tabId, "Runtime.callFunctionOn", {
             objectId,
             functionDeclaration: `function (name, deadline, token, requests) {
@@ -227,21 +201,15 @@ export async function markListenerElements(
             }`,
             arguments: [{ value: attr }, { value: Number.isFinite(deadline) ? deadline : Number.MAX_SAFE_INTEGER }, { value: paginationSnapshotId ?? null }, { value: requests }],
             returnByValue: true,
-          }) as { result?: { value?: boolean | "not-target" }; exceptionDetails?: { lineNumber?: number; columnNumber?: number; exception?: { className?: string } } };
-          if (response?.exceptionDetails) {
-            const { lineNumber, columnNumber, exception } = response.exceptionDetails;
-            const error = ["Error", "TypeError", "ReferenceError", "RangeError", "SyntaxError", "DOMException"].find((name) => name === exception?.className) ?? "page exception (details redacted)";
-            console.warn("[listener-spike]", { tabId, stage, nodeId, error, lineNumber, columnNumber });
-          }
+          }) as { result?: { value?: boolean | "not-target" }; exceptionDetails?: unknown };
           if (!response?.exceptionDetails && response?.result?.value === true) n++;
           else if (response?.exceptionDetails || response?.result?.value !== "not-target") incomplete = true;
-        } catch (error) {
-          console.warn("[listener-spike]", { tabId, stage, nodeId, error: diagnosticError(error) });
+        } catch {
           incomplete = true;
         } finally {
           if (objectId) {
             try { await debuggerMgr.sendCommand(tabId, "Runtime.releaseObject", { objectId }); }
-            catch (error) { console.warn("[listener-spike]", { tabId, stage: "Runtime.releaseObject", nodeId, error: diagnosticError(error) }); incomplete = true; }
+            catch { incomplete = true; }
           }
         }
       }
@@ -251,17 +219,15 @@ export async function markListenerElements(
     // 点击类先标(保序:既有测试断言首个 push 为点击集),投放区后标。
     const count = await markSet(clickIds, LISTENER_MARK_ATTR);
     const dropzoneCount = await markSet(dropIds, DROPZONE_MARK_ATTR);
-    console.debug("[listener-spike]", { tabId, stage: "complete", count, dropzoneCount, incomplete });
     return { count, dropzoneCount, mechanism: incomplete ? (Date.now() >= deadline ? "timeout" : "error") : "domDebugger" };
-  } catch (error) {
-    console.warn("[listener-spike]", { tabId, stage, error: diagnosticError(error) });
+  } catch {
     return { count: 0, dropzoneCount: 0, mechanism: "error" };
   } finally {
     if (docObjectId) {
       try {
         await debuggerMgr.sendCommand(tabId, "Runtime.releaseObject", { objectId: docObjectId });
-      } catch (error) {
-        console.warn("[listener-spike]", { tabId, stage: "Runtime.releaseObject(document)", error: diagnosticError(error) });
+      } catch {
+        /* 释放失败无害 */
       }
     }
   }
