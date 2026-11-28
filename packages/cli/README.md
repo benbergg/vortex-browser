@@ -103,6 +103,8 @@ vortex sequence --on-failure continue --steps '[...]'
 
 `@ref` 来自最近一次 `vortex observe`，**与 tab 绑定**：换了 tab 就要重新 observe。
 
+**`--target` 作用域语义**：`--target` 传 CSS 选择器或 `@ref`，只在该容器内采集。成功命中 target 只证明该容器存在，不证明目标控件位于容器内；空快照不代表整页没有该控件。选择器未命中时直接报错（`ELEMENT_NOT_FOUND`），不会返回空快照。
+
 **tab 身份怎么算**（`@ref` 的校验口径）：快照按**解析后的实际 tab**登记与校验 ——
 不是按「有没有传 `--tab`」。
 
