@@ -208,6 +208,8 @@ export async function markListenerElements(
             functionDeclaration: `function (name, deadline, token, requests) {
               if (Date.now() >= deadline) return false;
               const doc = this.ownerDocument;
+              // Document 节点没有所属文档(ownerDocument 为 null),无法校验归属,跳过且不算缺口。
+              if (!doc) return "not-target";
               // pierce also returns child nodes when only the main frame was claimed.
               if (requests.every(r => r.frameId === 0) && doc?.defaultView &&
                   doc.defaultView !== doc.defaultView.top) return "not-target";
