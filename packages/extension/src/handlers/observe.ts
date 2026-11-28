@@ -38,6 +38,31 @@ const scanEpoch = crypto.randomUUID();
 let scanOrder = 0;
 
 /**
+ * 语义模式**最终标签兜底**的保留清单(真源;inject 内联副本须同步,
+ * observe-role-fallback.test.ts 锁守护)。
+ *
+ * Why：兜底原为无条件 `return tag`,把 <div>/<span>/<body>/<html>/自定义元素
+ * (mdn-button / turbo-frame)的**标签名**当 role 输出——那不是 ARIA 角色,a11y 消费者
+ * (agent / 读屏替代实现 / role 等价性判定)无法按 ARIA 语义推理(2026-11-28 第6轮评测:
+ * MDN 出 role="mdn-button"、GitHub 出 role="turbo-frame"/"div"/"html"/"body",
+ * Chrome AX 原始树里根本没有这些 role)。改为「保留清单 + 其余归 generic」:
+ * 清单内标签名本身就是 ARIA 角色名,其余一律 generic。
+ *
+ * 保留(22):table, caption, article, figure, blockquote, form, search, dialog, menu,
+ * menuitem, menuitemcheckbox, menuitemradio, option, meter, marquee, img, code, strong,
+ * time, math, link, switch(SVG <switch>)。
+ * 兼容例外(保留但**不是**合法 ARIA 角色,只因既有 overlay 启发式依赖它):label。
+ * @author qingwa
+ */
+const NATIVE_FALLBACK_ROLE_TAGS = new Set([
+  "table", "caption", "article", "figure", "blockquote", "form", "search", "dialog",
+  "menu", "menuitem", "menuitemcheckbox", "menuitemradio", "option", "meter", "marquee",
+  "img", "code", "strong", "time", "math", "link", "switch",
+  // 兼容例外:label 不是 ARIA 角色,保留只为既有 overlay 启发式约定。
+  "label",
+]);
+
+/**
  * 仅供单测:复刻 inject 内联 getRole 真源(改一处须同步 inject 内联副本,
  * observe-role-gate.test.ts 锁守护)。@author qingwa
  */
@@ -77,7 +102,7 @@ export function getRoleForTest(el: Element): string {
   if (tag === "footer" && !el.closest("article,section,aside,main,nav")) return "contentinfo";
   // section 仅在有可及名称(aria-label/aria-labelledby)时为 region
   if (tag === "section" && (el.hasAttribute("aria-label") || el.hasAttribute("aria-labelledby"))) return "region";
-  return tag;
+  return NATIVE_FALLBACK_ROLE_TAGS.has(tag) ? tag : "generic";
 }
 
 /**
@@ -1172,7 +1197,7 @@ export function partitionMainContentFirst(candidates: Element[], mainEl: Element
  *        <span class="bnCheck-label">名</span></div>
  *
  * 无 role / 无原生 <input> / 无 aria-checked,勾选态是 `.bnCheck-status` 上的**裸**
- * `checked` class。getRole 因此返 tag(span),controlRoleFromClass 末位 token 规则
+ * `checked` class。getRole 因此返 generic(span 不在标签兜底保留清单),controlRoleFromClass 末位 token 规则
  * 抓不到缩写 "bnCheck"(≠checkbox),getUiState 的 is-checked/aria/native 路径也全漏
  * (checked 落在后代 status span)。本判据从 collected 元素(常是 bnCheck-label)上溯
  * ≤5 层命中 `.bnCheck` 根 → role=checkbox + checked。只覆盖实机验证过的 bnCheck,
@@ -1498,7 +1523,7 @@ const INTERACTIVE_SELECTORS = [
           // 同样走 RECALL_ROLES 召回门。这些 tag 历史上是「被忽视的容器」,Agent 看不到
           // 它们的 landmark/分组结构;现统一召回,与显式 [role=X] 形式等价。
           // 注意:section 仅在有 aria-label/aria-labelledby 时才为 region(无名称时
-          // getRole 返 tag name "section" 不在 RECALL_ROLES),召回门会自然过滤掉
+          // getRole 兜底返 "generic" 不在 RECALL_ROLES),召回门会自然过滤掉
           // 装饰用 section;但下方收集循环加过门成本几乎为零,统一收也无副作用。
           "table,nav,main,header,footer,aside,fieldset,ul,ol,li,section",
           "[tabindex]:not([tabindex='-1'])",
@@ -1568,6 +1593,16 @@ const INTERACTIVE_SELECTORS = [
           return { role: "checkbox", checked: !!status && status.classList.contains("checked") };
         };
 
+        // 语义模式最终标签兜底的保留清单(真源:模块级 NATIVE_FALLBACK_ROLE_TAGS;
+        // 注入体丢模块作用域不能 import,内联同语义副本,改一处须同步)。
+        // 清单外一律 generic——标签名不是 ARIA 角色名(div/span/body/html/自定义元素等)。
+        const __NATIVE_FALLBACK_ROLE_TAGS = new Set([
+          "table", "caption", "article", "figure", "blockquote", "form", "search", "dialog",
+          "menu", "menuitem", "menuitemcheckbox", "menuitemradio", "option", "meter", "marquee",
+          "img", "code", "strong", "time", "math", "link", "switch",
+          // 兼容例外:label 不是 ARIA 角色,保留只为既有 overlay 启发式约定。
+          "label",
+        ]);
         function getRole(el: Element, source?: { value: "dom" | "heuristic" }): string {
           if (source) source.value = "dom";
           const explicit = el.getAttribute("role");
@@ -1623,7 +1658,7 @@ const INTERACTIVE_SELECTORS = [
           // 班牛 bnCheck 自定义勾选控件(无 role/无原生 input)→ checkbox(N0064 P2-1)。
           if (source) source.value = "heuristic";
           if (bnCheckInfo(el)) return "checkbox";
-          return tag;
+          return __NATIVE_FALLBACK_ROLE_TAGS.has(tag) ? tag : "generic";
         }
 
         // Task 4 召回门 passesRoleGate(真源:reasoning/aria-taxonomy.ts RECALL_ROLES)
@@ -2838,8 +2873,8 @@ const INTERACTIVE_SELECTORS = [
         const TABLE_EXTRA_SELECTORS =
           // 原生 <table> 容器已并入 INTERACTIVE_SELECTORS(Task 4):HTML-AAM 隐式映射
           // getRole <table> → "table" ∈ RECALL_ROLES,过召回门入池。此处只补行/列等
-          // 内部 cell 结构与显式 row/cell/gridcell role(原生 tr/td/th 的 getRole 返
-          // tag name 不在 RECALL_ROLES,无法过门,需 selector 直收;filter=all 时
+          // 内部 cell 结构与显式 row/cell/gridcell role(原生 tr/td/th 的 getRole 兜底
+          // 返 generic,不在 RECALL_ROLES,无法过门,需 selector 直收;filter=all 时
           // 才用,普通观察不影响)。
           "tr,td,th,[role=row],[role=cell],[role=columnheader],[role=rowheader],[role=gridcell]";
         const ROOT_SELECTORS =

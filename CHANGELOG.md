@@ -62,6 +62,36 @@
 
 ### Fixed
 
+- **`observe.snapshot` 语义模式不再把标签名当 role**：过去 `getRole` 的最终兜底是无条件
+  `return tag`，把 `<div>`/`<span>`/`<body>`/`<html>`/自定义元素（`mdn-button`、
+  `turbo-frame` 等）的**标签名**直接当 role 输出——那不是 ARIA 角色，Chrome 原始无障碍树
+  （`Accessibility.getFullAXTree`）里根本没有这些 role，a11y 消费者（agent / 读屏替代实现 /
+  role 等价性判定）无法按 ARIA 语义推理。实测 MDN 文档页输出 `role="mdn-button"`、GitHub
+  issue 页输出 `role="turbo-frame"`/`div`/`html`/`body`。现在兜底改为**保留清单 + 其余归
+  `generic`**：保留 `table`/`caption`/`article`/`figure`/`blockquote`/`form`/`search`/
+  `dialog`/`menu`/`menuitem`/`menuitemcheckbox`/`menuitemradio`/`option`/`meter`/`marquee`/
+  `img`/`code`/`strong`/`time`/`math`/`link`/`switch`（SVG `<switch>`），另保留兼容例外
+  `label`（不是合法 ARIA 角色，只因既有 overlay 启发式依赖它）；其余（含 `progress`/
+  `optgroup`/`thead`/`tbody`/`tfoot`/`tr`/`td`/`th`/`h1`–`h6`/`output`/`col`/`colgroup`/
+  `legend`/`datalist`/`dl`/`dt`/`dd`/`p`/`pre`/`em`/`i`/`b` 等）一律归 `generic`。显式
+  `role`、HTML-AAM 隐式映射（`a`/`button`/`input`/`select`/`textarea`/`iframe`/`summary`/
+  `nav`/`main`/`aside`/`fieldset`/`ul`/`ol`/`li`/`header`/`footer`/`section`）、`bnCheck`
+  启发式一律不变；原生 `<table>` 与原生交互元素照旧入池、role 不变。
+
+  ⚠️ **标签身份仍保留在元素的 `tag` 字段**（`observe.snapshot` 输出逐元素带 `tag`），
+  语义消费者**不应继续依赖标签式 role**：要区分 `<div>`/`<span>`/自定义元素请读 `tag`，
+  不要读 `role`。
+
+  本轮**只**改最终标签兜底这一条路径；显式 `role`（作者自造 role 原样透出）、无 `title`
+  的 `<iframe>` 返 `"iframe"`、`includeAX:false` 分支直接用标签名当 role 这三条伪 role 路径
+  本轮未动——不可据此声称 `observe` 已不再产生任何非 ARIA role。
+
+  涉及文件：`packages/extension/src/handlers/observe.ts`（模块级 `NATIVE_FALLBACK_ROLE_TAGS`
+  + inject 内联副本 + 导出 `getRoleForTest` 同步）；新增
+  `packages/extension/tests/observe-role-fallback.test.ts`（执行序列化后的生产注入函数）；
+  同步 `packages/extension/tests/observe-role-gate.test.ts`、
+  `packages/extension/tests/observe-semantic-source.test.ts` 的既有断言。
+
 - **back/forward 的 load 等待不再空等满 25s**：历史恢复常在毫秒级完成，而 back/forward
   先发导航命令、**再**挂 tab `complete` 监听器，事件早于监听器发过就永远等不到
   ⇒ `waitForTabLoad` 空等满 `NAVIGATE_LOAD_TIMEOUT_MS`(25s)，实测单次 history 调用
