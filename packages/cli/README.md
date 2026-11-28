@@ -61,6 +61,15 @@ vortex network filter --status-min 400
 | `act` | 对元素执行 click / fill / type / select / scroll / hover（一等命令） |
 | `sequence` | 一次跑多步，每步自证（一等命令） |
 
+## 无障碍读取路径
+
+`vortex observe` 与 `vortex content getAccessibilityTree` 回答不同的问题：
+
+- `vortex observe` —— **候选元素**快照（交互 / 语义元素），带 AX 推导的 `role` / `name` / `state`。它**不是**完整的无障碍树，不枚举所有非交互容器（例如仅供屏幕阅读器使用的事件区）。
+- `vortex content getAccessibilityTree` —— 页面的 **Chrome 无障碍树**，包含候选扫描不呈现的节点（事件区、标题等结构性节点）。返回根节点上的 `source`（`chrome-ax` / `dom-heuristic`）、`degraded`、`truncated` 需要先核对：`degraded: true` 表示回退到 DOM 启发式路径，`truncated: true` 表示输出触达体积预算。
+
+要确认页面**是否声明**了事件区，读无障碍树。两个接口都不验证播报是否真的发生。
+
 ## observe / act / sequence
 
 这三个是给人直接用的「一等命令」：默认输出**人看的几行**，`--json` 回到原始 JSON
