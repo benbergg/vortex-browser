@@ -741,3 +741,129 @@ describe("ordinary scan write ownership across worker epochs", () => {
     expect(api.monitor.check()).toBe(true);
   });
 });
+
+describe("ownership handover across the executeScript argument boundary", () => {
+  const exitedKey = (kind: Kind) => kind === "listener" ? "__vortexListenerExitedEpochs" : kind === "scan" ? "__vortexScanExitedEpochs" : "__vortexAXExitedEpochs";
+
+  // Chrome hands the page result back through a sorted dictionary that drops
+  // null-valued fields, so the probe state arrives at the next injection with
+  // a different key order and without its null fields.
+  const acrossBoundary = (state: Record<string, any>) => {
+    const out: Record<string, any> = {};
+    for (const key of Object.keys(state).sort()) {
+      if (state[key] === null || state[key] === undefined) continue;
+      out[key] = state[key];
+    }
+    return out;
+  };
+
+  const seed = (api: any, kind: Kind, state: "retired" | "expired") => {
+    const request: any = {
+      frameId: api.frame.frameId, documentId: api.frame.documentId, epoch: `${kind}-worker-A`,
+      order: 4, token: `${kind}-token-A`, deadline: state === "expired" ? Date.now() - 1 : Date.now() + 60_000,
+    };
+    if (kind !== "listener") request.ancestorFrameIds = [1, 2];
+    api.win.document[ownerKey(kind)] = {
+      ...request, highWater: request.order, owner: state === "expired" ? request.token : null,
+      retired: state === "retired", revision: 3,
+    };
+    return request;
+  };
+
+  const successor = (kind: Kind, request: any) => ({
+    ...request, epoch: `${kind}-worker-B`, order: request.order + 1, token: `${kind}-token-B`, deadline: Date.now() + 60_000,
+  });
+
+  for (const kind of ["listener", "ax", "scan"] as const) {
+    it.each(["retired", "expired"] as const)(`hands over ${kind} ownership after the probe result crosses the argument boundary reordered and stripped of null fields (%s)`, async (state) => {
+      const api = await setup();
+      const request = seed(api, kind, state);
+      const { recoverDocumentOwnership } = await import("../src/handlers/observe-ownership-recovery.js");
+      const wait = async (work: Promise<any>) => (await work).map((entry: any) => ({
+        ...entry, result: entry.result && typeof entry.result === "object" ? acrossBoundary(entry.result) : entry.result,
+      }));
+      expect(await recoverDocumentOwnership(kind, 42, successor(kind, request) as any, wait as any)).toBe(true);
+      expect(api.win.document[ownerKey(kind)].owner).toBe(`${kind}-token-B`);
+      expect(api.win.document[exitedKey(kind)].has(`${kind}-worker-A`)).toBe(true);
+    });
+  }
+
+  for (const kind of ["listener", "ax", "scan"] as const) {
+    it(`hands over ${kind} ownership when a null-valued field is missing on one side only`, async () => {
+      const api = await setup();
+      const request = seed(api, kind, "retired");
+      const next = successor(kind, request);
+      const { transitionOwnership } = await import("../src/handlers/observe-ownership-recovery.js");
+      const op = async (action: "probe" | "handover", expected: any = null) => (await api.inject({
+        target: { tabId: 42, documentIds: [api.frame.documentId] }, world: "MAIN",
+        func: transitionOwnership, args: [`ownership.${action}`, kind, next, expected],
+      }))[0]?.result;
+      const expected = await op("probe");
+      expect(expected.owner).toBeNull();
+      // The probe saw a null owner, the live state lost the field entirely.
+      delete api.win.document[ownerKey(kind)].owner;
+      expect(await op("handover", expected)).toBe(true);
+      expect(api.win.document[ownerKey(kind)].owner).toBe(next.token);
+    });
+
+    it(`rejects a ${kind} handover when the owner token was released after the probe`, async () => {
+      const api = await setup();
+      const request = seed(api, kind, "expired");
+      const next = successor(kind, request);
+      const { transitionOwnership } = await import("../src/handlers/observe-ownership-recovery.js");
+      const op = async (action: "probe" | "handover", expected: any = null) => (await api.inject({
+        target: { tabId: 42, documentIds: [api.frame.documentId] }, world: "MAIN",
+        func: transitionOwnership, args: [`ownership.${action}`, kind, next, expected],
+      }))[0]?.result;
+      const expected = await op("probe");
+      expect(expected.owner).toBe(request.token);
+      api.win.document[ownerKey(kind)].owner = null;
+      const before = structuredClone(api.win.document[ownerKey(kind)]);
+      expect(await op("handover", expected)).toBe(false);
+      expect(api.win.document[ownerKey(kind)]).toEqual(before);
+      expect(api.win.document[exitedKey(kind)]).toBeUndefined();
+    });
+  }
+
+  const negatives: Array<{ label: string; kinds: Kind[]; mutate: (state: any) => any }> = [
+    { label: "an added field", kinds: ["listener", "ax", "scan"], mutate: (s) => ({ ...s, injected: true }) },
+    { label: "a removed field", kinds: ["listener", "ax", "scan"], mutate: (s) => { const copy = { ...s }; delete copy.revision; return copy; } },
+    { label: "a renamed field", kinds: ["listener", "ax", "scan"], mutate: (s) => { const copy = { ...s }; delete copy.revision; copy.rev = s.revision; return copy; } },
+    { label: "a changed revision", kinds: ["listener", "ax", "scan"], mutate: (s) => ({ ...s, revision: s.revision + 1 }) },
+    { label: "a changed owner", kinds: ["listener", "ax", "scan"], mutate: (s) => ({ ...s, owner: "other-owner" }) },
+    { label: "a changed high water", kinds: ["listener", "ax", "scan"], mutate: (s) => ({ ...s, highWater: s.highWater + 1 }) },
+    { label: "a changed deadline", kinds: ["listener", "ax", "scan"], mutate: (s) => ({ ...s, deadline: s.deadline + 1 }) },
+    { label: "a changed token", kinds: ["listener", "ax", "scan"], mutate: (s) => ({ ...s, token: "other-token" }) },
+    { label: "a changed ancestor frame id", kinds: ["ax", "scan"], mutate: (s) => ({ ...s, ancestorFrameIds: [1, 3] }) },
+    { label: "a reordered ancestor frame list", kinds: ["ax", "scan"], mutate: (s) => ({ ...s, ancestorFrameIds: [2, 1] }) },
+  ];
+
+  for (const kind of ["listener", "ax", "scan"] as const) {
+    for (const state of ["retired", "expired"] as const) {
+      for (const scenario of negatives) {
+        if (!scenario.kinds.includes(kind)) continue;
+        it(`rejects a ${kind} handover when ${scenario.label} changed after the probe under ${state} ownership`, async () => {
+          const api = await setup();
+          const request = seed(api, kind, state);
+          const next = successor(kind, request);
+          const { transitionOwnership } = await import("../src/handlers/observe-ownership-recovery.js");
+          const op = async (action: "probe" | "handover", expected: any = null) => (await api.inject({
+            target: { tabId: 42, documentIds: [api.frame.documentId] }, world: "MAIN",
+            func: transitionOwnership, args: [`ownership.${action}`, kind, next, expected],
+          }))[0]?.result;
+          const expected = await op("probe");
+          const tampered = scenario.mutate(structuredClone(expected));
+          const before = structuredClone(api.win.document[ownerKey(kind)]);
+          const tombstones = api.win.document[exitedKey(kind)];
+          expect(await op("handover", tampered)).toBe(false);
+          expect(api.win.document[ownerKey(kind)]).toEqual(before);
+          expect(api.win.document[exitedKey(kind)]).toBe(tombstones);
+          // The untouched probe state still hands over, so the rejection came
+          // from the changed field and not from a blocked lease.
+          expect(await op("handover", expected)).toBe(true);
+          expect(api.win.document[ownerKey(kind)].owner).toBe(next.token);
+        });
+      }
+    }
+  }
+});

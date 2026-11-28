@@ -41,18 +41,19 @@ describe("getRole 隐式 HTML-AAM 映射", () => {
     expect(roleOf(`<nav role="tablist"></nav>`, "nav")).toBe("tablist");
   });
 
-  it("section 无可及名称 → 返 tag 而非 region", () => {
-    expect(roleOf(`<section></section>`, "section")).toBe("section");
+  it("section 无可及名称 → 兜底返 generic 而非 region", () => {
+    // 第6轮:标签兜底改为「保留清单 + 其余归 generic」,section 不在保留清单内。
+    expect(roleOf(`<section></section>`, "section")).toBe("generic");
   });
 
-  it("header 顶层 → banner;非顶层 → tag", () => {
+  it("header 顶层 → banner;非顶层 → 兜底 generic", () => {
     expect(roleOf(`<header></header>`, "header")).toBe("banner");
-    expect(roleOf(`<article><header></header></article>`, "header")).toBe("header");
+    expect(roleOf(`<article><header></header></article>`, "header")).toBe("generic");
   });
 
-  it("footer 顶层 → contentinfo;非顶层 → tag", () => {
+  it("footer 顶层 → contentinfo;非顶层 → 兜底 generic", () => {
     expect(roleOf(`<footer></footer>`, "footer")).toBe("contentinfo");
-    expect(roleOf(`<article><footer></footer></article>`, "footer")).toBe("footer");
+    expect(roleOf(`<article><footer></footer></article>`, "footer")).toBe("generic");
   });
 });
 

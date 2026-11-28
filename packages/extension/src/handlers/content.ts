@@ -1,5 +1,8 @@
 import { ContentActions, VtxErrorCode, vtxError } from "@vortex-browser/shared";
 import type { ActionRouter } from "../lib/router.js";
+import type { DebuggerManager } from "../lib/debugger-manager.js";
+import { captureAXNodeMap } from "../reasoning/ax-snapshot.js";
+import type { CDPAXNode } from "../reasoning/types.js";
 import { getActiveTabId, buildExecuteTarget, ensureFrameAttached } from "../lib/tab-utils.js";
 import { resolveTargetOptional } from "../lib/resolve-target.js";
 import { truncateWithTextTrailer, truncateWithHtmlTrailer } from "../lib/truncate.js";
@@ -12,7 +15,337 @@ import {
   type TerminalProbe,
 } from "../lib/terminal-readback.js";
 
-export function registerContentHandlers(router: ActionRouter): void {
+// ---------------------------------------------------------------------------
+// content.getAccessibilityTree:Chrome AX 主路径 + DOM 启发式回退
+// ---------------------------------------------------------------------------
+
+/** AX 主路径预算:节点 2000 / 深度 20 / name+value 200 字符 / 序列化 1 MiB(UTF-8) */
+const AX_TREE_BUDGET = { maxNodes: 2000, maxDepth: 20, maxChars: 200, maxBytes: 1024 * 1024 };
+/** DOM 回退路径预算:节点 500 / 深度 10 / 名称 100 字符(经 args 传入页内注入函数) */
+const DOM_TREE_BUDGET = { maxNodes: 500, maxDepth: 10, maxChars: 100 };
+
+interface A11yTreeNode {
+  role: string;
+  name?: string;
+  value?: string;
+  children?: A11yTreeNode[];
+  /** AX 节点描述(node.description.value),≤200 字符 */
+  description?: string;
+  /** AX 属性白名单投影(归一化后的 boolean/number/string) */
+  state?: Record<string, boolean | number | string>;
+  /** AX 关系属性(controls/owns/labelledby 等)→ 目标身份 */
+  relations?: Record<string, Array<{ backendDOMNodeId?: number; text?: string }>>;
+  /** 数据来源:chrome-ax = Chrome 真实 AX 树;dom-heuristic = DOM 启发式回退 */
+  source?: "chrome-ax" | "dom-heuristic";
+  /** 仅 DOM 回退路径出现:未能取到 Chrome AX 语义 */
+  degraded?: true;
+  degradedReason?: string;
+  /** 触发预算截断(有数据被丢弃)时出现 */
+  truncated?: true;
+}
+
+function utf8Len(text: string): number {
+  return new TextEncoder().encode(text).length;
+}
+
+/** 字符串上限截断:省略号计入上限(截断后总长 = max) */
+function clipText(text: string, max: number): { text: string; truncated: boolean } {
+  if (text.length <= max) return { text, truncated: false };
+  return { text: text.slice(0, max - 1) + "…", truncated: true };
+}
+
+/** state 白名单:CDP 属性名(小写化后)→ 输出键名。白名单外一律不携带。 */
+const AX_STATE_KEYS = new Set([
+  "focused",
+  "focusable",
+  "disabled",
+  "required",
+  "invalid",
+  "expanded",
+  "selected",
+  "checked",
+  "pressed",
+  "readonly",
+  "modal",
+  "atomic",
+  "multiselectable",
+  "haspopup", // 源属性名 hasPopup
+  "autocomplete",
+  "live",
+  "relevant",
+  "orientation",
+  "level",
+]);
+
+/** relations 白名单:带 relatedNodes 的关系属性 */
+const AX_RELATION_KEYS = new Set([
+  "labelledby",
+  "describedby",
+  "activedescendant",
+  "controls",
+  "owns",
+  "errormessage",
+  "flowto",
+]);
+
+/** 每个关系属性最多保留的条目数 */
+const AX_RELATION_MAX_ITEMS = 20;
+
+/**
+ * AX 属性值归一化(按属性区分,禁止统一字符串布尔化)。
+ * - boolean 原样(显式 false 必须保留);
+ * - checked/pressed:"true"/"false"→boolean,"mixed" 保留字符串;
+ * - invalid:"true"/"false"→boolean,其余 token(spelling/grammar)保留字符串;
+ * - haspopup:"true"→"menu",其余(listbox/menu/tree/grid/dialog)原样;
+ * - level:只接受有限 number;
+ * - 属性缺失/非法 → 不写入(不补造)。
+ */
+function normalizeStateValue(
+  key: string,
+  raw: unknown,
+): boolean | number | string | undefined {
+  if (typeof raw === "boolean") return raw;
+  if (key === "level") {
+    return typeof raw === "number" && Number.isFinite(raw) ? raw : undefined;
+  }
+  if (typeof raw === "number") return Number.isFinite(raw) ? raw : undefined;
+  if (typeof raw !== "string") return undefined;
+  if (key === "checked" || key === "pressed") {
+    if (raw === "true") return true;
+    if (raw === "false") return false;
+    return raw; // "mixed" 及其他 token 原样
+  }
+  if (key === "invalid") {
+    if (raw === "true") return true;
+    if (raw === "false") return false;
+    return raw; // spelling/grammar 等 token 原样
+  }
+  if (key === "haspopup") {
+    // observe 既有约定:aria-haspopup="true" 等价 menu
+    return raw === "true" ? "menu" : raw;
+  }
+  if (raw === "true") return true;
+  if (raw === "false") return false;
+  return raw;
+}
+
+/**
+ * 从 CDP AX properties 抽取 state / relations。
+ * 返回 truncated:表示有内容被丢弃(description 除外)→ 需置根 truncated。
+ */
+function extractAxMeta(
+  props: CDPAXNode["properties"],
+  maxChars: number,
+): {
+  state: Record<string, boolean | number | string>;
+  relations: Record<string, Array<{ backendDOMNodeId?: number; text?: string }>>;
+  truncated: boolean;
+} {
+  const state: Record<string, boolean | number | string> = {};
+  const relations: Record<string, Array<{ backendDOMNodeId?: number; text?: string }>> = {};
+  let truncated = false;
+
+  for (const prop of props ?? []) {
+    const rawName = prop?.name;
+    if (typeof rawName !== "string") continue;
+    const key = rawName.toLowerCase();
+
+    if (AX_STATE_KEYS.has(key) && !(key in state)) {
+      const normalized = normalizeStateValue(key, prop.value?.value);
+      if (normalized !== undefined) {
+        if (typeof normalized === "string") {
+          const clipped = clipText(normalized, maxChars);
+          state[key] = clipped.text;
+          if (clipped.truncated) truncated = true;
+        } else {
+          state[key] = normalized;
+        }
+      }
+    }
+
+    if (AX_RELATION_KEYS.has(key) && !(key in relations)) {
+      const related = prop.value?.relatedNodes;
+      if (!Array.isArray(related) || related.length === 0) continue;
+      const items = related.slice(0, AX_RELATION_MAX_ITEMS);
+      if (related.length > AX_RELATION_MAX_ITEMS) truncated = true;
+      const out: Array<{ backendDOMNodeId?: number; text?: string }> = [];
+      for (const rel of items) {
+        const item: { backendDOMNodeId?: number; text?: string } = {};
+        // CDP 的 text 可选:缺失不等于"没有关系" → 只保留身份
+        if (typeof rel?.backendDOMNodeId === "number") item.backendDOMNodeId = rel.backendDOMNodeId;
+        if (typeof rel?.text === "string") {
+          const clipped = clipText(rel.text, maxChars);
+          item.text = clipped.text;
+          if (clipped.truncated) truncated = true;
+        }
+        out.push(item);
+      }
+      relations[key] = out;
+    }
+  }
+
+  return { state, relations, truncated };
+}
+
+function summarizeAxError(err: unknown): string {
+  const code = (err as { code?: unknown } | null)?.code;
+  const message = err instanceof Error ? err.message : String(err);
+  const brief = typeof code === "string" ? `${code}: ${message}` : message;
+  return brief.length > 200 ? brief.slice(0, 199) + "…" : brief;
+}
+
+/**
+ * 由 CDP AX 原始索引重建无障碍树。
+ * - 根:role=RootWebArea 者,否则取无父节点者;
+ * - ignored 节点自身跳过,其有效后代提升到父级并保序(不整棵子树删除);
+ * - 不过滤 isInteresting(用 captureAXNodeMap 的不过滤索引),role/name/value 取 Chrome 原值;
+ * - 预算:节点 2000 / 深度 20 / name+value 200 字符 / 序列化 1 MiB,超限即停并标 truncated。
+ */
+function buildAXTree(byNodeId: Map<string, CDPAXNode>): { root: A11yTreeNode | null } {
+  const { maxNodes, maxDepth, maxChars, maxBytes } = AX_TREE_BUDGET;
+  let truncated = false;
+  let nodeCount = 0;
+
+  let rootId: string | undefined;
+  for (const [id, node] of byNodeId) {
+    if (!node.ignored && node.role?.value === "RootWebArea") {
+      rootId = id;
+      break;
+    }
+  }
+  if (rootId === undefined) {
+    for (const [id, node] of byNodeId) {
+      if (node.ignored) continue;
+      if (!node.parentId || !byNodeId.has(node.parentId)) {
+        rootId = id;
+        break;
+      }
+    }
+  }
+  if (rootId === undefined) return { root: null };
+
+  const rootSrc = byNodeId.get(rootId)!;
+  const produced: Array<{ node: A11yTreeNode; parent: A11yTreeNode | null }> = [];
+
+  const makeNode = (src: CDPAXNode): A11yTreeNode => {
+    const node: A11yTreeNode = { role: src.role?.value ?? "generic" };
+    const name = clipText((src.name?.value ?? "").trim(), maxChars);
+    if (name.text) node.name = name.text;
+    if (name.truncated) truncated = true;
+    const rawValue = src.value?.value;
+    if (typeof rawValue === "string") {
+      const value = clipText(rawValue, maxChars);
+      if (value.text) node.value = value.text;
+      if (value.truncated) truncated = true;
+    }
+    // description:AX 原值,≤200 字符;截断 → 节点级 + 根级 truncated
+    const rawDescription = src.description?.value;
+    if (typeof rawDescription === "string" && rawDescription.length > 0) {
+      const description = clipText(rawDescription, maxChars);
+      node.description = description.text;
+      if (description.truncated) {
+        node.truncated = true;
+        truncated = true;
+      }
+    }
+    // state / relations:白名单投影;任一截断 → 节点级 + 根级 truncated
+    const meta = extractAxMeta(src.properties, maxChars);
+    if (Object.keys(meta.state).length > 0) node.state = meta.state;
+    if (Object.keys(meta.relations).length > 0) node.relations = meta.relations;
+    if (meta.truncated) {
+      node.truncated = true;
+      truncated = true;
+    }
+    return node;
+  };
+
+  const buildChildren = (src: CDPAXNode, depth: number, parent: A11yTreeNode | null): A11yTreeNode[] => {
+    const out: A11yTreeNode[] = [];
+    for (const childId of src.childIds ?? []) {
+      if (nodeCount >= maxNodes) {
+        truncated = true;
+        break;
+      }
+      const child = byNodeId.get(childId);
+      if (!child) {
+        truncated = true;
+        continue;
+      }
+      if (child.ignored) {
+        // ignored 节点自身跳过:其有效后代提升到当前层级并保持原有顺序
+        out.push(...buildChildren(child, depth, parent));
+        continue;
+      }
+      if (depth > maxDepth) {
+        truncated = true;
+        continue;
+      }
+      const built = makeNode(child);
+      nodeCount++;
+      produced.push({ node: built, parent });
+      const kids = buildChildren(child, depth + 1, built);
+      if (kids.length > 0) built.children = kids;
+      out.push(built);
+    }
+    return out;
+  };
+
+  const root = makeNode(rootSrc);
+  nodeCount++;
+  produced.push({ node: root, parent: null });
+  // 深度按输出层级计:根为第 1 层,最深节点层级 ≤ maxDepth
+  const kids = buildChildren(rootSrc, 2, root);
+  if (kids.length > 0) root.children = kids;
+
+  // 有非 ignored 节点未被收录 → 确实丢了数据,必须可见(禁止静默删项)
+  let nonIgnored = 0;
+  for (const node of byNodeId.values()) if (!node.ignored) nonIgnored++;
+  if (nodeCount < nonIgnored) truncated = true;
+
+  root.source = "chrome-ax";
+  if (truncated) root.truncated = true;
+
+  // 序列化字节预算:超限则从 DFS 尾部裁剪(保留文档前部的控件),直到落回预算内
+  let bytes = utf8Len(JSON.stringify(root));
+  if (bytes > maxBytes) {
+    truncated = true;
+    root.truncated = true;
+    bytes = utf8Len(JSON.stringify(root));
+    const detached = new Set<A11yTreeNode>();
+    const markDetached = (node: A11yTreeNode): void => {
+      detached.add(node);
+      for (const child of node.children ?? []) markDetached(child);
+    };
+    while (bytes > maxBytes) {
+      const avg = Math.max(1, Math.floor(bytes / Math.max(1, nodeCount)));
+      const drop = Math.max(1, Math.ceil((bytes - maxBytes) / avg));
+      let removed = 0;
+      for (let i = produced.length - 1; i >= 0 && removed < drop; i--) {
+        const entry = produced[i];
+        if (detached.has(entry.node) || !entry.parent) continue;
+        const siblings = entry.parent.children;
+        if (!siblings) continue;
+        const idx = siblings.indexOf(entry.node);
+        if (idx < 0) continue;
+        siblings.splice(idx, 1);
+        if (siblings.length === 0) delete entry.parent.children;
+        markDetached(entry.node);
+        removed++;
+      }
+      if (removed === 0) break;
+      bytes = utf8Len(JSON.stringify(root));
+    }
+    // 极端兜底:子树全裁掉仍超限(根自身过大)时,直接丢掉根的 children
+    if (bytes > maxBytes && root.children) {
+      delete root.children;
+      bytes = utf8Len(JSON.stringify(root));
+    }
+  }
+  if (truncated) root.truncated = true;
+  return { root };
+}
+
+export function registerContentHandlers(router: ActionRouter, debuggerMgr?: DebuggerManager): void {
   router.registerAll({
     [ContentActions.GET_TEXT]: async (args, tabId) => {
       // v0.8.1: @ref 形式（{index, snapshotId}）也走 page-side path，通过
@@ -372,101 +705,145 @@ export function registerContentHandlers(router: ActionRouter): void {
       const tid = await getActiveTabId(args.tabId as number | undefined ?? tabId);
       const frameId = args.frameId as number | undefined;
       if (frameId != null) await ensureFrameAttached(tid, frameId);
-      const results = await chrome.scripting.executeScript({
-        target: buildExecuteTarget(tid, frameId),
-        func: () => {
-          try {
-            interface A11yNode {
-              role: string;
-              name?: string;
-              children?: A11yNode[];
-            }
 
-            let nodeCount = 0;
-
-            function getRole(el: Element): string {
-              const ariaRole = el.getAttribute("role");
-              if (ariaRole) return ariaRole;
-              const tag = el.tagName.toLowerCase();
-              const roleMap: Record<string, string> = {
-                a: "link",
-                button: "button",
-                input: "textbox",
-                select: "listbox",
-                textarea: "textbox",
-                img: "img",
-                h1: "heading",
-                h2: "heading",
-                h3: "heading",
-                h4: "heading",
-                h5: "heading",
-                h6: "heading",
-                nav: "navigation",
-                main: "main",
-                header: "banner",
-                footer: "contentinfo",
-                aside: "complementary",
-                form: "form",
-                table: "table",
-                li: "listitem",
-                ul: "list",
-                ol: "list",
-              };
-              return roleMap[tag] ?? tag;
-            }
-
-            function getName(el: Element): string | undefined {
-              const ariaLabel = el.getAttribute("aria-label");
-              if (ariaLabel) return ariaLabel;
-              const ariaLabelledBy = el.getAttribute("aria-labelledby");
-              if (ariaLabelledBy) {
-                const labelEl = document.getElementById(ariaLabelledBy);
-                if (labelEl) return (labelEl as HTMLElement).innerText?.trim();
+      // DOM 启发式回退路径:未知标签 → generic;所有名称来源统一 100 字符上限。
+      const runDomHeuristic = async (degradedReason: string): Promise<A11yTreeNode | null> => {
+        const results = await chrome.scripting.executeScript({
+          target: buildExecuteTarget(tid, frameId),
+          func: (opts: { maxNodes: number; maxDepth: number; maxChars: number }) => {
+            try {
+              interface A11yNode {
+                role: string;
+                name?: string;
+                children?: A11yNode[];
               }
-              const text = (el as HTMLElement).innerText?.trim();
-              if (text) return text.slice(0, 100);
-              return undefined;
-            }
 
-            function walkNode(el: Element, depth: number): A11yNode | null {
-              if (nodeCount >= 500 || depth > 10) return null;
-              nodeCount++;
+              let nodeCount = 0;
+              let truncated = false;
 
-              const node: A11yNode = { role: getRole(el) };
-              const name = getName(el);
-              if (name) node.name = name;
-
-              const childNodes: A11yNode[] = [];
-              for (const child of Array.from(el.children)) {
-                const childNode = walkNode(child, depth + 1);
-                if (childNode) childNodes.push(childNode);
-                if (nodeCount >= 500) break;
+              // 所有名称来源(aria-label / aria-labelledby 文本 / innerText)统一上限,
+              // 省略号计入上限(截断后总长 = maxChars)。
+              function clip(text: string): string {
+                if (text.length <= opts.maxChars) return text;
+                truncated = true;
+                return text.slice(0, opts.maxChars - 1) + "…";
               }
-              if (childNodes.length > 0) node.children = childNodes;
 
-              return node;
+              function getRole(el: Element): string {
+                const ariaRole = el.getAttribute("role");
+                if (ariaRole) return ariaRole;
+                const tag = el.tagName.toLowerCase();
+                const roleMap: Record<string, string> = {
+                  a: "link",
+                  button: "button",
+                  input: "textbox",
+                  select: "listbox",
+                  textarea: "textbox",
+                  img: "img",
+                  h1: "heading",
+                  h2: "heading",
+                  h3: "heading",
+                  h4: "heading",
+                  h5: "heading",
+                  h6: "heading",
+                  nav: "navigation",
+                  main: "main",
+                  header: "banner",
+                  footer: "contentinfo",
+                  aside: "complementary",
+                  form: "form",
+                  table: "table",
+                  li: "listitem",
+                  ul: "list",
+                  ol: "list",
+                };
+                // 未知标签(自定义元素 / div / span 等)在 Chrome 里的真实 AX role
+                // 就是 generic —— 返回标签名是伪 role。
+                return roleMap[tag] ?? "generic";
+              }
+
+              function getName(el: Element): string | undefined {
+                const ariaLabel = el.getAttribute("aria-label");
+                if (ariaLabel) return clip(ariaLabel);
+                const ariaLabelledBy = el.getAttribute("aria-labelledby");
+                if (ariaLabelledBy) {
+                  const labelEl = document.getElementById(ariaLabelledBy);
+                  if (labelEl) {
+                    const labelled = (labelEl as HTMLElement).innerText?.trim();
+                    return labelled ? clip(labelled) : undefined;
+                  }
+                }
+                const text = (el as HTMLElement).innerText?.trim();
+                if (text) return clip(text);
+                return undefined;
+              }
+
+              function walkNode(el: Element, depth: number): A11yNode | null {
+                if (nodeCount >= opts.maxNodes || depth > opts.maxDepth) {
+                  truncated = true;
+                  return null;
+                }
+                nodeCount++;
+
+                const node: A11yNode = { role: getRole(el) };
+                const name = getName(el);
+                if (name) node.name = name;
+
+                const childNodes: A11yNode[] = [];
+                for (const child of Array.from(el.children)) {
+                  const childNode = walkNode(child, depth + 1);
+                  if (childNode) childNodes.push(childNode);
+                  if (nodeCount >= opts.maxNodes) {
+                    truncated = true;
+                    break;
+                  }
+                }
+                if (childNodes.length > 0) node.children = childNodes;
+
+                return node;
+              }
+
+              const tree = walkNode(document.body, 0);
+              return { result: tree, truncated };
+            } catch (err) {
+              return { error: err instanceof Error ? err.message : String(err) };
             }
+          },
+          args: [DOM_TREE_BUDGET],
+          world: "MAIN",
+        });
+        const res = results[0]?.result as { result?: A11yTreeNode; error?: string; truncated?: boolean };
+        // AX tree 无 selector 维度，仅透传错误
+        if (res?.error) {
+          throw vtxError(
+            res.error.startsWith("Element not found:")
+              ? VtxErrorCode.ELEMENT_NOT_FOUND
+              : VtxErrorCode.JS_EXECUTION_ERROR,
+            res.error,
+          );
+        }
+        const tree = res?.result;
+        if (!tree) return null;
+        tree.source = "dom-heuristic";
+        tree.degraded = true;
+        tree.degradedReason = degradedReason;
+        if (res.truncated) tree.truncated = true;
+        return tree;
+      };
 
-            const tree = walkNode(document.body, 0);
-            return { result: tree };
-          } catch (err) {
-            return { error: err instanceof Error ? err.message : String(err) };
-          }
-        },
-        args: [],
-        world: "MAIN",
-      });
-      const res = results[0]?.result as { result?: unknown; error?: string };
-      // AX tree 无 selector 维度，仅透传错误
-      if (res?.error) {
-        throw vtxError(
-          res.error.startsWith("Element not found:")
-            ? VtxErrorCode.ELEMENT_NOT_FOUND
-            : VtxErrorCode.JS_EXECUTION_ERROR,
-          res.error,
-        );
+      // AX 主路径只对主 frame 生效(Chrome 扩展 frame id 与 CDP frame id 不同,本轮不做映射)
+      const isMainFrame = frameId == null || frameId === 0;
+      if (!isMainFrame) return runDomHeuristic("non-main-frame");
+      if (!debuggerMgr) return runDomHeuristic("debugger-unavailable");
+      try {
+        const { byNodeId } = await captureAXNodeMap(debuggerMgr, tid, 0);
+        const ax = buildAXTree(byNodeId);
+        if (!ax.root) return runDomHeuristic("ax-tree-empty");
+        return ax.root;
+      } catch (err) {
+        // 白名单回退:attach / enableDomain / getFullAXTree 失败(含跨域、A11Y 不可用)
+        return runDomHeuristic(summarizeAxError(err));
       }
-      return res?.result;
     },
 
     [ContentActions.GET_ELEMENT_TEXT]: async (args, tabId) => {

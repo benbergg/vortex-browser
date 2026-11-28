@@ -156,6 +156,17 @@ Full design: [`docs/DESIGN.md`](docs/DESIGN.md) (architecture diagrams, protocol
 
 See [`packages/mcp/README.md`](packages/mcp/README.md) for full tool documentation.
 
+### Accessibility reading paths
+
+Two APIs answer different accessibility questions — pick by what you need:
+
+- `vortex_observe` (`observe.snapshot`) — a snapshot of **candidate elements** (interactive / semantic) with AX-derived `role` / `name` / `state`. It is **not** a complete accessibility tree: it does not enumerate every non-interactive container (screen-reader-only live regions, for example).
+- `vortex content getAccessibilityTree` — the **Chrome accessibility tree** for the page, including nodes the candidate scan does not surface (live regions, headings, other structural nodes). Check `source` (`chrome-ax` / `dom-heuristic`), `degraded` and `truncated` before trusting it: `degraded: true` means it fell back to the DOM heuristic path, `truncated: true` means the output hit a size budget.
+
+To find out whether a page *declares* a live region, read the accessibility tree. Neither API verifies that an announcement is actually made.
+
+**Role vocabulary differs between the two APIs.** With `source === "chrome-ax"`, `content.getAccessibilityTree` keeps Chrome AX role names — including non-ARIA names such as `RootWebArea`, `StaticText` and `InlineTextBox` — and provides no unified ARIA vocabulary; the returned tree is processed (ignored-node handling, field projection, size budgets), not a raw CDP response. `observe.snapshot` is a candidate-element snapshot that combines DOM/ARIA heuristics with AX overlay; it does not guarantee the same node set or role vocabulary as the tree, and it does not guarantee that only valid ARIA roles are emitted. Do not merge role statistics across the two APIs.
+
 ## Development
 
 ```bash

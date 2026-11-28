@@ -61,6 +61,17 @@ vortex network filter --status-min 400
 | `act` | 对元素执行 click / fill / type / select / scroll / hover（一等命令） |
 | `sequence` | 一次跑多步，每步自证（一等命令） |
 
+## 无障碍读取路径
+
+`vortex observe` 与 `vortex content getAccessibilityTree` 回答不同的问题：
+
+- `vortex observe` —— **候选元素**快照（交互 / 语义元素），带 AX 推导的 `role` / `name` / `state`。它**不是**完整的无障碍树，不枚举所有非交互容器（例如仅供屏幕阅读器使用的事件区）。
+- `vortex content getAccessibilityTree` —— 页面的 **Chrome 无障碍树**，包含候选扫描不呈现的节点（事件区、标题等结构性节点）。返回根节点上的 `source`（`chrome-ax` / `dom-heuristic`）、`degraded`、`truncated` 需要先核对：`degraded: true` 表示回退到 DOM 启发式路径，`truncated: true` 表示输出触达体积预算。
+
+要确认页面**是否声明**了事件区，读无障碍树。两个接口都不验证播报是否真的发生。
+
+**两个接口的 role 词表不同。** `source === "chrome-ax"` 时，`content.getAccessibilityTree` 保留 Chrome AX 角色名——包括 `RootWebArea`、`StaticText`、`InlineTextBox` 等非 ARIA 名称，不提供统一 ARIA 词表；返回的树经过处理（ignored 节点处理、字段投影、体积预算），不是 CDP 原始响应。`vortex observe` 是候选元素快照，综合 DOM/ARIA 启发式与 AX 覆盖，不保证与该树相同的节点集合或 role 词表，也不保证只输出合法 ARIA role。不要跨两个接口合并 role 统计。
+
 ## observe / act / sequence
 
 这三个是给人直接用的「一等命令」：默认输出**人看的几行**，`--json` 回到原始 JSON
@@ -91,6 +102,8 @@ vortex sequence --on-failure continue --steps '[...]'
 ```
 
 `@ref` 来自最近一次 `vortex observe`，**与 tab 绑定**：换了 tab 就要重新 observe。
+
+**`--target` 作用域语义**：`--target` 传 CSS 选择器或 `@ref`，只在该容器内采集。成功命中 target 只证明该容器存在，不证明目标控件位于容器内；空快照不代表整页没有该控件。选择器未命中时直接报错（`ELEMENT_NOT_FOUND`），不会返回空快照。
 
 **tab 身份怎么算**（`@ref` 的校验口径）：快照按**解析后的实际 tab**登记与校验 ——
 不是按「有没有传 `--tab`」。

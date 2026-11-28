@@ -8,6 +8,28 @@
 
 ### Added
 
+- **`observe.snapshot` 的元素 state 补齐 AX 焦点/可聚焦/模态三项**：`computeAXOverlay` 把 CDP
+  `Accessibility.getFullAXTree` 的 `properties` 投影成元素 `state` 时，白名单只含
+  `checked`/`selected`/`disabled`/`expanded`/`required`/`readonly`/`invalid`/`autocomplete`/
+  `pressed`，**不含 `focused`/`focusable`/`modal`**——AX 覆盖层本身已命中这些元素
+  （`semanticSource:"ax"`），是白名单缺失让信息在最后一层被丢弃。实测（2026-11-28，
+  `https://github.com/microsoft/vscode/issues`，Chrome）：点击
+  `input[placeholder="Search issues"]` 后 `observe.snapshot` 的 combobox state 只有
+  `{autocomplete:"list", haspopup:"listbox", expanded:false}`，而同一时刻 AX 的 `properties`
+  给 `focused:true`/`focusable:true`；打开 GitHub「Quick search」对话框后
+  `dialog "Quick search"` 的 state 为 `null`，AX 给 `modal:true`。现在这三项进白名单，
+  **原始值严格等于布尔 `true` 才输出**，属性缺失/`false`/字符串 `"false"`/其他非布尔一律
+  不输出（不造默认值）；`expanded`（保留显式 `false`）、`checked`（支持 `"mixed"`）、
+  `autocomplete`（仅合法 token）、`invalid` 等旧键语义不变。不新增顶层字段，不改
+  role/name/description/valueNow/controls/owns 与 frame 覆盖行为。
+  ⚠️ MCP 文本渲染（`packages/mcp/src/lib/observe-render.ts`）本轮**未改**：state 的文本渲染走
+  显式白名单，这三项只出现在结构化输出（compact/full）的 `state` 里。
+
+  涉及文件：`packages/extension/src/handlers/observe-ax-overlay.ts`（state 白名单）、
+  `packages/extension/src/reasoning/types.ts`（`AXOverlayInfo.state` 类型）、
+  `packages/extension/src/handlers/observe.ts`（三处 state 类型声明）；新增
+  `packages/extension/tests/observe-ax-state.test.ts`。
+
 - **`vortex_press` 支持 `text` 批量键入**：整串文本逐字符送成**受信任按键**（CDP
   `Input.dispatchKeyEvent` keyDown 带 `text`），终端/编辑器按真实键位处理，而不是往代理里
   插一段纯文本。标点走 US 布局的物理键位（`code` + `windowsVirtualKeyCode`）——旧的
@@ -18,7 +40,79 @@
   涉及文件：`packages/extension/src/handlers/keyboard.ts`（新增 `textToKeyEvents`/`typeText`，
   PRESS 增加 `text` 分支）；新增 `packages/extension/tests/keyboard-press-text.test.ts`。
 
+- **`content.getAccessibilityTree` 的 AX 节点补齐状态与关系**：每个 AX 节点新增三个可选
+  字段——`description`（AX 原描述，≤200 字符）、`state`（AX 属性白名单投影：`focused`/
+  `focusable`/`disabled`/`required`/`invalid`/`expanded`/`selected`/`checked`/`pressed`/
+  `readonly`/`modal`/`atomic`/`multiselectable`/`haspopup`/`autocomplete`/`live`/`relevant`/
+  `orientation`/`level`）、`relations`（`labelledby`/`describedby`/`activedescendant`/
+  `controls`/`owns`/`errormessage`/`flowto` → `{backendDOMNodeId, text?}`）。过去该 action
+  只回 `role`/`name`/`value`，无障碍评估读不到控件状态与结构层级（combobox 有无
+  autocomplete/弹层、heading 层级、是否 modal、焦点、必填/非法），与 `observe.snapshot`
+  已有的 state 词汇不一致。归一化**按属性区分**：boolean 原样保留（**显式 `false` 保留**），
+  `checked`/`pressed` 的 `"mixed"` 与 `invalid` 的 token（如 `spelling`）保留字符串，
+  `hasPopup="true"` 按既有约定映射为 `haspopup:"menu"`，`level` 只接受有限 number；
+  白名单外的属性（`url`/`editable`/`settable` 等）不携带，属性缺失不补造。关系项保留
+  `{backendDOMNodeId, text?}` 原始身份——CDP 常只给身份不给 text，**text 缺失不得等同
+  “没有关系”**；每属性最多 20 项，text ≤200 字符。新增字符串一律 ≤200 字符（省略号计入），
+  任一新增字段发生截断即置根节点 `truncated:true`（节点级同时标注）；1 MiB 序列化预算继续
+  生效且**计算包含新增字段**。DOM 回退路径、role/name/value 语义、ignored 提升规则不变。
+
+  涉及文件：`packages/extension/src/handlers/content.ts`（`buildAXTree` 字段抽取/归一化/
+  截断）；新增 `packages/extension/tests/content-accessibility-tree-state.test.ts`。
+
+### Changed
+
+- **`content.getAccessibilityTree` 改为优先返回 Chrome 真实无障碍树**：该 action（CLI
+  `vortex content getAccessibilityTree`）过去用页内 DOM 启发式（按标签名映射 role +
+  aria-label/innerText 取名），既**不穿 shadow root**（MDN 这类 web component 站点的搜索
+  浮层整棵子树缺失，`textbox/combobox/listbox/option` 计数全为 0），又输出**伪 role**
+  （`roleMap[tag] ?? tag` 让 `mdn-search-modal`/`div`/`span` 直接当 role 用）。现在主路径走
+  CDP `Accessibility.getFullAXTree` 并按 `childIds` 重建树：role/name/value 取 Chrome 原值，
+  被 Chrome 标为 ignored 的中间节点自身跳过、其有效后代提升到父级并保序。返回值仍是根节点
+  对象，根节点上新增三个可选字段：`source`（`chrome-ax` / `dom-heuristic`）、`degraded` +
+  `degradedReason`（走了 DOM 回退时出现）、`truncated`（触发预算截断时出现）。
+  AX 不可用（debugger attach / enableDomain / getFullAXTree 失败，含跨域与 A11Y 不可用）时
+  回退 DOM 启发式并标 `degraded:true`；回退路径里未知标签（自定义元素 / `div` / `span`）的
+  role 归 `generic`，所有名称来源（aria-label / aria-labelledby 指向文本 / innerText）统一
+  100 字符上限（省略号计入上限，超限即标 `truncated:true`）。AX 路径预算：节点 ≤2000、
+  层级 ≤20、name/value ≤200 字符、序列化 JSON ≤1 MiB；DOM 路径：节点 ≤500、层级 ≤10、
+  名称 ≤100 字符。
+
+  涉及文件：`packages/extension/src/handlers/content.ts`（AX 主路径 + DOM 回退 + 预算）；
+  `packages/extension/src/background.ts`（装配处传入 debuggerMgr）；新增
+  `packages/extension/tests/content-accessibility-tree.test.ts`。
+
 ### Fixed
+
+- **`observe.snapshot` 语义模式不再把标签名当 role**：过去 `getRole` 的最终兜底是无条件
+  `return tag`，把 `<div>`/`<span>`/`<body>`/`<html>`/自定义元素（`mdn-button`、
+  `turbo-frame` 等）的**标签名**直接当 role 输出——那不是 ARIA 角色，Chrome 原始无障碍树
+  （`Accessibility.getFullAXTree`）里根本没有这些 role，a11y 消费者（agent / 读屏替代实现 /
+  role 等价性判定）无法按 ARIA 语义推理。实测 MDN 文档页输出 `role="mdn-button"`、GitHub
+  issue 页输出 `role="turbo-frame"`/`div`/`html`/`body`。现在兜底改为**保留清单 + 其余归
+  `generic`**：保留 `table`/`caption`/`article`/`figure`/`blockquote`/`form`/`search`/
+  `dialog`/`menu`/`menuitem`/`menuitemcheckbox`/`menuitemradio`/`option`/`meter`/`marquee`/
+  `img`/`code`/`strong`/`time`/`math`/`link`/`switch`（SVG `<switch>`），另保留兼容例外
+  `label`（不是合法 ARIA 角色，只因既有 overlay 启发式依赖它）；其余（含 `progress`/
+  `optgroup`/`thead`/`tbody`/`tfoot`/`tr`/`td`/`th`/`h1`–`h6`/`output`/`col`/`colgroup`/
+  `legend`/`datalist`/`dl`/`dt`/`dd`/`p`/`pre`/`em`/`i`/`b` 等）一律归 `generic`。显式
+  `role`、HTML-AAM 隐式映射（`a`/`button`/`input`/`select`/`textarea`/`iframe`/`summary`/
+  `nav`/`main`/`aside`/`fieldset`/`ul`/`ol`/`li`/`header`/`footer`/`section`）、`bnCheck`
+  启发式一律不变；原生 `<table>` 与原生交互元素照旧入池、role 不变。
+
+  ⚠️ **标签身份仍保留在元素的 `tag` 字段**（`observe.snapshot` 输出逐元素带 `tag`），
+  语义消费者**不应继续依赖标签式 role**：要区分 `<div>`/`<span>`/自定义元素请读 `tag`，
+  不要读 `role`。
+
+  本轮**只**改最终标签兜底这一条路径；显式 `role`（作者自造 role 原样透出）、无 `title`
+  的 `<iframe>` 返 `"iframe"`、`includeAX:false` 分支直接用标签名当 role 这三条伪 role 路径
+  本轮未动——不可据此声称 `observe` 已不再产生任何非 ARIA role。
+
+  涉及文件：`packages/extension/src/handlers/observe.ts`（模块级 `NATIVE_FALLBACK_ROLE_TAGS`
+  + inject 内联副本 + 导出 `getRoleForTest` 同步）；新增
+  `packages/extension/tests/observe-role-fallback.test.ts`（执行序列化后的生产注入函数）；
+  同步 `packages/extension/tests/observe-role-gate.test.ts`、
+  `packages/extension/tests/observe-semantic-source.test.ts` 的既有断言。
 
 - **back/forward 的 load 等待不再空等满 25s**：历史恢复常在毫秒级完成，而 back/forward
   先发导航命令、**再**挂 tab `complete` 监听器，事件早于监听器发过就永远等不到

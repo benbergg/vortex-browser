@@ -54,6 +54,7 @@ function setup(sameOriginChild = false) {
     rejectClaim?: number;
     omitDocumentId?: number;
     unresolvedFrame?: number;
+    extraListenerNodes?: (frame: any) => Array<{ type: string; backendNodeId: number }>;
     beforeWrite?: (frame: any, params: any) => void;
     afterWrite?: () => void;
     afterInjection?: (details: any, frame: any, result: any) => void;
@@ -103,6 +104,7 @@ function setup(sameOriginChild = false) {
     { type: "drop", backendNodeId: backendId(frame.win.document.querySelector("#drop"), frame) },
     { type: "click", backendNodeId: backendId(frame.win.document.querySelector("#host").shadowRoot.querySelector("#shadow-click"), frame) },
     { type: "dragover", backendNodeId: backendId(frame.win.document.querySelector("#host").shadowRoot.querySelector("#shadow-drop"), frame) },
+    ...(hooks.extraListenerNodes?.(frame) ?? []),
   ]);
   const runWrite = (frame: any, node: any, params: any) => frame.win.eval(`(${params.functionDeclaration})`).apply(node, structuredClone(params.arguments.map((arg: any) => arg.value)));
   const debuggerMgr = {
@@ -141,7 +143,7 @@ function setup(sameOriginChild = false) {
     for (const listener of listeners) listener({ tabId: 42, frameId, documentId: frames.get(frameId)!.documentId, url: old.url });
     return old;
   };
-  return { frames, hooks, observe, inject, injections, ownership, writes, runWrite, navigate };
+  return { frames, hooks, observe, inject, injections, ownership, writes, runWrite, navigate, backendId };
 }
 
 afterEach(() => {
@@ -364,7 +366,7 @@ describe("listener/dropzone document request ownership", () => {
     expect(retireA).toBeDefined();
     api.hooks.omitDocumentId = 0;
     const b: any = await api.observe({ paginate: true, maxElements: 2 });
-    expect(b.error?.code).toBe("STALE_SNAPSHOT");
+    expect(b.error?.code).toBe("PAGE_NOT_READY");
     expect(b.result).toBeUndefined();
     const frame = api.frames.get(0)!;
     expect(a.error).toBeUndefined();
@@ -395,6 +397,37 @@ describe("listener/dropzone document request ownership", () => {
     expect(response.result.elements.some((element: any) => element.frameId === 0 && element.listenerInteractive)).toBe(true);
     expect(response.result.elements.filter((element: any) => element.frameId === 17).every((element: any) => !element.listenerInteractive && !element.dropzoneInteractive)).toBe(true);
     expect(api.frames.get(17)!.win.document.__vortexListenerOwner.owner).toBeNull();
+  });
+
+  it("skips document-node candidates without an owning document and keeps the batch count exact", async () => {
+    const api = setup(true);
+    const mainFrame = api.frames.get(0)!;
+    api.hooks.extraListenerNodes = (frame) => frame.frameId === 0
+      ? [{ type: "click", backendNodeId: api.backendId(frame.win.document, frame) }]
+      : [];
+    const docAttrWrites: string[] = [];
+    Object.defineProperty(mainFrame.win.document, "setAttribute", {
+      configurable: true,
+      value: (name: string) => { docAttrWrites.push(name); },
+    });
+    const stamped: Array<Array<string | null>> = [];
+    api.hooks.afterInjection = (details, frame) => {
+      if (!String(details.func).includes("const scanRoot") || frame.frameId !== 0) return;
+      stamped.push(markerNodes(frame).map((node) => node.getAttribute(node.id.includes("drop") ? "data-vtx-dropzone" : "data-vtx-listener")));
+    };
+    const response: any = await api.observe();
+    expect(response.error).toBeUndefined();
+    // Document 节点无所属文档:跳过而不是记为缺口,整体仍是 domDebugger
+    expect(response.result.meta.degraded?.listenerDiscovery).toBeUndefined();
+    expect(response.result.elements.filter((element: any) => element.listenerInteractive)).toHaveLength(2);
+    expect(response.result.elements.filter((element: any) => element.dropzoneInteractive)).toHaveLength(2);
+    const docWrite = api.writes.find((write) => write.node === mainFrame.win.document)!;
+    expect(docWrite).toBeDefined();
+    expect(api.runWrite(docWrite.frame, docWrite.node, docWrite.params)).toBe("not-target");
+    expect(docAttrWrites).toEqual([]);
+    const claim = api.ownership("claim")[0];
+    expect(stamped).toHaveLength(1);
+    expect(stamped[0]).toEqual(Array(4).fill(claim.args[1].token));
   });
 
   it("late cleanup leaves a newer pagination monitor and token markers untouched", async () => {

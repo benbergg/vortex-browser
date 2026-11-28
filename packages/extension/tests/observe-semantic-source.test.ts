@@ -62,7 +62,7 @@ describe("observe semantic provenance", () => {
     expect(byName("Native")).toMatchObject({ role: "button", semanticSource: "dom", nameSource: "heuristic" });
     expect(byName("Explicit")).toMatchObject({ role: "switch", semanticSource: "dom", nameSource: "heuristic" });
     expect(byName("Inferred")).toMatchObject({ role: "checkbox", semanticSource: "heuristic" });
-    expect(byName("Click only")).toMatchObject({ role: "div", semanticSource: "heuristic" });
+    expect(byName("Click only")).toMatchObject({ role: "generic", semanticSource: "heuristic" });
     expect(byName("AX overlay")).toMatchObject({ role: "button", semanticSource: "ax", nameSource: "aria-label" });
     const withoutAX: any = await router.dispatch({ type: "tool_request", tool: "observe.snapshot", args: { format, includeAX: false }, requestId: "no-ax", tabId: 42 });
     expect(withoutAX.error).toBeUndefined();

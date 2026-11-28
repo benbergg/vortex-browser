@@ -1,4 +1,4 @@
-import { ObserveActions, VtxErrorCode, vtxError } from "@vortex-browser/shared";
+import { ObserveActions, VtxError, VtxErrorCode, vtxError } from "@vortex-browser/shared";
 import type { ActionRouter } from "../lib/router.js";
 import type { DebuggerManager } from "../lib/debugger-manager.js";
 import { getActiveTabId, buildExecuteTarget, ensureFrameAttached } from "../lib/tab-utils.js";
@@ -36,6 +36,31 @@ const listenerEpoch = crypto.randomUUID();
 let listenerOrder = 0;
 const scanEpoch = crypto.randomUUID();
 let scanOrder = 0;
+
+/**
+ * 语义模式**最终标签兜底**的保留清单(真源;inject 内联副本须同步,
+ * observe-role-fallback.test.ts 锁守护)。
+ *
+ * Why：兜底原为无条件 `return tag`,把 <div>/<span>/<body>/<html>/自定义元素
+ * (mdn-button / turbo-frame)的**标签名**当 role 输出——那不是 ARIA 角色,a11y 消费者
+ * (agent / 读屏替代实现 / role 等价性判定)无法按 ARIA 语义推理(2026-11-28 第6轮评测:
+ * MDN 出 role="mdn-button"、GitHub 出 role="turbo-frame"/"div"/"html"/"body",
+ * Chrome AX 原始树里根本没有这些 role)。改为「保留清单 + 其余归 generic」:
+ * 清单内标签名本身就是 ARIA 角色名,其余一律 generic。
+ *
+ * 保留(22):table, caption, article, figure, blockquote, form, search, dialog, menu,
+ * menuitem, menuitemcheckbox, menuitemradio, option, meter, marquee, img, code, strong,
+ * time, math, link, switch(SVG <switch>)。
+ * 兼容例外(保留但**不是**合法 ARIA 角色,只因既有 overlay 启发式依赖它):label。
+ * @author qingwa
+ */
+const NATIVE_FALLBACK_ROLE_TAGS = new Set([
+  "table", "caption", "article", "figure", "blockquote", "form", "search", "dialog",
+  "menu", "menuitem", "menuitemcheckbox", "menuitemradio", "option", "meter", "marquee",
+  "img", "code", "strong", "time", "math", "link", "switch",
+  // 兼容例外:label 不是 ARIA 角色,保留只为既有 overlay 启发式约定。
+  "label",
+]);
 
 /**
  * 仅供单测:复刻 inject 内联 getRole 真源(改一处须同步 inject 内联副本,
@@ -77,7 +102,7 @@ export function getRoleForTest(el: Element): string {
   if (tag === "footer" && !el.closest("article,section,aside,main,nav")) return "contentinfo";
   // section 仅在有可及名称(aria-label/aria-labelledby)时为 region
   if (tag === "section" && (el.hasAttribute("aria-label") || el.hasAttribute("aria-labelledby"))) return "region";
-  return tag;
+  return NATIVE_FALLBACK_ROLE_TAGS.has(tag) ? tag : "generic";
 }
 
 /**
@@ -243,7 +268,14 @@ interface ScannedElement {
   occludedBy?: string;
   attrs: Record<string, string>;
   /** Framework UI state derived from class / aria. @since 0.4.0 (O-8) */
-  state?: { checked?: boolean | "mixed"; selected?: boolean; active?: boolean; disabled?: boolean; expanded?: boolean; required?: boolean; current?: boolean; invalid?: boolean; sort?: "ascending" | "descending" | "none"; haspopup?: string; readonly?: boolean };
+  state?: { checked?: boolean | "mixed"; selected?: boolean; active?: boolean; disabled?: boolean; expanded?: boolean; required?: boolean; current?: boolean; invalid?: boolean; sort?: "ascending" | "descending" | "none"; haspopup?: string; readonly?: boolean;
+    /** AX focused=true:键盘焦点当前在该元素上。@since R7 */
+    focused?: boolean;
+    /** AX focusable=true:该元素可接收键盘焦点。@since R7 */
+    focusable?: boolean;
+    /** AX modal=true:该对话框为模态。@since R7 */
+    modal?: boolean;
+  };
   /** 值域控件(slider/spinbutton/progressbar/meter 及原生 range/number/progress)的当前值,如 "30" 或 "30/100"。@since dogfood 2026-06-02 */
   /** 同快照内 role+name 重名时,能把本元素与同组区分开的祖先文本。@since dup-context */
   valueNow?: string;
@@ -1172,7 +1204,7 @@ export function partitionMainContentFirst(candidates: Element[], mainEl: Element
  *        <span class="bnCheck-label">名</span></div>
  *
  * 无 role / 无原生 <input> / 无 aria-checked,勾选态是 `.bnCheck-status` 上的**裸**
- * `checked` class。getRole 因此返 tag(span),controlRoleFromClass 末位 token 规则
+ * `checked` class。getRole 因此返 generic(span 不在标签兜底保留清单),controlRoleFromClass 末位 token 规则
  * 抓不到缩写 "bnCheck"(≠checkbox),getUiState 的 is-checked/aria/native 路径也全漏
  * (checked 落在后代 status span)。本判据从 collected 元素(常是 bnCheck-label)上溯
  * ≤5 层命中 `.bnCheck` 根 → role=checkbox + checked。只覆盖实机验证过的 bnCheck,
@@ -1498,7 +1530,7 @@ const INTERACTIVE_SELECTORS = [
           // 同样走 RECALL_ROLES 召回门。这些 tag 历史上是「被忽视的容器」,Agent 看不到
           // 它们的 landmark/分组结构;现统一召回,与显式 [role=X] 形式等价。
           // 注意:section 仅在有 aria-label/aria-labelledby 时才为 region(无名称时
-          // getRole 返 tag name "section" 不在 RECALL_ROLES),召回门会自然过滤掉
+          // getRole 兜底返 "generic" 不在 RECALL_ROLES),召回门会自然过滤掉
           // 装饰用 section;但下方收集循环加过门成本几乎为零,统一收也无副作用。
           "table,nav,main,header,footer,aside,fieldset,ul,ol,li,section",
           "[tabindex]:not([tabindex='-1'])",
@@ -1568,6 +1600,16 @@ const INTERACTIVE_SELECTORS = [
           return { role: "checkbox", checked: !!status && status.classList.contains("checked") };
         };
 
+        // 语义模式最终标签兜底的保留清单(真源:模块级 NATIVE_FALLBACK_ROLE_TAGS;
+        // 注入体丢模块作用域不能 import,内联同语义副本,改一处须同步)。
+        // 清单外一律 generic——标签名不是 ARIA 角色名(div/span/body/html/自定义元素等)。
+        const __NATIVE_FALLBACK_ROLE_TAGS = new Set([
+          "table", "caption", "article", "figure", "blockquote", "form", "search", "dialog",
+          "menu", "menuitem", "menuitemcheckbox", "menuitemradio", "option", "meter", "marquee",
+          "img", "code", "strong", "time", "math", "link", "switch",
+          // 兼容例外:label 不是 ARIA 角色,保留只为既有 overlay 启发式约定。
+          "label",
+        ]);
         function getRole(el: Element, source?: { value: "dom" | "heuristic" }): string {
           if (source) source.value = "dom";
           const explicit = el.getAttribute("role");
@@ -1623,7 +1665,7 @@ const INTERACTIVE_SELECTORS = [
           // 班牛 bnCheck 自定义勾选控件(无 role/无原生 input)→ checkbox(N0064 P2-1)。
           if (source) source.value = "heuristic";
           if (bnCheckInfo(el)) return "checkbox";
-          return tag;
+          return __NATIVE_FALLBACK_ROLE_TAGS.has(tag) ? tag : "generic";
         }
 
         // Task 4 召回门 passesRoleGate(真源:reasoning/aria-taxonomy.ts RECALL_ROLES)
@@ -2838,8 +2880,8 @@ const INTERACTIVE_SELECTORS = [
         const TABLE_EXTRA_SELECTORS =
           // 原生 <table> 容器已并入 INTERACTIVE_SELECTORS(Task 4):HTML-AAM 隐式映射
           // getRole <table> → "table" ∈ RECALL_ROLES,过召回门入池。此处只补行/列等
-          // 内部 cell 结构与显式 row/cell/gridcell role(原生 tr/td/th 的 getRole 返
-          // tag name 不在 RECALL_ROLES,无法过门,需 selector 直收;filter=all 时
+          // 内部 cell 结构与显式 row/cell/gridcell role(原生 tr/td/th 的 getRole 兜底
+          // 返 generic,不在 RECALL_ROLES,无法过门,需 selector 直收;filter=all 时
           // 才用,普通观察不影响)。
           "tr,td,th,[role=row],[role=cell],[role=columnheader],[role=rowheader],[role=gridcell]";
         const ROOT_SELECTORS =
@@ -3596,7 +3638,14 @@ const INTERACTIVE_SELECTORS = [
           inViewport: boolean;
           occludedBy?: string;
           attrs: Record<string, string>;
-          state?: { checked?: boolean; selected?: boolean; active?: boolean; disabled?: boolean; expanded?: boolean; required?: boolean; current?: boolean; invalid?: boolean; sort?: "ascending" | "descending" | "none"; haspopup?: string; level?: number };
+          state?: { checked?: boolean; selected?: boolean; active?: boolean; disabled?: boolean; expanded?: boolean; required?: boolean; current?: boolean; invalid?: boolean; sort?: "ascending" | "descending" | "none"; haspopup?: string; level?: number;
+            /** AX focused=true:键盘焦点当前在该元素上。@since R7 */
+            focused?: boolean;
+            /** AX focusable=true:该元素可接收键盘焦点。@since R7 */
+            focusable?: boolean;
+            /** AX modal=true:该对话框为模态。@since R7 */
+            modal?: boolean;
+          };
           /** 值域控件当前值,如 "30" 或 "30/100"(getValueInfo 严格限定值域控件)。 */
           valueNow?: string;
           /** 同快照内 role+name 重名时的区分性祖先文本。@since dup-context */
@@ -4918,6 +4967,68 @@ const LISTENER_DISCOVERY_TIMEOUT_MS = 8_000;
 const SCAN_CLAIM_TIMEOUT_MS = 1_000;
 
 /**
+ * 扫描归属 claim 的失败分类。每个 frame 只产出一条最终分类：
+ * 归属被拒（refused）与 recovery 异常（recovery-error/recovery-timeout）是 terminal，
+ * 不再重试；其余可重试。
+ */
+type ScanClaimFailure = {
+  frameId: number;
+  reason: "skipped-no-document" | "skipped-lifecycle" | "injection-error" | "empty-result"
+    | "timeout" | "refused" | "recovery-error" | "recovery-timeout";
+  detail: string;
+  terminal: boolean;
+};
+
+/**
+ * 归属 claim 全部失败时按原因诚实报错：归属冲突与 recovery 异常优先（terminal），
+ * 其次按 injection-error > empty-result > timeout > skipped。
+ */
+function scanClaimError(failures: ScanClaimFailure[], tabId: number): VtxError {
+  const pick = (reason: ScanClaimFailure["reason"]) => failures.find((failure) => failure.reason === reason);
+  const refused = pick("refused");
+  if (refused) {
+    return vtxError(VtxErrorCode.STALE_SNAPSHOT,
+      `Target document ownership could not be acquired: the scan ownership protocol refused the claim on frame ${refused.frameId}`,
+      { tabId, frameId: refused.frameId });
+  }
+  const recoveryError = pick("recovery-error");
+  if (recoveryError) {
+    return vtxError(VtxErrorCode.JS_EXECUTION_ERROR,
+      `The scan ownership claim was refused on frame ${recoveryError.frameId} and the ownership recovery failed: ${recoveryError.detail}`,
+      { tabId, frameId: recoveryError.frameId });
+  }
+  const recoveryTimeout = pick("recovery-timeout");
+  if (recoveryTimeout) {
+    return vtxError(VtxErrorCode.STALE_SNAPSHOT,
+      `Target document ownership could not be acquired: the ownership recovery timed out on frame ${recoveryTimeout.frameId}`,
+      { tabId, frameId: recoveryTimeout.frameId });
+  }
+  const injectionError = pick("injection-error");
+  if (injectionError) {
+    return vtxError(VtxErrorCode.JS_EXECUTION_ERROR,
+      `Failed to acquire scan ownership on frame ${injectionError.frameId}: ${injectionError.detail}`,
+      { tabId, frameId: injectionError.frameId });
+  }
+  const emptyResult = pick("empty-result");
+  if (emptyResult) {
+    return vtxError(VtxErrorCode.PAGE_NOT_READY,
+      `Target document is no longer available on frame ${emptyResult.frameId} (the document was replaced or is not scriptable)`,
+      { tabId, frameId: emptyResult.frameId });
+  }
+  const timedOut = pick("timeout");
+  if (timedOut) {
+    return vtxError(VtxErrorCode.TIMEOUT,
+      `Timed out acquiring scan ownership on frame ${timedOut.frameId} after ${timedOut.detail}ms`,
+      { tabId, frameId: timedOut.frameId });
+  }
+  const skipped = pick("skipped-lifecycle") ?? pick("skipped-no-document");
+  const code = skipped && skipped.frameId === 0 ? VtxErrorCode.PAGE_NOT_READY : VtxErrorCode.IFRAME_NOT_READY;
+  return vtxError(code,
+    `Target frame ${skipped?.frameId ?? 0} is not ready (documentLifecycle=${skipped?.detail ?? "unknown"})`,
+    { tabId, frameId: skipped?.frameId });
+}
+
+/**
  * 单 frame 超时 = 剩余预算按剩余 frame 数均摊,但不低于下限。
  * 单 frame 场景即等于整个剩余预算(不误伤慢站);多 frame 场景保证一个卡死的 frame
  * 不会吃光预算导致其余 frame 全被跳过。
@@ -5164,8 +5275,8 @@ export function registerObserveHandlers(router: ActionRouter, debuggerMgr: Debug
       );
       checkDeadline();
       const explicitFrameId = args.frameId as number | undefined;
-      const navigationAtStart = new Map(navigation.get(tid));
-      const committedAtStart = new Map(committedDocuments.get(tid));
+      let navigationAtStart = new Map(navigation.get(tid));
+      let committedAtStart = new Map(committedDocuments.get(tid));
       for (const [id, entry] of pageSnapshots) {
         if (Date.now() - entry.capturedAt > PAGE_TTL_MS) pageSnapshots.delete(id);
       }
@@ -5231,7 +5342,7 @@ export function registerObserveHandlers(router: ActionRouter, debuggerMgr: Debug
       const includeBoxes = args.includeBoxes === true;
 
       // scope 存在时只扫 scope 所在的 frame:局部观察不该把别的 frame 混进来。
-      const frameTargets = await resolveTargetFrames(
+      let frameTargets = await resolveTargetFrames(
         tid,
         scope ? scope.frameId : explicitFrameId,
         framesParam,
@@ -5355,24 +5466,61 @@ export function registerObserveHandlers(router: ActionRouter, debuggerMgr: Debug
       };
       let listenerDiscovery: "timeout" | "error" | "skipped-heavy" | undefined;
       let axOverlayTimedOut = false;
-      const discoverListeners = async (targets: FrameTarget[]) => {
-        const claimDeadline = Date.now() + Math.min(SCAN_CLAIM_TIMEOUT_MS, Math.max(0, deadline - Date.now()) / 2);
+      // 扫描归属 claim：一轮内按 frame 并发；失败按原因分类（F1）。
+      const claimScanRound = async (
+        targets: FrameTarget[],
+        claimDeadline: number,
+      ): Promise<{ claimed: ScanRequest[]; failures: ScanClaimFailure[] }> => {
+        const claimed: ScanRequest[] = [];
+        const failures: ScanClaimFailure[] = [];
         await Promise.all(targets.map(async (target) => {
-          if (!target.documentId?.trim() || (target.documentLifecycle && target.documentLifecycle !== "active")) {
-            unclaimedFrames.push(target.frameId); return;
+          if (!target.documentId?.trim()) {
+            failures.push({ frameId: target.frameId, reason: "skipped-no-document", detail: "no documentId", terminal: false });
+            return;
+          }
+          if (target.documentLifecycle && target.documentLifecycle !== "active") {
+            failures.push({ frameId: target.frameId, reason: "skipped-lifecycle", detail: target.documentLifecycle, terminal: false });
+            return;
           }
           const request: ScanRequest = { frameId: target.frameId, documentId: target.documentId, ancestorFrameIds: target.ancestorFrameIds,
             epoch: scanEpoch, order: ++scanOrder, token: crypto.randomUUID(), deadline };
           scanRequests.push(request);
+          const claimStart = Date.now();
           try {
-            const claimed = await raceTimeout(track(chrome.scripting.executeScript({ target: { tabId: tid, documentIds: [request.documentId] }, world: "MAIN",
+            const result = await raceTimeout(track(chrome.scripting.executeScript({ target: { tabId: tid, documentIds: [request.documentId] }, world: "MAIN",
               func: updateScanOwnership, args: ["scan.claim", request] })), Math.max(0, claimDeadline - Date.now()));
-            if (claimed !== TIMED_OUT && claimed.length === 1 && claimed[0].documentId === request.documentId && claimed[0].frameId === request.frameId &&
-                (claimed[0].result === true || (claimed[0].result === false && await recoverDocumentOwnership("scan", tid, request,
-                  (work) => raceTimeout(track(work), Math.max(0, claimDeadline - Date.now())))))) claimedScans.push(request);
-            else unclaimedFrames.push(target.frameId);
-          } catch (err) { unclaimedFrames.push(target.frameId); console.warn("[vortex.observe] scan claim failed", err); }
+            if (result === TIMED_OUT) {
+              failures.push({ frameId: target.frameId, reason: "timeout", detail: String(Date.now() - claimStart), terminal: false });
+              return;
+            }
+            if (result.length !== 1 || result[0].documentId !== request.documentId || result[0].frameId !== request.frameId ||
+                typeof result[0].result !== "boolean") {
+              failures.push({ frameId: target.frameId, reason: "empty-result", detail: JSON.stringify(result), terminal: false });
+              return;
+            }
+            if (result[0].result === true) { claimed.push(request); return; }
+            // 归属协议拒绝：走 recovery。recovery 阶段的异常单独归类（terminal，不重试）。
+            let recoveryTimedOut = false;
+            const wait: NonNullable<Parameters<typeof recoverDocumentOwnership>[3]> = (work) =>
+              raceTimeout(track(work), Math.max(0, claimDeadline - Date.now())).then((value) => {
+                if (value === TIMED_OUT) recoveryTimedOut = true;
+                return value;
+              });
+            try {
+              if (await recoverDocumentOwnership("scan", tid, request, wait)) { claimed.push(request); return; }
+              failures.push({ frameId: target.frameId, reason: recoveryTimedOut ? "recovery-timeout" : "refused",
+                detail: "ownership protocol refused the claim", terminal: true });
+            } catch (err) {
+              failures.push({ frameId: target.frameId, reason: "recovery-error", detail: String(err), terminal: true });
+            }
+          } catch (err) {
+            failures.push({ frameId: target.frameId, reason: "injection-error", detail: String(err), terminal: false });
+            console.warn("[vortex.observe] scan claim failed", err);
+          }
         }));
+        return { claimed, failures };
+      };
+      const discoverListenerElements = async (targets: FrameTarget[]) => {
         if (!debuggerMgr) return;
         const listenerDeadline = Math.min(deadline, Date.now() + LISTENER_DISCOVERY_TIMEOUT_MS);
         await Promise.all(targets.map(async (target) => {
@@ -5414,9 +5562,38 @@ export function registerObserveHandlers(router: ActionRouter, debuggerMgr: Debug
           console.warn("[vortex.observe] listener discovery failed", err);
         }
       };
-      await discoverListeners(frameTargets);
+      const claimRound = async (targets: FrameTarget[], claimBudgetMs: number) => {
+        const round = await claimScanRound(targets, Date.now() + Math.min(claimBudgetMs, Math.max(0, deadline - Date.now())));
+        claimedScans.push(...round.claimed);
+        unclaimedFrames.push(...round.failures.map((failure) => failure.frameId));
+        return round.failures;
+      };
+      let claimFailures = await claimRound(frameTargets, SCAN_CLAIM_TIMEOUT_MS);
+      if (claimedScans.length === 0 && !claimFailures.some((failure) => failure.terminal) && deadline - Date.now() > 0) {
+        // F2：全部 frame 未 claim 上且没有归属冲突时，重新解析 frame、整窗重建身份基线，再试一轮。
+        const resolved = await resolveTargetFrames(tid, scope ? scope.frameId : explicitFrameId, framesParam);
+        navigationAtStart = new Map(navigation.get(tid));
+        committedAtStart = new Map(committedDocuments.get(tid));
+        if (resolved.length === 0) {
+          throw vtxError(
+            VtxErrorCode.IFRAME_NOT_READY,
+            "No target frames resolved (tab may be uninitialized)",
+            { tabId: tid, frameId: explicitFrameId },
+          );
+        }
+        if (paginate && resolved.length !== 1) {
+          throw vtxError(VtxErrorCode.INVALID_PARAMS, "Pagination requires a single frame");
+        }
+        frameTargets = resolved;
+        claimedScans.length = 0;
+        unclaimedFrames.length = 0;
+        claimFailures = await claimRound(frameTargets, 2 * SCAN_CLAIM_TIMEOUT_MS);
+      }
+      await discoverListenerElements(frameTargets);
       checkDeadline();
-      if (claimedScans.length === 0) throw vtxError(VtxErrorCode.STALE_SNAPSHOT, "Target document ownership could not be acquired");
+      if (claimedScans.length === 0) {
+        throw scanClaimError(claimFailures, tid);
+      }
       const primaryRequest = claimedScans.find((request) => request.frameId === frameTargets[0].frameId);
       scans.push(
         ...(await scanFramesWithBudget(tid, frameTargets, scanBudget, {
@@ -5509,7 +5686,11 @@ export function registerObserveHandlers(router: ActionRouter, debuggerMgr: Debug
               }));
             if (newTargets.length > 0) {
               autoFallback = true;
-              await discoverListeners(newTargets);
+              const fallbackClaim = await claimScanRound(newTargets,
+                Date.now() + Math.min(SCAN_CLAIM_TIMEOUT_MS, Math.max(0, deadline - Date.now())));
+              claimedScans.push(...fallbackClaim.claimed);
+              unclaimedFrames.push(...fallbackClaim.failures.map((failure) => failure.frameId));
+              await discoverListenerElements(newTargets);
               // 与主循环共享同一预算:fallback 是第二轮扫描,不该另起炉灶再吃 25s
               scans.push(
                 ...(await scanFramesWithBudget(tid, newTargets, scanBudget, {
@@ -5611,7 +5792,14 @@ export function registerObserveHandlers(router: ActionRouter, debuggerMgr: Debug
         tag: string;
         role: string;
         name: string;
-        state?: { checked?: boolean | "mixed"; selected?: boolean; active?: boolean; disabled?: boolean; expanded?: boolean; required?: boolean; current?: boolean; invalid?: boolean; sort?: "ascending" | "descending" | "none"; haspopup?: string; readonly?: boolean };
+        state?: { checked?: boolean | "mixed"; selected?: boolean; active?: boolean; disabled?: boolean; expanded?: boolean; required?: boolean; current?: boolean; invalid?: boolean; sort?: "ascending" | "descending" | "none"; haspopup?: string; readonly?: boolean;
+          /** AX focused=true:键盘焦点当前在该元素上。@since R7 */
+          focused?: boolean;
+          /** AX focusable=true:该元素可接收键盘焦点。@since R7 */
+          focusable?: boolean;
+          /** AX modal=true:该对话框为模态。@since R7 */
+          modal?: boolean;
+        };
         /** 值域控件当前值,如 "30" 或 "30/100"(getValueInfo 严格限定值域控件)。 */
         valueNow?: string;
         /** 同快照内 role+name 重名时的区分性祖先文本。@since dup-context */

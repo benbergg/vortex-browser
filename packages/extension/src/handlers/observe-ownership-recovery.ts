@@ -51,8 +51,18 @@ export function transitionOwnership(
       old.deadline === request.deadline && Object.entries(request).every(([name, value]) =>
         JSON.stringify(current[name]) === JSON.stringify(value));
   }
-  if (JSON.stringify(current) !== JSON.stringify(expected) ||
-      (!old.retired && old.owner !== null && Date.now() < old.deadline)) return false;
+  // The probe state returns from the page through the extension boundary, which
+  // neither preserves key order nor keeps null-valued fields. Compare the union
+  // of both key sets and treat a missing key as a null value, so only
+  // "null ⇔ missing" is equivalent; ancestorFrameIds stays order sensitive.
+  const expectedRecord = expected as OwnerState & Record<string, unknown>;
+  const names = new Set([...Object.keys(expectedRecord), ...Object.keys(current)]);
+  for (const name of names) {
+    const expectedValue = expectedRecord[name] === undefined ? null : expectedRecord[name];
+    const currentValue = current[name] === undefined ? null : current[name];
+    if (JSON.stringify(currentValue) !== JSON.stringify(expectedValue)) return false;
+  }
+  if (!old.retired && old.owner !== null && Date.now() < old.deadline) return false;
   const tombstones = exited ?? new Set<string>();
   tombstones.add(old.epoch);
   doc[exitedKey] = tombstones;
