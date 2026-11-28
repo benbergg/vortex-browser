@@ -18,6 +18,28 @@
   涉及文件：`packages/extension/src/handlers/keyboard.ts`（新增 `textToKeyEvents`/`typeText`，
   PRESS 增加 `text` 分支）；新增 `packages/extension/tests/keyboard-press-text.test.ts`。
 
+### Changed
+
+- **`content.getAccessibilityTree` 改为优先返回 Chrome 真实无障碍树**：该 action（CLI
+  `vortex content getAccessibilityTree`）过去用页内 DOM 启发式（按标签名映射 role +
+  aria-label/innerText 取名），既**不穿 shadow root**（MDN 这类 web component 站点的搜索
+  浮层整棵子树缺失，`textbox/combobox/listbox/option` 计数全为 0），又输出**伪 role**
+  （`roleMap[tag] ?? tag` 让 `mdn-search-modal`/`div`/`span` 直接当 role 用）。现在主路径走
+  CDP `Accessibility.getFullAXTree` 并按 `childIds` 重建树：role/name/value 取 Chrome 原值，
+  被 Chrome 标为 ignored 的中间节点自身跳过、其有效后代提升到父级并保序。返回值仍是根节点
+  对象，根节点上新增三个可选字段：`source`（`chrome-ax` / `dom-heuristic`）、`degraded` +
+  `degradedReason`（走了 DOM 回退时出现）、`truncated`（触发预算截断时出现）。
+  AX 不可用（debugger attach / enableDomain / getFullAXTree 失败，含跨域与 A11Y 不可用）时
+  回退 DOM 启发式并标 `degraded:true`；回退路径里未知标签（自定义元素 / `div` / `span`）的
+  role 归 `generic`，所有名称来源（aria-label / aria-labelledby 指向文本 / innerText）统一
+  100 字符上限（省略号计入上限，超限即标 `truncated:true`）。AX 路径预算：节点 ≤2000、
+  层级 ≤20、name/value ≤200 字符、序列化 JSON ≤1 MiB；DOM 路径：节点 ≤500、层级 ≤10、
+  名称 ≤100 字符。
+
+  涉及文件：`packages/extension/src/handlers/content.ts`（AX 主路径 + DOM 回退 + 预算）；
+  `packages/extension/src/background.ts`（装配处传入 debuggerMgr）；新增
+  `packages/extension/tests/content-accessibility-tree.test.ts`。
+
 ### Fixed
 
 - **back/forward 的 load 等待不再空等满 25s**：历史恢复常在毫秒级完成，而 back/forward

@@ -35,7 +35,7 @@ registerFramesHandlers(router);
 registerPageHandlers(router, debuggerMgr);
 registerJsHandlers(router, debuggerMgr);
 registerDomHandlers(router, debuggerMgr);
-registerContentHandlers(router);
+registerContentHandlers(router, debuggerMgr);
 registerStorageHandlers(router);
 registerCaptureHandlers(router, debuggerMgr);
 registerViewportHandlers(router, debuggerMgr);
