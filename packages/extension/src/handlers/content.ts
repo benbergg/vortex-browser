@@ -29,6 +29,12 @@ interface A11yTreeNode {
   name?: string;
   value?: string;
   children?: A11yTreeNode[];
+  /** AX 节点描述(node.description.value),≤200 字符 */
+  description?: string;
+  /** AX 属性白名单投影(归一化后的 boolean/number/string) */
+  state?: Record<string, boolean | number | string>;
+  /** AX 关系属性(controls/owns/labelledby 等)→ 目标身份 */
+  relations?: Record<string, Array<{ backendDOMNodeId?: number; text?: string }>>;
   /** 数据来源:chrome-ax = Chrome 真实 AX 树;dom-heuristic = DOM 启发式回退 */
   source?: "chrome-ax" | "dom-heuristic";
   /** 仅 DOM 回退路径出现:未能取到 Chrome AX 语义 */
@@ -46,6 +52,139 @@ function utf8Len(text: string): number {
 function clipText(text: string, max: number): { text: string; truncated: boolean } {
   if (text.length <= max) return { text, truncated: false };
   return { text: text.slice(0, max - 1) + "…", truncated: true };
+}
+
+/** state 白名单:CDP 属性名(小写化后)→ 输出键名。白名单外一律不携带。 */
+const AX_STATE_KEYS = new Set([
+  "focused",
+  "focusable",
+  "disabled",
+  "required",
+  "invalid",
+  "expanded",
+  "selected",
+  "checked",
+  "pressed",
+  "readonly",
+  "modal",
+  "atomic",
+  "multiselectable",
+  "haspopup", // 源属性名 hasPopup
+  "autocomplete",
+  "live",
+  "relevant",
+  "orientation",
+  "level",
+]);
+
+/** relations 白名单:带 relatedNodes 的关系属性 */
+const AX_RELATION_KEYS = new Set([
+  "labelledby",
+  "describedby",
+  "activedescendant",
+  "controls",
+  "owns",
+  "errormessage",
+  "flowto",
+]);
+
+/** 每个关系属性最多保留的条目数 */
+const AX_RELATION_MAX_ITEMS = 20;
+
+/**
+ * AX 属性值归一化(按属性区分,禁止统一字符串布尔化)。
+ * - boolean 原样(显式 false 必须保留);
+ * - checked/pressed:"true"/"false"→boolean,"mixed" 保留字符串;
+ * - invalid:"true"/"false"→boolean,其余 token(spelling/grammar)保留字符串;
+ * - haspopup:"true"→"menu",其余(listbox/menu/tree/grid/dialog)原样;
+ * - level:只接受有限 number;
+ * - 属性缺失/非法 → 不写入(不补造)。
+ */
+function normalizeStateValue(
+  key: string,
+  raw: unknown,
+): boolean | number | string | undefined {
+  if (typeof raw === "boolean") return raw;
+  if (key === "level") {
+    return typeof raw === "number" && Number.isFinite(raw) ? raw : undefined;
+  }
+  if (typeof raw === "number") return Number.isFinite(raw) ? raw : undefined;
+  if (typeof raw !== "string") return undefined;
+  if (key === "checked" || key === "pressed") {
+    if (raw === "true") return true;
+    if (raw === "false") return false;
+    return raw; // "mixed" 及其他 token 原样
+  }
+  if (key === "invalid") {
+    if (raw === "true") return true;
+    if (raw === "false") return false;
+    return raw; // spelling/grammar 等 token 原样
+  }
+  if (key === "haspopup") {
+    // observe 既有约定:aria-haspopup="true" 等价 menu
+    return raw === "true" ? "menu" : raw;
+  }
+  if (raw === "true") return true;
+  if (raw === "false") return false;
+  return raw;
+}
+
+/**
+ * 从 CDP AX properties 抽取 state / relations。
+ * 返回 truncated:表示有内容被丢弃(description 除外)→ 需置根 truncated。
+ */
+function extractAxMeta(
+  props: CDPAXNode["properties"],
+  maxChars: number,
+): {
+  state: Record<string, boolean | number | string>;
+  relations: Record<string, Array<{ backendDOMNodeId?: number; text?: string }>>;
+  truncated: boolean;
+} {
+  const state: Record<string, boolean | number | string> = {};
+  const relations: Record<string, Array<{ backendDOMNodeId?: number; text?: string }>> = {};
+  let truncated = false;
+
+  for (const prop of props ?? []) {
+    const rawName = prop?.name;
+    if (typeof rawName !== "string") continue;
+    const key = rawName.toLowerCase();
+
+    if (AX_STATE_KEYS.has(key) && !(key in state)) {
+      const normalized = normalizeStateValue(key, prop.value?.value);
+      if (normalized !== undefined) {
+        if (typeof normalized === "string") {
+          const clipped = clipText(normalized, maxChars);
+          state[key] = clipped.text;
+          if (clipped.truncated) truncated = true;
+        } else {
+          state[key] = normalized;
+        }
+      }
+    }
+
+    if (AX_RELATION_KEYS.has(key) && !(key in relations)) {
+      const related = prop.value?.relatedNodes;
+      if (!Array.isArray(related) || related.length === 0) continue;
+      const items = related.slice(0, AX_RELATION_MAX_ITEMS);
+      if (related.length > AX_RELATION_MAX_ITEMS) truncated = true;
+      const out: Array<{ backendDOMNodeId?: number; text?: string }> = [];
+      for (const rel of items) {
+        const item: { backendDOMNodeId?: number; text?: string } = {};
+        // CDP 的 text 可选:缺失不等于"没有关系" → 只保留身份
+        if (typeof rel?.backendDOMNodeId === "number") item.backendDOMNodeId = rel.backendDOMNodeId;
+        if (typeof rel?.text === "string") {
+          const clipped = clipText(rel.text, maxChars);
+          item.text = clipped.text;
+          if (clipped.truncated) truncated = true;
+        }
+        out.push(item);
+      }
+      relations[key] = out;
+    }
+  }
+
+  return { state, relations, truncated };
 }
 
 function summarizeAxError(err: unknown): string {
@@ -98,6 +237,24 @@ function buildAXTree(byNodeId: Map<string, CDPAXNode>): { root: A11yTreeNode | n
       const value = clipText(rawValue, maxChars);
       if (value.text) node.value = value.text;
       if (value.truncated) truncated = true;
+    }
+    // description:AX 原值,≤200 字符;截断 → 节点级 + 根级 truncated
+    const rawDescription = src.description?.value;
+    if (typeof rawDescription === "string" && rawDescription.length > 0) {
+      const description = clipText(rawDescription, maxChars);
+      node.description = description.text;
+      if (description.truncated) {
+        node.truncated = true;
+        truncated = true;
+      }
+    }
+    // state / relations:白名单投影;任一截断 → 节点级 + 根级 truncated
+    const meta = extractAxMeta(src.properties, maxChars);
+    if (Object.keys(meta.state).length > 0) node.state = meta.state;
+    if (Object.keys(meta.relations).length > 0) node.relations = meta.relations;
+    if (meta.truncated) {
+      node.truncated = true;
+      truncated = true;
     }
     return node;
   };

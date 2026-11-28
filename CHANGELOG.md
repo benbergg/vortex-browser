@@ -18,6 +18,26 @@
   涉及文件：`packages/extension/src/handlers/keyboard.ts`（新增 `textToKeyEvents`/`typeText`，
   PRESS 增加 `text` 分支）；新增 `packages/extension/tests/keyboard-press-text.test.ts`。
 
+- **`content.getAccessibilityTree` 的 AX 节点补齐状态与关系**：每个 AX 节点新增三个可选
+  字段——`description`（AX 原描述，≤200 字符）、`state`（AX 属性白名单投影：`focused`/
+  `focusable`/`disabled`/`required`/`invalid`/`expanded`/`selected`/`checked`/`pressed`/
+  `readonly`/`modal`/`atomic`/`multiselectable`/`haspopup`/`autocomplete`/`live`/`relevant`/
+  `orientation`/`level`）、`relations`（`labelledby`/`describedby`/`activedescendant`/
+  `controls`/`owns`/`errormessage`/`flowto` → `{backendDOMNodeId, text?}`）。过去该 action
+  只回 `role`/`name`/`value`，无障碍评估读不到控件状态与结构层级（combobox 有无
+  autocomplete/弹层、heading 层级、是否 modal、焦点、必填/非法），与 `observe.snapshot`
+  已有的 state 词汇不一致。归一化**按属性区分**：boolean 原样保留（**显式 `false` 保留**），
+  `checked`/`pressed` 的 `"mixed"` 与 `invalid` 的 token（如 `spelling`）保留字符串，
+  `hasPopup="true"` 按既有约定映射为 `haspopup:"menu"`，`level` 只接受有限 number；
+  白名单外的属性（`url`/`editable`/`settable` 等）不携带，属性缺失不补造。关系项保留
+  `{backendDOMNodeId, text?}` 原始身份——CDP 常只给身份不给 text，**text 缺失不得等同
+  “没有关系”**；每属性最多 20 项，text ≤200 字符。新增字符串一律 ≤200 字符（省略号计入），
+  任一新增字段发生截断即置根节点 `truncated:true`（节点级同时标注）；1 MiB 序列化预算继续
+  生效且**计算包含新增字段**。DOM 回退路径、role/name/value 语义、ignored 提升规则不变。
+
+  涉及文件：`packages/extension/src/handlers/content.ts`（`buildAXTree` 字段抽取/归一化/
+  截断）；新增 `packages/extension/tests/content-accessibility-tree-state.test.ts`。
+
 ### Changed
 
 - **`content.getAccessibilityTree` 改为优先返回 Chrome 真实无障碍树**：该 action（CLI
