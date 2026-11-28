@@ -165,6 +165,8 @@ Two APIs answer different accessibility questions — pick by what you need:
 
 To find out whether a page *declares* a live region, read the accessibility tree. Neither API verifies that an announcement is actually made.
 
+**Role vocabulary differs between the two APIs.** With `source === "chrome-ax"`, `content.getAccessibilityTree` keeps Chrome AX role names — including non-ARIA names such as `RootWebArea`, `StaticText` and `InlineTextBox` — and provides no unified ARIA vocabulary; the returned tree is processed (ignored-node handling, field projection, size budgets), not a raw CDP response. `observe.snapshot` is a candidate-element snapshot that combines DOM/ARIA heuristics with AX overlay; it does not guarantee the same node set or role vocabulary as the tree, and it does not guarantee that only valid ARIA roles are emitted. Do not merge role statistics across the two APIs.
+
 ## Development
 
 ```bash

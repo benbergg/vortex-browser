@@ -70,6 +70,8 @@ vortex network filter --status-min 400
 
 要确认页面**是否声明**了事件区，读无障碍树。两个接口都不验证播报是否真的发生。
 
+**两个接口的 role 词表不同。** `source === "chrome-ax"` 时，`content.getAccessibilityTree` 保留 Chrome AX 角色名——包括 `RootWebArea`、`StaticText`、`InlineTextBox` 等非 ARIA 名称，不提供统一 ARIA 词表；返回的树经过处理（ignored 节点处理、字段投影、体积预算），不是 CDP 原始响应。`vortex observe` 是候选元素快照，综合 DOM/ARIA 启发式与 AX 覆盖，不保证与该树相同的节点集合或 role 词表，也不保证只输出合法 ARIA role。不要跨两个接口合并 role 统计。
+
 ## observe / act / sequence
 
 这三个是给人直接用的「一等命令」：默认输出**人看的几行**，`--json` 回到原始 JSON

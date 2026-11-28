@@ -165,6 +165,8 @@ LLM（Claude Code / 自定义客户端）
 
 要确认页面**是否声明**了事件区，读无障碍树。两个 API 都不验证播报是否真的发生。
 
+**两个 API 的 role 词表不同。** `source === "chrome-ax"` 时，`content.getAccessibilityTree` 保留 Chrome AX 角色名——包括 `RootWebArea`、`StaticText`、`InlineTextBox` 等非 ARIA 名称，不提供统一 ARIA 词表；返回的树经过处理（ignored 节点处理、字段投影、体积预算），不是 CDP 原始响应。`observe.snapshot` 是候选元素快照，综合 DOM/ARIA 启发式与 AX 覆盖，不保证与该树相同的节点集合或 role 词表，也不保证只输出合法 ARIA role。不要跨两个 API 合并 role 统计。
+
 ## 开发
 
 ```bash
